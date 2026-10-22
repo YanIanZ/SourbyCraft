@@ -1,0 +1,57 @@
+--- a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/task/ChunkFullTask.java
++++ b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/task/ChunkFullTask.java
+@@ -30,6 +_,11 @@
+     private final ChunkAccess fromChunk;
+     private final PrioritisedExecutor.PrioritisedTask convertToFullTask;
+ 
++    // Folia start - region threading - count chunk gen rates
++    public static final io.papermc.paper.util.IntervalledCounter chunkLoads = new io.papermc.paper.util.IntervalledCounter(java.util.concurrent.TimeUnit.SECONDS.toNanos(15L));
++    public static final io.papermc.paper.util.IntervalledCounter chunkGenerates = new io.papermc.paper.util.IntervalledCounter(java.util.concurrent.TimeUnit.SECONDS.toNanos(15L));
++
++    // Folia end - region threading - count chunk gen rates
+     public ChunkFullTask(final ChunkTaskScheduler scheduler, final ServerLevel world, final int chunkX, final int chunkZ,
+                          final NewChunkHolder chunkHolder, final ChunkAccess fromChunk, final Priority priority) {
+         super(scheduler, world, chunkX, chunkZ);
+@@ -43,6 +_,22 @@
+         return ChunkStatus.FULL;
+     }
+ 
++    // Folia start - region threading - count chunk gen rates
++    public static double genRate(final long time) {
++        synchronized (chunkGenerates) {
++            chunkGenerates.updateCurrentTime(time);
++            return chunkGenerates.getRate();
++        }
++    }
++
++    public static double loadRate(final long time) {
++        synchronized (chunkLoads) {
++            chunkLoads.updateCurrentTime(time);
++            return chunkLoads.getRate();
++        }
++    }
++
++    // Folia end - region threading - count chunk gen rates
+     @Override
+     public void run() {
+         final PlatformHooks platformHooks = PlatformHooks.get();
+@@ -59,6 +_,19 @@
+                 ((ChunkSystemPoiManager)this.world.getPoiManager()).moonrise$checkConsistency(this.fromChunk);
+             }
+ 
++            // Folia start - region threading - count chunk gen rates
++            final long time = System.nanoTime();
++            if (this.fromChunk instanceof ImposterProtoChunk wrappedFull) {
++                synchronized (chunkLoads) {
++                    chunkLoads.updateAndAdd(1L, time);
++                }
++            } else {
++                synchronized (chunkGenerates) {
++                    chunkGenerates.updateAndAdd(1L, time);
++                }
++            }
++
++            // Folia end - region threading - count chunk gen rates
+             if (this.fromChunk instanceof ImposterProtoChunk wrappedFull) {
+                 chunk = wrappedFull.getWrapped();
+             } else {

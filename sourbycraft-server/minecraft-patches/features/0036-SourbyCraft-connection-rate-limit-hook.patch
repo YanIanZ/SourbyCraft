@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Tue, 20 Oct 2026 01:48:15 +0700
+Subject: [PATCH] SourbyCraft - connection rate limit hook
+
+Observe TCP accepts and login starts before expensive initialization.
+Close only when the operator explicitly enables KICK for admission.
+
+diff --git a/net/minecraft/server/network/ServerConnectionListener.java b/net/minecraft/server/network/ServerConnectionListener.java
+index c5bfefefe1acefb0ceb9e686bdaf44263e2b7f4f..6a810be8e200e640dcd0994d027ab310e8e91f46 100644
+--- a/net/minecraft/server/network/ServerConnectionListener.java
++++ b/net/minecraft/server/network/ServerConnectionListener.java
+@@ -92,6 +92,11 @@ public class ServerConnectionListener {
+                             new ChannelInitializer<Channel>() {
+                                 @Override
+                                 protected void initChannel(final Channel channel) {
++                                    // SourbyCraft - TCP admission before packet codecs, listeners or region registration
++                                    if (!dev.iyanz.sourbycraft.security.SecurityGuards.INSTANCE.connectionOpened(channel)) {
++                                        channel.close();
++                                        return;
++                                    }
+                                     try {
+                                         channel.config().setOption(ChannelOption.TCP_NODELAY, true);
+                                     } catch (ChannelException var5) {
+diff --git a/net/minecraft/server/network/ServerLoginPacketListenerImpl.java b/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
+index d7372d5139f7263806f568790174572d184966e2..33c384f746087bbd59abb4ca7127f4bbb54a6092 100644
+--- a/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
+@@ -166,6 +166,11 @@ public class ServerLoginPacketListenerImpl implements ServerLoginPacketListener,
+     @Override
+     public void handleHello(final ServerboundHelloPacket packet) {
+         Validate.validState(this.state == ServerLoginPacketListenerImpl.State.HELLO, "Unexpected hello packet");
++        // SourbyCraft - count initial login starts separately from packet and pending-login caps
++        if (!dev.iyanz.sourbycraft.security.SecurityGuards.INSTANCE.loginStarted(this.connection.channel)) {
++            this.disconnect(Component.literal("Too many login attempts. Please try again later."));
++            return;
++        }
+         // Paper start - Validate usernames
+         if (io.papermc.paper.configuration.GlobalConfiguration.get().proxies.isProxyOnlineMode()
+             && io.papermc.paper.configuration.GlobalConfiguration.get().unsupportedSettings.performUsernameValidation

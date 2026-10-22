@@ -1,0 +1,24 @@
+--- a/net/minecraft/world/level/block/TargetBlock.java
++++ b/net/minecraft/world/level/block/TargetBlock.java
+@@ -46,9 +_,20 @@
+     }
+     private static void awardTargetHitCriteria(Projectile projectile, BlockHitResult hitResult, int outputStrength) {
+         // Paper end - Add TargetHitEvent
+-        if (projectile.getOwner() instanceof ServerPlayer playerOwner) {
++        // Canvas start - region threading
++
++        // Folia makes getOwner return null if out of region. While fine in practice,
++        // this does sacrifice behavior(intentionally), to prevent concurrency issues.
++
++        // This code has been changed to get the raw owner and then just schedule to
++        // the player if out of region to keep the criterion trigger intact
++
++        if (projectile.getOwnerRaw() instanceof ServerPlayer rawOwner) {
++            rawOwner.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer playerOwner) -> {
++        // Canvas end - region threading
+             playerOwner.awardStat(Stats.TARGET_HIT);
+             CriteriaTriggers.TARGET_BLOCK_HIT.trigger(playerOwner, projectile, hitResult.getLocation(), outputStrength);
++            }); // Canvas - region threading
+         }
+     }
+ 

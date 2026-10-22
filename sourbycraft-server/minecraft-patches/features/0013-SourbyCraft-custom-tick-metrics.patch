@@ -1,0 +1,309 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: SourbyCraft <agent@local>
+Date: Wed, 2 Sep 2026 00:00:00 +0000
+Subject: [PATCH] SourbyCraft - custom tick metrics
+
+
+diff --git a/ca/spottedleaf/common/time/TickData.java b/ca/spottedleaf/common/time/TickData.java
+index 099b4dbabeac184d009354f3e0af62d5945a7f17..b6425ee44f76e9fc41680164d1a1b6f4c5f91d74 100644
+--- a/ca/spottedleaf/common/time/TickData.java
++++ b/ca/spottedleaf/common/time/TickData.java
+@@ -5,18 +5,50 @@ import java.util.ArrayDeque;
+ import java.util.ArrayList;
+ import java.util.Arrays;
+ import java.util.List;
++import dev.iyanz.sourbycraft.perf.RegionTickMetrics;
++import dev.iyanz.sourbycraft.perf.RegionTickMetricsHolder;
++import java.util.Objects;
+ 
+ public final class TickData {
+ 
+     private final long interval; // ns
++    private final RegionTickMetrics shared;
++    private final RegionTickMetricsHolder sharedHolder;
+ 
+-    private final ArrayDeque<TickTime> timeData = new ArrayDeque<>();
++    private final ArrayDeque<TickTime> timeData;
+ 
+     public TickData(final long intervalNS) {
+         this.interval = intervalNS;
++        this.shared = null;
++        this.sharedHolder = null;
++        this.timeData = new ArrayDeque<>();
++    }
++
++    public TickData(final RegionTickMetrics shared, final long intervalNS) {
++        this.interval = intervalNS;
++        this.shared = Objects.requireNonNull(shared);
++        this.sharedHolder = null;
++        this.timeData = null;
++    }
++
++    public TickData(final RegionTickMetricsHolder sharedHolder, final long intervalNS) {
++        this.interval = intervalNS;
++        this.shared = null;
++        this.sharedHolder = Objects.requireNonNull(sharedHolder);
++        this.timeData = null;
++    }
++
++    private RegionTickMetrics shared() {
++        return this.sharedHolder == null ? this.shared : this.sharedHolder.current();
+     }
+ 
+     public void addDataFrom(final TickTime time) {
++        final RegionTickMetrics shared = this.shared();
++        if (shared != null) {
++            shared.tickCompletedWithoutTarget(time);
++            return;
++        }
++
+         final long start = time.tickStart();
+ 
+         TickTime first;
+@@ -91,13 +123,18 @@ public final class TickData {
+             computeSegmentData(data, allStart, allEnd, inverse),
+             computeSegmentData(data, percent99BestStart, percent99BestEnd, inverse),
+             computeSegmentData(data, percent95BestStart, percent95BestEnd, inverse),
+-            computeSegmentData(data, percent1WorstStart, percent1WorstEnd, inverse),
+             computeSegmentData(data, percent5WorstStart, percent5WorstEnd, inverse),
++            computeSegmentData(data, percent1WorstStart, percent1WorstEnd, inverse),
+             data
+         );
+     }
+ 
+     public Double getTPSAverage(final TickTime inProgress, final long tickInterval) {
++        final RegionTickMetrics shared = this.shared();
++        if (shared != null) {
++            return shared.tps(this.interval, inProgress, tickInterval);
++        }
++
+         if (this.timeData.isEmpty() && inProgress == null) {
+             return null;
+         }
+@@ -119,6 +156,11 @@ public final class TickData {
+     public record MSPTData(double avg, long[] rawData) {}
+ 
+     public MSPTData getMSPTData(final TickTime inProgress, final long tickInterval) {
++        final RegionTickMetrics shared = this.shared();
++        if (shared != null) {
++            return shared.mspt(this.interval, inProgress, tickInterval);
++        }
++
+         if (this.timeData.isEmpty() && inProgress == null) {
+             return null;
+         }
+@@ -143,6 +185,11 @@ public final class TickData {
+ 
+     // rets null if there is no data
+     public TickReportData generateTickReport(final TickTime inProgress, final long endTime, final long tickInterval) {
++        final RegionTickMetrics shared = this.shared();
++        if (shared != null) {
++            return shared.report(this.interval, inProgress, endTime, tickInterval);
++        }
++
+         if (this.timeData.isEmpty() && inProgress == null) {
+             return null;
+         }
+diff --git a/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java b/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java
+index cbd4b1c002808a2deda700a1a6cec36d458f7151..a02c2e7563ee1b102873452613d446c3d83b448b 100644
+--- a/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java
++++ b/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java
+@@ -191,6 +191,8 @@ public class WorldShutdownThread extends RegionShutdownThread {
+ 
+         LOGGER.info("Saved {} level data", getWorldName());
+ 
++        dev.iyanz.sourbycraft.perf.RegionMetricsRegistry.INSTANCE.retireWorld(
++            this.level.sourbyTelemetryWorldId, System.nanoTime());
+         RegionizedServer.getInstance().worlds.remove(this.level);
+         MinecraftServer.getServer().removeLevel(this.level);
+         MinecraftServer.getServer().server.worlds.remove(this.level.getWorld().getName().toLowerCase(java.util.Locale.ROOT));
+diff --git a/io/papermc/paper/threadedregions/TickRegionScheduler.java b/io/papermc/paper/threadedregions/TickRegionScheduler.java
+index fcedc6814850c9c41482df468246738cce6ae1dc..c6fc3f6b882c9fce3cf79d53a8b961fbac7a6d8d 100644
+--- a/io/papermc/paper/threadedregions/TickRegionScheduler.java
++++ b/io/papermc/paper/threadedregions/TickRegionScheduler.java
+@@ -1,5 +1,6 @@
+ package io.papermc.paper.threadedregions;
+ 
++import dev.iyanz.sourbycraft.perf.RegionTickMetricsHolder;
+ import ca.spottedleaf.common.time.Schedule;
+ import ca.spottedleaf.common.time.TickData;
+ import ca.spottedleaf.common.time.TickTime;
+@@ -410,6 +411,7 @@ public final class TickRegionScheduler {
+     public static abstract class RegionScheduleHandle extends SchedulableTick {
+ 
+         protected long currentTick;
++        public final RegionTickMetricsHolder sourbyTickMetrics = new RegionTickMetricsHolder();
+         protected long lastTickStart;
+ 
+         public final TickData tickTimes5s;
+@@ -439,11 +441,11 @@ public final class TickRegionScheduler {
+         public RegionScheduleHandle(final TickRegions.TickRegionData region, final long firstStart) {
+             this.currentTick = 0L;
+             this.lastTickStart = TimeUtil.DEADLINE_NOT_SET;
+-            this.tickTimes5s = new TickData(TimeUnit.SECONDS.toNanos(5L));
+-            this.tickTimes15s = new TickData(TimeUnit.SECONDS.toNanos(15L));
+-            this.tickTimes1m = new TickData(TimeUnit.MINUTES.toNanos(1L));
+-            this.tickTimes5m = new TickData(TimeUnit.MINUTES.toNanos(5L));
+-            this.tickTimes15m = new TickData(TimeUnit.MINUTES.toNanos(15L));
++            this.tickTimes5s = new TickData(this.sourbyTickMetrics, TimeUnit.SECONDS.toNanos(5L));
++            this.tickTimes15s = new TickData(this.sourbyTickMetrics, TimeUnit.SECONDS.toNanos(15L));
++            this.tickTimes1m = new TickData(this.sourbyTickMetrics, TimeUnit.MINUTES.toNanos(1L));
++            this.tickTimes5m = new TickData(this.sourbyTickMetrics, TimeUnit.MINUTES.toNanos(5L));
++            this.tickTimes15m = new TickData(this.sourbyTickMetrics, TimeUnit.MINUTES.toNanos(15L));
+             this.region = region;
+ 
+             this.setScheduledStart(firstStart);
+@@ -601,6 +603,7 @@ public final class TickRegionScheduler {
+             WATCHDOG_THREAD.addTick(runningTick); // Folia - region threading
+             try {
+                 // next start isn't updated until the end of this tick
++                this.sourbyTickMetrics.tickStarted(tickStart);
+                 this.tickRegion(tickCount, tickStart, scheduledEnd);
+             } catch (final Throwable thrown) {
+                 this.scheduler.regionFailed(this, false, thrown);
+@@ -644,11 +647,7 @@ public final class TickRegionScheduler {
+             synchronized (this) {
+                 this.currentTickData = null;
+                 this.currentTickingThread = null;
+-                this.tickTimes5s.addDataFrom(time);
+-                this.tickTimes15s.addDataFrom(time);
+-                this.tickTimes1m.addDataFrom(time);
+-                this.tickTimes5m.addDataFrom(time);
+-                this.tickTimes15m.addDataFrom(time);
++                this.sourbyTickMetrics.tickCompleted(time, getTimeBetweenTicks());
+             }
+         }
+ 
+diff --git a/io/papermc/paper/threadedregions/TickRegions.java b/io/papermc/paper/threadedregions/TickRegions.java
+index 4d4fa380e52f83d107a9a8a24c825d4439208bea..ab34149c5d0f8fd30c29c61513b294b0a69a5653 100644
+--- a/io/papermc/paper/threadedregions/TickRegions.java
++++ b/io/papermc/paper/threadedregions/TickRegions.java
+@@ -4,6 +4,7 @@ import ca.spottedleaf.common.util.TimeUtil;
+ import ca.spottedleaf.moonrise.common.util.TickThread;
+ import ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkHolderManager;
+ import com.mojang.logging.LogUtils;
++import dev.iyanz.sourbycraft.perf.RegionMetricsRegistry;
+ import dev.iyanz.aurora.engine.threadedregions.SchedulerUtil;
+ import dev.iyanz.aurora.engine.threadedregions.ServerRegionTickManager;
+ import dev.iyanz.aurora.engine.util.ticket.SaveAllTicket;
+@@ -35,6 +36,8 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+ 
+     private static final Logger LOGGER = LogUtils.getClassLogger(); // Canvas - region threading
+     private static int regionShift = 31;
++    private static final RegionMetricsRegistry SOURBY_METRICS = RegionMetricsRegistry.INSTANCE;
++
+ 
+     public static int getRegionChunkShift() {
+         return regionShift;
+@@ -119,6 +122,29 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+         return new TickRegionData(region);
+     }
+ 
++    private static void retireTelemetry(final TickRegionData data,
++                                        final RegionMetricsRegistry.RetirementReason reason,
++                                        final long nowNanos) {
++        SOURBY_METRICS.retire(data.tickHandle.sourbyTickMetrics, reason, nowNanos);
++    }
++
++    private static void activateTelemetry(final TickRegionData data, final long nowNanos) {
++        SOURBY_METRICS.activate(
++            data.world.sourbyTelemetryWorldId, data.id, data.tickHandle.sourbyTickMetrics, nowNanos
++        );
++    }
++
++    private static void rotateMergeTargetTelemetry(final TickRegionData data, final long nowNanos) {
++        SOURBY_METRICS.rotateForMerge(
++            data.tickHandle.sourbyTickMetrics.generationId(), data.world.sourbyTelemetryWorldId, data.id,
++            data.tickHandle.sourbyTickMetrics, nowNanos
++        );
++    }
++
++    private static void destroyTelemetry(final TickRegionData data, final long nowNanos) {
++        retireTelemetry(data, RegionMetricsRegistry.RetirementReason.DESTROYED, nowNanos);
++    }
++
+     @Override
+     public TickRegionSectionData createNewSectionData(final int sectionX, final int sectionZ, final int sectionShift) {
+         return null;
+@@ -133,6 +159,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+ 
+     @Override
+     public void onRegionDestroy(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
++        destroyTelemetry(region.getData(), System.nanoTime());
+         // nothing for now
+         dev.iyanz.aurora.engine.threadedregions.SchedulerUtil.getHandle().onRegionDestroy(region); // Canvas - region profiler
+         // Canvas start - region threading
+@@ -153,6 +180,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+     @Override
+     public void onRegionActive(final ThreadedRegionizer.@NonNull ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
+         final TickRegionData data = region.getData();
++        activateTelemetry(data, System.nanoTime());
+ 
+         data.tickHandle.checkInitialSchedule();
+         scheduler.scheduleRegion(data.tickHandle);
+@@ -163,6 +191,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+         final TickRegionData data = region.getData();
+ 
+         scheduler.descheduleRegion(data.tickHandle);
++        retireTelemetry(data, RegionMetricsRegistry.RetirementReason.INACTIVE, System.nanoTime());
+         // we call inactive here, since unpinning needs to occur before copying, or else this will cause issues
+         dev.iyanz.aurora.engine.threadedregions.SchedulerUtil.getHandle().onRegionInactive(region); // Canvas - region profiler
+         // old handle cannot be scheduled anymore, copy to a new handle
+@@ -172,13 +201,14 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+     @Override
+     public void preMerge(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> from,
+                          final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> into) {
+-
++        final long now = System.nanoTime();
++        retireTelemetry(from.getData(), RegionMetricsRegistry.RetirementReason.MERGE, now);
+     }
+ 
+     @Override
+     public void preSplit(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> from,
+                          final java.util.List<ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData>> into) {
+-
++        retireTelemetry(from.getData(), RegionMetricsRegistry.RetirementReason.SPLIT, System.nanoTime());
+     }
+ 
+     public static final class TickRegionSectionData implements ThreadedRegionizer.ThreadedRegionSectionData {}
+@@ -528,6 +558,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+         public void mergeInto(final ThreadedRegionizer.@NonNull ThreadedRegion<TickRegionData, TickRegionSectionData> into) {
+             // note: merge target is always a region being released from ticking
+             final TickRegionData data = into.getData();
++            rotateMergeTargetTelemetry(data, System.nanoTime());
+             final long currentTickTo = data.getCurrentTick();
+             final long currentTickFrom = this.getCurrentTick();
+ 
+@@ -574,6 +605,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+ 
+         @NonNull
+         private ConcreteRegionTickHandle copy() {
++            // The constructor creates a fresh telemetry owner; only scheduling state is copied.
+             final ConcreteRegionTickHandle ret = new ConcreteRegionTickHandle(this.region, this.getScheduledStart());
+ 
+             ret.currentTick = this.currentTick;
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index 529d6820a48b7bc08b10679d78461f1c5c87ef24..b89c0d0a7ab6b4e9e8adf13de734c92c8b81d9c5 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -1063,6 +1063,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+             this.server.spark.disable(); // Paper - spark
+             this.server.disablePlugins();
+             this.server.waitForAsyncTasksShutdown(); // Paper - Wait for Async Tasks during shutdown
++            dev.iyanz.sourbycraft.core.SourbyCraftBootstrap.close();
+         }
+         // CraftBukkit end
+         this.isSaving = true; // Canvas - region threading
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+index 0737efe5954543f9ab2af2d965fa5f14d4f47119..9abf69e0e4ee8b18f77abfb2488ce19526f4014c 100644
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -190,6 +190,8 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+     private static final int EMPTY_TIME_NO_TICK = 300;
+     private static final int MAX_SCHEDULED_TICKS_PER_TICK = 65536;
+     private static final AtomicInteger ENTITY_COUNTER = new AtomicInteger();
++    public final long sourbyTelemetryWorldId =
++        dev.iyanz.sourbycraft.perf.RegionMetricsRegistry.INSTANCE.newWorldId();
+     private final List<ServerPlayer> players = new java.util.concurrent.CopyOnWriteArrayList<>(); // Folia - region threading
+     private final ServerChunkCache chunkSource;
+     private final MinecraftServer server;

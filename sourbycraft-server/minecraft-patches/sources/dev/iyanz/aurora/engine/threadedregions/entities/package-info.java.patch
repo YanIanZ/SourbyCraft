@@ -1,0 +1,7 @@
+--- /dev/null
++++ b/dev/iyanz/aurora/engine/threadedregions/entities/package-info.java
+@@ -1,0 +_,4 @@
++@NullMarked
++package dev.iyanz.aurora.engine.threadedregions.entities;
++
++import org.jspecify.annotations.NullMarked;

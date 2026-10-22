@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/entity/monster/Vex.java
++++ b/net/minecraft/world/entity/monster/Vex.java
+@@ -346,7 +_,7 @@
+         @Override
+         public void tick() {
+             BlockPos boundOrigin = Vex.this.getBoundOrigin();
+-            if (boundOrigin == null) {
++            if (boundOrigin == null || !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor((net.minecraft.server.level.ServerLevel)Vex.this.level(), boundOrigin)) { // Folia - region threading
+                 boundOrigin = Vex.this.blockPosition();
+             }
+ 

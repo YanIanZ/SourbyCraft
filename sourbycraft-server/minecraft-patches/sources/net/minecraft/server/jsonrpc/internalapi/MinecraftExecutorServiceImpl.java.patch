@@ -1,0 +1,16 @@
+--- a/net/minecraft/server/jsonrpc/internalapi/MinecraftExecutorServiceImpl.java
++++ b/net/minecraft/server/jsonrpc/internalapi/MinecraftExecutorServiceImpl.java
+@@ -19,11 +_,11 @@
+ 
+     @Override
+     public <V> CompletableFuture<V> submit(final Supplier<V> supplier) {
+-        return this.server().submit(supplier);
++        return CompletableFuture.supplyAsync(supplier, io.papermc.paper.threadedregions.RegionizedServer.getInstance()::scheduleToOrExecute); // Canvas - region threading
+     }
+ 
+     @Override
+     public CompletableFuture<Void> submit(final Runnable runnable) {
+-        return this.server().submit(runnable);
++        return CompletableFuture.runAsync(runnable, io.papermc.paper.threadedregions.RegionizedServer.getInstance()::scheduleToOrExecute); // Canvas - region threading
+     }
+ }

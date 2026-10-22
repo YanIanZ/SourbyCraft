@@ -1,0 +1,20 @@
+--- a/net/minecraft/world/level/block/entity/ConduitBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/ConduitBlockEntity.java
+@@ -76,7 +_,7 @@
+ 
+     public static void clientTick(final Level level, final BlockPos pos, final BlockState state, final ConduitBlockEntity entity) {
+         entity.tickCount++;
+-        long gameTime = level.getGameTime();
++        long gameTime = level.getRedstoneGameTime(); // Folia - region threading
+         List<BlockPos> effectBlocks = entity.effectBlocks;
+         if (gameTime % 40L == 0L) {
+             entity.isActive = updateShape(level, pos, effectBlocks);
+@@ -92,7 +_,7 @@
+ 
+     public static void serverTick(final Level level, final BlockPos pos, final BlockState state, final ConduitBlockEntity entity) {
+         entity.tickCount++;
+-        long gameTime = level.getGameTime();
++        long gameTime = level.getRedstoneGameTime(); // Folia - region threading
+         List<BlockPos> effectBlocks = entity.effectBlocks;
+         if (gameTime % 40L == 0L) {
+             boolean active = updateShape(level, pos, effectBlocks);

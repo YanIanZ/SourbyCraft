@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Tue, 20 Oct 2026 02:20:59 +0700
+Subject: [PATCH] SourbyCraft - proxy-aware admission keys
+
+Pass the BungeeCord/Velocity/PROXY protocol settings to the admission guard when the TCP
+listener starts, key login starts by Connection.getRemoteAddress() at Hello, and apply the
+per-address login limit after Velocity modern forwarding stores the player address.
+
+diff --git a/net/minecraft/server/network/ServerConnectionListener.java b/net/minecraft/server/network/ServerConnectionListener.java
+index 6a810be8e200e640dcd0994d027ab310e8e91f46..95e9c27baefe117f61301badd5363d753416c200 100644
+--- a/net/minecraft/server/network/ServerConnectionListener.java
++++ b/net/minecraft/server/network/ServerConnectionListener.java
+@@ -72,6 +72,12 @@ public class ServerConnectionListener {
+     }
+ 
+     public void startTcpServerListener(SocketAddress address) throws IOException {
++        // SourbyCraft start - proxy-aware admission keys: forwarding settings are read once per listener start
++        dev.iyanz.sourbycraft.security.SecurityGuards.INSTANCE.configureProxyMode(
++            org.spigotmc.SpigotConfig.bungee,
++            io.papermc.paper.configuration.GlobalConfiguration.get().proxies.velocity.enabled,
++            io.papermc.paper.configuration.GlobalConfiguration.get().proxies.proxyProtocol);
++        // SourbyCraft end - proxy-aware admission keys
+         // Paper end - Unix domain socket support
+         synchronized (this.channels) {
+             EventLoopGroupHolder eventLoopGroupHolder = EventLoopGroupHolder.remote(address, this.server.useNativeTransport()); // Paper - Unix domain socket support
+diff --git a/net/minecraft/server/network/ServerLoginPacketListenerImpl.java b/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
+index 33c384f746087bbd59abb4ca7127f4bbb54a6092..01dcf0f14bb6d7e99fdab5434121668a683d1982 100644
+--- a/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
+@@ -166,8 +166,9 @@ public class ServerLoginPacketListenerImpl implements ServerLoginPacketListener,
+     @Override
+     public void handleHello(final ServerboundHelloPacket packet) {
+         Validate.validState(this.state == ServerLoginPacketListenerImpl.State.HELLO, "Unexpected hello packet");
+-        // SourbyCraft - count initial login starts separately from packet and pending-login caps
+-        if (!dev.iyanz.sourbycraft.security.SecurityGuards.INSTANCE.loginStarted(this.connection.channel)) {
++        // SourbyCraft - count initial login starts separately from packet and pending-login caps; key the
++        // forwarded player address (PROXY protocol / BungeeCord have replaced it before Hello)
++        if (!dev.iyanz.sourbycraft.security.SecurityGuards.INSTANCE.loginStarted(this.connection.channel, this.connection.getRemoteAddress())) {
+             this.disconnect(Component.literal("Too many login attempts. Please try again later."));
+             return;
+         }
+@@ -418,6 +419,12 @@ public class ServerLoginPacketListenerImpl implements ServerLoginPacketListener,
+                 port = ((java.net.InetSocketAddress) listening).getPort();
+             }
+             this.connection.address = new java.net.InetSocketAddress(com.destroystokyo.paper.proxy.VelocityProxy.readAddress(buf), port);
++            // SourbyCraft start - proxy-aware admission keys: Velocity forwards the player address only after Hello
++            if (!dev.iyanz.sourbycraft.security.SecurityGuards.INSTANCE.loginForwarded(this.connection.channel, this.connection.getRemoteAddress())) {
++                this.disconnect(Component.literal("Too many login attempts. Please try again later."));
++                return;
++            }
++            // SourbyCraft end - proxy-aware admission keys
+ 
+             this.authenticatedProfile = com.destroystokyo.paper.proxy.VelocityProxy.createProfile(buf);
+ 

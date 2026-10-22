@@ -1,143 +1,131 @@
 <p align="center">
-  <img src="assets/SourbyCraft.png" alt="SourbyCraft" width="380">
+  <img src=".github/assets/SourbyCraft.png" alt="SourbyCraft" width="380">
 </p>
 
-<h1 align="center">SourbyCraft — 26.2 Canvas</h1>
+<h1 align="center">SourbyCraft</h1>
 
-<p align="center"><strong>Region-threaded Minecraft 26.2 · CanvasMC engine · Cherry server-side mixins · lean SourbyLoader slim jar</strong></p>
+<p align="center">A region-threaded Minecraft 26.2 server built on Paper, with the Aurora engine and first-party observability.</p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/minecraft-26.2-brightgreen?style=flat-square">
-  <img src="https://img.shields.io/badge/java-25-blue?style=flat-square">
-  <img src="https://img.shields.io/badge/engine-CanvasMC%20(region--threading)-8a2be2?style=flat-square">
-  <img src="https://img.shields.io/badge/version-26.2--REL%20build%2038c-brightgreen?style=flat-square">
-  <img src="https://img.shields.io/badge/jar-~34M%20(SourbyLoader)-green?style=flat-square">
-  <img src="https://img.shields.io/badge/mixins-Cherry-e83e8c?style=flat-square">
-  <img src="https://img.shields.io/badge/license-PolyForm--NC--1.0.0-lightgrey?style=flat-square">
+  <a href="https://github.com/YanIanZ/SourbyCraft/releases"><img src="https://img.shields.io/github/v/release/YanIanZ/SourbyCraft?style=flat-square&label=release" alt="Latest release"></a>
+  <a href="https://github.com/YanIanZ/SourbyCraft/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/YanIanZ/SourbyCraft/build.yml?branch=26.2&style=flat-square&label=build" alt="Build status"></a>
+  <img src="https://img.shields.io/badge/minecraft-26.2-brightgreen?style=flat-square" alt="Minecraft 26.2">
+  <img src="https://img.shields.io/badge/java-25-blue?style=flat-square" alt="Java 25">
+  <img src="https://img.shields.io/badge/license-GPL--3.0--only-blue?style=flat-square" alt="License: GPL-3.0-only">
 </p>
 
 ---
 
-## What is it
+## About
 
-**SourbyCraft 26.2 Canvas** is a high-performance Minecraft **26.2** server. This line is a re-platform of SourbyCraft onto the **[CanvasMC](https://github.com/CraftCanvasMC/Canvas)** engine — a region-threading fork of Paper (Folia lineage) that ticks the world across CPU cores instead of one main thread. It is built with Canvas's own **weaver** toolchain and packaged as a **SourbyLoader / SourbyClip** slim jar (~34 MiB): a paperclip that downloads its heavy libraries once, SHA-256-verified, on first boot instead of bundling them, so the artifact stays tiny.
+SourbyCraft runs each region of a world on its own tick thread, so a server can use more than one
+core for gameplay. Paper is its only upstream. The region-threading engine, originally derived from
+Folia and Canvas, has been owned and maintained by SourbyCraft since 2026-10-05 and lives under
+`dev.iyanz.aurora`.
 
-On top of the Canvas engine it adds SourbyCraft's **utility & UX layer** — a hex-colored command suite, offline **GeoIP** on `/ping`, TPS/RAM boss bars, varied **message/lang**, an **advanced auto-updater**, built-in **ViaVersion** for old clients — plus **Cherry**, a unified server-side **mixin** engine.
+Aurora optimizes in this order: correctness, reliability, stability, predictable latency, resource
+efficiency, scalability, observability, then peak throughput. A faster result that weakens region
+ownership, persistence, shutdown or plugin semantics is not accepted.
 
-> **This is the Canvas benchmark line.** The self-tuning **perf engine**, **anti-xray** (SourbyEngine), and the **proxy/forwarding** config surface from the Folia line are **deferred / not present in this build** — they may be ported to Canvas later. The `release/26.2` Folia line still carries them.
+**Status.** [Build 48 — Aurora Nexus](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.2-r48)
+is the latest release (full, signed, not STABLE; [release notes](docs/releases/26.2-build-48-aurora-nexus.md),
+open gates in [docs/releases/26.2-build-48.md](docs/releases/26.2-build-48.md)). STABLE is planned for Build 49
+([roadmap](docs/releases/ROADMAP-47-50.md)).
 
-Build id **38c** (`c` = Canvas), REL channel, codename **cookies**.
+## Features
 
----
-
-## Highlights
-
-| | |
+| Feature | State |
 |---|---|
-| 🧵 **CanvasMC region-threading** | Regions tick in parallel across cores; scales with player spread |
-| 🍒 **Cherry mixins** | Server-side SpongePowered mixins + access-transformers + Fabric-format loading — modify server internals from a plugin, no fork. Off by default. |
-| 📦 **SourbyLoader slim jar** | ~34 MiB — libraries fetched (SHA-256-verified) on first boot, not bundled |
-| 🧩 **sourbyapi** | The SourbyCraft-branded API (`dev.iyanz.sourbycraft:sourbyapi`) = Canvas API over the Bukkit/Paper foundation |
-| 🌍 **Offline GeoIP** | `/ping` shows player location from a local db-ip.com database — no IP leaves the server |
-| 🎨 **Yellow `[SourbyCraft]` console** | Rebranded, hex-colored log prefix; truecolor banner + command output |
-| 📊 **TPS / RAM boss bars** | `/tpsbar` + `/rambar` (RAM bar shows heap + swap), auto-shown to admins |
-| 🔄 **Advanced auto-updater** | Channel-aware (REL/DEV/EXP), SHA-256-verified, safe staged apply |
-| 🕰️ **Built-in ViaVersion** | Old clients join out of the box — ViaVersion + ViaBackwards auto-provisioned (pinned, SHA-256-verified) on first boot |
-| ⚡ **spark bundled** | Canvas's built-in [spark](https://spark.lucko.me) profiler (`/spark`), latest 1.10.172 |
+| Region-threaded ticking (SourbyCraft-owned engine) | Implemented |
+| Metrics runtime behind `/tps`, `/mspt`, `/perf`, HUD bars and Spark | Implemented; cross-surface consistency is an open Build 48 gate |
+| Auto-updater (`apply_mode=notify` by default; releases signed from Build 48) | Implemented |
+| Aurora Compatibility Bridge for non-region-aware plugins | Implemented, off by default, not qualified |
+| Aurora World Fabric (region storage, templates, instances) | Experimental, off by default |
+| Async pathfinding | Experimental, off by default |
+| Cherry server-side mixins (`-Dcherry.enable.mixin=true`) | Off by default |
 
----
+States use the vocabulary in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md): *implemented* means
+functionally verified, not performance-qualified.
 
 ## Quick start
 
-Requires **Java 25**.
+Requires **Java 25**. Download `SourbyCraft-26.2-REL.jar` from
+[Releases](https://github.com/YanIanZ/SourbyCraft/releases), check it against the `.sha256` file,
+then run:
 
 ```bash
-# grab SourbyCraft-slim.jar from Releases, then:
-java -Xmx4G -jar SourbyCraft-slim.jar --nogui
+java -Xmx4G -jar SourbyCraft-26.2-REL.jar --nogui
 ```
 
-First boot fetches the externalized libraries (SourbyLoader, one-time, verified) and generates the config. Region-threading is on by default.
+The first boot needs internet once: the launcher downloads the externalized libraries and the
+Mojang server jar and verifies each by SHA-256. After that the server can run offline
+(`-Dsourbyclip.offline=true`).
 
-> **Offline first boot?** The libraries must be downloaded once. If the machine has no internet, SourbyLoader prints the exact URLs + target paths it needs.
+### Docker
 
----
+```bash
+docker build -f docker/Dockerfile --build-arg JAR=release/SourbyCraft-26.2-REL.jar -t sourbycraft:26.2 .
+docker compose -f docker/docker-compose.yml up -d --build
+```
 
-## Commands
-
-Console-runnable; each also works as `/sourbycraft:<name>` if a plugin shadows the bare name.
-
-| Command | Does |
-|---|---|
-| `/tps` | TPS (native `Bukkit.getTPS()`), color-coded |
-| `/mspt` | Mean ms/tick |
-| `/tpsbar` · `/rambar` | Toggle the TPS / RAM (heap + swap) boss bars |
-| `/ping [player]` | Latency + **GeoIP** location (offline) |
-| `/ver` · `/version` | Branded build info (version, channel, GMT+7 build time) |
-| `/sys` | Server / JVM / host snapshot |
-| `/plugins` | SourbyCraft-styled plugin list |
-| `/maxp [n]` | Show or set max players — **persists across restart** |
-| `/speedtest` | Network speed (Ookla CLI, SHA-256-pinned) |
-| `/update` | Auto-updater status / force a channel-aware check |
-
-`/spark` is Canvas's built-in profiler. **Max-player bypass:** players with `sourbycraft.maxplayers.bypass` (or ops) can join a full server.
-
----
-
-## Cherry — server-side mixins
-
-**Cherry** is SourbyCraft's unified mixin engine, running natively inside SourbyClip (no separate launcher jar). It merges **LeavesMC (Leavesclip)** — SpongePowered Mixin + access-wideners + MixinExtras + conditional-mixins — with **CraftCanvasMC (Horizon)**'s access-transformer engine, and adds **Fabric-format** discovery (`fabric.mod.json` mixins + `*.mixins.json` + refmaps, server-side only).
-
-Enable with `-Dcherry.enable.mixin=true`. A plugin (also a normal Paper plugin) drops a `cherry-plugin.json` declaring an optional `mixin` block and/or an `access-transformers` list. It loads Fabric-format server-side mixin/AT/access-widener declarations — it does **not** run full Fabric mods.
-
-Full docs, javadocs, and the plugin-author guide: **https://github.com/YanIanZ/Cherry**
-
----
+Run both from the repository root. Compose stores server data in `data/`.
 
 ## Configuration
 
-Two independent config surfaces coexist cleanly:
+| File | Purpose |
+|---|---|
+| `sourbycraft_config/sourbycraft_global_config.toml` | Messages, max players, auto-updater, ViaVersion/ProtocolLib provisioning |
+| `sourbycraft_config/aurora.toml` | Aurora engine options (CPU budget, bridge, AWF, async pathfinding) |
+| `config/canvas-server.yml`, `config/canvas-worlds.yml` | Region scheduler options (file names kept for existing servers) |
+| `config/paper-global.yml` → `threaded-regions` | Region thread count and grid size |
+| `sourbycraft-security.yml` | Crash-prevention and packet-guard limits (all default to `LOG`) |
 
-- **SourbyCraft utility layer** → `sourbycraft_config/sourbycraft_global_config.toml` (nightconfig TOML) — messages, `/maxp` persistence, the auto-updater, ViaVersion auto-provision.
-- **Canvas engine** → `config/canvas-server.yml` + `config/canvas-worlds.yml` (region scheduler, tick rate, autosave, …). Defaults are stabilized for production (e.g. region-scheduler `guard-severity: LOG` instead of the crash-prone `THROW`).
+SourbyCraft never tunes gameplay or performance settings on its own; diagnostics recommend, the
+operator decides. Details and reload behavior: [docs/AURORA-CONFIG.md](docs/AURORA-CONFIG.md).
 
-### Built-in ViaVersion / ViaBackwards (old-client support)
+## Commands
 
-Old clients join with **zero manual install**. On first boot SourbyCraft downloads the pinned ViaVersion + ViaBackwards jars into `plugins/` (each SHA-256-verified, https-only, like the slim-jar libraries) *before* the plugin manager scans, so they load the same boot.
+`/tps`, `/mspt`, `/perf <view>`, `/tpsbar`, `/rambar`, `/perfbar`, `/sys`, `/spec`, `/plugins`,
+`/ver`, `/maxp`, `/update` and more. Full list: [docs/guides/commands.md](docs/guides/commands.md).
 
-- **Change the floor:** `plugins/ViaVersion/config.yml` → `block-versions` (default `["<1.20"]`).
-- **Toggle:** `[viaversion] auto-provision` in the unified TOML (default `true`). Set `false` to manage Via yourself or run fully offline.
-- **Idempotent:** never re-downloads a present/verified jar and never overwrites your config edits.
+## Building from source
 
----
-
-## Build from source
-
-Requires **JDK 25** and git. This line uses Canvas's **weaver** patcher (not SourbyPatcher, which is unused here).
+The build needs JDK 25 and the private SourbyPatcher/SourbyClip toolchain published to Maven Local
+([setup](docs/development/PRIVATE-TOOLCHAIN.md)). Without it Gradle stops at settings time.
 
 ```bash
-# apply Canvas + SourbyCraft patches, then build the slim jar
+python3 scripts/private_toolchain.py --publish .private-toolchain
 ./gradlew applyAllPatches
-./gradlew slimServerJar    # -> build/libs/SourbyCraft-slim.jar
+./gradlew slimServerJar        # build/libs/SourbyCraft-slim.jar
 ```
 
-`applyAllPatches` materializes the Canvas + Paper sources from the pinned upstreams and applies SourbyCraft's patches; `slimServerJar` strips the externalized libraries and injects the SourbyLoader bootstrap.
+Changes to Minecraft or Paper code go through feature patches. [AGENTS.md](AGENTS.md) covers the
+patch workflow, tests and release rules.
 
----
+## Documentation
 
-## Release lines
+- [Developer reading path and docs index](docs/README.md)
+- [Aurora architecture](docs/architecture/AURORA.md): entry point and current state, verified against code
+- [Development rules](docs/DEVELOPMENT.md): truthfulness policy, evidence requirements, testing matrix
+- [Release notes and gates](docs/releases/)
+- [Performance baseline](docs/BASELINE.md) and [qualification readiness](docs/architecture/qualification-readiness.md)
 
-| Line | Focus | Base | Branch |
-|---|---|---|---|
-| **26.1.2** | Skyblock / minigames | Paper + SWM in-memory worlds | `release/26.1.2` |
-| **26.2 (Folia)** | Full perf engine + anti-xray + proxy | Luminol 26.2 | `release/26.2` |
-| **26.2 Canvas** *(this)* | **CanvasMC engine + Cherry mixins** | CanvasMC 26.2 (via weaver) | `release/26.2-canvas` |
+## Credits and license
 
-The auto-updater serves this Canvas line as the current REL builds (`v26.2-r36` onward).
+SourbyCraft uses and derives work from **[Paper](https://github.com/PaperMC/Paper)**, Folia-derived
+region-threading work and **[CanvasMC](https://github.com/CraftCanvasMC/Canvas)**. Upstream
+attribution, copyright notices and license obligations are preserved.
 
----
+The plugin bridge includes an adaptation of **Luminol /
+[LightingLuminol](https://github.com/LuminolCustomArchive/LightingLuminol)** scheduler compatibility
+work by **Bacteriawa** and contributors; original attribution and GPL v3 license texts are retained
+([port scope and provenance](docs/development/LIGHTINGLUMINOL-BRIDGE-PORT.md)).
 
-## Credits & license
+Cherry incorporates work inspired by or derived from **[LeavesMC](https://github.com/LeavesMC)** and
+**[CraftCanvasMC/Horizon](https://github.com/CraftCanvasMC/Horizon)** where applicable
+([Cherry](https://github.com/YanIanZ/Cherry)). Profiling integration uses
+**[spark](https://spark.lucko.me)**.
 
-Built on **[CanvasMC](https://github.com/CraftCanvasMC/Canvas)** (region-threading fork of [Paper](https://github.com/PaperMC/Paper), Folia lineage). Cherry merges **[LeavesMC](https://github.com/LeavesMC) (Leavesclip)** + **[CraftCanvasMC/Horizon](https://github.com/CraftCanvasMC/Horizon)** mixin tooling. Profiler by **[spark](https://spark.lucko.me)**.
-
-Licensed under **PolyForm Noncommercial 1.0.0** — see [`LICENSE`](LICENSE).
+SourbyCraft is licensed under the [GPL version 3 only](LICENSE.md); upstream components keep their own
+licences, listed there. The SourbyCraft and Aurora names and logos are covered by the
+[trademark policy](TRADEMARK.md): forks are welcome under the GPL, but must use their own name.

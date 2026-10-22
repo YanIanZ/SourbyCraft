@@ -1,0 +1,100 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Tue, 20 Oct 2026 17:43:25 +0700
+Subject: [PATCH] SourbyCraft - unloaded chunks are not loaded for the
+ snapshot's IfLoaded reads
+
+
+diff --git a/dev/iyanz/aurora/level/SnapshotPathRegion.java b/dev/iyanz/aurora/level/SnapshotPathRegion.java
+index 512b655ab551c575062c4f76753fa61c9b469346..bb3b253e4269fb2e833f83be93b0868f942db4ac 100644
+--- a/dev/iyanz/aurora/level/SnapshotPathRegion.java
++++ b/dev/iyanz/aurora/level/SnapshotPathRegion.java
+@@ -54,7 +54,9 @@ import org.jspecify.annotations.Nullable;
+  */
+ public final class SnapshotPathRegion extends PathNavigationRegion {
+ 
+-    // [gridX][gridZ][sectionIndex] — null entry = read as air.
++    // [gridX][gridZ][sectionIndex] — null entry = read as air. A null COLUMN means the chunk was not
++    // loaded when the region was built (PathNavigationRegion keeps a null chunk there): the *IfLoaded
++    // reads answer null for it, like vanilla, while the plain reads answer air (SourbyCraft).
+     private final PalettedContainerRO<BlockState> @Nullable [][][] sectionStates;
+     private final int minSectionY;
+     private final int sectionsPerColumn;
+@@ -129,6 +131,19 @@ public final class SnapshotPathRegion extends PathNavigationRegion {
+         return column[sectionIndex];
+     }
+ 
++    // SourbyCraft start - unloaded chunks are not loaded for the *IfLoaded reads, as in vanilla
++    /**
++     * Whether the chunk holding this column was loaded when the region was built: inside the grid
++     * and captured. Vanilla {@code PathNavigationRegion.getChunkIfLoaded} answers {@code null} for
++     * anything else, and {@code WalkNodeEvaluator.getPathTypeFromState} turns that into BLOCKED.
++     */
++    private boolean isLoadedColumn(final int blockX, final int blockZ) {
++        final int gx = SectionPos.blockToSectionCoord(blockX) - this.centerX;
++        final int gz = SectionPos.blockToSectionCoord(blockZ) - this.centerZ;
++        return gx >= 0 && gx < this.gridSizeX && gz >= 0 && gz < this.gridSizeZ && this.sectionStates[gx][gz] != null;
++    }
++    // SourbyCraft end - unloaded chunks are not loaded for the *IfLoaded reads
++
+     private BlockState snapshotState(final int blockX, final int blockY, final int blockZ) {
+         final PalettedContainerRO<BlockState> section = this.sectionAt(blockX, blockY, blockZ);
+         if (section == null) {
+@@ -153,8 +168,13 @@ public final class SnapshotPathRegion extends PathNavigationRegion {
+         return this.snapshotState(pos.getX(), pos.getY(), pos.getZ()).getFluidState();
+     }
+ 
++    // Vanilla order: an unloaded or out-of-grid chunk is null at any height; a loaded chunk answers
++    // like LevelChunk (air above/below the build height, no fluid).
+     @Override
+     public @Nullable BlockState getBlockStateIfLoaded(final BlockPos pos) {
++        if (!this.isLoadedColumn(pos.getX(), pos.getZ())) {
++            return null; // SourbyCraft - as vanilla: not loaded, so the solve reads BLOCKED
++        }
+         if (this.isOutsideBuildHeight(pos)) {
+             return Blocks.AIR.defaultBlockState();
+         }
+@@ -163,6 +183,9 @@ public final class SnapshotPathRegion extends PathNavigationRegion {
+ 
+     @Override
+     public @Nullable FluidState getFluidIfLoaded(final BlockPos pos) {
++        if (!this.isLoadedColumn(pos.getX(), pos.getZ())) {
++            return null; // SourbyCraft - as vanilla: not loaded
++        }
+         if (this.isOutsideBuildHeight(pos)) {
+             return Fluids.EMPTY.defaultFluidState();
+         }
+@@ -180,7 +203,14 @@ public final class SnapshotPathRegion extends PathNavigationRegion {
+         return this.collisionView;
+     }
+ 
+-    /** A {@link BlockGetter} view over the immutable snapshot; all reads route back through the region. */
++    /**
++     * A {@link BlockGetter} view over the immutable snapshot; all reads route back through the region.
++     *
++     * <p>It stands in for the chunk vanilla's {@code getChunkForCollisions} hands out, which for an
++     * unloaded chunk is an {@code EmptyLevelChunk}: a {@code LevelChunk} whose {@code *IfLoaded} reads
++     * are its plain reads (void air, no fluid), never {@code null}. So this view's {@code *IfLoaded}
++     * answer like its plain reads too, and not like the region's.</p>
++     */
+     private final class CollisionView implements BlockGetter {
+         @Override
+         public @Nullable BlockEntity getBlockEntity(final BlockPos pos) {
+@@ -194,7 +224,7 @@ public final class SnapshotPathRegion extends PathNavigationRegion {
+ 
+         @Override
+         public @Nullable BlockState getBlockStateIfLoaded(final BlockPos pos) {
+-            return SnapshotPathRegion.this.getBlockStateIfLoaded(pos);
++            return SnapshotPathRegion.this.getBlockState(pos); // SourbyCraft - a chunk's IfLoaded is its plain read (LevelChunk)
+         }
+ 
+         @Override
+@@ -204,7 +234,7 @@ public final class SnapshotPathRegion extends PathNavigationRegion {
+ 
+         @Override
+         public @Nullable FluidState getFluidIfLoaded(final BlockPos pos) {
+-            return SnapshotPathRegion.this.getFluidIfLoaded(pos);
++            return SnapshotPathRegion.this.getFluidState(pos); // SourbyCraft - a chunk's IfLoaded is its plain read (LevelChunk)
+         }
+ 
+         @Override

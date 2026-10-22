@@ -1,0 +1,17 @@
+--- a/src/main/java/org/bukkit/craftbukkit/entity/CraftEnderDragonPart.java
++++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftEnderDragonPart.java
+@@ -11,6 +_,14 @@
+         super(server, entity);
+     }
+ 
++    // Folia start - region threading
++    @Override
++    public net.minecraft.world.entity.boss.enderdragon.EnderDragonPart getHandle() {
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.entity, "Accessing entity state off owning region's thread");
++        return (net.minecraft.world.entity.boss.enderdragon.EnderDragonPart)this.entity;
++    }
++    // Folia end - region threading
++
+     @Override
+     public EnderDragon getParent() {
+         return (EnderDragon) super.getParent();

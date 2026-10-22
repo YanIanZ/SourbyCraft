@@ -1,0 +1,7 @@
+--- /dev/null
++++ b/dev/iyanz/aurora/engine/threadedregions/scheduler/package-info.java
+@@ -1,0 +_,4 @@
++@NullMarked
++package dev.iyanz.aurora.engine.threadedregions.scheduler;
++
++import org.jspecify.annotations.NullMarked;

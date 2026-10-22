@@ -1,0 +1,10 @@
+--- a/net/minecraft/advancements/triggers/FishingRodHookedTrigger.java
++++ b/net/minecraft/advancements/triggers/FishingRodHookedTrigger.java
+@@ -24,6 +_,7 @@
+     }
+ 
+     public void trigger(final ServerPlayer player, final ItemStack rod, final FishingHook hook, final Collection<ItemStack> items) {
++        if (player.level().canvasConfig().disableCriterionTrigger) return; // Canvas - disable criterion trigger config
+         LootContext hookedInContext = EntityPredicate.createContext(player, hook.getHookedIn() != null ? hook.getHookedIn() : hook);
+         this.trigger(player, t -> t.matches(rod, hookedInContext, items));
+     }

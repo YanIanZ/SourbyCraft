@@ -1,0 +1,11 @@
+--- a/ca/spottedleaf/moonrise/patches/chunk_system/level/chunk/ChunkData.java
++++ b/ca/spottedleaf/moonrise/patches/chunk_system/level/chunk/ChunkData.java
+@@ -5,7 +_,7 @@
+ public final class ChunkData {
+ 
+     private int referenceCount = 0;
+-    public NearbyPlayers.TrackedChunk nearbyPlayers; // Moonrise - nearby players
++    // public NearbyPlayers.TrackedChunk nearbyPlayers; // Moonrise - nearby players // Folia - region threading
+ 
+     public ChunkData() {
+ 

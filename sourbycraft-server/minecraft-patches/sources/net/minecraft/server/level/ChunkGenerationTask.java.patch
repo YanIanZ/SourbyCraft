@@ -1,0 +1,21 @@
+--- a/net/minecraft/server/level/ChunkGenerationTask.java
++++ b/net/minecraft/server/level/ChunkGenerationTask.java
+@@ -4,8 +_,6 @@
+ import java.util.List;
+ import java.util.concurrent.CompletableFuture;
+ import net.minecraft.util.StaticCache2D;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.Zone;
+ import net.minecraft.world.level.ChunkPos;
+ import net.minecraft.world.level.chunk.ChunkAccess;
+ import net.minecraft.world.level.chunk.status.ChunkDependencies;
+@@ -113,8 +_,7 @@
+     }
+ 
+     private void scheduleLayer(final ChunkStatus status, final boolean needsGeneration) {
+-        try (Zone zone = Profiler.get().zone("scheduleLayer")) {
+-            zone.addText(status::getName);
++        {
+             int radius = this.getRadiusForLayer(status, needsGeneration);
+ 
+             for (int x = this.pos.x() - radius; x <= this.pos.x() + radius; x++) {

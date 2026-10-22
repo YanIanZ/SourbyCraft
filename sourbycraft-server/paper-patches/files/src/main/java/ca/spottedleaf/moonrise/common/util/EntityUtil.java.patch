@@ -1,0 +1,10 @@
+--- a/src/main/java/ca/spottedleaf/moonrise/common/util/EntityUtil.java
++++ b/src/main/java/ca/spottedleaf/moonrise/common/util/EntityUtil.java
+@@ -28,6 +_,7 @@
+             + ",passenger_count=" + entity.getPassengers().size();
+     }
+ 
++    @Deprecated // Canvas - region threading
+     public static String dumpEntity(final Entity entity) {
+         final List<Entity> passengers = entity.getPassengers();
+         final List<String> passengerStrings = new ArrayList<>(passengers.size());

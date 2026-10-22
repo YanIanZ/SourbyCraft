@@ -1,0 +1,81 @@
+--- a/net/minecraft/network/PacketProcessor.java
++++ b/net/minecraft/network/PacketProcessor.java
+@@ -19,6 +_,12 @@
+         this.runningThread = runningThread;
+     }
+ 
++    // Folia start - region threading
++    public boolean hasPackets() {
++        return !this.packetsToBeHandled.isEmpty();
++    }
++
++    // Folia end - region threading
+     // Paper start - improve tick loop
+     public final boolean executeSinglePacket() {
+         if (this.closed) {
+@@ -39,9 +_,9 @@
+         return Thread.currentThread() == this.runningThread;
+     }
+ 
+-    public <T extends PacketListener> void scheduleIfPossible(final T listener, final Packet<T> packet) {
++    public <T extends PacketListener> boolean scheduleIfPossible(final T listener, final Packet<T> packet) { // Folia - region threading - return whether to notify
+         if (this.closed) {
+-            throw new io.papermc.paper.util.ServerStopRejectedExecutionException("Server already shutting down"); // Paper - do not prematurely disconnect players on stop
++            throw new io.papermc.paper.util.ServerStopRejectedExecutionException("Packet processor is shut down"); // Paper - do not prematurely disconnect players on stop // Folia - region threading - change exception message
+         }
+         // Paper start - improve tick loop
+         // wake up main thread inbetween ticks to process packets
+@@ -52,9 +_,10 @@
+             // only unpark if we are the first packet OR are at the head of the queue
+             // we unpark if we are at the head in case the main thread emptied the queue
+             // immediately before we added but after checking isEmpty
+-            java.util.concurrent.locks.LockSupport.unpark(this.runningThread);
++            return true; // Folia - region threading - return whether to notify
+         }
+         // Paper end - improve tick loop
++        return false; // Folia - region threading - return whether to notify
+     }
+ 
+     public void processQueuedPackets() {
+@@ -70,28 +_,8 @@
+         this.closed = true;
+     }
+ 
+-    // Paper start - detailed watchdog information
+-    public static final java.util.concurrent.ConcurrentLinkedDeque<PacketListener> packetProcessing = new java.util.concurrent.ConcurrentLinkedDeque<>();
+-    static final java.util.concurrent.atomic.AtomicLong totalMainThreadPacketsProcessed = new java.util.concurrent.atomic.AtomicLong();
+-
+-    public static long getTotalProcessedPackets() {
+-        return totalMainThreadPacketsProcessed.get();
+-    }
+-
+-    public static java.util.List<PacketListener> getCurrentPacketProcessors() {
+-        java.util.List<PacketListener> listeners = new java.util.ArrayList<>(4);
+-        for (PacketListener listener : packetProcessing) {
+-            listeners.add(listener);
+-        }
+-
+-        return listeners;
+-    }
+-    // Paper end - detailed watchdog information
+-
+     private record ListenerAndPacket<T extends PacketListener>(T listener, Packet<T> packet) {
+         public void handle() {
+-            packetProcessing.push(this.listener); // Paper - detailed watchdog information
+-            try { // Paper - detailed watchdog information
+             if (this.listener.shouldHandleMessage(this.packet)) {
+                 try {
+                     this.packet.handle(this.listener);
+@@ -105,12 +_,6 @@
+             } else {
+                 PacketProcessor.LOGGER.debug("Ignoring packet due to disconnection: {}", this.packet);
+             }
+-            // Paper start - detailed watchdog information
+-            } finally {
+-                totalMainThreadPacketsProcessed.getAndIncrement();
+-                packetProcessing.pop();
+-            }
+-            // Paper end - detailed watchdog information
+         }
+     }
+ }

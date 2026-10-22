@@ -1,0 +1,22 @@
+--- a/src/main/java/io/papermc/paper/configuration/GlobalConfiguration.java
++++ b/src/main/java/io/papermc/paper/configuration/GlobalConfiguration.java
+@@ -396,4 +_,19 @@
+     public class UpdateChecker extends ConfigurationPart {
+         public boolean enabled = true;
+     }
++    // Folia start - threaded regions
++
++    public ThreadedRegions threadedRegions;
++    public class ThreadedRegions extends ConfigurationPart {
++
++        public int threads = -1;
++        public int gridExponent = 4;
++        public io.papermc.paper.threadedregions.TickRegionScheduler.SchedulerType scheduler = io.papermc.paper.threadedregions.TickRegionScheduler.SchedulerType.EDF;
++
++        @PostProcess
++        public void postProcess() {
++            io.papermc.paper.threadedregions.TickRegions.init(this);
++        }
++    }
++    // Folia end - threaded regions
+ }

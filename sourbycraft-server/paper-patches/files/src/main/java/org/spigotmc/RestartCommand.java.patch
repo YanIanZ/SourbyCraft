@@ -1,0 +1,15 @@
+--- a/src/main/java/org/spigotmc/RestartCommand.java
++++ b/src/main/java/org/spigotmc/RestartCommand.java
+@@ -30,6 +_,12 @@
+     }
+ 
+     private static void restart(final String restartScript) {
++        // Canvas start - region threading
++        // we disable this command, why the fuck isn't this throwing already
++        if (true) {
++            throw new UnsupportedOperationException("Unsupported in region threading");
++        }
++        // Canvas end - region threading
+         try {
+             // Paper - extract method and cleanup
+             boolean isRestarting = addShutdownHook(restartScript);

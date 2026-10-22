@@ -1,0 +1,171 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Tue, 20 Oct 2026 16:26:31 +0700
+Subject: [PATCH] SourbyCraft - lock-free region task queue depth and late tick
+ counts
+
+
+diff --git a/io/papermc/paper/threadedregions/RegionizedTaskQueue.java b/io/papermc/paper/threadedregions/RegionizedTaskQueue.java
+index 2ae2b9799bc3709dbea96f1d1cd86bf72b6d605c..3742543fdf7116d8689e1ee8f34137bfb8f5fc0c 100644
+--- a/io/papermc/paper/threadedregions/RegionizedTaskQueue.java
++++ b/io/papermc/paper/threadedregions/RegionizedTaskQueue.java
+@@ -317,6 +317,18 @@ public final class RegionizedTaskQueue {
+             return this.tickTaskQueue.sourbyCancelAll() + this.chunkQueue.sourbyCancelAll();
+         }
+         // SourbyCraft end - cancel-only drain for an unloading world
++
++        // SourbyCraft start - lock-free queue depth for /perf scheduler
++        /** Entries in the tick-task queue; a racy volatile read, never takes the queue monitor. */
++        public int sourbyQueuedTickTasks() {
++            return this.tickTaskQueue.sourbyQueuedEntries;
++        }
++
++        /** Entries in the chunk-task queue; a racy volatile read, never takes the queue monitor. */
++        public int sourbyQueuedChunkTasks() {
++            return this.chunkQueue.sourbyQueuedEntries;
++        }
++        // SourbyCraft end - lock-free queue depth for /perf scheduler
+     }
+ 
+     static final class PrioritisedQueue {
+@@ -333,6 +345,12 @@ public final class RegionizedTaskQueue {
+         }
+ 
+         private boolean isDestroyed;
++        // SourbyCraft start - lock-free queue depth for /perf scheduler
++        // Deque entries (what getScheduledTasks() sums), stale cancelled/re-prioritised entries included.
++        // Written only while holding this queue's monitor, so it equals getScheduledTasks() whenever
++        // the monitor is free; volatile so a command thread can read it without taking the monitor.
++        volatile int sourbyQueuedEntries;
++        // SourbyCraft end - lock-free queue depth for /perf scheduler
+ 
+         public int getScheduledTasks() {
+             synchronized (this) {
+@@ -356,6 +374,7 @@ public final class RegionizedTaskQueue {
+                         drained.add(task);
+                     }
+                 }
++                this.sourbyQueuedEntries = 0; // SourbyCraft - lock-free queue depth for /perf scheduler
+             }
+             int cancelled = 0;
+             for (final ChunkBasedPriorityTask task : drained) {
+@@ -384,12 +403,14 @@ public final class RegionizedTaskQueue {
+             synchronized (this) {
+                 this.isDestroyed = true;
+                 mergeInto(target, this.queues);
++                this.sourbyQueuedEntries = 0; // SourbyCraft - lock-free queue depth for /perf scheduler: entries now counted by target
+             }
+         }
+ 
+         private static void mergeInto(final PrioritisedQueue target, final ArrayDeque<ChunkBasedPriorityTask>[] thisQueues) {
+             synchronized (target) {
+                 final ArrayDeque<ChunkBasedPriorityTask>[] otherQueues = target.queues;
++                int sourbyMoved = 0; // SourbyCraft - lock-free queue depth for /perf scheduler
+                 for (int i = 0; i < thisQueues.length; ++i) {
+                     final ArrayDeque<ChunkBasedPriorityTask> fromQ = thisQueues[i];
+                     final ArrayDeque<ChunkBasedPriorityTask> intoQ = otherQueues[i];
+@@ -403,7 +424,9 @@ public final class RegionizedTaskQueue {
+                     for (final Iterator<ChunkBasedPriorityTask> iterator = fromQ.descendingIterator(); iterator.hasNext();) {
+                         intoQ.addFirst(iterator.next());
+                     }
++                    sourbyMoved += fromQ.size(); // SourbyCraft - lock-free queue depth for /perf scheduler
+                 }
++                target.sourbyQueuedEntries += sourbyMoved; // SourbyCraft - lock-free queue depth for /perf scheduler
+             }
+         }
+ 
+@@ -460,6 +483,7 @@ public final class RegionizedTaskQueue {
+                     final RegionTaskQueueData taskQueueData = entry.getKey().getData().getTaskQueueData();
+                     mergeInto(isChunkData ? taskQueueData.chunkQueue : taskQueueData.tickTaskQueue, entry.getValue());
+                 }
++                this.sourbyQueuedEntries = 0; // SourbyCraft - lock-free queue depth for /perf scheduler: entries now counted by the targets
+             }
+         }
+ 
+@@ -478,6 +502,7 @@ public final class RegionizedTaskQueue {
+                     return Boolean.FALSE;
+                 }
+                 queues[priority.priority].addLast(task);
++                ++this.sourbyQueuedEntries; // SourbyCraft - lock-free queue depth for /perf scheduler (single writer: monitor held)
+                 return Boolean.TRUE;
+             }
+         }
+@@ -496,6 +521,7 @@ public final class RegionizedTaskQueue {
+                 for (int i = 0; i <= max; ++i) {
+                     final ArrayDeque<ChunkBasedPriorityTask> queue = queues[i];
+                     while ((task = queue.pollFirst()) != null) {
++                        --this.sourbyQueuedEntries; // SourbyCraft - lock-free queue depth for /perf scheduler (per poll: exact even if trySetCompleting throws)
+                         if ((referenceCounter = task.trySetCompleting(i)) != null) {
+                             break search_loop;
+                         }
+diff --git a/io/papermc/paper/threadedregions/TickRegionScheduler.java b/io/papermc/paper/threadedregions/TickRegionScheduler.java
+index d9b53333108add6e6d873e1472e1dedb52beaf99..26a8e3d4b02278af9d7397fc9bf3c83cd4c7b0d0 100644
+--- a/io/papermc/paper/threadedregions/TickRegionScheduler.java
++++ b/io/papermc/paper/threadedregions/TickRegionScheduler.java
+@@ -88,6 +88,58 @@ public final class TickRegionScheduler {
+         return DEFAULT_TICK_TIME_NANOS;
+     }
+     // Canvas end - region threading
++    // SourbyCraft start - count late tick starts for /perf scheduler
++    /**
++     * A tick is late when it starts more than this past its scheduled start. The same 1 ms the
++     * {@code /perf scheduler} view uses for "ready but past its tick start".
++     */
++    public static final long SOURBY_LATE_TICK_THRESHOLD_NANOS = dev.iyanz.sourbycraft.perf.SchedulerQueueCollector.OVERDUE_THRESHOLD_NANOS;
++    // LongAdder: every scheduler thread counts here; contention spreads over cells allocated once
++    // (bounded by the CPU count), never per tick. Read lock-free with sum().
++    private static final java.util.concurrent.atomic.LongAdder SOURBY_REGION_TICKS = new java.util.concurrent.atomic.LongAdder();
++    private static final java.util.concurrent.atomic.LongAdder SOURBY_LATE_REGION_TICKS = new java.util.concurrent.atomic.LongAdder();
++    private static final java.util.concurrent.atomic.LongAdder SOURBY_GLOBAL_TICKS = new java.util.concurrent.atomic.LongAdder();
++    private static final java.util.concurrent.atomic.LongAdder SOURBY_LATE_GLOBAL_TICKS = new java.util.concurrent.atomic.LongAdder();
++
++    static void sourbyCountTickStart(final boolean global, final long scheduledStart, final long tickStart) {
++        if (scheduledStart == TimeUtil.DEADLINE_NOT_SET) {
++            return;
++        }
++        final boolean late = tickStart - scheduledStart > SOURBY_LATE_TICK_THRESHOLD_NANOS;
++        if (global) {
++            SOURBY_GLOBAL_TICKS.increment();
++            if (late) {
++                SOURBY_LATE_GLOBAL_TICKS.increment();
++            }
++        } else {
++            SOURBY_REGION_TICKS.increment();
++            if (late) {
++                SOURBY_LATE_REGION_TICKS.increment();
++            }
++        }
++    }
++
++    /** Region ticks started since boot (approximate while ticks are starting: LongAdder.sum()). */
++    public static long sourbyRegionTicksStarted() {
++        return SOURBY_REGION_TICKS.sum();
++    }
++
++    /** Region ticks that started more than {@link #SOURBY_LATE_TICK_THRESHOLD_NANOS} late since boot. */
++    public static long sourbyLateRegionTicks() {
++        return SOURBY_LATE_REGION_TICKS.sum();
++    }
++
++    /** Global ticks started since boot. */
++    public static long sourbyGlobalTicksStarted() {
++        return SOURBY_GLOBAL_TICKS.sum();
++    }
++
++    /** Global ticks that started more than {@link #SOURBY_LATE_TICK_THRESHOLD_NANOS} late since boot. */
++    public static long sourbyLateGlobalTicks() {
++        return SOURBY_LATE_GLOBAL_TICKS.sum();
++    }
++    // SourbyCraft end - count late tick starts for /perf scheduler
++
+     // Folia start - watchdog
+     public static final FoliaWatchdogThread WATCHDOG_THREAD = new FoliaWatchdogThread();
+     static {
+@@ -583,6 +635,7 @@ public final class TickRegionScheduler {
+ 
+             final long scheduledStart = this.getScheduledStart();
+             final long scheduledEnd = scheduledStart + deadlineFuture; // Canvas - region threading
++            sourbyCountTickStart(this.region == null, scheduledStart, tickStart); // SourbyCraft - count late tick starts for /perf scheduler
+ 
+             final long intermediateTaskTime;
+             final long intermediateTaskTimeCPU;

@@ -1,0 +1,26 @@
+--- a/net/minecraft/world/level/block/CommandBlock.java
++++ b/net/minecraft/world/level/block/CommandBlock.java
+@@ -91,6 +_,11 @@
+ 
+     @Override
+     protected void tick(final BlockState state, final ServerLevel level, final BlockPos pos, final RandomSource random) {
++        // Canvas start - region threading
++        if (true) {
++            return;
++        }
++        // Canvas end - region threading
+         if (level.getBlockEntity(pos) instanceof CommandBlockEntity commandBlock) {
+             BaseCommandBlock baseCommandBlock = commandBlock.getCommandBlock();
+             boolean commandSet = !StringUtil.isNullOrEmpty(baseCommandBlock.getCommand());
+@@ -133,6 +_,11 @@
+     protected InteractionResult useWithoutItem(
+         final BlockState state, final Level level, final BlockPos pos, final Player player, final BlockHitResult hitResult
+     ) {
++        // Canvas start - region threading
++        if (true) {
++            return InteractionResult.FAIL;
++        }
++        // Canvas end - region threading
+         if (level.getBlockEntity(pos) instanceof CommandBlockEntity commandBlockEntity && (player.canUseGameMasterBlocks() || (player.isCreative() && player.getBukkitEntity().hasPermission("minecraft.commandblock")))) { // Paper - command block permission
+             player.openCommandBlock(commandBlockEntity);
+             return InteractionResult.SUCCESS;

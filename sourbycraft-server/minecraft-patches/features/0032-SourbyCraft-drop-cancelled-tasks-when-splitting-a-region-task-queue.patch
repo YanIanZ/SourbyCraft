@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Wed, 14 Oct 2026 02:08:26 +0700
+Subject: [PATCH] SourbyCraft - drop cancelled tasks when splitting a region
+ task queue
+
+Cancelling a queued region task only clears its reference count; the
+task stays in the queue until polled. Its chunk ticket is released, so
+its section can unload. A later split of that queue then looked the
+task's section up among the new regions, found none and threw
+IllegalStateException under the regioniser's write lock, which stops
+the server. A task without a reference count can never run, so split
+now drops it instead of routing it.
+
+diff --git a/io/papermc/paper/threadedregions/RegionizedTaskQueue.java b/io/papermc/paper/threadedregions/RegionizedTaskQueue.java
+index aed1a307b1d946a465fbba124de5edf8c674cfce..e66ce540744b9a93d0505dbb875d5e55d5009a1c 100644
+--- a/io/papermc/paper/threadedregions/RegionizedTaskQueue.java
++++ b/io/papermc/paper/threadedregions/RegionizedTaskQueue.java
+@@ -391,6 +391,12 @@ public final class RegionizedTaskQueue {
+                     final ArrayDeque<ChunkBasedPriorityTask> fromQ = thisQueues[i];
+ 
+                     for (final ChunkBasedPriorityTask task : fromQ) {
++                        // SourbyCraft start - drop a cancelled or completed task instead of routing it: it holds no
++                        // reference count, so its section may have unloaded, and it would never run anyway
++                        if (task.getReferenceCounterVolatile() == null) {
++                            continue;
++                        }
++                        // SourbyCraft end - drop a cancelled or completed task instead of routing it
+                         final int sectionX = task.chunkX >> shift;
+                         final int sectionZ = task.chunkZ >> shift;
+                         final long sectionKey = CoordinateUtils.getChunkKey(sectionX, sectionZ);

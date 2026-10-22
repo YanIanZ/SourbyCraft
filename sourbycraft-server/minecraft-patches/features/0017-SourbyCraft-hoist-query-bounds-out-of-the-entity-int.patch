@@ -1,0 +1,82 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: agent <agent@local>
+Date: Sun, 20 Sep 2026 23:30:48 +0700
+Subject: [PATCH] SourbyCraft - hoist query bounds out of the entity
+ intersection loop
+
+The entity spatial query is the hottest path on a server with players
+connected: getEntities appears 137 times in 5364 execution samples and
+AABB.intersects, which it calls once per entity per section, is the
+single most sampled method at 246.
+
+intersects(AABB) delegates to intersects(double x6) after reading the
+argument's six fields, and those reads happen on every iteration. AABB is
+immutable and the query box does not change across the loop, so the six
+values are read once above the section loop and the existing six-double
+overload does the same comparison without them.
+
+Behaviour is identical: the overload is what intersects(AABB) already
+calls, with the same operands in the same order.
+
+diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/ChunkEntitySlices.java b/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/ChunkEntitySlices.java
+index de239b5da9f2d26893e86f8026f896fe73267c3b..90cd4ced838c0675216385c22b9fffed36cf8756 100644
+--- a/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/ChunkEntitySlices.java
++++ b/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/ChunkEntitySlices.java
+@@ -536,6 +536,18 @@ public final class ChunkEntitySlices {
+             final int max = Mth.clamp(Mth.floor(box.maxY + 0.0) >> 4, minSection, maxSection);
+ 
+             final BasicEntityList<Entity>[] entitiesBySection = this.entitiesBySection;
++            // SourbyCraft start - hoist the query bounds out of the per-entity loop
++            // intersects(AABB) reads the argument's six fields on every call, and this loop runs
++            // once per entity per section per query -- the hottest entity path on a server with
++            // players connected. AABB is immutable, so the values cannot change across
++            // iterations and the six-double overload is the same comparison without the reads.
++            final double queryMinX = box.minX;
++            final double queryMinY = box.minY;
++            final double queryMinZ = box.minZ;
++            final double queryMaxX = box.maxX;
++            final double queryMaxY = box.maxY;
++            final double queryMaxZ = box.maxZ;
++            // SourbyCraft end - hoist the query bounds out of the per-entity loop
+ 
+             for (int section = min; section <= max; ++section) {
+                 final BasicEntityList<Entity> list = entitiesBySection[section - minSection];
+@@ -549,7 +561,8 @@ public final class ChunkEntitySlices {
+                 for (int i = 0, len = Math.min(storage.length, list.size()); i < len; ++i) {
+                     final Entity entity = storage[i];
+ 
+-                    if (entity == null || entity == except || !entity.getBoundingBox().intersects(box)) {
++                    if (entity == null || entity == except || !entity.getBoundingBox().intersects( // SourbyCraft - hoisted query bounds
++                        queryMinX, queryMinY, queryMinZ, queryMaxX, queryMaxY, queryMaxZ)) {
+                         continue;
+                     }
+ 
+@@ -576,6 +589,18 @@ public final class ChunkEntitySlices {
+             final int max = Mth.clamp(Mth.floor(box.maxY + 0.0) >> 4, minSection, maxSection);
+ 
+             final BasicEntityList<Entity>[] entitiesBySection = this.entitiesBySection;
++            // SourbyCraft start - hoist the query bounds out of the per-entity loop
++            // intersects(AABB) reads the argument's six fields on every call, and this loop runs
++            // once per entity per section per query -- the hottest entity path on a server with
++            // players connected. AABB is immutable, so the values cannot change across
++            // iterations and the six-double overload is the same comparison without the reads.
++            final double queryMinX = box.minX;
++            final double queryMinY = box.minY;
++            final double queryMinZ = box.minZ;
++            final double queryMaxX = box.maxX;
++            final double queryMaxY = box.maxY;
++            final double queryMaxZ = box.maxZ;
++            // SourbyCraft end - hoist the query bounds out of the per-entity loop
+ 
+             for (int section = min; section <= max; ++section) {
+                 final BasicEntityList<Entity> list = entitiesBySection[section - minSection];
+@@ -589,7 +614,8 @@ public final class ChunkEntitySlices {
+                 for (int i = 0, len = Math.min(storage.length, list.size()); i < len; ++i) {
+                     final Entity entity = storage[i];
+ 
+-                    if (entity == null || entity == except || !entity.getBoundingBox().intersects(box)) {
++                    if (entity == null || entity == except || !entity.getBoundingBox().intersects( // SourbyCraft - hoisted query bounds
++                        queryMinX, queryMinY, queryMinZ, queryMaxX, queryMaxY, queryMaxZ)) {
+                         continue;
+                     }
+ 

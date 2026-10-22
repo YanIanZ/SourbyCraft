@@ -1,0 +1,18 @@
+--- a/net/minecraft/world/entity/animal/turtle/Turtle.java
++++ b/net/minecraft/world/entity/animal/turtle/Turtle.java
+@@ -315,8 +_,13 @@
+             // Paper end - Add EntityFertilizeEggEvent event
+ 
+             if (loveCause != null) {
+-                loveCause.awardStat(Stats.ANIMALS_BRED);
+-                CriteriaTriggers.BRED_ANIMALS.trigger(loveCause, this.animal, this.partner, null);
++                // Canvas start - region threading
++                final Animal partner = this.partner;
++                loveCause.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer entityPlayer) -> {
++                    entityPlayer.awardStat(Stats.ANIMALS_BRED);
++                    CriteriaTriggers.BRED_ANIMALS.trigger(entityPlayer, this.animal, partner, null);
++                });
++                // Canvas end - region threading
+             }
+ 
+             this.turtle.setHasEgg(true);

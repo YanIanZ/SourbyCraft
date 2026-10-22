@@ -1,0 +1,14 @@
+--- a/net/minecraft/world/entity/projectile/LlamaSpit.java
++++ b/net/minecraft/world/entity/projectile/LlamaSpit.java
+@@ -42,6 +_,11 @@
+     @Override
+     public void tick() {
+         super.tick();
++        // Folia start - region threading - make sure entities do not move into regions they do not own
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor((net.minecraft.server.level.ServerLevel)this.level(), this.position(), this.getDeltaMovement(), 1)) {
++            return;
++        }
++        // Folia end - region threading - make sure entities do not move into regions they do not own
+         Vec3 movement = this.getDeltaMovement();
+         HitResult hitResult = ProjectileUtil.getHitResultOnMoveVector(this, this::canHitEntity);
+         this.preHitTargetOrDeflectSelf(hitResult); // CraftBukkit - projectile hit event

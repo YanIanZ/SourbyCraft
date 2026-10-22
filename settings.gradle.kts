@@ -1,25 +1,52 @@
 pluginManagement {
-    // PR #12 "Path B": weaver-consumes-Canvas. io.canvasmc.weaver.patcher (root, upstream
-    // checkout + recursive resolution) and io.canvasmc.weaver.core (used unversioned inside the
-    // materialized sourbycraft-server/sourbyapi build scripts, exactly like Canvas's own
-    // canvas-server/canvas-api do — the version is resolved once here and shared across the
-    // multi-project build) are CanvasMC's own paperweight-core fork; it applies Canvas's base
-    // patches + ATs by construction, replacing dev.iyanz.sourbypatcher (our own paperweight fork,
-    // which hit a hard git-am ordering wall trying to reconstruct that sequencing generically).
-
+    // Private SourbyPatcher applies paperweight with Paper as the only upstream.
+    val patcherVersion = providers.gradleProperty("patcherVersion").get()
+    val paperweightVersion = providers.gradleProperty("paperweightVersion").get()
+    val localRepo = providers.systemProperty("maven.repo.local")
+        .getOrElse(System.getProperty("user.home") + "/.m2/repository")
+    val patcherJar = file("$localRepo/dev/iyanz/sourbypatcher/paper-toolchain/$patcherVersion/paper-toolchain-$patcherVersion.jar")
+    check(patcherJar.isFile) {
+        "Private SourbyPatcher missing. Publish the pinned private checkout to Maven Local; see docs/development/PRIVATE-TOOLCHAIN.md"
+    }
+    val hash = java.security.MessageDigest.getInstance("SHA-256")
+        .digest(providers.fileContents(layout.settingsDirectory.file(patcherJar.absolutePath)).asBytes.get()).joinToString("") { "%02x".format(it) }
+    check(hash == providers.gradleProperty("patcherSha256").get()) {
+        "Private SourbyPatcher SHA-256 mismatch; republish the approved private revision"
+    }
+    // The published POM and Gradle module metadata are what declare the paperweight patcher version
+    // this plugin loads (Gradle resolves the .module, Maven consumers the POM), so pin both.
+    val patcherArtifacts = listOf(
+        "POM" to file("$localRepo/dev/iyanz/sourbypatcher/paper-toolchain/$patcherVersion/paper-toolchain-$patcherVersion.pom"),
+        "module metadata" to file("$localRepo/dev/iyanz/sourbypatcher/paper-toolchain/$patcherVersion/paper-toolchain-$patcherVersion.module"),
+    )
+    val patcherArtifactPins = mapOf(
+        "POM" to providers.gradleProperty("patcherPomSha256").get(),
+        "module metadata" to providers.gradleProperty("patcherModuleSha256").get(),
+    )
+    for ((label, artifact) in patcherArtifacts) {
+        check(artifact.isFile) {
+            "Private SourbyPatcher $label missing. Publish the pinned private checkout to Maven Local; see docs/development/PRIVATE-TOOLCHAIN.md"
+        }
+        val artifactHash = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(providers.fileContents(layout.settingsDirectory.file(artifact.absolutePath)).asBytes.get()).joinToString("") { "%02x".format(it) }
+        check(artifactHash == patcherArtifactPins.getValue(label)) {
+            "Private SourbyPatcher $label SHA-256 mismatch; the paperweight version may have moved. Republish the approved private revision"
+        }
+    }
     repositories {
         gradlePluginPortal()
-        mavenLocal()
+        exclusiveContent {
+            forRepository { mavenLocal() }
+            filter { includeGroupByRegex("dev\\.iyanz\\.sourbypatcher.*") }
+        }
         maven("https://repo.papermc.io/repository/maven-public/")
-        maven("https://maven.canvasmc.io/public/")
-        maven("https://maven.canvasmc.io/releases")
-        maven { url = uri("${rootDir}/sourby-maven") }
     }
 
     plugins {
-        id("io.canvasmc.weaver.patcher") version "2.4.5"
-        id("io.canvasmc.weaver.core") version "2.4.5"
-        id("io.canvasmc.weaver.dependency-bridge") version "2.4.5"
+        id("dev.iyanz.sourbypatcher.paper") version patcherVersion
+        // Same paperweight release as the version declared in the pinned SourbyPatcher POM/module
+        // metadata (first with Gradle 9.8 support). scripts/private_toolchain.py enforces the equality.
+        id("io.papermc.paperweight.core") version paperweightVersion
     }
 }
 
@@ -34,14 +61,22 @@ for (name in listOf("sourbyapi", "sourbycraft-server")) {
     file(name).mkdirs()
 }
 
-optionalInclude("test-plugin")
-optionalInclude("luminol-generator")
+// Opt-in projects, Paper-style: each has a git-ignored <name>.settings.gradle.kts, generated
+// commented out on first configuration; uncomment its include to keep it on locally.
+// -PincludeTestPlugin=true (what CI passes) includes both regardless of those local files.
+// legacy-test-plugin is a Bukkit plugin without folia-supported that CI boots with
+// aurora.bridge.mode = "safe".
+val includeTestPlugins = providers.gradleProperty("includeTestPlugin").map(String::toBoolean).getOrElse(false)
+optionalInclude("test-plugin", includeTestPlugins)
+optionalInclude("legacy-test-plugin", includeTestPlugins)
 
-fun optionalInclude(name: String, op: (ProjectDescriptor.() -> Unit)? = null) {
+fun optionalInclude(name: String, forced: Boolean = false, op: (ProjectDescriptor.() -> Unit)? = null) {
     val settingsFile = file("$name.settings.gradle.kts")
+    if (forced) {
+        include(":$name")
+    }
     if (settingsFile.exists()) {
         apply(from = settingsFile)
-        findProject(":$name")?.let { op?.invoke(it) }
     } else {
         settingsFile.writeText(
             """
@@ -51,12 +86,14 @@ fun optionalInclude(name: String, op: (ProjectDescriptor.() -> Unit)? = null) {
             """.trimIndent()
         )
     }
+    findProject(":$name")?.let { op?.invoke(it) }
 }
 
 // SourbyCraft — derive the clean channel version (e.g. "26.2-REL") from the git branch, matching
-// the root build's sourbycraftSuffixProvider so project.version (and therefore the API version
-// reported by "Implementing API version ...", read from apiVersioning.json) stays in lockstep with
+// the root build's sourbycraftSuffixProvider so artifact coordinates stay in lockstep with
 // /ver, the startup banner and the JAR manifest instead of emitting "<mc>.local-SNAPSHOT".
+// Bukkit's compatibility API version is generated separately as <apiVersion>-R0.1-SNAPSHOT;
+// plugins such as EssentialsX parse that value and reject a build-channel suffix.
 // The branch is read via providers.exec (config-cache compatible) rather than a raw ProcessBuilder
 // at configuration time, which the configuration cache forbids.
 gradle.lifecycle.beforeProject {
@@ -68,11 +105,13 @@ gradle.lifecycle.beforeProject {
     val releaseMajor = releaseVersionFull.substringBefore('-')
     val codename = providers.gradleProperty("codename").getOrElse("dev").trim()
     val suffix = when {
-        branch.contains("experimental") || branch.contains("feat") -> "EXP"
+        // CI publishes releases from 26.2 and passes -PsourbyChannel=REL for that build only.
+        providers.gradleProperty("sourbyChannel").orNull == "REL" -> "REL"
+        branch.startsWith("experimental/") || branch.startsWith("feat/") -> "EXP"
         branch.startsWith("release/") -> "REL"
         branch.contains("-dev") || branch.contains("develop") -> "DEV"
         codename == "dev" -> "DEV"
-        else -> "REL"
+        else -> "DEV"
     }
     val versionString = when (suffix) {
         "EXP" -> "$releaseMajor-EXP"

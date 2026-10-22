@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Tue, 20 Oct 2026 18:26:58 +0700
+Subject: [PATCH] SourbyCraft - time how long region tasks wait in their queue
+
+
+diff --git a/io/papermc/paper/threadedregions/RegionizedTaskQueue.java b/io/papermc/paper/threadedregions/RegionizedTaskQueue.java
+index 3742543fdf7116d8689e1ee8f34137bfb8f5fc0c..52eccac2733e9f6355eff777416b97ba8e418ce5 100644
+--- a/io/papermc/paper/threadedregions/RegionizedTaskQueue.java
++++ b/io/papermc/paper/threadedregions/RegionizedTaskQueue.java
+@@ -501,6 +501,7 @@ public final class RegionizedTaskQueue {
+                 if (this.isDestroyed) {
+                     return Boolean.FALSE;
+                 }
++                task.sourbyQueuedAtNanos = dev.iyanz.sourbycraft.perf.RegionTaskWaitLatency.stampIfUnset(task.sourbyQueuedAtNanos); // SourbyCraft - time how long region tasks wait in their queue (first push only)
+                 queues[priority.priority].addLast(task);
+                 ++this.sourbyQueuedEntries; // SourbyCraft - lock-free queue depth for /perf scheduler (single writer: monitor held)
+                 return Boolean.TRUE;
+@@ -533,6 +534,7 @@ public final class RegionizedTaskQueue {
+                 return false;
+             }
+ 
++            dev.iyanz.sourbycraft.perf.RegionTaskWaitLatency.taskStarting(task.isChunkTask, task.sourbyQueuedAtNanos); // SourbyCraft - time how long region tasks wait in their queue
+             try {
+                 task.executeInternal();
+             } finally {
+@@ -559,6 +561,8 @@ public final class RegionizedTaskQueue {
+             private static final VarHandle REFERENCE_COUNTER_HANDLE = ConcurrentUtil.getVarHandle(ChunkBasedPriorityTask.class, "referenceCounter", ReferenceCountData.class);
+             private Runnable run;
+             private volatile Priority priority;
++            // SourbyCraft - time how long region tasks wait in their queue: first push time, 0 = not yet pushed. Volatile because a re-push after a split reads it under another queue's monitor.
++            private volatile long sourbyQueuedAtNanos;
+             private static final VarHandle PRIORITY_HANDLE = ConcurrentUtil.getVarHandle(ChunkBasedPriorityTask.class, "priority", Priority.class);
+ 
+             ChunkBasedPriorityTask(final WorldRegionTaskData world, final int chunkX, final int chunkZ, final boolean isChunkTask,

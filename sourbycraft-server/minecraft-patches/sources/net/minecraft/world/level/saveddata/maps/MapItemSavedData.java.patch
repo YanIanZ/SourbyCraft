@@ -1,0 +1,155 @@
+--- a/net/minecraft/world/level/saveddata/maps/MapItemSavedData.java
++++ b/net/minecraft/world/level/saveddata/maps/MapItemSavedData.java
+@@ -178,7 +_,7 @@
+         return new MapItemSavedData(0, 0, scale, false, false, isLocked, dimension);
+     }
+ 
+-    public MapItemSavedData locked() {
++    public synchronized MapItemSavedData locked() { // Folia - make map data thread-safe
+         MapItemSavedData result = new MapItemSavedData(
+             this.centerX, this.centerZ, this.scale, this.trackingPosition, this.unlimitedTracking, true, this.dimension
+         );
+@@ -189,7 +_,7 @@
+         return result;
+     }
+ 
+-    public MapItemSavedData scaled() {
++    public synchronized MapItemSavedData scaled() { // Folia - make map data thread-safe
+         return createFresh(this.centerX, this.centerZ, (byte)Mth.clamp(this.scale + 1, 0, 4), this.trackingPosition, this.unlimitedTracking, this.dimension);
+     }
+ 
+@@ -198,7 +_,8 @@
+         return stack -> stack == mapStack || stack.is(mapStack.getItem()) && Objects.equals(mapId, stack.get(DataComponents.MAP_ID));
+     }
+ 
+-    public void tickCarriedBy(final Player tickingPlayer, final ItemStack itemStack, final @Nullable ItemFrame placedInFrame) {
++    public synchronized void tickCarriedBy(final Player tickingPlayer, final ItemStack itemStack, final @Nullable ItemFrame placedInFrame) { // Folia - make map data thread-safe
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(tickingPlayer, "Ticking map player in incorrect region"); // Folia - region threading
+         if (!this.carriedByPlayers.containsKey(tickingPlayer)) {
+             MapItemSavedData.HoldingPlayer holdingPlayer = new MapItemSavedData.HoldingPlayer(tickingPlayer);
+             this.carriedByPlayers.put(tickingPlayer, holdingPlayer);
+@@ -401,7 +_,7 @@
+         }
+     }
+ 
+-    public @Nullable Packet<?> getUpdatePacket(final MapId id, final Player player) {
++    public synchronized @Nullable Packet<?> getUpdatePacket(final MapId id, final Player player) { // Folia - make map data thread-safe
+         MapItemSavedData.HoldingPlayer holdingPlayer = this.carriedByPlayers.get(player);
+         return holdingPlayer == null ? null : holdingPlayer.nextUpdatePacket(id);
+     }
+@@ -410,20 +_,21 @@
+     // Paper start - Fix unnecessary map data saves
+         this.setColorsDirty(x, y, true);
+     }
+-    public void setColorsDirty(final int x, final int y, final boolean markFileDirty) {
+-        if (markFileDirty) this.setDirty();
++    public synchronized void setColorsDirty(final int x, final int y, final boolean markFileDirty) { // Folia - make map data thread-safe
++        // if (markFileDirty) this.setDirty(); // Folia - make map data thread-safe - move down
+     // Paper end - Fix unnecessary map data saves
+ 
+         for (MapItemSavedData.HoldingPlayer holdingPlayer : this.carriedBy) {
+             holdingPlayer.markColorsDirty(x, y);
+         }
++        if (markFileDirty) this.setDirty(); // Folia - make map data thread-safe - moved down
+     }
+ 
+-    private void setDecorationsDirty() {
++    private synchronized void setDecorationsDirty() { // Folia - make map data thread-safe
+         this.carriedBy.forEach(MapItemSavedData.HoldingPlayer::markDecorationsDirty);
+     }
+ 
+-    public MapItemSavedData.HoldingPlayer getHoldingPlayer(final Player player) {
++    public synchronized MapItemSavedData.HoldingPlayer getHoldingPlayer(final Player player) { // Folia - make map data thread-safe
+         MapItemSavedData.HoldingPlayer holdingPlayer = this.carriedByPlayers.get(player);
+         if (holdingPlayer == null) {
+             holdingPlayer = new MapItemSavedData.HoldingPlayer(player);
+@@ -434,7 +_,7 @@
+         return holdingPlayer;
+     }
+ 
+-    public boolean toggleBanner(final LevelAccessor level, final BlockPos pos) {
++    public synchronized boolean toggleBanner(final LevelAccessor level, final BlockPos pos) { // Folia - make map data thread-safe
+         double xPos = pos.getX() + 0.5;
+         double zPos = pos.getZ() + 0.5;
+         int scale = 1 << this.scale;
+@@ -442,7 +_,7 @@
+         double yd = (zPos - this.centerZ) / scale;
+         int halfSize = 63;
+         if (xd >= -63.0 && yd >= -63.0 && xd <= 63.0 && yd <= 63.0) {
+-            MapBanner banner = MapBanner.fromWorld(level, pos);
++            MapBanner banner = level.getChunkIfLoadedImmediately(pos.getX() >> 4, pos.getZ() >> 4) == null || !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(level.getMinecraftWorld(), pos) ? null : MapBanner.fromWorld(level, pos); // Folia - make map data thread-safe - don't sync load or read data we do not own
+             if (banner == null) {
+                 return false;
+             }
+@@ -464,7 +_,7 @@
+         return false;
+     }
+ 
+-    public void checkBanners(final BlockGetter level, final int x, final int z) {
++    public synchronized void checkBanners(final BlockGetter level, final int x, final int z) { // Folia - make map data thread-safe
+         Iterator<MapBanner> iterator = this.bannerMarkers.values().iterator();
+ 
+         while (iterator.hasNext()) {
+@@ -484,13 +_,13 @@
+         return this.bannerMarkers.values();
+     }
+ 
+-    public void removedFromFrame(final BlockPos pos, final int entityID) {
++    public synchronized void removedFromFrame(final BlockPos pos, final int entityID) { // Folia - make map data thread-safe
+         this.removeDecoration(getFrameKey(entityID));
+         this.frameMarkers.remove(MapFrame.frameId(pos));
+         this.setDirty();
+     }
+ 
+-    public boolean updateColor(final int x, final int y, final byte newColor) {
++    public synchronized boolean updateColor(final int x, final int y, final byte newColor) { // Folia - make map data thread-safe
+         byte oldColor = this.colors[x + y * 128];
+         if (oldColor != newColor) {
+             this.setColor(x, y, newColor);
+@@ -500,12 +_,12 @@
+         }
+     }
+ 
+-    public void setColor(final int x, final int y, final byte newColor) {
++    public synchronized void setColor(final int x, final int y, final byte newColor) { // Folia - make map data thread-safe
+         this.colors[x + y * 128] = newColor;
+         this.setColorsDirty(x, y);
+     }
+ 
+-    public boolean isExplorationMap() {
++    public synchronized boolean isExplorationMap() { // Folia - make map data thread-safe
+         for (MapDecoration decoration : this.decorations.values()) {
+             if (decoration.type().value().explorationMapElement()) {
+                 return true;
+@@ -515,7 +_,7 @@
+         return false;
+     }
+ 
+-    public void addClientSideDecorations(final List<MapDecoration> decorations) {
++    public synchronized void addClientSideDecorations(final List<MapDecoration> decorations) { // Folia - make map data thread-safe
+         this.decorations.clear();
+         this.trackedDecorationCount = 0;
+ 
+@@ -532,7 +_,7 @@
+         return this.decorations.values();
+     }
+ 
+-    public boolean isTrackedCountOverLimit(final int limit) {
++    public synchronized boolean isTrackedCountOverLimit(final int limit) { // Folia - make map data thread-safe
+         return this.trackedDecorationCount > limit;
+     }
+ 
+@@ -686,11 +_,13 @@
+         }
+ 
+         public void applyToMap(final MapItemSavedData map) {
++            synchronized (map) { // Folia - make map data thread-safe
+             for (int x = 0; x < this.width; x++) {
+                 for (int y = 0; y < this.height; y++) {
+                     map.setColor(this.startX + x, this.startY + y, this.mapColors[x + y * this.width]);
+                 }
+             }
++            } // Folia - make map data thread-safe
+         }
+     }
+ 

@@ -1,0 +1,20 @@
+--- a/ca/spottedleaf/moonrise/patches/chunk_system/player/RegionizedPlayerChunkLoader.java
++++ b/ca/spottedleaf/moonrise/patches/chunk_system/player/RegionizedPlayerChunkLoader.java
+@@ -218,7 +_,7 @@
+         final PlayerChunkLoaderData loader = ((ChunkSystemServerPlayer)player).moonrise$getChunkLoader();
+ 
+         if (loader == null) {
+-            return;
++            throw new IllegalStateException("Player is already removed from player chunk loader"); // Folia - region threading
+         }
+ 
+         loader.remove();
+@@ -306,7 +_,7 @@
+     public void tick() {
+         TickThread.ensureTickThread("Cannot tick player chunk loader async");
+         long currTime = System.nanoTime();
+-        for (final ServerPlayer player : new java.util.ArrayList<>(this.world.players())) {
++        for (final ServerPlayer player : new java.util.ArrayList<>(this.world.getLocalPlayers())) { // Folia - region threading
+             final PlayerChunkLoaderData loader = ((ChunkSystemServerPlayer)player).moonrise$getChunkLoader();
+             if (loader == null || loader.removed || loader.world != this.world) {
+                 // not our problem anymore

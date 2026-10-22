@@ -1,0 +1,37 @@
+--- a/ca/spottedleaf/concurrentutil/scheduler/SchedulableTick.java
++++ b/ca/spottedleaf/concurrentutil/scheduler/SchedulableTick.java
+@@ -30,11 +_,12 @@
+     private static final AtomicLong ID_GENERATOR = new AtomicLong();
+     public final long id = ID_GENERATOR.getAndIncrement();
+ 
+-    long scheduledStart = TimeUtil.DEADLINE_NOT_SET;
+-
+-    Object state;
+-
+-    boolean setState(final Object state) {
++    public long scheduledStart = TimeUtil.DEADLINE_NOT_SET;
++    public long lastQueueInsertion = TimeUtil.DEADLINE_NOT_SET; // Canvas - affinity scheduler
++
++    public Object state;
++
++    public boolean setState(final Object state) {
+         synchronized (this) {
+             if (this.state != null) {
+                 return false;
+@@ -44,14 +_,14 @@
+         }
+     }
+ 
+-    protected final long getScheduledStart() {
++    public final long getScheduledStart() {
+         return this.scheduledStart;
+     }
+ 
+     /**
+      * If this task is scheduled, then this may only be invoked during {@link #runTick()}
+      */
+-    protected final void setScheduledStart(final long value) {
++    public final void setScheduledStart(final long value) {
+         this.scheduledStart = value;
+     }
+ 

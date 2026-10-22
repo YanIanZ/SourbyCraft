@@ -1,0 +1,18 @@
+--- a/src/main/java/io/papermc/paper/util/MCUtil.java
++++ b/src/main/java/io/papermc/paper/util/MCUtil.java
+@@ -126,6 +_,7 @@
+      */
+     public static void ensureMain(String reason, Runnable run) {
+         if (!isMainThread()) {
++            if (true) throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - region threading
+             if (reason != null) {
+                 MinecraftServer.LOGGER.warn("Asynchronous " + reason + "!", new IllegalStateException());
+             }
+@@ -144,6 +_,7 @@
+      */
+     public static <T> T ensureMain(String reason, Supplier<T> run) {
+         if (!isMainThread()) {
++            if (true) throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
+             if (reason != null) {
+                 MinecraftServer.LOGGER.warn("Asynchronous " + reason + "! Blocking thread until it returns ", new IllegalStateException());
+             }

@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/entity/ai/goal/FollowOwnerGoal.java
++++ b/net/minecraft/world/entity/ai/goal/FollowOwnerGoal.java
+@@ -54,7 +_,7 @@
+     public boolean canContinueToUse() {
+         return !this.navigation.isDone()
+             && !this.tamable.unableToMoveToOwner()
+-            && !(this.tamable.distanceToSqr(this.owner) <= this.stopDistance * this.stopDistance);
++            && !(this.owner.level() == this.tamable.level() && this.tamable.distanceToSqr(this.owner) <= this.stopDistance * this.stopDistance); // Folia - region threading - check level
+     }
+ 
+     @Override

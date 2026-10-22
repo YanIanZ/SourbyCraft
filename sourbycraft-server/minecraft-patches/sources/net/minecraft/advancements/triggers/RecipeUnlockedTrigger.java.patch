@@ -1,0 +1,10 @@
+--- a/net/minecraft/advancements/triggers/RecipeUnlockedTrigger.java
++++ b/net/minecraft/advancements/triggers/RecipeUnlockedTrigger.java
+@@ -17,6 +_,7 @@
+     }
+ 
+     public void trigger(final ServerPlayer player, final RecipeHolder<?> recipe) {
++        if (player.level().canvasConfig().disableCriterionTrigger) return; // Canvas - disable criterion trigger config
+         this.trigger(player, t -> t.matches(recipe));
+     }
+ 

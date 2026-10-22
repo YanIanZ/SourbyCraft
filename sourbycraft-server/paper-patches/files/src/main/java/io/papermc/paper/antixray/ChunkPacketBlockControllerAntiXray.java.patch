@@ -1,0 +1,31 @@
+--- a/src/main/java/io/papermc/paper/antixray/ChunkPacketBlockControllerAntiXray.java
++++ b/src/main/java/io/papermc/paper/antixray/ChunkPacketBlockControllerAntiXray.java
+@@ -186,16 +_,21 @@
+             return;
+         }
+ 
+-        if (!Bukkit.isPrimaryThread()) {
+-            // Plugins?
+-            MinecraftServer.getServer().scheduleOnMain(() -> modifyBlocks(chunkPacket, chunkPacketInfo));
++        // Canvas start - region threading
++        // from below
++        final LevelChunk chunk = chunkPacketInfo.getChunk();
++        final Level level = chunk.getLevel();
++        final int x = chunk.getPos().x();
++        final int z = chunk.getPos().z();
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(level, x, z)) {
++            // not in proper region, schedule to it
++            io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueChunkTask(
++                (ServerLevel) level, x, z, () -> modifyBlocks(chunkPacket, chunkPacketInfo));
++        // Canvas end - region threading
+             return;
+         }
+ 
+-        LevelChunk chunk = chunkPacketInfo.getChunk();
+-        int x = chunk.getPos().x();
+-        int z = chunk.getPos().z();
+-        Level level = chunk.getLevel();
++        // Canvas - region threading - move up
+         ((ChunkPacketInfoAntiXray) chunkPacketInfo).setNearbyChunks(level.getChunkIfLoaded(x - 1, z), level.getChunkIfLoaded(x + 1, z), level.getChunkIfLoaded(x, z - 1), level.getChunkIfLoaded(x, z + 1));
+         executor.execute((Runnable) chunkPacketInfo);
+     }

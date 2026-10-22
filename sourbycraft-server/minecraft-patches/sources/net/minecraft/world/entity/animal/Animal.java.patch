@@ -1,0 +1,17 @@
+--- a/net/minecraft/world/entity/animal/Animal.java
++++ b/net/minecraft/world/entity/animal/Animal.java
+@@ -258,8 +_,12 @@
+         if (player == null) player = partner.getLoveCause();
+         if (player != null) {
+             // Paper end - Call EntityBreedEvent
+-            player.awardStat(Stats.ANIMALS_BRED);
+-            CriteriaTriggers.BRED_ANIMALS.trigger(player, this, partner, offspring);
++            // Canvas start - region threading
++            player.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer entityPlayer) -> {
++                entityPlayer.awardStat(Stats.ANIMALS_BRED);
++                CriteriaTriggers.BRED_ANIMALS.trigger(entityPlayer, this, partner, offspring);
++            });
++            // Canvas end - region threading
+         } // Paper - Call EntityBreedEvent
+         this.setAge(6000);
+         partner.setAge(6000);

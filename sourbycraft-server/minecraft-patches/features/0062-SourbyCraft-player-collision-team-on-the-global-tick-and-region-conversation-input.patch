@@ -1,0 +1,101 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Wed, 21 Oct 2026 02:14:07 +0700
+Subject: [PATCH] SourbyCraft - player collision team on the global tick and
+ region conversation input
+
+collisions.enable-player-collisions=false: the hidden collideRule team is joined, left and removed through dev.iyanz.sourbycraft.guards.PlayerCollisionTeam, which posts the scoreboard change to the global tick (the base disabled the block because scoreboards are global-tick state; Paper also looked the team up with the wrong key on quit and shutdown). Bukkit Conversation input is delivered on the player's own region through dev.iyanz.sourbycraft.guards.ConversationInput instead of throwing inside the async chat chain.
+
+diff --git a/net/minecraft/server/network/ServerGamePacketListenerImpl.java b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+index 8c2005bba5366abc7c475418f285015ec68f1854..d0c57a42d8efc73d67033002433de8e8e2e9f93a 100644
+--- a/net/minecraft/server/network/ServerGamePacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+@@ -2760,9 +2760,8 @@ public class ServerGamePacketListenerImpl
+         if (rawMessage.isEmpty()) {
+             LOGGER.warn("{} tried to send an empty message", this.player.getScoreboardName());
+         } else if (this.getCraftPlayer().isConversing()) {
+-            if (true) throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - region threading
+-            final String conversationInput = rawMessage;
+-            this.server.processQueue.add(() -> ServerGamePacketListenerImpl.this.getCraftPlayer().acceptConversationInput(conversationInput));
++            // Folia - region threading - the main-thread queue does not exist; SourbyCraft - deliver on the player's own region
++            dev.iyanz.sourbycraft.guards.ConversationInput.deliver(this.player, rawMessage); // SourbyCraft - owned conversation input
+         } else if (this.player.getChatVisibility() == ChatVisiblity.SYSTEM) { // Re-add "Command Only" flag check
+             this.send(new ClientboundSystemChatPacket(Component.translatable("chat.cannotSend").withStyle(ChatFormatting.RED), false));
+         } else {
+diff --git a/net/minecraft/server/players/PlayerList.java b/net/minecraft/server/players/PlayerList.java
+index a459c6867dffeb19d811b6ff68ac3a995234b788..7ca2b4d339c0ac56fa97776f963e2f11b4be13ef 100644
+--- a/net/minecraft/server/players/PlayerList.java
++++ b/net/minecraft/server/players/PlayerList.java
+@@ -380,11 +380,7 @@ public abstract class PlayerList {
+         this.server.notificationManager().playerJoined(player);
+         playerConnection.resumeFlushing();
+         // Paper start - Configurable player collision; Add to collideRule team if needed
+-        final net.minecraft.world.scores.Scoreboard scoreboard = this.getServer().getLevel(Level.OVERWORLD).getScoreboard();
+-        final PlayerTeam collideRuleTeam = scoreboard.getPlayerTeam(this.collideRuleTeamName);
+-        if (false && this.collideRuleTeamName != null && collideRuleTeam != null && player.getTeam() == null) { // Folia - region threading
+-            scoreboard.addPlayerToTeam(player.getScoreboardName(), collideRuleTeam);
+-        }
++        dev.iyanz.sourbycraft.guards.PlayerCollisionTeam.join(this, player, io.papermc.paper.threadedregions.RegionizedServer.getInstance()::addTask); // SourbyCraft - team change posted to the global tick (replaces the Folia-disabled block)
+         // Paper end - Configurable player collision
+         // CraftBukkit start - moved down
+         LOGGER.info(
+@@ -522,13 +518,7 @@ public abstract class PlayerList {
+         // CraftBukkit end
+ 
+         // Paper start - Configurable player collision; Remove from collideRule team if needed
+-        if (false && this.collideRuleTeamName != null) { // Folia - region threading
+-            final net.minecraft.world.scores.Scoreboard scoreBoard = this.server.getLevel(Level.OVERWORLD).getScoreboard();
+-            final PlayerTeam team = scoreBoard.getPlayersTeam(this.collideRuleTeamName);
+-            if (player.getTeam() == team && team != null) {
+-                scoreBoard.removePlayerFromTeam(player.getScoreboardName(), team);
+-            }
+-        }
++        dev.iyanz.sourbycraft.guards.PlayerCollisionTeam.quit(this, player, io.papermc.paper.threadedregions.RegionizedServer.getInstance()::addTask); // SourbyCraft - team change posted to the global tick (replaces the Folia-disabled block)
+         // Paper end - Configurable player collision
+ 
+         // Paper - Drop carried item when player has disconnected
+@@ -1302,11 +1292,7 @@ public abstract class PlayerList {
+         // CraftBukkit end
+ 
+         // Paper start - Configurable player collision; Remove collideRule team if it exists
+-        if (false && this.collideRuleTeamName != null) { // Folia - region threading
+-            final net.minecraft.world.scores.Scoreboard scoreboard = this.getServer().getLevel(Level.OVERWORLD).getScoreboard();
+-            final PlayerTeam team = scoreboard.getPlayersTeam(this.collideRuleTeamName);
+-            if (team != null) scoreboard.removePlayerTeam(team);
+-        }
++        dev.iyanz.sourbycraft.guards.PlayerCollisionTeam.shutdown(this); // SourbyCraft - replaces the Folia-disabled block
+         // Paper end - Configurable player collision
+     }
+ 
+diff --git a/net/minecraft/world/scores/Scoreboard.java b/net/minecraft/world/scores/Scoreboard.java
+index 712af9176a201fa060dee66a7099b2f22269c128..b46a3caa210965af57dd779b26c573a4793670d0 100644
+--- a/net/minecraft/world/scores/Scoreboard.java
++++ b/net/minecraft/world/scores/Scoreboard.java
+@@ -403,6 +403,27 @@ public class Scoreboard {
+         // Canvas end - region threading
+     }
+ 
++    // SourbyCraft start - atomic add for the player collision team: unlike addPlayerToTeam it never moves a holder that already has a team
++    public boolean addPlayerToTeamIfAbsent(final String player, final PlayerTeam team) {
++        final MutableBoolean added = new MutableBoolean(false);
++
++        this.teamReferences.swapValue((current) -> {
++            if (current.teamsByHolder.containsKey(player) || current.teamsByName.get(team.getName()) != team) {
++                return current;
++            }
++
++            var newTeamsByHolder = new Object2ObjectOpenHashMap<>(current.teamsByHolder);
++            newTeamsByHolder.put(player, team);
++            team.getPlayers().add(player);
++            added.setTrue();
++
++            return new Entry(current.teamsByName, newTeamsByHolder);
++        });
++
++        return added.isTrue();
++    }
++    // SourbyCraft end
++
+     public boolean removePlayerFromTeam(final String player) {
+         // Canvas start - region threading
+         final MutableBoolean wasInTeam = new MutableBoolean(false);

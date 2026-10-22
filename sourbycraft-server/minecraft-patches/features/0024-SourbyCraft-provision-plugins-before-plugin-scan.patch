@@ -1,0 +1,23 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Tue, 6 Oct 2026 14:00:00 +0700
+Subject: [PATCH] SourbyCraft provision packet plugins before the plugin scan
+
+Enter the existing verified plugin provisioning from the active SourbyClip
+server path, before PluginInitializerManager scans the selected plugin folder.
+This covers ViaVersion/ViaBackwards and the independent ProtocolLib pin.
+
+diff --git a/net/minecraft/server/Main.java b/net/minecraft/server/Main.java
+index 6ea93cb722fd5dc30cae844a536b39dfdb9a2fdc..a98584329387836a5fddcfdd6331892b7f278d34 100644
+--- a/net/minecraft/server/Main.java
++++ b/net/minecraft/server/Main.java
+@@ -123,6 +123,9 @@ public class Main {
+                 JvmProfiler.INSTANCE.start(Environment.SERVER);
+             }
+ 
++            // SourbyCraft: Clip has loaded the server; provision before Paper scans plugins.
++            dev.iyanz.sourbycraft.bootstrap.PluginProvisioner.provisionJars(
++                ((java.io.File) options.valueOf("plugins")).toPath());
+             io.papermc.paper.plugin.PluginInitializerManager.load(options); // Paper
+             Bootstrap.bootStrap();
+             Bootstrap.validate();

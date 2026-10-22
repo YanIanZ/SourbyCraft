@@ -1,0 +1,40 @@
+--- a/net/minecraft/server/commands/data/BlockDataAccessor.java
++++ b/net/minecraft/server/commands/data/BlockDataAccessor.java
+@@ -55,6 +_,37 @@
+         this.entity = entity;
+         this.pos = pos;
+     }
++    // Canvas start - region threading
++    // note: this is only used by the data command
++
++    @Override
++    public void ensureTickThread(final String reason) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
++        if (!isTickThreadFor()) {
++            throw net.minecraft.server.commands.data.DataAccessor.CSE_TARGET_NOT_SAME_REGION.create();
++        }
++        // on same region, pass
++    }
++
++    @Override
++    public void scheduleOrExecute(final java.util.function.Consumer<DataAccessor> consumer) {
++        final net.minecraft.world.level.Level entityLevel = this.entity.getLevel();
++        if (entityLevel == null) {
++            return;
++        }
++        // if we own the pos we just run it
++        entityLevel.canvas$loadOrRunAtChunksAsync(
++            // just set radius to 0, nobody cares about surrounding blocks
++            pos, 0, ca.spottedleaf.concurrentutil.util.Priority.NORMAL, () -> {
++                consumer.accept(this);
++            }
++        );
++    }
++
++    @Override
++    public boolean isTickThreadFor() {
++        return ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.entity.getLevel(), pos);
++    }
++    // Canvas end - region threading
+ 
+     @Override
+     public void setData(final CompoundTag tag) {

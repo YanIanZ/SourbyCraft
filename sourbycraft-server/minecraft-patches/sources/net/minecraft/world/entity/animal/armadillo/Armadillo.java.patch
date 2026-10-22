@@ -1,0 +1,25 @@
+--- a/net/minecraft/world/entity/animal/armadillo/Armadillo.java
++++ b/net/minecraft/world/entity/animal/armadillo/Armadillo.java
+@@ -21,8 +_,6 @@
+ import net.minecraft.util.RandomSource;
+ import net.minecraft.util.StringRepresentable;
+ import net.minecraft.util.TimeUtil;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.InteractionHand;
+ import net.minecraft.world.InteractionResult;
+ import net.minecraft.world.damagesource.DamageSource;
+@@ -140,13 +_,8 @@
+ 
+     @Override
+     protected void customServerAiStep(final ServerLevel level) {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("armadilloBrain");
+         this.getBrain().tick(level, this);
+-        profiler.pop();
+-        profiler.push("armadilloActivityUpdate");
+         ArmadilloAi.updateActivity(this);
+-        profiler.pop();
+         if (this.isAlive() && --this.scuteTime <= 0 && this.shouldDropLoot(level)) {
+             if (this.dropFromGiftLootTable(level, BuiltInLootTables.ARMADILLO_SHED, this::spawnAtLocation)) {
+                 this.playSound(SoundEvents.ARMADILLO_SCUTE_DROP, 1.0F, (this.random.nextFloat() - this.random.nextFloat()) * 0.2F + 1.0F);

@@ -2,6 +2,7 @@ package dev.iyanz.sourbycraft.command;
 
 import dev.iyanz.sourbycraft.SourbyCraftColors;
 import dev.iyanz.sourbycraft.brand.BuildInfo;
+import dev.iyanz.sourbycraft.brand.BuildProvenance;
 import dev.iyanz.sourbycraft.util.BarUtil;
 import io.papermc.paper.ServerBuildInfo;
 import net.kyori.adventure.text.Component;
@@ -18,14 +19,9 @@ import java.util.Locale;
 
 import static net.kyori.adventure.text.Component.text;
 
-/**
- * Custom /ver. Boxed banner with SourbyCraft branding header and a
- * matching {@link BarUtil#FILLED} divider so the layout reads as one
- * coherent SourbyCraft panel rather than the bare Paper /version dump.
- */
+/** Build identity and runtime information in the shared command panel. */
 public class VerCommand extends Command {
 
-    private static final String DIVIDER = BarUtil.FILLED.repeat(BarUtil.DEFAULT_WIDTH);
     // GMT+7 day-name format matching the GH release title convention
     // (e.g. "Friday, 19 June 2026 10:45"). Sourced from the buildTimestamp in
     // META-INF/sourbycraft-build.properties so /ver shows when the jar was
@@ -34,8 +30,24 @@ public class VerCommand extends Command {
             DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy HH:mm", Locale.ENGLISH);
     private static final ZoneId GMT_PLUS_7 = ZoneId.of("Asia/Jakarta");
 
+    private final java.util.function.Supplier<ServerBuildInfo> serverBuildInfo;
+    private final java.util.function.Supplier<BuildProvenance> provenance;
+
     public VerCommand(String n) {
+        this(n, ServerBuildInfo::buildInfo);
+    }
+
+    /** Test seam: Paper's {@link ServerBuildInfo} cannot initialise outside a running server. */
+    VerCommand(String n, java.util.function.Supplier<ServerBuildInfo> serverBuildInfo) {
+        this(n, serverBuildInfo, BuildProvenance::load);
+    }
+
+    /** Test seam: the provenance of the test classpath is whatever the last build wrote. */
+    VerCommand(String n, java.util.function.Supplier<ServerBuildInfo> serverBuildInfo,
+               java.util.function.Supplier<BuildProvenance> provenance) {
         super(n);
+        this.serverBuildInfo = serverBuildInfo;
+        this.provenance = provenance;
         this.description = "Version info";
         this.usageMessage = "/ver";
         this.setPermission("sourbycraft.command.ver");
@@ -46,7 +58,7 @@ public class VerCommand extends Command {
     @Override
     public boolean execute(CommandSender s, String alias, String[] args) {
         if (!testPermission(s)) return true;
-        ServerBuildInfo bi = ServerBuildInfo.buildInfo();
+        ServerBuildInfo bi = this.serverBuildInfo.get();
         BuildInfo brand = BuildInfo.load();
 
         String buildDate;
@@ -57,18 +69,27 @@ public class VerCommand extends Command {
             buildDate = "";
         }
 
-        s.sendMessage(text(DIVIDER, SourbyCraftColors.PRIMARY));
-        var headerLine = text()
-            .append(text(BarUtil.FILLED + " ", SourbyCraftColors.PRIMARY))
-            .append(text("SourbyCraft ", SourbyCraftColors.HEADER))
-            .append(text(brand.displayVersion(), SourbyCraftColors.VALUE));
-        if (!buildDate.isEmpty()) {
-            headerLine.append(text("  " + buildDate, SourbyCraftColors.DIM));
-        }
-        s.sendMessage(headerLine.build());
-
+        s.sendMessage(UiPanel.header("Version"));
+        s.sendMessage(UiPanel.row("Release", brand.releaseIdentity()));
+        s.sendMessage(UiPanel.row("Built (Asia/Jakarta)", buildDate.isEmpty() ? "unavailable" : buildDate));
         s.sendMessage(line("Minecraft", bi.minecraftVersionId() + "  (" + bi.minecraftVersionName() + ")"));
+        // Transition §14 names the build identity an operator should be able to read back:
+        // SourbyCraft, Minecraft, Aurora Engine, build, Java, commit, channel. The first two and
+        // the commit were already here; an engine, a runtime and a channel that only exist in
+        // the boot log cannot be checked by whoever is looking at a server months later.
+        s.sendMessage(line("Engine", brand.engineName() + " Engine"));
+        // Build 47: whether the runtime came up whole, and whether legacy plugins are admitted,
+        // are properties of this run an operator should not have to dig out of the boot log.
+        s.sendMessage(line("Aurora runtime", dev.iyanz.sourbycraft.core.AuroraRuntime.state().name()));
+        // Read-only: runtimeMode() would create the bridge runtime as a side effect of /ver.
+        final var bridgeMode = dev.iyanz.sourbycraft.bridge.AuroraBridge.modeIfStarted();
+        s.sendMessage(line("Aurora Bridge", bridgeMode == null ? "not-started" : bridgeMode.name().toLowerCase(java.util.Locale.ROOT)));
         s.sendMessage(line("Bukkit API", Bukkit.getBukkitVersion()));
+        s.sendMessage(line("Java", Runtime.version().toString()));
+        final String configuredChannel = dev.iyanz.sourbycraft.update.AutoUpdateSettings.channel;
+        final var forcedChannel = dev.iyanz.sourbycraft.update.UpdateChannel.parseConfig(configuredChannel);
+        s.sendMessage(line("Update channel", configuredChannel == null || configuredChannel.isBlank()
+            ? brand.channel() : forcedChannel == null ? "UNKNOWN" : forcedChannel.suffix()));
 
         long u = ManagementFactory.getRuntimeMXBean().getUptime();
         long d = u / 86400000, h = (u % 86400000) / 3600000, m = (u % 3600000) / 60000;
@@ -78,14 +99,18 @@ public class VerCommand extends Command {
             .append(text("  Git: ", SourbyCraftColors.LABEL))
             .append(text(bi.gitBranch().orElse("?") + "@" + bi.gitCommit().orElse("?"), SourbyCraftColors.DIM))
             .build());
-        s.sendMessage(text(DIVIDER, SourbyCraftColors.DIM));
+        // Build provenance (TODO Inovasi): what this jar was built from, so a server months later
+        // can be traced to the exact patch set and toolchain. Full hashes: jar manifest Provenance-*.
+        s.sendMessage(UiPanel.section("Provenance"));
+        for (String[] row : this.provenance.get().displayRows()) {
+            s.sendMessage(line(row[0], row[1]));
+        }
+        s.sendMessage(UiPanel.actions(java.util.List.of("/aurora", "/sourbycraft config")));
+        s.sendMessage(UiPanel.footer());
         return true;
     }
 
     private static Component line(String label, String value) {
-        return text()
-            .append(text("  " + label + ": ", SourbyCraftColors.LABEL))
-            .append(text(value, SourbyCraftColors.VALUE))
-            .build();
+        return UiPanel.row(label, value);
     }
 }

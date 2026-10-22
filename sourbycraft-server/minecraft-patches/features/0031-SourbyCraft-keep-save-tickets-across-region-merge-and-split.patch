@@ -1,0 +1,64 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Wed, 14 Oct 2026 02:08:19 +0700
+Subject: [PATCH] SourbyCraft - keep save tickets across region merge and split
+
+A region holding an unconsumed save ticket (save-all, an AWF world save)
+that merged into another or split reported the save complete from
+onRegionDestroy although its chunks were not saved, and the regions that
+now own them carried no ticket. On merge the ticket moves to the merge
+target (coalescing with a ticket already there); on split it is split
+into one part per new region and reported once every part has saved.
+
+propagateSaveAllTicket's future is completed off the calling thread: the
+ticket's callback can run under the regioniser's write lock, where a
+synchronous dependent re-entering the regioniser would deadlock. A
+reported failure still wins over the completion that follows it.
+
+diff --git a/io/papermc/paper/threadedregions/TickRegions.java b/io/papermc/paper/threadedregions/TickRegions.java
+index ab34149c5d0f8fd30c29c61513b294b0a69a5653..8a5c2236ddff34c092fe1db851f592733f0a4d5f 100644
+--- a/io/papermc/paper/threadedregions/TickRegions.java
++++ b/io/papermc/paper/threadedregions/TickRegions.java
+@@ -311,12 +311,9 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+         @Override
+         public CompletableFuture<Void> propagateSaveAllTicket(final boolean flush) {
+             final CompletableFuture<Void> future = new CompletableFuture<>();
+-            this.canvas$saveAllTicket.propagate(new SaveAllTicket(
+-                () -> {
+-                    future.complete(null);
+-                },
+-                future::completeExceptionally, flush
+-            ));
++            // SourbyCraft - completed off the calling thread: the ticket's callback can run under the
++            // regioniser's write lock (a region destroyed holding it), where a dependent must not run
++            this.canvas$saveAllTicket.propagate(SaveAllTicket.completing(future, flush));
+             return future;
+         }
+ 
+@@ -552,6 +549,17 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+ 
+             // task queue
+             this.taskQueueData.split(regioniser, into);
++
++            // SourbyCraft start - a pending save ticket follows the chunks it was asked to save: one part
++            // per new region, reported once every part has saved (onRegionDestroy would report it now)
++            final SaveAllTicket pendingSave = this.canvas$saveAllTicket.pop();
++            if (pendingSave != null) {
++                final java.util.Iterator<SaveAllTicket> parts = pendingSave.split(regions.size()).iterator();
++                for (final var region : regions) {
++                    region.getData().canvas$saveAllTicket.propagate(parts.next());
++                }
++            }
++            // SourbyCraft end - a pending save ticket follows the chunks it was asked to save
+         }
+ 
+         @Override
+@@ -590,6 +598,8 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+ 
+             // task queue
+             this.taskQueueData.mergeInto(data.taskQueueData);
++            // SourbyCraft - a pending save ticket moves to the region that now owns the chunks
++            this.canvas$saveAllTicket.forwardTo(data.canvas$saveAllTicket);
+             SchedulerUtil.getHandle().onRegionMerge(this, data, world); // Canvas - region profiler
+         }
+     }

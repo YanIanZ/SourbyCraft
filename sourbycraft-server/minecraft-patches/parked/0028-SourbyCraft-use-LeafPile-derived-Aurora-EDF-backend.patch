@@ -1,0 +1,66 @@
+From ade3b24f3e9ccfe076a96fb222bd8b01a3f12f2a Mon Sep 17 00:00:00 2001
+From: agent <agent@local>
+Date: Tue, 6 Oct 2026 23:13:14 +0700
+Subject: [PATCH] SourbyCraft - use LeafPile-derived Aurora EDF backend
+
+---
+ .../concurrentutil/scheduler/SchedulableTick.java      |  2 +-
+ .../aurora/engine/threadedregions/SchedulerUtil.java   | 10 +++++-----
+ 2 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/ca/spottedleaf/concurrentutil/scheduler/SchedulableTick.java b/ca/spottedleaf/concurrentutil/scheduler/SchedulableTick.java
+index a823119..d2cc9db 100644
+--- a/ca/spottedleaf/concurrentutil/scheduler/SchedulableTick.java
++++ b/ca/spottedleaf/concurrentutil/scheduler/SchedulableTick.java
+@@ -33,7 +33,7 @@ public abstract class SchedulableTick {
+     public long scheduledStart = TimeUtil.DEADLINE_NOT_SET;
+     public long lastQueueInsertion = TimeUtil.DEADLINE_NOT_SET; // Canvas - affinity scheduler
+ 
+-    public Object state;
++    public volatile Object state; // SourbyCraft - published to cross-thread cancellation readers
+ 
+     public boolean setState(final Object state) {
+         synchronized (this) {
+diff --git a/dev/iyanz/aurora/engine/threadedregions/SchedulerUtil.java b/dev/iyanz/aurora/engine/threadedregions/SchedulerUtil.java
+index 59ca07a..80cd6ff 100644
+--- a/dev/iyanz/aurora/engine/threadedregions/SchedulerUtil.java
++++ b/dev/iyanz/aurora/engine/threadedregions/SchedulerUtil.java
+@@ -1,7 +1,7 @@
+ package dev.iyanz.aurora.engine.threadedregions;
+ 
+ import ca.spottedleaf.concurrentutil.numa.OSNuma;
+-import ca.spottedleaf.concurrentutil.scheduler.EDFSchedulerThreadPool;
++import dev.iyanz.aurora.engine.threadedregions.scheduler.AuroraEdfScheduler;
+ import ca.spottedleaf.concurrentutil.scheduler.Scheduler;
+ import ca.spottedleaf.concurrentutil.scheduler.StealingScheduledThreadPool;
+ import ca.spottedleaf.moonrise.common.util.MoonriseConstants;
+@@ -77,8 +77,8 @@ public class SchedulerUtil {
+      */
+     public static void startScheduler() {
+         final Scheduler scheduler = TickRegions.getScheduler().scheduler;
+-        if (scheduler instanceof EDFSchedulerThreadPool edfSchedulerThreadPool) {
+-            TickRegionScheduler.LOGGER.info("Starting EDF region scheduler");
++        if (scheduler instanceof AuroraEdfScheduler edfSchedulerThreadPool) {
++            TickRegionScheduler.LOGGER.info("Starting Aurora EDF region scheduler ({} threads, LeafPile-derived)", edfSchedulerThreadPool.getCoreThreads().length);
+             edfSchedulerThreadPool.start();
+         }
+         if (scheduler instanceof AffinitySchedulerThreadPool affinitySchedulerThreadPool) {
+@@ -110,7 +110,7 @@ public class SchedulerUtil {
+             switch (schedulerType) {
+                 case EDF: {
+                     HANDLER = new NullHandler();
+-                    return new EDFSchedulerThreadPool(initialThreads, threadFactory);
++                    return new AuroraEdfScheduler(initialThreads, threadFactory);
+                 }
+                 case WORK_STEALING: {
+                     final StealingScheduledThreadPool scheduler = new StealingScheduledThreadPool(
+@@ -387,4 +387,4 @@ public class SchedulerUtil {
+             }
+         }
+     }
+-}
+\ No newline at end of file
++}
+-- 
+2.50.1 (Apple Git-155)
+

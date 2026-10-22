@@ -1,0 +1,218 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Wed, 21 Oct 2026 02:14:20 +0700
+Subject: [PATCH] SourbyCraft - owned refusal messages and off-region tick time
+
+Server#reload, reloadData, unloadWorld, restart, Datapack#setEnabled, the Bukkit scheduler for non-bridged plugins, the ServerTickManager, MCUtil#ensureMain and /restart throw dev.iyanz.sourbycraft.guards.RegionRefusal messages that keep the legacy prefix and name the supported alternative. Server#getAverageTickTime reports the global tick's figure off any region (as getTPS does), and World#getTickableTileEntityCount sums the regions' published counts instead of throwing.
+
+diff --git a/src/main/java/io/papermc/paper/datapack/PaperDatapack.java b/src/main/java/io/papermc/paper/datapack/PaperDatapack.java
+index 113b858e507326a6ebbc4d9b1658fed3cd16b86c..8a04d155e04d9a0b7cbf25225db07f9e6872fdf5 100644
+--- a/src/main/java/io/papermc/paper/datapack/PaperDatapack.java
++++ b/src/main/java/io/papermc/paper/datapack/PaperDatapack.java
+@@ -30,7 +30,7 @@ public class PaperDatapack extends PaperDiscoveredDatapack implements Datapack {
+     public void setEnabled(final boolean enabled) {
+         // Canvas start - region threading
+         if (true) {
+-            throw new UnsupportedOperationException("Unsupported in region threading");
++            throw dev.iyanz.sourbycraft.guards.RegionRefusal.DATAPACK_TOGGLE.error();
+         }
+         // Canvas end - region threading
+         final MinecraftServer server = MinecraftServer.getServer();
+diff --git a/src/main/java/io/papermc/paper/util/MCUtil.java b/src/main/java/io/papermc/paper/util/MCUtil.java
+index d8f9970242d4935c780ba4982ab0185590f4455a..180c748d48c2f49edfe9e9c7b631cc7afbb6fc2e 100644
+--- a/src/main/java/io/papermc/paper/util/MCUtil.java
++++ b/src/main/java/io/papermc/paper/util/MCUtil.java
+@@ -126,7 +126,7 @@ public final class MCUtil {
+      */
+     public static void ensureMain(String reason, Runnable run) {
+         if (!isMainThread()) {
+-            if (true) throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - region threading
++            if (true) throw dev.iyanz.sourbycraft.guards.RegionRefusal.ENSURE_MAIN.error(); // Folia - region threading - SourbyCraft: owned refusal message
+             if (reason != null) {
+                 MinecraftServer.LOGGER.warn("Asynchronous " + reason + "!", new IllegalStateException());
+             }
+@@ -145,7 +145,7 @@ public final class MCUtil {
+      */
+     public static <T> T ensureMain(String reason, Supplier<T> run) {
+         if (!isMainThread()) {
+-            if (true) throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
++            if (true) throw dev.iyanz.sourbycraft.guards.RegionRefusal.ENSURE_MAIN.error(); // Canvas - region threading - SourbyCraft: owned refusal message
+             if (reason != null) {
+                 MinecraftServer.LOGGER.warn("Asynchronous " + reason + "! Blocking thread until it returns ", new IllegalStateException());
+             }
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+index caa20c0c555bde8bb6fa100e0c728f4752ed7b66..9ae7304224b8aace12015bd4b655ab8a0a52ac97 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -978,7 +978,7 @@ public final class CraftServer implements Server {
+     public void reload() {
+         // Canvas start - region threading
+         if (true) {
+-            throw new UnsupportedOperationException("Unsupported in region threading");
++            throw dev.iyanz.sourbycraft.guards.RegionRefusal.PLUGIN_RELOAD.error();
+         }
+         // Canvas end - region threading
+         // Paper start - lifecycle events
+@@ -1119,7 +1119,7 @@ public final class CraftServer implements Server {
+     public void reloadData() {
+         // Canvas start - region threading
+         if (true) {
+-            throw new UnsupportedOperationException("Unsupported in region threading");
++            throw dev.iyanz.sourbycraft.guards.RegionRefusal.DATA_RELOAD.error();
+         }
+         // Canvas end - region threading
+         ReloadCommand.reload(this.console);
+@@ -1632,7 +1632,7 @@ public final class CraftServer implements Server {
+ 
+     @Override
+     public boolean unloadWorld(World world, boolean save) {
+-        if (true) throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - not implemented properly yet
++        if (true) throw dev.iyanz.sourbycraft.guards.RegionRefusal.UNLOAD_WORLD.error(); // Folia - not implemented properly yet - SourbyCraft: owned refusal message
+         //Preconditions.checkState(!this.console.isIteratingOverLevels, "Cannot unload a world while worlds are being ticked"); // Paper - Cat - Temp disable. We'll see how this goes.
+         if (world == null) {
+             return false;
+@@ -3020,6 +3020,12 @@ public final class CraftServer implements Server {
+                 task = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegion().getData().getRegionSchedulingHandle();
+             }
+         }
++        // SourbyCraft start - off any region (an async task, a bridged legacy plugin's profiler), report
++        // the global tick's average tick time instead of throwing: reading a statistic needs no region ownership.
++        if (task == null) {
++            task = io.papermc.paper.threadedregions.RegionizedServer.getGlobalTickData();
++        }
++        // SourbyCraft end
+         if (!(task instanceof io.papermc.paper.threadedregions.TickRegionScheduler.RegionScheduleHandle tickHandle)) {
+             throw new UnsupportedOperationException("Not on any region");
+         }
+@@ -3082,7 +3088,7 @@ public final class CraftServer implements Server {
+         // Canvas start - region threading
+         // we disable this command, why the fuck isn't this throwing already
+         if (true) {
+-            throw new UnsupportedOperationException("Unsupported in region threading");
++            throw dev.iyanz.sourbycraft.guards.RegionRefusal.RESTART.error();
+         }
+         // Canvas end - region threading
+         org.spigotmc.RestartCommand.restart();
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServerTickManager.java b/src/main/java/org/bukkit/craftbukkit/CraftServerTickManager.java
+index 99c3d6c986e6d2c2fe0cdce020ab43a314d668a7..c5eb8cedd92777abc8e1f8dfb5f5d8da7887aef3 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServerTickManager.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServerTickManager.java
+@@ -16,66 +16,66 @@ final class CraftServerTickManager implements ServerTickManager {
+ 
+     @Override
+     public boolean isRunningNormally() {
+-        throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
++        throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - region threading - SourbyCraft: owned refusal message
+     }
+ 
+     @Override
+     public boolean isStepping() {
+-        throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
++        throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - region threading - SourbyCraft: owned refusal message
+     }
+ 
+     @Override
+     public boolean isSprinting() {
+-        throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
++        throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - region threading - SourbyCraft: owned refusal message
+     }
+ 
+     @Override
+     public boolean isFrozen() {
+-        throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
++        throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - region threading - SourbyCraft: owned refusal message
+     }
+ 
+     @Override
+     public float getTickRate() {
+-        throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
++        throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - region threading - SourbyCraft: owned refusal message
+     }
+ 
+     @Override
+     public void setTickRate(final float tickRate) {
+-        throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
++        throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - region threading - SourbyCraft: owned refusal message
+     }
+ 
+     @Override
+     public void setFrozen(final boolean frozen) {
+-        throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
++        throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - region threading - SourbyCraft: owned refusal message
+     }
+ 
+     @Override
+     public boolean stepGameIfFrozen(final int ticks) {
+-        throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
++        throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - region threading - SourbyCraft: owned refusal message
+     }
+ 
+     @Override
+     public boolean stopStepping() {
+-        throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
++        throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - region threading - SourbyCraft: owned refusal message
+     }
+ 
+     @Override
+     public boolean requestGameToSprint(final int ticks) {
+-        throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
++        throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - region threading - SourbyCraft: owned refusal message
+     }
+ 
+     @Override
+     public boolean stopSprinting() {
+-        throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
++        throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - region threading - SourbyCraft: owned refusal message
+     }
+ 
+     @Override
+     public boolean isFrozen(final Entity entity) {
+-        throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
++        throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - region threading - SourbyCraft: owned refusal message
+     }
+ 
+     @Override
+     public int getFrozenTicksToRun() {
+-        throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
++        throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - region threading - SourbyCraft: owned refusal message
+     }
+ }
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftWorld.java b/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
+index f52c0398dffed7126ab323ff5778b1c2e5b1bf5b..0e37c74c8a644d98472c6670b232ee86778601cb 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
+@@ -238,7 +238,7 @@ public class CraftWorld extends CraftRegionAccessor implements World {
+ 
+     @Override
+     public int getTickableTileEntityCount() {
+-        throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - region threading - TODO fix this?
++        return dev.iyanz.sourbycraft.guards.RegionStatistics.tickableBlockEntities(this.world); // SourbyCraft - sum of the regions' last published counts (was: Folia - region threading - TODO fix this?)
+     }
+ 
+     @Override
+diff --git a/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java b/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
+index 673dc72cb29a18b6cb7d664614c91fb66112d525..dcc5701e29a79ba45866bc23045baa2fd4af90b5 100644
+--- a/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
++++ b/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
+@@ -542,7 +542,7 @@ public class CraftScheduler implements BukkitScheduler {
+             return task;
+         }
+         // SourbyCraft end - Aurora Bridge
+-        if (true) throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - region threading
++        if (true) throw dev.iyanz.sourbycraft.guards.RegionRefusal.BUKKIT_SCHEDULER.error(); // Folia - region threading - SourbyCraft: owned refusal message
+         // Paper start
+         if (!this.isAsyncScheduler && !task.isSync()) {
+             this.asyncScheduler.handle(task, delay);
+diff --git a/src/main/java/org/spigotmc/RestartCommand.java b/src/main/java/org/spigotmc/RestartCommand.java
+index 93e9beb5a0f12429fbe78c2312f00c3a8f3c05ab..706441d64b1ae084734b00114294439cf24eeb53 100644
+--- a/src/main/java/org/spigotmc/RestartCommand.java
++++ b/src/main/java/org/spigotmc/RestartCommand.java
+@@ -33,7 +33,7 @@ public class RestartCommand extends Command {
+         // Canvas start - region threading
+         // we disable this command, why the fuck isn't this throwing already
+         if (true) {
+-            throw new UnsupportedOperationException("Unsupported in region threading");
++            throw dev.iyanz.sourbycraft.guards.RegionRefusal.RESTART.error();
+         }
+         // Canvas end - region threading
+         try {

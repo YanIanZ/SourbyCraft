@@ -1,0 +1,83 @@
+--- a/net/minecraft/world/RandomSequences.java
++++ b/net/minecraft/world/RandomSequences.java
+@@ -30,7 +_,7 @@
+     private int salt;
+     private boolean includeWorldSeed = true;
+     private boolean includeSequenceId = true;
+-    private final Map<Identifier, RandomSequence> sequences = new Object2ObjectOpenHashMap<>();
++    private final Map<Identifier, RandomSequence> sequences = new java.util.concurrent.ConcurrentHashMap<>(); // Folia - region threading
+ 
+     public RandomSequences() {
+     }
+@@ -104,61 +_,61 @@
+         @Override
+         public RandomSource fork() {
+             RandomSequences.this.setDirty();
+-            return this.random.fork();
++            synchronized (this.random) { return this.random.fork(); } // Folia - region threading
+         }
+ 
+         @Override
+         public PositionalRandomFactory forkPositional() {
+             RandomSequences.this.setDirty();
+-            return this.random.forkPositional();
++            synchronized (this.random) { return this.random.forkPositional(); } // Folia - region threading
+         }
+ 
+         @Override
+         public void setSeed(final long seed) {
+             RandomSequences.this.setDirty();
+-            this.random.setSeed(seed);
++            synchronized (this.random) { this.random.setSeed(seed); } // Folia - region threading
+         }
+ 
+         @Override
+         public int nextInt() {
+             RandomSequences.this.setDirty();
+-            return this.random.nextInt();
++            synchronized (this.random) { return this.random.nextInt(); } // Folia - region threading
+         }
+ 
+         @Override
+         public int nextInt(final int bound) {
+             RandomSequences.this.setDirty();
+-            return this.random.nextInt(bound);
++            synchronized (this.random) { return this.random.nextInt(bound); } // Folia - region threading
+         }
+ 
+         @Override
+         public long nextLong() {
+             RandomSequences.this.setDirty();
+-            return this.random.nextLong();
++            synchronized (this.random) { return this.random.nextLong(); } // Folia - region threading
+         }
+ 
+         @Override
+         public boolean nextBoolean() {
+             RandomSequences.this.setDirty();
+-            return this.random.nextBoolean();
++            synchronized (this.random) { return this.random.nextBoolean(); } // Folia - region threading
+         }
+ 
+         @Override
+         public float nextFloat() {
+             RandomSequences.this.setDirty();
+-            return this.random.nextFloat();
++            synchronized (this.random) { return this.random.nextFloat(); } // Folia - region threading
+         }
+ 
+         @Override
+         public double nextDouble() {
+             RandomSequences.this.setDirty();
+-            return this.random.nextDouble();
++            synchronized (this.random) { return this.random.nextDouble(); } // Folia - region threading
+         }
+ 
+         @Override
+         public double nextGaussian() {
+             RandomSequences.this.setDirty();
+-            return this.random.nextGaussian();
++            synchronized (this.random) { return this.random.nextGaussian(); } // Folia - region threading
+         }
+ 
+         @Override

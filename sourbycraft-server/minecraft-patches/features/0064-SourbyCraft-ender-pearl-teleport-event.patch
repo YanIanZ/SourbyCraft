@@ -1,0 +1,117 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Wed, 21 Oct 2026 21:13:36 +0700
+Subject: [PATCH] SourbyCraft - ender pearl teleport event
+
+
+diff --git a/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java b/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java
+index 58bbd78a701a3ee2dafc92c3649c12693699840b..3a78e6e0ca9a387d21f90fdd0b8a16dd2a76ca06 100644
+--- a/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java
++++ b/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java
+@@ -81,83 +81,6 @@ public class ThrownEnderpearl extends ThrowableItemProjectile {
+         hitResult.getEntity().hurt(this.damageSources().thrown(this, this.getOwner()), 0.0F);
+     }
+ 
+-    // Folia start - region threading
+-    private void attemptTeleport(final Entity source, final ServerLevel checkWorld, final Vec3 to) {
+-        final boolean onPortalCooldown = source.isOnPortalCooldown();
+-        final ThrownEnderpearl entityPearl = this;
+-
+-        // ignore retired callback, in those cases we do not want to teleport
+-        source.getBukkitEntity().taskScheduler.scheduleOrExecute( // Canvas - region threading
+-            (Entity entity) -> {
+-                if (!isAllowedToTeleportOwner(entity, checkWorld)) {
+-                    return;
+-                }
+-
+-                // source is now an invalid reference, do not use it, use the entity parameter
+-                final Vec3 endermitePos = entity.position();
+-
+-                // dismount from any vehicles, so we can teleport and to prevent desync
+-                if (entity.isPassenger()) {
+-                    entity.unRide();
+-                }
+-
+-                if (onPortalCooldown) {
+-                    entity.setPortalCooldown();
+-                }
+-
+-                entity.teleportAsync(
+-                    checkWorld, to, null, null, null,
+-                    org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.ENDER_PEARL,
+-                    // chunk could have been unloaded
+-                    Entity.TELEPORT_FLAG_TELEPORT_PASSENGERS | Entity.TELEPORT_FLAG_LOAD_CHUNK,
+-                    (Entity teleported) -> {
+-                        // entity is now an invalid reference, do not use it, instead use teleported
+-                        if (teleported instanceof ServerPlayer player) {
+-                            // connection teleport is already done
+-                            final ServerLevel world = player.level();
+-
+-                            // endermite spawn chance
+-                            if (world.getRandom().nextFloat() < 0.05F && world.isSpawningMonsters()) {
+-                                final Endermite entityendermite = EntityTypes.ENDERMITE.create(world, EntitySpawnReason.TRIGGERED);
+-
+-                                if (entityendermite != null) {
+-                                    final float yRot = teleported.getYRot();
+-                                    final float xRot = teleported.getXRot();
+-                                    final Runnable spawn = () -> {
+-                                        entityendermite.snapTo(endermitePos.x, endermitePos.y, endermitePos.z, yRot, xRot);
+-                                        world.addFreshEntity(entityendermite, org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.ENDER_PEARL);
+-                                    };
+-
+-                                    if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(world, endermitePos, net.minecraft.world.phys.Vec3.ZERO, 1)) {
+-                                        spawn.run();
+-                                    } else {
+-                                        io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
+-                                            world,
+-                                            ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkCoordinate(endermitePos.x),
+-                                            ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkCoordinate(endermitePos.z),
+-                                            spawn
+-                                        );
+-                                    }
+-                                }
+-                            }
+-
+-                            // damage player
+-                            teleported.resetFallDistance();
+-                            player.resetCurrentImpulseContext();
+-                            player.hurtServer(player.level(), player.damageSources().enderPearl().eventEntityDamager(entityPearl), 5.0F); // CraftBukkit // Paper - fix DamageSource API
+-                            playSound(teleported.level(), to);
+-                        } else {
+-                            // reset fall damage so that if the entity was falling they do not instantly die
+-                            teleported.resetFallDistance();
+-                            playSound(teleported.level(), to);
+-                        }
+-                    }
+-                );
+-            } // Canvas - region threading
+-        );
+-    }
+-
+-    // Folia end - region threading
+     @Override
+     protected void onHit(final HitResult hitResult) {
+         super.onHit(hitResult);
+@@ -178,17 +101,16 @@ public class ThrownEnderpearl extends ThrowableItemProjectile {
+         if (this.level() instanceof ServerLevel level && !this.isRemoved()) {
+             // Folia start - region threading
+             if (true) {
+-                // we can't fire events, because we do not actually know where the other entity is located
++                // The owner may be on another region; schedule its event and transfer there.
+                 ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Must be on tick thread for ticking entity");
+ 
+-                // teleport the owner
++                // SourbyCraft - event on the owner's region; always consume on the pearl's region
+                 final Entity entity = this.getOwnerRaw();
+                 if (entity != null) {
+-                    attemptTeleport(entity, (ServerLevel)this.level(), this.position());
++                    dev.iyanz.sourbycraft.entity.teleport.PearlTeleport.hit(this, entity, level, this.position());
++                } else {
++                    this.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.HIT);
+                 }
+-
+-                // discard after teleport
+-                this.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.HIT);
+                 return;
+             }
+             // Folia end - region threading

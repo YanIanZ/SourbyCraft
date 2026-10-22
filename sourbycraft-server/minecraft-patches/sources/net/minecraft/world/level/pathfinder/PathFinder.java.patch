@@ -1,0 +1,30 @@
+--- a/net/minecraft/world/level/pathfinder/PathFinder.java
++++ b/net/minecraft/world/level/pathfinder/PathFinder.java
+@@ -12,9 +_,6 @@
+ import java.util.function.Function;
+ import java.util.stream.Collectors;
+ import net.minecraft.core.BlockPos;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+-import net.minecraft.util.profiling.metrics.MetricCategory;
+ import net.minecraft.world.entity.Mob;
+ import net.minecraft.world.level.PathNavigationRegion;
+ import org.jspecify.annotations.Nullable;
+@@ -69,9 +_,6 @@
+     private @Nullable Path findPath(
+         final Node from, final List<Map.Entry<Target, BlockPos>> targets, final float maxPathLength, final int reachRange, final float maxVisitedNodesMultiplier // Paper - optimize collection
+     ) {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("find_path");
+-        profiler.markForCharting(MetricCategory.PATH_FINDING);
+         //Set<Target> targets = targetMap.keySet(); // Paper - unused
+         from.g = 0.0F;
+         from.h = this.getBestH(from, targets);
+@@ -146,7 +_,6 @@
+                 best = path;
+             }
+         }
+-        profiler.pop();
+         if (captureDebug && best != null) {
+             Set<Target> set = Sets.newHashSet();
+             for(Map.Entry<Target, BlockPos> entry : targets) {

@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/level/chunk/storage/SerializableChunkData.java
++++ b/net/minecraft/world/level/chunk/storage/SerializableChunkData.java
+@@ -518,7 +_,7 @@
+             }
+         }
+ 
+-        ChunkAccess.PackedTicks ticksForSerialization = chunk.getTicksForSerialization(level.getGameTime());
++        ChunkAccess.PackedTicks ticksForSerialization = chunk.getTicksForSerialization(level.getRedstoneGameTime()); // Folia - region threading
+         ShortList[] postProcessingSections = Arrays.stream(chunk.getPostProcessing())
+             .map(shorts -> shorts != null && !shorts.isEmpty() ? new ShortArrayList(shorts) : null)
+             .toArray(ShortList[]::new);

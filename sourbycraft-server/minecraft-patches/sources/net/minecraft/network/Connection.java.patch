@@ -1,0 +1,355 @@
+--- a/net/minecraft/network/Connection.java
++++ b/net/minecraft/network/Connection.java
+@@ -65,7 +_,7 @@
+     private static final ProtocolInfo<ServerHandshakePacketListener> INITIAL_PROTOCOL = HandshakeProtocols.SERVERBOUND;
+     private final PacketFlow receiving;
+     private volatile boolean sendLoginDisconnect = true;
+-    private final Queue<WrappedConsumer> pendingActions = Queues.newConcurrentLinkedQueue(); // Paper - Optimize network
++    private final Queue<WrappedConsumer> pendingActions = new ca.spottedleaf.concurrentutil.collection.MultiThreadedQueue<>(); // Paper - Optimize network // Folia - region threading - connection fixes
+     public Channel channel;
+     public SocketAddress address;
+     // Spigot start
+@@ -76,7 +_,7 @@
+     private volatile @Nullable PacketListener disconnectListener;
+     private volatile @Nullable PacketListener packetListener;
+     private @Nullable DisconnectionDetails disconnectionDetails;
+-    private boolean disconnectionHandled;
++    private final java.util.concurrent.atomic.AtomicBoolean disconnectionHandled = new java.util.concurrent.atomic.AtomicBoolean(false); // Folia - region threading - may be called concurrently during configuration stage
+     private int receivedPackets;
+     private int sentPackets;
+     private float averageReceivedPackets;
+@@ -133,6 +_,41 @@
+         this.receiving = receiving;
+     }
+ 
++    // Folia start - region threading
++    private volatile boolean becomeActive;
++
++    public boolean becomeActive() {
++        return this.becomeActive;
++    }
++
++    private static record DisconnectReq(DisconnectionDetails details) {}
++
++    private final ca.spottedleaf.concurrentutil.collection.MultiThreadedQueue<DisconnectReq> disconnectReqs =
++            new ca.spottedleaf.concurrentutil.collection.MultiThreadedQueue<>();
++
++    /**
++     * Safely disconnects the connection while possibly on another thread. Note: This call will not block, even if on the
++     * same thread that could disconnect.
++     */
++    public final void disconnectSafely(DisconnectionDetails details) {
++        this.disconnectReqs.add(new DisconnectReq(details));
++        // We can't halt packet processing here because a plugin could cancel a kick request.
++    }
++
++    /**
++     * Safely disconnects the connection while possibly on another thread. Note: This call will not block, even if on the
++     * same thread that could disconnect.
++     */
++    public final void disconnectSafely(Component disconnectReason, io.papermc.paper.connection.DisconnectionReason cause) {
++        this.disconnectReqs.add(new DisconnectReq(new DisconnectionDetails(disconnectReason, java.util.Optional.empty(), java.util.Optional.empty(), java.util.Optional.empty(), java.util.Optional.ofNullable(cause))));
++        // We can't halt packet processing here because a plugin could cancel a kick request.
++    }
++
++    public final boolean isPlayerConnected() {
++        return this.packetListener instanceof net.minecraft.server.network.ServerCommonPacketListenerImpl;
++    }
++
++    // Folia end - region threading
+     @Override
+     public void channelActive(final ChannelHandlerContext ctx) throws Exception {
+         super.channelActive(ctx);
+@@ -142,6 +_,7 @@
+         if (this.delayedDisconnect != null) {
+             this.disconnect(this.delayedDisconnect);
+         }
++        this.becomeActive = true; // Folia - region threading
+     }
+ 
+     @Override
+@@ -404,7 +_,7 @@
+         }
+ 
+         packet.onPacketDispatch(this.getPlayer());
+-        if (connected && (InnerUtil.canSendImmediate(this, packet)
++        if (false && connected && (InnerUtil.canSendImmediate(this, packet) // Folia - region threading - connection fixes
+             || (io.papermc.paper.util.MCUtil.isMainThread() && packet.isReady() && this.pendingActions.isEmpty()
+             && (packet.getExtraPackets() == null || packet.getExtraPackets().isEmpty())))) {
+             this.sendPacket(packet, listener, flush);
+@@ -433,11 +_,12 @@
+     }
+ 
+     public void runOnceConnected(final Consumer<Connection> action) {
+-        if (this.isConnected()) {
++        if (false && this.isConnected()) { // Folia - region threading - connection fixes
+             this.flushQueue();
+             action.accept(this);
+         } else {
+             this.pendingActions.add(new WrappedConsumer(action)); // Paper - Optimize network
++            this.flushQueue(); // Folia - region threading - connection fixes
+         }
+     }
+ 
+@@ -456,7 +_,7 @@
+             return;
+         }
+ 
+-        if (connected && this.pendingActions.isEmpty()) {
++        if (false && connected && this.pendingActions.isEmpty()) { // Folia - region threading - connection fixes
+             this.channel.eventLoop().execute(task);
+         } else {
+             this.pendingActions.add(new WrappedConsumer(connection -> connection.channel.eventLoop().execute(task)));
+@@ -524,10 +_,11 @@
+     }
+ 
+     public void flushChannel() {
+-        if (this.isConnected()) {
++        if (false && this.isConnected()) { // Folia - region threading - connection fixes
+             this.flush();
+         } else {
+             this.pendingActions.add(new WrappedConsumer(Connection::flush)); // Paper - Optimize network
++            this.flushQueue(); // Folia - region threading - connection fixes
+         }
+     }
+ 
+@@ -541,53 +_,61 @@
+ 
+     // Paper start - Optimize network: Rewrite this to be safer if ran off main thread
+     private boolean flushQueue() {
+-        if (!this.isConnected()) {
+-            return true;
+-        }
+-        if (io.papermc.paper.util.MCUtil.isMainThread()) {
+-            return this.processQueue();
+-        } else if (this.isPending) {
+-            // Should only happen during login/status stages
+-            synchronized (this.pendingActions) {
+-                return this.processQueue();
+-            }
+-        }
+-        return false;
+-    }
+-
++        return this.processQueue(); // Folia - region threading - connection fixes
++    }
++
++    // Folia start - region threading - connection fixes
++    // allow only one thread to be flushing the queue at once to ensure packets are written in the order they are sent
++    // into the queue
++    private final java.util.concurrent.atomic.AtomicBoolean flushingQueue = new java.util.concurrent.atomic.AtomicBoolean();
++
++    private static boolean canWrite(WrappedConsumer queued) {
++        return queued != null && (!(queued instanceof PacketSendAction packet) || packet.packet.isReady());
++    }
++
++    private boolean canWritePackets() {
++        return canWrite(this.pendingActions.peek());
++    }
++
++    // Folia end - region threading - connection fixes
+     private boolean processQueue() {
+-        if (this.pendingActions.isEmpty()) {
++        // Folia start - region threading - connection fixes
++        if (!this.isConnected()) {
+             return true;
+         }
+ 
+-        // If we are on main, we are safe here in that nothing else should be processing queue off main anymore
+-        // But if we are not on main due to login/status, the parent is synchronized on packetQueue
+-        final java.util.Iterator<WrappedConsumer> iterator = this.pendingActions.iterator();
+-        while (iterator.hasNext()) {
+-            final WrappedConsumer queued = iterator.next(); // poll -> peek
+-
+-            // Fix NPE (Spigot bug caused by handleDisconnection())
+-            if (queued == null) {
+-                return true;
+-            }
+-
+-            if (queued.isConsumed()) {
+-                continue;
+-            }
+-
+-            if (queued instanceof PacketSendAction packetSendAction) {
+-                final Packet<?> packet = packetSendAction.packet;
+-                if (!packet.isReady()) {
++        while (this.canWritePackets()) {
++            final boolean set = false == this.flushingQueue.get() && false == this.flushingQueue.compareAndExchange(false, true);
++            try {
++                if (!set) {
++                    // we didn't acquire the lock, break
+                     return false;
+                 }
+-            }
+-
+-            iterator.remove();
+-            if (queued.tryMarkConsumed()) {
+-                queued.accept(this);
++
++                ca.spottedleaf.concurrentutil.collection.MultiThreadedQueue<WrappedConsumer> queue =
++                    (ca.spottedleaf.concurrentutil.collection.MultiThreadedQueue<WrappedConsumer>)this.pendingActions;
++                WrappedConsumer holder;
++                for (;;) {
++                    // synchronise so that queue clears appear atomic
++                    synchronized (queue) {
++                        holder = queue.pollIf(Connection::canWrite);
++                    }
++                    if (holder == null) {
++                        break;
++                    }
++
++                    holder.accept(this);
++                }
++
++            } finally {
++                if (set) {
++                    this.flushingQueue.set(false);
++                }
+             }
+         }
++
+         return true;
++        // Folia end - region threading - connection fixes
+     }
+     // Paper end - Optimize network
+ 
+@@ -596,28 +_,48 @@
+     private static int currTick; // Paper - Buffer joins to world
+     public void tick() {
+         this.flushQueue();
+-        // Paper start - Buffer joins to world
+-        if (Connection.currTick != net.minecraft.server.MinecraftServer.currentTick) {
+-            Connection.currTick = net.minecraft.server.MinecraftServer.currentTick;
+-            Connection.joinAttemptsThisTick = 0;
+-        }
+-        // Paper end - Buffer joins to world
++        // Folia start - this is broken
++        // // Paper start - Buffer joins to world
++        // if (Connection.currTick != net.minecraft.server.MinecraftServer.currentTick) {
++        //     Connection.currTick = net.minecraft.server.MinecraftServer.currentTick;
++        //     Connection.joinAttemptsThisTick = 0;
++        // }
++        // // Paper end - Buffer joins to world
++        // Folia end - this is broken
++        // Folia start - region threading
++        // handle disconnect requests, but only after flushQueue()
++        DisconnectReq disconnectReq;
++        while ((disconnectReq = this.disconnectReqs.poll()) != null) {
++            PacketListener packetlistener = this.packetListener;
++
++            if (packetlistener instanceof net.minecraft.server.network.ServerLoginPacketListenerImpl loginPacketListener) {
++                loginPacketListener.disconnect(disconnectReq.details.reason());
++                // this doesn't fail, so abort any further attempts
++                return;
++            } else if (packetlistener instanceof net.minecraft.server.network.ServerCommonPacketListenerImpl commonPacketListener) {
++                commonPacketListener.disconnect(disconnectReq.details);
++                // may be cancelled by a plugin, if not cancelled then any further calls do nothing
++                continue;
++            } else {
++                this.disconnect(disconnectReq.details);
++                this.setReadOnly();
++                return;
++            }
++        }
++        if (!this.isConnected()) {
++            // disconnected from above
++            this.handleDisconnection();
++            return;
++        }
++        // Folia end - region threading
+         if (this.packetListener instanceof TickablePacketListener tickable) {
+             // Paper start - Buffer joins to world
+-            if (!(this.packetListener instanceof net.minecraft.server.network.ServerLoginPacketListenerImpl loginPacketListener)
+-                || loginPacketListener.state != net.minecraft.server.network.ServerLoginPacketListenerImpl.State.VERIFYING
+-                || Connection.joinAttemptsThisTick++ < MAX_PER_TICK) {
+-            // Paper start - detailed watchdog information
+-            net.minecraft.network.PacketProcessor.packetProcessing.push(this.packetListener);
+-            try {
++            if (true) { // Folia - region threading
+             tickable.tick();
+-            } finally {
+-                net.minecraft.network.PacketProcessor.packetProcessing.pop();
+-            } // Paper end - detailed watchdog information
+             } // Paper end - Buffer joins to world
+         }
+ 
+-        if (!this.isConnected() && !this.disconnectionHandled) {
++        if (!this.isConnected()) {// Folia - region threading - it's fine to call if it is already handled, as it no longer logs
+             this.handleDisconnection();
+         }
+ 
+@@ -668,6 +_,7 @@
+             this.channel.close().awaitUninterruptibly();
+             this.disconnectionDetails = details;
+         }
++        this.becomeActive = true; // Folia - region threading
+     }
+ 
+     public boolean isMemoryConnection() {
+@@ -863,10 +_,10 @@
+ 
+     public void handleDisconnection() {
+         if (this.channel != null && !this.channel.isOpen()) {
+-            if (this.disconnectionHandled) {
++            if (!this.disconnectionHandled.compareAndSet(false, true)) { // Folia - region threading - may be called concurrently during configuration stage
+                 // LOGGER.warn("handleDisconnection() called twice"); // Paper - Don't log useless message
+             } else {
+-                this.disconnectionHandled = true;
++                // this.disconnectionHandled = true; // Folia - region threading - may be called concurrently during configuration stage - set above
+                 PacketListener packetListener = this.getPacketListener();
+                 PacketListener disconnectListener = packetListener != null ? packetListener : this.disconnectListener;
+                 if (disconnectListener != null) {
+@@ -895,6 +_,21 @@
+                     }
+                 }
+                 // Paper end - Add PlayerConnectionCloseEvent
++                // Folia start - region threading
++                if (packetListener instanceof net.minecraft.server.network.ServerCommonPacketListenerImpl commonPacketListener) {
++                    net.minecraft.server.MinecraftServer.getServer().getPlayerList().removeConnection(
++                            commonPacketListener.getOwner().name(),
++                            commonPacketListener.getOwner().id(), this
++                    );
++                } else if (packetListener instanceof net.minecraft.server.network.ServerLoginPacketListenerImpl loginPacketListener) {
++                    if (loginPacketListener.state.ordinal() >= net.minecraft.server.network.ServerLoginPacketListenerImpl.State.VERIFYING.ordinal()) {
++                        net.minecraft.server.MinecraftServer.getServer().getPlayerList().removeConnection(
++                                loginPacketListener.authenticatedProfile.name(),
++                                loginPacketListener.authenticatedProfile.id(), this
++                        );
++                    }
++                }
++                // Folia end - region threading
+             }
+         }
+     }
+@@ -922,15 +_,25 @@
+     // Paper start - Optimize network
+     public void clearPacketQueue() {
+         final net.minecraft.server.level.ServerPlayer player = getPlayer();
+-        for (final Consumer<Connection> queuedAction : this.pendingActions) {
+-            if (queuedAction instanceof PacketSendAction packetSendAction) {
+-                final Packet<?> packet = packetSendAction.packet;
+-                if (packet.hasFinishListener()) {
+-                    packet.onPacketDispatchFinish(player, null);
++        // Folia start - region threading - connection fixes
++        java.util.List<Connection.PacketSendAction> queuedPackets = new java.util.ArrayList<>();
++        // synchronise so that flushQueue does not poll values while the queue is being cleared
++        synchronized (this.pendingActions) {
++            Connection.WrappedConsumer consumer;
++            while ((consumer = this.pendingActions.poll()) != null) {
++                if (consumer instanceof Connection.PacketSendAction packetHolder) {
++                    queuedPackets.add(packetHolder);
+                 }
+             }
+         }
+-        this.pendingActions.clear();
++
++        for (Connection.PacketSendAction queuedPacket : queuedPackets) {
++            Packet<?> packet = queuedPacket.packet;
++            if (packet.hasFinishListener()) {
++                packet.onPacketDispatchFinish(player, null);
++            }
++        }
++        // Folia end - region threading - connection fixes
+     }
+ 
+     private static final class InnerUtil { // Attempt to hide these methods from ProtocolLib, so it doesn't accidently pick them up.

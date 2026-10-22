@@ -1,0 +1,61 @@
+--- a/src/main/java/io/papermc/paper/world/saveddata/PaperLevelOverrides.java
++++ b/src/main/java/io/papermc/paper/world/saveddata/PaperLevelOverrides.java
+@@ -28,7 +_,8 @@
+         Codec.LONG.fieldOf("game_time").forGetter(levelOverrides -> levelOverrides.gameTime),
+         Codec.BOOL.fieldOf("initialized").forGetter(levelOverrides -> levelOverrides.initialized),
+         LEGACY_GAME_TYPE_CODEC.fieldOf("game_type").forGetter(levelOverrides -> levelOverrides.gameType),
+-        LevelSettings.DifficultySettings.CODEC.fieldOf("difficulty_settings").forGetter(levelOverrides -> levelOverrides.difficultySettings)
++        LevelSettings.DifficultySettings.CODEC.fieldOf("difficulty_settings").forGetter(levelOverrides -> levelOverrides.difficultySettings),
++        dev.iyanz.aurora.engine.world.PerWorldDistanceConfig.LEVEL_OVERRIDES_FIELD.forGetter(levelOverrides -> levelOverrides.canvas$distanceConfig) // Canvas - per world distance // Aurora - saved as Aurora.Distance, Canvas.Distance read until Build 50
+     ).apply(instance, PaperLevelOverrides::new));
+     public static final SavedDataType<PaperLevelOverrides> TYPE = new SavedDataType<>(
+         Identifier.fromNamespaceAndPath(Identifier.PAPER_NAMESPACE, "level_overrides"),
+@@ -44,9 +_,10 @@
+     private LevelSettings.DifficultySettings difficultySettings;
+     private transient @Nullable PrimaryLevelData rootData;
+     private transient ResourceKey<Level> dimension = Level.OVERWORLD;
++    public final dev.iyanz.aurora.engine.world.PerWorldDistanceConfig canvas$distanceConfig; // Canvas - per world distance
+ 
+     private PaperLevelOverrides() {
+-        this(RespawnData.DEFAULT, 0L, false, GameType.SURVIVAL, LevelSettings.DifficultySettings.DEFAULT);
++        this(RespawnData.DEFAULT, 0L, false, GameType.SURVIVAL, LevelSettings.DifficultySettings.DEFAULT, dev.iyanz.aurora.engine.world.PerWorldDistanceConfig.DEFAULT); // Canvas - per world distance
+     }
+ 
+     private PaperLevelOverrides(
+@@ -54,13 +_,15 @@
+         final long gameTime,
+         final boolean initialized,
+         final GameType gameType,
+-        final LevelSettings.DifficultySettings difficultySettings
++        final LevelSettings.DifficultySettings difficultySettings,
++        final dev.iyanz.aurora.engine.world.PerWorldDistanceConfig canvas$distanceConfig // Canvas - per world distance
+     ) {
+         this.respawnData = respawnData.normalized();
+         this.gameTime = gameTime;
+         this.initialized = initialized;
+         this.gameType = gameType;
+         this.difficultySettings = difficultySettings;
++        this.canvas$distanceConfig = canvas$distanceConfig; // Canvas - per world distance
+     }
+ 
+     public static PaperLevelOverrides createFromLiveLevelData(final PrimaryLevelData rootData) {
+@@ -69,7 +_,8 @@
+             rootData.getGameTime(),
+             false,
+             rootData.getGameType(),
+-            new LevelSettings.DifficultySettings(rootData.getDifficulty(), rootData.isHardcore(), rootData.isDifficultyLocked())
++            new LevelSettings.DifficultySettings(rootData.getDifficulty(), rootData.isHardcore(), rootData.isDifficultyLocked()),
++            dev.iyanz.aurora.engine.world.PerWorldDistanceConfig.DEFAULT // Canvas - per world distance
+         );
+     }
+ 
+@@ -83,7 +_,8 @@
+             levelData.get("Time").asLong(0L),
+             levelData.get("initialized").asBoolean(true),
+             GameType.byId(levelData.get("GameType").asInt(GameType.SURVIVAL.getId())),
+-            levelData.get("difficulty_settings").read(LevelSettings.DifficultySettings.CODEC).result().orElse(LevelSettings.DifficultySettings.DEFAULT)
++            levelData.get("difficulty_settings").read(LevelSettings.DifficultySettings.CODEC).result().orElse(LevelSettings.DifficultySettings.DEFAULT),
++            dev.iyanz.aurora.engine.world.PerWorldDistanceConfig.fromRawLevelData(levelData) // Canvas - per world distance // Aurora - Aurora.Distance, else Canvas.Distance
+         );
+     }
+ 

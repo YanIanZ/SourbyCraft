@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/level/block/DoublePlantBlock.java
++++ b/net/minecraft/world/level/block/DoublePlantBlock.java
+@@ -121,7 +_,7 @@
+ 
+     protected static void preventDropFromBottomPart(final Level level, final BlockPos pos, final BlockState state, final Player player) {
+         // CraftBukkit start
+-        if (((net.minecraft.server.level.ServerLevel)level).hasPhysicsEvent && org.bukkit.craftbukkit.event.CraftEventFactory.callBlockPhysicsEvent(level, pos).isCancelled()) { // Paper
++        if (((net.minecraft.server.level.ServerLevel)level).getCurrentWorldData().hasPhysicsEvent && org.bukkit.craftbukkit.event.CraftEventFactory.callBlockPhysicsEvent(level, pos).isCancelled()) { // Paper // Folia - region threading
+             return;
+         }
+         // CraftBukkit end

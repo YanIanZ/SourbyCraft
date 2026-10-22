@@ -1,0 +1,54 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Tue, 6 Oct 2026 22:37:54 +0700
+Subject: [PATCH] SourbyCraft - measure generic chunk generation stages
+
+
+diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/task/ChunkUpgradeGenericStatusTask.java b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/task/ChunkUpgradeGenericStatusTask.java
+index 78fd90e0aa4d84ab13de8c101c5d31596e9ba1f7..67b9b8e84ff33da0abfcd6ab8ff0d07e0826f0f1 100644
+--- a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/task/ChunkUpgradeGenericStatusTask.java
++++ b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/task/ChunkUpgradeGenericStatusTask.java
+@@ -33,6 +33,10 @@ public final class ChunkUpgradeGenericStatusTask extends ChunkProgressionTask im
+ 
+     private final PrioritisedExecutor.PrioritisedTask generateTask;
+ 
++    // SourbyCraft - optional timing only; preserve the executor/radius ownership lifecycle.
++    private long generationQueuedAt;
++    private boolean measuredGeneration;
++
+     public ChunkUpgradeGenericStatusTask(final ChunkTaskScheduler scheduler, final ServerLevel world, final int chunkX,
+                                          final int chunkZ, final ChunkAccess chunk, final StaticCache2D<GenerationChunkHolder> neighbours,
+                                          final ChunkStatus toStatus, final Priority priority) {
+@@ -69,6 +73,16 @@ public final class ChunkUpgradeGenericStatusTask extends ChunkProgressionTask im
+ 
+     @Override
+     public void run() {
++        final long started = dev.iyanz.sourbycraft.perf.ChunkGenerationMetrics.stampRunStart();
++        try {
++            this.runTask();
++        } finally {
++            dev.iyanz.sourbycraft.perf.ChunkGenerationMetrics.runFinished(
++                this.measuredGeneration, this.toStatus.getName(), this.generationQueuedAt, started);
++        }
++    }
++
++    private void runTask() {
+         final ChunkAccess chunk = this.fromChunk;
+ 
+         final ServerChunkCache serverChunkCache = this.world.getChunkSource();
+@@ -94,6 +108,7 @@ public final class ChunkUpgradeGenericStatusTask extends ChunkProgressionTask im
+                     this.complete(chunk, null);
+                     return;
+                 }
++                this.measuredGeneration = true; // SourbyCraft - a generation step runs
+                 completeFuture = ChunkPyramid.GENERATION_PYRAMID.getStepTo(this.toStatus).apply(ctx, this.neighbours, this.fromChunk)
+                         .whenComplete((final ChunkAccess either, final Throwable throwable) -> {
+                                     if (either instanceof ProtoChunk proto) {
+@@ -169,6 +184,7 @@ public final class ChunkUpgradeGenericStatusTask extends ChunkProgressionTask im
+         if ((boolean)SCHEDULED_HANDLE.getAndSet((ChunkUpgradeGenericStatusTask)this, true)) {
+             throw new IllegalStateException("Cannot double call schedule()");
+         }
++        this.generationQueuedAt = dev.iyanz.sourbycraft.perf.ChunkGenerationMetrics.stampQueued(); // SourbyCraft
+         if (this.isEmptyTask()) {
+             if (this.generateTask.cancel()) {
+                 this.run();

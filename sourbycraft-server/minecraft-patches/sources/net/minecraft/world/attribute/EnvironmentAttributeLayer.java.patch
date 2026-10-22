@@ -1,0 +1,16 @@
+--- a/net/minecraft/world/attribute/EnvironmentAttributeLayer.java
++++ b/net/minecraft/world/attribute/EnvironmentAttributeLayer.java
+@@ -7,6 +_,13 @@
+     permits EnvironmentAttributeLayer.Constant,
+     EnvironmentAttributeLayer.Positional,
+     EnvironmentAttributeLayer.TimeBased {
++    // Folia start - region threading
++
++    default EnvironmentAttributeLayer<Value> copy() {
++        return this;
++    }
++
++    // Folia end - region threading
+     @FunctionalInterface
+     non-sealed interface Constant<Value> extends EnvironmentAttributeLayer<Value> {
+         Value applyConstant(Value baseValue);

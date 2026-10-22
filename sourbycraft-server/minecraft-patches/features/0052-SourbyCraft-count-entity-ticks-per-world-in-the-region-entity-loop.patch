@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Tue, 20 Oct 2026 19:35:06 +0700
+Subject: [PATCH] SourbyCraft - count entity ticks per world in the region
+ entity loop
+
+
+diff --git a/io/papermc/paper/threadedregions/RegionizedWorldData.java b/io/papermc/paper/threadedregions/RegionizedWorldData.java
+index 9ac76fb70913bde4158d0eaa048c235a9996adc6..9061c5d95d7c1898b6cfe1ca7814d81e8dc25d16 100644
+--- a/io/papermc/paper/threadedregions/RegionizedWorldData.java
++++ b/io/papermc/paper/threadedregions/RegionizedWorldData.java
+@@ -461,6 +461,7 @@ public final class RegionizedWorldData {
+     public int wakeupInactiveRemainingVillagers;
+     // Paper end
+     public int currentPrimedTnt = 0; // Spigot
++    public int sourbyEntityTicks; // SourbyCraft - entity tick counters: this region's entity loop count, zeroed by ServerLevel.tick
+     @VisibleForDebug
+     public NaturalSpawner.@Nullable SpawnState lastSpawnState;
+     public boolean shouldSignal = true;
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+index 9abf69e0e4ee8b18f77abfb2488ce19526f4014c..efa2c506897817e08d92bd1e123349b731eb0cdf 100644
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -936,6 +936,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+             }
+ 
+             io.papermc.paper.entity.activation.ActivationRange.activateEntities(this); // Paper - EAR
++            regionizedWorldData.sourbyEntityTicks = 0; final long sourbyEntityLoopStart = System.nanoTime(); // SourbyCraft - entity tick counters
+             regionizedWorldData // Folia - region threading
+                 .forEachTickingEntity( // Folia - region threading
+                     entity -> {
+@@ -953,12 +954,14 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+                                         entity.stopRiding();
+                                     }
+ 
++                                    regionizedWorldData.sourbyEntityTicks++; // SourbyCraft - entity tick counters
+                                     this.guardEntityTick(this::tickNonPassenger, entity);
+                                 }
+                             }
+                         }
+                     }
+                 );
++            dev.iyanz.sourbycraft.perf.EntityTickCounters.regionTicked(this.bukkitName, regionizedWorldData.sourbyEntityTicks, System.nanoTime() - sourbyEntityLoopStart); // SourbyCraft - entity tick counters
+             if (this.paperConfig().unsupportedSettings.ticking.blockEntities) { // Paper - option to disable ticking
+             this.tickBlockEntities();
+             } // Paper - option to disable ticking

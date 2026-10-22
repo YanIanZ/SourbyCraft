@@ -1,0 +1,57 @@
+--- a/src/main/java/io/papermc/paper/adventure/providers/ClickCallbackProviderImpl.java
++++ b/src/main/java/io/papermc/paper/adventure/providers/ClickCallbackProviderImpl.java
+@@ -86,8 +_,8 @@
+     abstract static class CallbackManager<C, I> {
+ 
+         private final Predicate<Identifier> locationPredicate;
+-        protected final Map<I, StoredCallback<C, I>> callbacks = new HashMap<>();
+-        private final Queue<StoredCallback<C, I>> queue = new ConcurrentLinkedQueue<>();
++        protected final Map<I, StoredCallback<C, I>> callbacks = new java.util.concurrent.ConcurrentHashMap<>(); // Folia - region threading
++        // private final Queue<StoredCallback<C, I>> queue = new ConcurrentLinkedQueue<>(); // Folia - region threading
+ 
+         protected CallbackManager(final Predicate<Identifier> locationPredicate) {
+             this.locationPredicate = locationPredicate;
+@@ -98,27 +_,33 @@
+         }
+ 
+         public I addCallback(final I id, final @NotNull C callback, final ClickCallback.@NotNull Options options) {
+-            this.queue.add(new StoredCallback<>(callback, options, id));
++            this.callbacks.put(id, new StoredCallback<>(callback, options, id)); // Folia - region threading
+             return id;
+         }
+ 
+         public void handleQueue(final int currentTick) {
+             // Evict expired entries
+             if (currentTick % 100 == 0) {
+-                this.callbacks.values().removeIf(callback -> !callback.valid());
++                this.callbacks.values().removeIf(StoredCallback::expired); // Folia - region threading - don't read uses field
+             }
+ 
+-            // Add entries from queue
+-            StoredCallback<C, I> callback;
+-            while ((callback = this.queue.poll()) != null) {
+-                this.callbacks.put(callback.id(), callback);
+-            }
++            // Folia - region threading
+         }
+ 
+         final void tryConsumeCallback(final I key, final Consumer<? super C> callbackConsumer) {
+-            final StoredCallback<C, I> callback = this.callbacks.get(key);
+-            if (callback != null && callback.valid()) {
+-                callback.takeUse();
++            // Folia start - region threading
++            final StoredCallback<C, I>[] use = new StoredCallback[1];
++            this.callbacks.computeIfPresent(key, (final I keyInMap, final StoredCallback<C, I> value) -> {
++                if (!value.valid()) {
++                    return null;
++                }
++                use[0] = value;
++                value.takeUse();
++                return value.valid() ? value : null;
++            });
++            final StoredCallback<C, I> callback = use[0];
++            if (callback != null) {
++            // Folia end - region threading
+                 callbackConsumer.accept(callback.callback);
+             }
+         }

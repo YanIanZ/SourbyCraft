@@ -79,10 +79,11 @@ public final class SourbyMessages {
             "<#FF6961>Full house!</#FF6961> <gray>Server SourbyCraft lagi kepenuhan, balik lagi nanti.</gray>"
         ),
         MOTD, List.of(
-            "<#FFB347><bold>SourbyCraft</bold></#FFB347> <gray>»</gray> <#AEC6CF>Ngebut, mulus, bebas lag.</#AEC6CF>\n<#77DD77>Gabung sekarang, seru-seruan bareng!</#77DD77>",
-            "<#CBA6F7><bold>✦ SourbyCraft ✦</bold></#CBA6F7>\n<#AEC6CF>Powered by Canvas — tiap region jalan sendiri, TPS anti drop.</#AEC6CF>",
-            "<gradient:#FFB347:#CBA6F7><bold>SourbyCraft Network</bold></gradient>\n<gray>Performa kelas atas, komunitas kelas satu.</gray>",
-            "<#FFB347><bold>SourbyCraft</bold></#FFB347> <#77DD77>ONLINE</#77DD77>\n<gray>Mari main, jangan cuma ngintip MOTD doang :)</gray>"
+            "<#22D3EE><bold>SourbyCraft</bold></#22D3EE> <gray>· Aurora Engine</gray>\n<#94A3B8>Selamat datang. Bangun dunia bersama!</#94A3B8>",
+            "<#22D3EE><bold>SourbyCraft</bold></#22D3EE> <gray>· Minecraft</gray>\n<#94A3B8>Petualangan baru menunggu kamu.</#94A3B8>",
+            "<#22D3EE><bold>SourbyCraft</bold></#22D3EE> <gray>· Aurora Engine</gray>\n<#94A3B8>Jelajahi, berkarya, dan bermain bersama.</#94A3B8>",
+            "<#22D3EE><bold>SourbyCraft</bold></#22D3EE>\n<#94A3B8>Dunia kita, cerita kita. Selamat bermain!</#94A3B8>"
+
         ),
         JOIN, List.of(
             "<#77DD77>+</#77DD77> <#FFB347><player></#FFB347> <gray>gabung ke server. Sambut yuk!</gray>",
@@ -132,6 +133,18 @@ public final class SourbyMessages {
     public static String getRaw(String key) {
         String raw = pickRaw(key);
         return raw == null ? "" : raw;
+    }
+
+    /**
+     * True when the operator explicitly configured {@code messages.<key>} as a list with no usable (non-blank
+     * string) entry, e.g. {@code join = []}. Callers whose message is optional (the join/leave broadcast) treat
+     * that as "send nothing"; a key that is absent, or not a list, is not disabled and keeps its built-in default.
+     * {@link #get} itself is unchanged and still falls back to the defaults, so a required message (server-full,
+     * MOTD) is never rendered empty.
+     */
+    public static boolean isDisabled(String key) {
+        return SourbyCraftConfig.cfgGet(SECTION + "." + key, null) instanceof List<?> raw
+            && raw.stream().noneMatch(o -> o instanceof String s && !s.isBlank());
     }
 
     /** The number of variants currently configured for a key (operator list if present+usable, else built-in). */
@@ -226,9 +239,9 @@ public final class SourbyMessages {
         }
         // Per-key comments (only if not already commented).
         maybeComment(f, SECTION + "." + SERVER_FULL, "Kick line shown when a non-bypass player hits a full server (KICK_FULL).");
-        maybeComment(f, SECTION + "." + MOTD, "Server-list MOTD. \\n splits two lines. One variant applied at startup.");
-        maybeComment(f, SECTION + "." + JOIN, "Broadcast when a player joins. <player> = their name.");
-        maybeComment(f, SECTION + "." + LEAVE, "Broadcast when a player leaves. <player> = their name.");
+        maybeComment(f, SECTION + "." + MOTD, "Server-list MOTD, one variant picked at random per boot and applied in memory (server.properties is not rewritten). \\n splits two lines. [] (empty list) = keep the server.properties motd. RESTART_REQUIRED.");
+        maybeComment(f, SECTION + "." + JOIN, "Broadcast when a player joins. <player> = their name. [] (empty list) = no join message; remove the key to restore the built-in variants. LIVE (/sourbycraft reload).");
+        maybeComment(f, SECTION + "." + LEAVE, "Broadcast when a player leaves. <player> = their name. [] (empty list) = no leave message; remove the key to restore the built-in variants. LIVE (/sourbycraft reload).");
     }
 
     private static void maybeComment(com.electronwill.nightconfig.core.file.CommentedFileConfig f, String path, String comment) {

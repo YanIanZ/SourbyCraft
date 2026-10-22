@@ -1,0 +1,38 @@
+--- a/net/minecraft/world/entity/item/PrimedTnt.java
++++ b/net/minecraft/world/entity/item/PrimedTnt.java
+@@ -104,8 +_,8 @@
+ 
+     @Override
+     public void tick() {
+-        if (this.level().spigotConfig.maxTntTicksPerTick > 0 && ++this.level().spigotConfig.currentPrimedTnt > this.level().spigotConfig.maxTntTicksPerTick) { return; } // Spigot
+-        this.handlePortal();
++        if (this.level().spigotConfig.maxTntTicksPerTick > 0 && ++this.level().getCurrentWorldData().currentPrimedTnt > this.level().spigotConfig.maxTntTicksPerTick) { return; } // Spigot // Folia - region threading
++        // this.handlePortal(); // Folia - region threading
+         this.applyGravity();
+         this.move(MoverType.SELF, this.getDeltaMovement());
+         this.applyEffectsFromBlocks();
+@@ -226,13 +_,21 @@
+     @Override
+     public @Nullable Entity teleport(final TeleportTransition transition) {
+         Entity newEntity = super.teleport(transition);
+-        if (newEntity instanceof PrimedTnt tnt) {
+-            tnt.setUsedPortal(true);
+-        }
++        // Folia - region threading - move to post change
+ 
+         return newEntity;
+     }
+ 
++    // Folia start - region threading
++    @Override
++    public void postChangeDimension() {
++        super.postChangeDimension();
++        if (this instanceof PrimedTnt primedTnt) {
++            primedTnt.setUsedPortal(true);
++        }
++    }
++
++    // Folia end - region threading
+     @Override
+     public final boolean hurtServer(final ServerLevel level, final DamageSource source, final float damage) {
+         return false;

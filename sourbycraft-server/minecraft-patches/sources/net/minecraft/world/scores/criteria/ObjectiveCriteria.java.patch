@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/scores/criteria/ObjectiveCriteria.java
++++ b/net/minecraft/world/scores/criteria/ObjectiveCriteria.java
+@@ -17,7 +_,7 @@
+ 
+ public class ObjectiveCriteria {
+     private static final Map<String, ObjectiveCriteria> CUSTOM_CRITERIA = Maps.newHashMap();
+-    public static final Map<String, ObjectiveCriteria> CRITERIA_CACHE = Maps.newHashMap();
++    public static final Map<String, ObjectiveCriteria> CRITERIA_CACHE = Maps.newConcurrentMap(); // Canvas - region threading
+     public static final Codec<ObjectiveCriteria> CODEC = Codec.STRING
+         .comapFlatMap(
+             name -> byName(name).map(DataResult::success).orElse(DataResult.error(() -> "No scoreboard criteria with name: " + name)),

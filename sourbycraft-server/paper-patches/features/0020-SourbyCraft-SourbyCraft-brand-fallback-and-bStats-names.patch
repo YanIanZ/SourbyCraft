@@ -1,0 +1,66 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Wed, 21 Oct 2026 23:20:14 +0700
+Subject: [PATCH] SourbyCraft - SourbyCraft brand fallback and bStats names
+
+ServerBuildInfoImpl falls back to BRAND_SOURBYCRAFT_ID / "SourbyCraft"
+(BRAND_CANVAS_ID was removed from the API, owner decision 2026-10-21).
+The bStats service, version prefix and chart are SourbyCraft names; nothing
+is submitted (feature 0001 removes the phone-home).
+
+diff --git a/src/main/java/com/destroystokyo/paper/Metrics.java b/src/main/java/com/destroystokyo/paper/Metrics.java
+index f300691cb546a40cd5774ad0ca7e3d7cf6552ef2..4cf8d8acbd3541a0c4c32e4c6ff38ca3732c57b8 100644
+--- a/src/main/java/com/destroystokyo/paper/Metrics.java
++++ b/src/main/java/com/destroystokyo/paper/Metrics.java
+@@ -604,7 +604,7 @@ public class Metrics {
+             boolean logFailedRequests = config.getBoolean("logFailedRequests", false);
+             // Only start Metrics, if it's enabled in the config
+             if (config.getBoolean("enabled", true)) {
+-                Metrics metrics = new Metrics("Canvas", serverUUID, logFailedRequests, Bukkit.getLogger()); // Canvas - Rebrand
++                Metrics metrics = new Metrics("SourbyCraft", serverUUID, logFailedRequests, Bukkit.getLogger()); // Canvas - Rebrand // SourbyCraft - name only; nothing is submitted (Paper feature 0001)
+ 
+                 metrics.addCustomChart(new Metrics.SimplePie("minecraft_version", () -> {
+                     String minecraftVersion = Bukkit.getVersion();
+@@ -620,7 +620,7 @@ public class Metrics {
+                     // Canvas start - Rebrand - new versioning schem for bstats
+                     io.papermc.paper.ServerBuildInfo buildInfo = io.papermc.paper.ServerBuildInfo.buildInfo();
+                     final int num = buildInfo.buildNumber().orElse(-1);
+-                    paperVersion = "Canvas-V3-" +
++                    paperVersion = "SourbyCraft-" + // SourbyCraft - was Canvas-V3-
+                         buildInfo.minecraftVersionName() + "-" +
+                         (num != -1 ? num : "DEV");
+                     // Canvas end - Rebrand - new versioning schem for bstats
+@@ -628,7 +628,7 @@ public class Metrics {
+                     paperVersion = "unknown";
+                 }
+                 // Canvas start - Rebrand
+-                metrics.addCustomChart(new Metrics.SimplePie("canvas_version", () -> paperVersion));
++                metrics.addCustomChart(new Metrics.SimplePie("sourbycraft_version", () -> paperVersion)); // SourbyCraft - was canvas_version
+                 final io.papermc.paper.configuration.GlobalConfiguration paperGlobal = io.papermc.paper.configuration.GlobalConfiguration.get();
+                 if (paperGlobal != null) {
+                     metrics.addCustomChart(new Metrics.SimplePie("scheduler_type", () -> paperGlobal.threadedRegions.scheduler.name()));
+diff --git a/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java b/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java
+index 2f93496e2214631cb4ef9aeffbea907c327476be..59988b8791e2a72ebd1060e37c3c1b8f5585ea4c 100644
+--- a/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java
++++ b/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java
+@@ -40,7 +40,7 @@ public record ServerBuildInfoImpl(
+ 
+     private static final String BRAND_PAPER_NAME = "Paper";
+     // Canvas start - Rebrand
+-    private static final String BRAND_CANVAS_NAME = "Canvas";
++    private static final String BRAND_SOURBYCRAFT_NAME = "SourbyCraft"; // SourbyCraft - the fallback brand is SourbyCraft, not Canvas
+ 
+     // private static final Key BRAND_FOLIA_ID = Key.key("papermc", "folia");
+     // Canvas end - Rebrand
+@@ -55,9 +55,9 @@ public record ServerBuildInfoImpl(
+         this(
+             getManifestAttribute(manifest, ATTRIBUTE_BRAND_ID)
+                 .map(Key::key)
+-                .orElse(BRAND_CANVAS_ID), // Canvas - Rebrand
++                .orElse(BRAND_SOURBYCRAFT_ID), // Canvas - Rebrand // SourbyCraft - BRAND_CANVAS_ID removed from the API
+             getManifestAttribute(manifest, ATTRIBUTE_BRAND_NAME)
+-                .orElse(BRAND_CANVAS_NAME), // Canvas - Rebrand
++                .orElse(BRAND_SOURBYCRAFT_NAME), // Canvas - Rebrand // SourbyCraft
+             SharedConstants.getCurrentVersion().id(),
+             SharedConstants.getCurrentVersion().name(),
+             getManifestAttribute(manifest, ATTRIBUTE_BUILD_NUMBER)

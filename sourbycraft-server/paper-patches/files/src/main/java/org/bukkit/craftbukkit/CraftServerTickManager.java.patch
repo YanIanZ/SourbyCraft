@@ -1,0 +1,94 @@
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServerTickManager.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServerTickManager.java
+@@ -16,78 +_,66 @@
+ 
+     @Override
+     public boolean isRunningNormally() {
+-        return this.manager.runsNormally();
++        throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
+     }
+ 
+     @Override
+     public boolean isStepping() {
+-        return this.manager.isSteppingForward();
++        throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
+     }
+ 
+     @Override
+     public boolean isSprinting() {
+-        return this.manager.isSprinting();
++        throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
+     }
+ 
+     @Override
+     public boolean isFrozen() {
+-        return this.manager.isFrozen();
++        throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
+     }
+ 
+     @Override
+     public float getTickRate() {
+-        return this.manager.tickrate();
++        throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
+     }
+ 
+     @Override
+     public void setTickRate(final float tickRate) {
+-        Preconditions.checkArgument(tickRate >= 1.0F && tickRate <= 10_000.0F, "The given tick rate must not be less than 1.0 or greater than 10,000.0");
+-        this.manager.setTickRate(tickRate);
++        throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
+     }
+ 
+     @Override
+     public void setFrozen(final boolean frozen) {
+-        if (frozen) {
+-            if (this.manager.isSprinting()) {
+-                this.manager.stopSprinting();
+-            }
+-
+-            if (this.manager.isSteppingForward()) {
+-                this.manager.stopStepping();
+-            }
+-        }
+-
+-        this.manager.setFrozen(frozen);
++        throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
+     }
+ 
+     @Override
+     public boolean stepGameIfFrozen(final int ticks) {
+-        return this.manager.stepGameIfPaused(ticks);
++        throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
+     }
+ 
+     @Override
+     public boolean stopStepping() {
+-        return this.manager.stopStepping();
++        throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
+     }
+ 
+     @Override
+     public boolean requestGameToSprint(final int ticks) {
+-        return this.manager.requestGameToSprint(ticks, true);
++        throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
+     }
+ 
+     @Override
+     public boolean stopSprinting() {
+-        return this.manager.stopSprinting();
++        throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
+     }
+ 
+     @Override
+     public boolean isFrozen(final Entity entity) {
+-        Preconditions.checkArgument(entity != null, "The given entity must not be null");
+-        return this.manager.isEntityFrozen(((CraftEntity) entity).getHandle());
++        throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
+     }
+ 
+     @Override
+     public int getFrozenTicksToRun() {
+-        return this.manager.frozenTicksToRun();
++        throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
+     }
+ }

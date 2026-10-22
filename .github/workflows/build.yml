@@ -1,36 +1,125 @@
-name: Build & Boot Test
+name: Official Build, Boot & Release
 
 on:
   push:
-    branches: [ release/26.2, main ]
+    branches: [ '26.2', main ]
   pull_request:
-    branches: [ release/26.2, main ]
+    branches: [ '26.2', main ]
   workflow_dispatch:
+
+# The default token can read the repository and nothing else. Only the release job, which
+# creates the tag and the GitHub release, asks for contents: write (SEC-8).
+permissions:
+  contents: read
 
 concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: Build 26.2 jar
+  # Pull requests get no secrets (owner decision 2026-10-20): no deploy keys, so no private
+  # SourbyPatcher/SourbyClip, so no Gradle (settings.gradle.kts refuses without the pinned
+  # SourbyPatcher jar), no Java build, no Java tests, no boot. This job runs what needs none of that.
+  pr-checks:
+    name: PR checks (no secrets; Java build and tests NOT run)
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
-    if: "!contains(github.event.head_commit.message, 'skip ci') && !contains(github.event.head_commit.message, 'ci skip')"
+    permissions:
+      contents: read
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7 (v7.0.1)
         with:
-          fetch-depth: 0        # paperweight needs git history for patch application
+          persist-credentials: false
 
       - name: Validate gradle wrapper
-        uses: gradle/actions/wrapper-validation@v4
+        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6 (v6.4.0)
 
+      - name: Set git identity (the Python tests create fixture repositories)
+        run: |
+          git config --global user.email "no-reply@github.com"
+          git config --global user.name "Github Actions"
+
+      # The provisioning probe test compiles bootstrap sources with javac --release 25; the
+      # runner's default JDK is 17.
       - name: Setup Java 25
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6 (v6.1.0)
         with:
           java-version: 25
           distribution: temurin
-          cache: gradle
+
+      - name: Python policy and tooling suite (private-toolchain tests reported as skipped)
+        run: python3 scripts/pr_checks.py
+
+      - name: Patch policy
+        run: python3 scripts/patch_policy.py
+
+      - name: Engine baseline guard
+        run: python3 scripts/baseline_policy.py
+
+      - name: Check patch surface
+        run: python3 scripts/patch_surface.py --check
+
+      - name: State what this pull request was not checked for
+        if: always()
+        run: |
+          {
+            echo "## Java build and tests did NOT run for this pull request"
+            echo
+            echo "They need the private-toolchain deploy keys (SourbyPatcher, SourbyClip), which pull requests do not get."
+            echo "Not run here: applyAllPatches, every Gradle task (compile, :sourbyapi/:sourbycraft-server/:test-plugin tests),"
+            echo "the four Python tests that read private-toolchain outputs (listed in scripts/pr_checks.py), slimServerJar,"
+            echo "verify_build_identity, the SBOM, the boot tests and the Docker image. They run on push and workflow_dispatch."
+            echo
+            echo "Run here: gradle wrapper validation, scripts/test_*.py (rest), patch_policy, baseline_policy, patch_surface --check."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=Java build and tests not run::This pull request ran no Gradle build, no Java tests and no boot test (they need private-toolchain secrets). They run after merge on push."
+
+  build:
+    name: Build 26.2 jar
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    # The secret-bearing build: pushes and manual dispatch only, never pull_request (the PR job
+    # above). The skip-ci check applies to a push's head commit. Publication is the release job (OBS-9).
+    if: "github.event_name != 'pull_request' && !contains(github.event.head_commit.message, 'skip ci') && !contains(github.event.head_commit.message, 'ci skip')"
+    outputs:
+      channel: ${{ steps.relnum.outputs.channel }}
+      number: ${{ steps.relnum.outputs.number }}
+      tag: ${{ steps.relnum.outputs.tag }}
+      publish: ${{ steps.relnum.outputs.publish }}
+      # What the independent rebuild job must reproduce (Build 49): the slim jar's SHA-256 and the
+      # SOURCE_DATE_EPOCH both builds were stamped with.
+      slim_sha256: ${{ steps.slim.outputs.sha256 }}
+      source_epoch: ${{ steps.epoch.outputs.epoch }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7 (v7.0.1)
+        with:
+          fetch-depth: 0        # paperweight needs git history for patch application
+
+      # Every later step (Gradle, tests, slimServerJar) sees SOURCE_DATE_EPOCH, so the build
+      # timestamps and the slim jar's entry times derive from the commit, not from the clock.
+      - name: Pin SOURCE_DATE_EPOCH to the commit time
+        id: epoch
+        run: |
+          epoch=$(git log -1 --format=%ct)
+          echo "SOURCE_DATE_EPOCH=$epoch" >> "$GITHUB_ENV"
+          echo "epoch=$epoch" >> "$GITHUB_OUTPUT"
+          echo "SOURCE_DATE_EPOCH=$epoch"
+
+      - name: Validate gradle wrapper
+        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6 (v6.4.0)
+
+      # The exact Temurin build, not "25": the major alone floats with the runner image, and the
+      # provenance Jdk string (vendor + runtime version) and the deflate output depend on it. The
+      # rebuild job pins the same value; bump both together (scripts/test_reproducible_build.py
+      # fails when they differ). 25.0.4+1 is what the 2026-10-21 runs resolved.
+      - name: Setup Java 25 (Temurin 25.0.4+1)
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6 (v6.1.0)
+        with:
+          java-version: 25.0.4+1
+          distribution: temurin
 
       - name: Set git identity (paperweight applies patches as commits)
         run: |
@@ -38,166 +127,1107 @@ jobs:
           git config --global user.name "Github Actions"
           git config --global --add safe.directory '*'
 
-      - name: Publish SourbyPatcher to mavenLocal (build plugin for the Folia patcher)
-        run: cd sourbypatcher && ./gradlew publishToMavenLocal --no-daemon --stacktrace -x test
+      - name: Read approved private revisions
+        id: toolchain
+        run: |
+          python3 - <<'PYTHON' >> "$GITHUB_OUTPUT"
+          import json
+          lock = json.load(open('build-data/private-toolchain.lock.json'))
+          print('clip=' + lock['SourbyClip']['revision'])
+          print('patcher=' + lock['SourbyPatcher']['revision'])
+          PYTHON
+
+      - name: Checkout private SourbyPatcher
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7 (v7.0.1)
+        with:
+          repository: YanIanZ/SourbyPatcher
+          ref: ${{ steps.toolchain.outputs.patcher }}
+          path: .private-toolchain/SourbyPatcher
+          ssh-key: ${{ secrets.SOURBYPATCHER_DEPLOY_KEY }}
+          persist-credentials: false
+
+      - name: Checkout private SourbyClip
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7 (v7.0.1)
+        with:
+          repository: YanIanZ/SourbyClip
+          ref: ${{ steps.toolchain.outputs.clip }}
+          path: .private-toolchain/SourbyClip
+          ssh-key: ${{ secrets.SOURBYCLIP_DEPLOY_KEY }}
+          persist-credentials: false
+
+      - name: Test and publish private tools to Maven Local
+        run: python3 scripts/private_toolchain.py --publish .private-toolchain
 
       - name: Setup Metal (vendored — gen sources)
         run: bash scripts/setup_metal.sh
 
-      - name: Apply all patches (Luminol 26.2 -> Folia)
+      - name: Apply all patches (Paper -> SourbyCraft)
         run: ./gradlew applyAllPatches --no-daemon --stacktrace
 
-      - name: Compile server
-        run: ./gradlew :sourbycraft-server:compileJava --no-daemon --stacktrace
+      - name: Install redis-server for the AWF Redis backend tests
+        run: sudo apt-get update -q && sudo apt-get install -y -q redis-server && redis-server --version
 
-      - name: Compute next release number (rN — also stamped as build Nf)
+      - name: Test API and server; build metrics fixture
+        env:
+          # The Redis backend tests start their own redis-server; here they must run, not skip.
+          SOURBY_REQUIRE_REDIS: "1"
+          # zstd-dependent AWF/Slime tests must fail instead of silently skipping (OBS-9).
+          SOURBY_REQUIRE_ZSTD: "1"
+        run: ./gradlew -PincludeTestPlugin=true :sourbyapi:test :sourbycraft-server:test :test-plugin:test :test-plugin:jar :legacy-test-plugin:jar --no-daemon --stacktrace
+
+      - name: Validate release identity and profiling scripts
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+
+      - name: Engine baseline guard
+        run: python3 scripts/baseline_policy.py
+
+      - name: Check patch surface
+        run: python3 scripts/patch_surface.py --check
+
+      - name: Verify packaged bootstrap download and cache behavior
+        run: |
+          clip=$(sed -n 's/^clipVersion=//p' gradle.properties)
+          clip_jar="$HOME/.m2/repository/dev/iyanz/sourbyclip/$clip/sourbyclip-$clip.jar"
+          java --class-path "$clip_jar" scripts/fixtures/ClipDownloadProbe.java "$RUNNER_TEMP/clip-download-probe"
+          java --class-path "$clip_jar" scripts/fixtures/ClipLaunchProbe.java success
+          status=0
+          java --class-path "$clip_jar" scripts/fixtures/ClipLaunchProbe.java failure > "$RUNNER_TEMP/clip-failure.log" 2>&1 || status=$?
+          test "$status" -eq 1
+          grep -F 'fixture ServerMain failure' "$RUNNER_TEMP/clip-failure.log"
+
+      - name: Resolve release identity once
         id: relnum
         run: |
-          # Highest existing v26.2-rN tag + 1. ls-remote needs no tag fetch and no auth (public).
-          last=$(git ls-remote --tags origin 'v26.2-r*' | sed -n 's#.*refs/tags/v26\.2-r\([0-9]*\)$#\1#p' | sort -n | tail -1)
-          next=$(( ${last:-0} + 1 ))
-          echo "next=$next" >> "$GITHUB_OUTPUT"
-          echo "Next release: v26.2-r$next (build ${next}f)"
+          channel=DEV
+          case "$GITHUB_REF" in
+            refs/heads/release/*) channel=REL ;;
+            refs/heads/feat/*|refs/heads/experimental/*) channel=EXP ;;
+          esac
+          # Releases are published from 26.2 (owner decision 2026-10-21; release/26.2-canvas retired).
+          # A push to 26.2 publishes only while gradle.properties has release=true|pre and the
+          # configured sourbyBuild has no v26.2-rN tag yet; every other push is a development build
+          # of the same branch, so 26.2 keeps building after a release without a bump.
+          mode=$(sed -n 's/^release=//p' gradle.properties | tr -d '[:space:]')
+          publish=false
+          if [ "$GITHUB_REF" = 'refs/heads/26.2' ] && [ "$GITHUB_EVENT_NAME" != 'pull_request' ] \
+              && [ "$mode" != false ] && python3 scripts/release_version.py > "$RUNNER_TEMP/relnum.out" 2> "$RUNNER_TEMP/relnum.err"; then
+            publish=true
+            channel=REL
+            cat "$RUNNER_TEMP/relnum.out" >> "$GITHUB_OUTPUT"
+          else
+            [ -s "$RUNNER_TEMP/relnum.err" ] && echo "not publishing: $(cat "$RUNNER_TEMP/relnum.err")"
+            python3 scripts/release_version.py --development >> "$GITHUB_OUTPUT"
+          fi
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish channel=$channel release=$mode"
 
-      - name: Build slim release jar (SourbyLoader)
+      # treeHash in the jar covers untracked, non-ignored files of the checkout; the rebuild job starts
+      # without them. Listing them here makes a rebuild mismatch caused by a stray file obvious.
+      - name: Show untracked files that enter the build identity
+        run: git status --porcelain --untracked-files=all | grep '^??' || echo "none"
+
+      - name: Build slim server jar (SourbyLoader)
         run: |
           # Release number == build number from r6 onward: the auto-updater compares the tag's rN
           # against the running jar's own build Nf, so the two MUST be stamped from the same counter.
           #
-          # NOTE: the task is `slimServerJar` (registered in root build.gradle.kts:112) — not the
-          # `slimPaperclipJar` name this workflow used pre-Canvas rebase. The Folia line at
-          # release/26.2 had its own paperweight fork (`sourbypatcher/`) register a task under the
-          # old name; this Canvas line uses the stock weaver toolchain, and the slim-jar task
-          # was renamed to drop the paperclip assumption.
-          ./gradlew slimServerJar --no-daemon --stacktrace -PsourbyBuild=${{ steps.relnum.outputs.next }}
+          # The private SourbyPatcher paper-toolchain adapter applies paperweight with Paper as the
+          # only upstream; slimServerJar (root build.gradle.kts) strips libraries from its paperclip jar.
+          ./gradlew slimServerJar --no-daemon --stacktrace -PsourbyBuild=${{ steps.relnum.outputs.number }} ${{ steps.relnum.outputs.publish == 'true' && '-PsourbyChannel=REL' || '' }}
           mkdir -p release
-          cp build/libs/SourbyCraft-slim.jar release/SourbyCraft-26.2-REL.jar
+          # --source-root: the provenance hashes in the jar (patch directories, engine baseline,
+          # toolchain lock and pins) must equal this checkout's.
+          python3 scripts/verify_build_identity.py sourbycraft-server/build/libs/sourbycraft-server-26.2-${{ steps.relnum.outputs.channel }}.jar "${{ steps.relnum.outputs.number }}" --channel "${{ steps.relnum.outputs.channel }}" --commit "$GITHUB_SHA" --source-root .
+          cp build/libs/SourbyCraft-slim.jar release/SourbyCraft-26.2-${{ steps.relnum.outputs.channel }}.jar
+          api_version=$(sed -n 's/^apiVersion=//p' gradle.properties)
+          python3 scripts/verify_build_identity.py build/libs/SourbyCraft-slim.jar --api-only --api-version "$api_version"
+
+      - name: Record the slim jar hash for the independent rebuild
+        id: slim
+        run: |
+          sha=$(sha256sum build/libs/SourbyCraft-slim.jar | cut -d' ' -f1)
+          echo "sha256=$sha" >> "$GITHUB_OUTPUT"
+          echo "slim jar sha256 $sha (SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH)"
+
+      # Only the rebuild job reads this (to print an entry diff when the hashes differ).
+      - name: Upload the first-build slim jar for the rebuild comparison
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7 (v7.0.2)
+        with:
+          name: SourbyCraft-26.2-first-build-slim
+          path: build/libs/SourbyCraft-slim.jar
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Generate and verify the SBOM (CycloneDX)
+        run: |
+          set -eu
+          # From what the jar ships (libraries.list, versions.list, download-context, launcher), see
+          # scripts/sbom.py for why this is not the CycloneDX Gradle plugin. verify fails the build
+          # unless every libraries.list line is exactly one component with the same SHA-256.
+          channel=${{ steps.relnum.outputs.channel }}
+          python3 scripts/sbom.py generate "release/SourbyCraft-26.2-$channel.jar" \
+            --server-jar "sourbycraft-server/build/libs/sourbycraft-server-26.2-$channel.jar" \
+            -o "release/SourbyCraft-26.2-$channel.cdx.json"
+          python3 scripts/sbom.py verify "release/SourbyCraft-26.2-$channel.jar" "release/SourbyCraft-26.2-$channel.cdx.json"
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7 (v7.0.2)
+        with:
+          name: SourbyCraft-26.2-sbom
+          path: release/SourbyCraft-26.2-${{ steps.relnum.outputs.channel }}.cdx.json
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Show build info
         run: |
-          jar=$(ls release/SourbyCraft-*-REL.jar 2>/dev/null | head -1)
+          jar=release/SourbyCraft-26.2-${{ steps.relnum.outputs.channel }}.jar
           echo "Built: $jar ($(du -h "$jar" | cut -f1))"
 
-      - name: Upload jar
-        uses: actions/upload-artifact@v4
-        with:
-          name: SourbyCraft-26.2
-          path: release/SourbyCraft-*-REL.jar
-          if-no-files-found: error
-          retention-days: 7
+      # Keep intermediate JARs on this runner; only a qualified release uploads a server binary.
+      - name: Prepare boot-test files
+        run: |
+          mkdir -p run fixture
+          cp release/SourbyCraft-26.2-*.jar run/
+          cp test-plugin/build/libs/test-plugin-1.0.0.jar fixture/
+          cp legacy-test-plugin/build/libs/legacy-test-plugin-1.0.0.jar fixture/
 
-  boot-test:
-    name: Boot test (server reaches Done)
-    runs-on: ubuntu-24.04
-    needs: build
-    steps:
-      - name: Setup Java 25
-        uses: actions/setup-java@v4
-        with:
-          java-version: 25
-          distribution: temurin
-
-      - name: Download jar
-        uses: actions/download-artifact@v4
-        with:
-          name: SourbyCraft-26.2
-          path: run
-
-      - name: Boot server, wait for Done, stop cleanly
+      - name: Boot server, verify metrics API, and stop cleanly
         working-directory: run
         run: |
-          set -u
-          jar=$(ls SourbyCraft-*-REL.jar | head -1)
+          set -euo pipefail
+          jar=$(find . -maxdepth 1 -type f -name 'SourbyCraft-26.2-*.jar' -print -quit)
+          test -n "$jar"
+          fixture=../fixture/test-plugin-1.0.0.jar
+          test -f "$fixture"
+          mkdir -p plugins
+          cp "$fixture" plugins/test-plugin-1.0.0.jar
           echo "eula=true" > eula.txt
           # keep the console-log short and offline so CI runs deterministically
-          printf 'online-mode=false\nmax-players=1\nlevel-type=minecraft\\:flat\nspawn-protection=0\n' > server.properties
+          printf 'online-mode=false\nmax-players=1\nlevel-type=minecraft\\:normal\nspawn-protection=0\n' > server.properties
+          # no plugin provisioning or auto-update during CI boots (provisioning has its own probe test)
+          mkdir -p sourbycraft_config
+          printf '[viaversion]\nauto-provision = false\n[protocollib]\nauto-provision = false\n[misc.auto_update]\nenabled = false\n' > sourbycraft_config/sourbycraft_global_config.toml
           echo "Booting $jar ..."
           mkfifo stdin.pipe
-          java -Xmx2G -XX:+UseG1GC -jar "$jar" --nogui < stdin.pipe > server.log 2>&1 &
+          # sourby.testplugin.probes enables the test plugin's unload fixture (UnloadFixtureProbe): it
+          # creates a temporary world, queues region/entity tasks, unloads the world and logs
+          # SOURBY_UNLOAD_FIXTURE_* markers. The other probes it enables need players or commands.
+          java -Xmx2G -XX:+UseG1GC -Dsourby.testplugin.probes=true -XX:StartFlightRecording=settings=profile,filename=boot.jfr,dumponexit=true -jar "$jar" --nogui < stdin.pipe > server.log 2>&1 &
           PID=$!
-          exec 3> stdin.pipe   # hold the write end open so the server keeps reading stdin
-          booted=0
-          for i in $(seq 1 240); do
-            if grep -q 'Done (' server.log; then booted=1; break; fi
+          stdin_open=0
+          java_status=
+          cleanup_required=1
+
+          close_stdin() {
+            if [ "$stdin_open" -eq 1 ]; then
+              exec 3>&- 2>/dev/null || true
+              stdin_open=0
+            fi
+          }
+
+          wait_for_exit() {
+            local attempts=$1
+            for _ in $(seq 1 "$attempts"); do
+              if ! kill -0 "$PID" 2>/dev/null; then
+                return 0
+              fi
+              sleep 1
+            done
+            # The process may exit during the final sleep.
+            ! kill -0 "$PID" 2>/dev/null
+          }
+
+          reap_if_exited() {
+            if kill -0 "$PID" 2>/dev/null; then
+              return 1
+            fi
+            if wait "$PID"; then
+              java_status=0
+            else
+              java_status=$?
+            fi
+            return 0
+          }
+
+          bounded_cleanup() {
+            close_stdin
+            if reap_if_exited; then
+              return
+            fi
+
+            kill -TERM "$PID" 2>/dev/null || true
+            if wait_for_exit 10; then
+              reap_if_exited || true
+              return
+            fi
+
+            kill -KILL "$PID" 2>/dev/null || true
+            if wait_for_exit 10; then
+              reap_if_exited || true
+            else
+              echo "Unable to confirm process $PID exited after SIGKILL."
+            fi
+          }
+
+          show_log() {
+            echo "----- last 40 log lines -----"
+            tail -40 server.log || true
+          }
+
+          fail_after_launch() {
+            local message=$1
+            bounded_cleanup
+            cleanup_required=0
+            show_log
+            if [ -n "$java_status" ]; then
+              echo "Java exit status: $java_status"
+            fi
+            echo "$message"
+            exit 1
+          }
+
+          cleanup_on_exit() {
+            local shell_status=$?
+            trap - EXIT
+            if [ "$cleanup_required" -eq 1 ]; then
+              bounded_cleanup
+            fi
+            exit "$shell_status"
+          }
+
+          trap cleanup_on_exit EXIT
+          if exec 3> stdin.pipe; then
+            stdin_open=1   # hold the write end open so the server keeps reading stdin
+          else
+            fail_after_launch "Could not open the server console FIFO."
+          fi
+          # Read by the console thread before the overworld exists; it must still run after Done (SPEC B88).
+          if ! printf 'say SOURBY_EARLY_CONSOLE_PROBE\n' >&3; then
+            fail_after_launch "Server console closed before accepting the early console probe."
+          fi
+
+          # The test plugin logs ONLOAD/ONENABLE when the metrics service answers, and SAMPLED_OK
+          # once a snapshot carries real values (finite target TPS, heap, processors) -- or
+          # SAMPLED_FAILED with what was wrong. Non-null alone proved nothing (OBS-9).
+          ready=0
+          for _ in $(seq 1 240); do
+            if grep -q 'Done (' server.log \
+              && grep -q 'SOURBY_METRICS_ONLOAD_OK' server.log \
+              && grep -q 'SOURBY_METRICS_ONENABLE_OK' server.log \
+              && grep -q 'SOURBY_METRICS_SAMPLED_OK' server.log; then
+              ready=1
+              break
+            fi
+            if grep -q 'SOURBY_METRICS_SAMPLED_FAILED' server.log; then
+              grep 'SOURBY_METRICS_SAMPLED_FAILED' server.log
+              fail_after_launch "The metrics snapshot never carried real values."
+            fi
             if ! kill -0 "$PID" 2>/dev/null; then echo "server process exited early"; break; fi
             sleep 1
           done
-          echo "stop" >&3 || true   # request a clean shutdown
-          exec 3>&-
-          # give it up to 60s to shut down, then force
-          for i in $(seq 1 60); do kill -0 "$PID" 2>/dev/null || break; sleep 1; done
-          kill "$PID" 2>/dev/null || true
-          echo "----- last 40 log lines -----"
-          tail -40 server.log
-          if [ "$booted" -eq 1 ]; then
-            echo "✅ Server reached Done and was asked to stop."
-          else
-            echo "❌ Server did not reach Done within 240s."
-            exit 1
+
+          if [ "$ready" -ne 1 ]; then
+            fail_after_launch "Server did not reach Done with the metrics markers (load, enable, sampled) within 240s."
           fi
 
-  docker-build:
-    name: Docker image builds
-    runs-on: ubuntu-24.04
-    needs: build
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+          # Region ownership gate: the unload fixture queues region and entity tasks in a temporary
+          # world, unloads it while they are pending and judges what happened to each. A marker ending
+          # in _WRONG or _FAILED names the broken rule; SOURBY_UNLOAD_FIXTURE_OK is the last marker.
+          fixture_done=0
+          for _ in $(seq 1 120); do
+            if grep -Eq 'SOURBY_UNLOAD_FIXTURE_[A-Z_]*(_WRONG|_FAILED)|SOURBY_UNLOAD_FIXTURE_FAILED' server.log; then
+              grep 'SOURBY_UNLOAD_FIXTURE_' server.log
+              fail_after_launch "The unload fixture reported a wrong or failed step (see markers above)."
+            fi
+            if grep -q 'SOURBY_UNLOAD_FIXTURE_START' server.log \
+              && grep -q 'SOURBY_UNLOAD_FIXTURE_WORLD_OK' server.log \
+              && grep -q 'SOURBY_UNLOAD_FIXTURE_QUEUED_OK' server.log \
+              && grep -q 'SOURBY_UNLOAD_FIXTURE_UNLOAD_OK' server.log \
+              && grep -q 'SOURBY_UNLOAD_FIXTURE_ACCOUNTED_OK' server.log \
+              && grep -q 'SOURBY_UNLOAD_FIXTURE_QUIET_OK' server.log \
+              && grep -q 'SOURBY_UNLOAD_FIXTURE_RELEASED_OK' server.log \
+              && grep -q 'SOURBY_UNLOAD_FIXTURE_OK' server.log; then
+              fixture_done=1
+              break
+            fi
+            if ! kill -0 "$PID" 2>/dev/null; then echo "server process exited early"; break; fi
+            sleep 1
+          done
+          grep 'SOURBY_UNLOAD_FIXTURE_' server.log || true
+          if [ "$fixture_done" -ne 1 ]; then
+            fail_after_launch "The unload fixture did not log every marker (start, world, queued, unload, accounted, quiet, released, ok) within 120s."
+          fi
+          # The engine's own drain/ownership errors are not fixture markers; any of them fails the step.
+          if grep -Eq 'Failed to (drain|retire an entity scheduler|cancel region scheduler tasks|cancel queued region tasks)|Failed to save chunks in unloadfixture' server.log; then
+            grep -E 'Failed to (drain|retire an entity scheduler|cancel region scheduler tasks|cancel queued region tasks)|Failed to save chunks in unloadfixture' server.log
+            fail_after_launch "The engine reported an error while draining the unloaded fixture world."
+          fi
+          # Region execute() tasks have no handle: the fixture counts the ones that never ran, and the
+          # engine's drain line must account for at least that many cancelled queued tasks (else leaked).
+          not_run=$(grep 'SOURBY_UNLOAD_FIXTURE_QUIET_OK' server.log | grep -o 'executeNotRun=[0-9]*' | head -1 | cut -d= -f2)
+          cancelled_queued=$(grep 'Drained unloadfixture for unload' server.log | grep -o 'and [0-9]* queued region task' | head -1 | grep -o '[0-9]*' || true)
+          if [ "${not_run:-0}" -gt "${cancelled_queued:-0}" ]; then
+            fail_after_launch "The fixture's queued region tasks that never ran (${not_run}) exceed those the engine cancelled (${cancelled_queued:-0}): leaked."
+          fi
 
-      - name: Download jar
-        uses: actions/download-artifact@v4
-        with:
-          name: SourbyCraft-26.2
-          path: release
+          if ! printf 'tps\nmspt\nram\nperf\nperf cpu\nperf gc\nspark profiler info\nstop\n' >&3; then
+            fail_after_launch "Server console closed before accepting smoke-test commands."
+          fi
+          close_stdin
 
-      - name: Build image (Dockerfile + entrypoint COPY paths)
+          if ! wait_for_exit 60; then
+            fail_after_launch "Server required forced cleanup after the 60s shutdown timeout."
+          fi
+          if ! reap_if_exited; then
+            fail_after_launch "Server was still running after shutdown polling completed."
+          fi
+          cleanup_required=0
+          show_log
+          if [ "$java_status" -ne 0 ]; then
+            echo "Server exited with status $java_status."
+            exit 1
+          fi
+          # Each command is proven by a line only its own view prints. A panel header
+          # ("SourbyCraft / ...") is printed by every command and proved nothing (OBS-9).
+          sed 's/\x1b\[[0-9;]*m//g' server.log > smoke.log
+          grep -Eq 'Target [0-9.]+ TPS' smoke.log \
+            || { echo "/tps did not print its target line."; exit 1; }
+          grep -q 'Active regions: ' smoke.log \
+            || { echo "/tps did not print its region count."; exit 1; }
+          grep -Eq 'Worst average (unavailable|[0-9.]+ms .*budget\))' smoke.log \
+            || { echo "/mspt did not print its worst-average line."; exit 1; }
+          grep -q 'Exact recent max ' smoke.log \
+            || { echo "/mspt did not print its recent maximum."; exit 1; }
+          grep -q 'Profiler is already running' smoke.log \
+            || { echo "spark command output marker missing."; exit 1; }
+          grep -q 'Heap used / committed / maximum: ' smoke.log \
+            || { echo "/ram did not print its heap line."; exit 1; }
+          grep -q 'Worst region TPS: ' smoke.log \
+            || { echo "/perf did not print its tick section."; exit 1; }
+          grep -q 'Process CPU / system CPU: ' smoke.log \
+            || { echo "/perf cpu did not print its CPU line."; exit 1; }
+          grep -q 'GC collections / cumulative collection time: ' smoke.log \
+            || { echo "/perf gc did not print its GC line."; exit 1; }
+          grep -q '\[Server\] SOURBY_EARLY_CONSOLE_PROBE' server.log \
+            || { echo "A console command read before the worlds loaded did not run (SPEC B88)."; exit 1; }
+          if grep -q 'Command exception: /say SOURBY_EARLY_CONSOLE_PROBE' server.log; then
+            echo "A console command read before the worlds loaded threw (SPEC B88)."; exit 1
+          fi
+          echo "----- Aurora boot summary -----"
+          grep -E 'stages completed without error|Aurora startup|Aurora startup index|failed during Aurora boot' server.log || echo "(no Aurora boot summary line found)"
+          jfr summary boot.jfr
+          echo "Server reached Done, exposed metrics during load and enable, ran the unload fixture, and exited cleanly."
+
+      - name: Bootstrap failure recovery and offline boot
         run: |
-          jar=$(ls release/SourbyCraft-*-REL.jar | head -1)
+          set -euo pipefail
+          # A fresh server directory with no library cache. First with no network at all: the
+          # bootstrap must fail fast and cleanly (no hang, no partial files). Then online: it
+          # must reach Done. Then offline again: it must reach Done from the cache alone.
+          mkdir -p run-offline
+          cd run-offline
+          jar=$(find ../run -maxdepth 1 -type f -name 'SourbyCraft-26.2-*.jar' -print -quit)
+          test -n "$jar"
+          jar=$(readlink -f "$jar")
+          java_bin="$JAVA_HOME/bin/java"
+          me=$(id -un)
+          echo "eula=true" > eula.txt
+          printf 'online-mode=false\nmax-players=1\nlevel-type=minecraft\\:flat\n' > server.properties
+          # no plugin provisioning or auto-update during CI boots (provisioning has its own probe test)
+          mkdir -p sourbycraft_config
+          printf '[viaversion]\nauto-provision = false\n[protocollib]\nauto-provision = false\n[misc.auto_update]\nenabled = false\n' > sourbycraft_config/sourbycraft_global_config.toml
+
+          offline() {
+            # A private network namespace with only loopback: every outbound connection fails.
+            sudo unshare --net -- sh -c "ip link set lo up && exec sudo -u $me -E env HOME=$HOME PATH=$PATH \"\$@\"" sh "$@"
+          }
+
+          boot() {
+            local log=$1 mode=$2 pid status=0
+            rm -f stdin.pipe && mkfifo stdin.pipe
+            if [ "$mode" = offline ]; then
+              offline "$java_bin" -Xmx2G -jar "$jar" --nogui < stdin.pipe > "$log" 2>&1 &
+            else
+              "$java_bin" -Xmx2G -jar "$jar" --nogui < stdin.pipe > "$log" 2>&1 &
+            fi
+            pid=$!
+            exec 3> stdin.pipe
+            for _ in $(seq 1 240); do
+              grep -q 'Done (' "$log" && break
+              [ -d "/proc/$pid" ] || break
+              sleep 1
+            done
+            if grep -q 'Done (' "$log"; then printf 'stop\n' >&3 || true; fi
+            exec 3>&-
+            for _ in $(seq 1 90); do [ -d "/proc/$pid" ] || break; sleep 1; done
+            if [ -d "/proc/$pid" ]; then sudo pkill -KILL -f "$jar" || true; tail -40 "$log"; echo "$log: did not stop"; return 1; fi
+            wait "$pid" || status=$?
+            echo "$log: exit $status"
+            return "$status"
+          }
+
+          start=$(date +%s)
+          status=0
+          boot first-offline.log offline || status=$?
+          elapsed=$(( $(date +%s) - start ))
+          echo "----- first boot without network (${elapsed}s) -----"
+          grep -E '\[Sourbyclip\]|Cannot prepare original JAR' first-offline.log | head -12 || true
+          test "$status" -ne 0 || { echo "a first boot with no network must fail"; exit 1; }
+          test "$elapsed" -lt 120 || { echo "the failing first boot took ${elapsed}s"; exit 1; }
+          # SourbyClip 3.1.2 is the only launcher stage that needs the network on a fresh directory
+          # (it fetches the Mojang server jar before any library). Its strings, as compiled into the
+          # packaged launcher: Sourbyclip.getDownloadContextFromMojang logs
+          # "[Sourbyclip] Failed to download original jar" at ERROR and exits 1, followed by the
+          # stack trace of the IOException built in DownloadContext.download:
+          # "Cannot prepare original JAR <file> at <path>; source: <url>".
+          grep -Eq 'ERROR\]: \[Sourbyclip\] Failed to download original jar' first-offline.log \
+            || { head -40 first-offline.log; echo "the failed first boot does not carry SourbyClip's download error"; exit 1; }
+          grep -Eq 'Cannot prepare original JAR [^ ]+ at .+; source: https://' first-offline.log \
+            || { head -40 first-offline.log; echo "the failure does not name the file and URL it could not fetch"; exit 1; }
+          # Canary for the no-download assertions after the online boot: the same fresh-directory
+          # boot printed SourbyClip's INFO line announcing the attempt
+          # ("[HH:mm:ss INFO]: [Sourbyclip] Downloading <file>", DownloadContext.download). The
+          # pattern used below to prove "no download" must match this real line, else it is vacuous.
+          grep -Eq 'INFO\]: \[Sourbyclip\] Downloading [^ ]+\.jar' first-offline.log \
+            || { head -40 first-offline.log; echo "the failed first boot shows no SourbyClip download line; the offline no-download check would be vacuous"; exit 1; }
+          test -z "$(find . -name '*.tmp' 2>/dev/null)" || { find . -name '*.tmp'; echo "partial downloads were left behind"; exit 1; }
+
+          boot online.log online
+          grep -q 'Done (' online.log || { echo "the online boot did not reach Done"; exit 1; }
+
+          boot second-offline.log offline
+          echo "----- boot without network after a successful one -----"
+          grep -E '\[Sourbyclip\]|Classpath prepared|auto-provision|Done \(' second-offline.log | head -12 || true
+          grep -Eq 'Classpath prepared: [0-9]+ entries' second-offline.log \
+            || { head -40 second-offline.log; echo "no SourbyClip bootstrap summary (BootstrapConsole.prepared) in the cached offline boot"; exit 1; }
+          grep -q 'Done (' second-offline.log || { tail -40 second-offline.log; echo "the cached offline boot did not reach Done"; exit 1; }
+          # Launcher: any download attempt or failure (the patterns are SourbyClip's own; a bare
+          # "Failed to download" is not used because server code may log that for unrelated reasons). Server side (PluginProvisioner,
+          # ProtocolLibProvisioner): provisioning is disabled in this directory's config, so neither a
+          # successful nor a failed plugin download may appear.
+          if grep -En 'INFO\]: \[Sourbyclip\] Downloading |Failed to download (original jar|jar with the selected|from all repositories)|Cannot prepare original JAR|^Failed from |auto-provision: downloaded|auto-provision: failed to provision|ProtocolLib installation failed' second-offline.log; then
+            echo "the offline boot tried to download"; exit 1
+          fi
+          echo "First boot without network failed cleanly; online boot succeeded; later boot ran offline from the cache."
+
+      - name: Boot with the Aurora Bridge and a legacy plugin
+        run: |
+          set -euo pipefail
+          # A second, separate boot: aurora.bridge.mode = "safe" and a plugin without
+          # folia-supported. Evidence that the bridge admits, routes and cancels legacy scheduler
+          # work on a real server; not a qualification of any real plugin.
+          mkdir -p run-bridge/plugins run-bridge/sourbycraft_config
+          cd run-bridge
+          jar=$(find ../run -maxdepth 1 -type f -name 'SourbyCraft-26.2-*.jar' -print -quit)
+          test -n "$jar"
+          cp ../fixture/legacy-test-plugin-1.0.0.jar plugins/
+          echo "eula=true" > eula.txt
+          printf 'online-mode=false\nmax-players=1\nlevel-type=minecraft\\:flat\nspawn-protection=0\n' > server.properties
+          printf '[aurora.bridge]\nmode = "safe"\n' > sourbycraft_config/aurora.toml
+          printf '[viaversion]\nauto-provision = false\n[protocollib]\nauto-provision = false\n[misc.auto_update]\nenabled = false\n' > sourbycraft_config/sourbycraft_global_config.toml
+          mkfifo stdin.pipe
+          java -Xmx2G -XX:+UseG1GC -jar "$jar" --nogui < stdin.pipe > server.log 2>&1 &
+          PID=$!
+          stdin_open=0
+          java_status=
+          cleanup_required=1
+
+          close_stdin() {
+            if [ "$stdin_open" -eq 1 ]; then
+              exec 3>&- 2>/dev/null || true
+              stdin_open=0
+            fi
+          }
+
+          wait_for_exit() {
+            local attempts=$1
+            for _ in $(seq 1 "$attempts"); do
+              if ! kill -0 "$PID" 2>/dev/null; then
+                return 0
+              fi
+              sleep 1
+            done
+            # The process may exit during the final sleep.
+            ! kill -0 "$PID" 2>/dev/null
+          }
+
+          reap_if_exited() {
+            if kill -0 "$PID" 2>/dev/null; then
+              return 1
+            fi
+            if wait "$PID"; then
+              java_status=0
+            else
+              java_status=$?
+            fi
+            return 0
+          }
+
+          bounded_cleanup() {
+            close_stdin
+            if reap_if_exited; then
+              return
+            fi
+
+            kill -TERM "$PID" 2>/dev/null || true
+            if wait_for_exit 10; then
+              reap_if_exited || true
+              return
+            fi
+
+            kill -KILL "$PID" 2>/dev/null || true
+            if wait_for_exit 10; then
+              reap_if_exited || true
+            else
+              echo "Unable to confirm process $PID exited after SIGKILL."
+            fi
+          }
+
+          show_log() {
+            echo "----- last 40 log lines -----"
+            tail -40 server.log || true
+          }
+
+          fail_after_launch() {
+            local message=$1
+            bounded_cleanup
+            cleanup_required=0
+            show_log
+            if [ -n "$java_status" ]; then
+              echo "Java exit status: $java_status"
+            fi
+            echo "$message"
+            exit 1
+          }
+
+          cleanup_on_exit() {
+            local shell_status=$?
+            trap - EXIT
+            if [ "$cleanup_required" -eq 1 ]; then
+              bounded_cleanup
+            fi
+            exit "$shell_status"
+          }
+
+          trap cleanup_on_exit EXIT
+          if exec 3> stdin.pipe; then
+            stdin_open=1
+          else
+            fail_after_launch "Could not open the server console FIFO."
+          fi
+
+          ready=0
+          for _ in $(seq 1 240); do
+            if grep -q 'Done (' server.log && grep -q 'LEGACY_BRIDGE_ENABLED' server.log; then
+              ready=1
+              break
+            fi
+            if ! kill -0 "$PID" 2>/dev/null; then echo "server process exited early"; break; fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then
+            fail_after_launch "Legacy plugin did not load through the bridge and reach Done within 240s."
+          fi
+
+          settled=0
+          for _ in $(seq 1 30); do
+            if grep -q 'LEGACY_BRIDGE_SYNC_OK' server.log \
+              && grep -q 'LEGACY_BRIDGE_ASYNC_OK' server.log \
+              && grep -q 'LEGACY_BRIDGE_TIMER_OK' server.log \
+              && grep -Eq 'LEGACY_BRIDGE_WORLD_ACCESS_(ALLOWED|REFUSED)' server.log \
+              && grep -Eq 'LEGACY_BRIDGE_REGION_SYNC_(OK|REFUSED)' server.log \
+              && grep -q 'LEGACY_GLOBAL_EXECUTE_OK' server.log \
+              && grep -q 'LEGACY_GLOBAL_RUN_OK' server.log \
+              && grep -q 'LEGACY_GLOBAL_DELAYED_OK' server.log \
+              && grep -q 'LEGACY_GLOBAL_FROM_REGION_OK' server.log \
+              && grep -q 'LEGACY_GLOBAL_REPEATER_SELF_CANCEL_OK' server.log \
+              && grep -q 'LEGACY_GLOBAL_REPEATER_STOPPED_OK' server.log \
+              && grep -q 'LEGACY_GLOBAL_ONESHOT_STATES_OK' server.log \
+              && grep -q 'LEGACY_GLOBAL_IDLE_CANCEL_OK' server.log \
+              && grep -q 'LEGACY_GLOBAL_CANCEL_TASKS_OK' server.log \
+              && grep -q 'LEGACY_GLOBAL_EXCEPTION_OK' server.log \
+              && grep -q 'LEGACY_REGION_TASK_OK' server.log \
+              && grep -q 'LEGACY_ENTITY_TASK_OK' server.log \
+              && grep -q 'LEGACY_ENTITY_RETIRED_OK' server.log; then
+              settled=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$settled" -ne 1 ]; then
+            fail_after_launch "Bridged scheduler markers did not all appear within 30s."
+          fi
+          # The fixture logs <MARKER>_WRONG when a scheduler call ends in the wrong state.
+          if grep -q '_WRONG' server.log; then
+            grep '_WRONG' server.log
+            fail_after_launch "A bridged scheduler call ended in the wrong state (see _WRONG above)."
+          fi
+
+          if ! printf 'plugins LegacyBridgeTest\nperf governor\nperf plugins\nperf history\nstop\n' >&3; then
+            fail_after_launch "Server console closed before accepting commands."
+          fi
+          close_stdin
+          if ! wait_for_exit 60; then
+            fail_after_launch "Server required forced cleanup after the 60s shutdown timeout."
+          fi
+          if ! reap_if_exited; then
+            fail_after_launch "Server was still running after shutdown polling completed."
+          fi
+          cleanup_required=0
+          echo "----- bridge evidence -----"
+          grep -E 'Aurora Bridge|LEGACY_BRIDGE|stages completed without error|Bridge I/O|Scheduler redirects|Owner handoffs|Fatal violations|Quarantined|Plugins by state|redirects / handoffs|Minutes kept|History' server.log || true
+          grep -q 'Plugins by state' server.log || { echo "/perf plugins printed nothing"; exit 1; }
+          grep -Eq 'Minutes kept: |History: no minute recorded yet' server.log || { echo "/perf history printed nothing"; exit 1; }
+          if [ "$java_status" -ne 0 ]; then
+            show_log
+            echo "Server exited with status $java_status."
+            exit 1
+          fi
+          grep -q 'Aurora Bridge admitted LegacyBridgeTest' server.log \
+            || { echo "bridge admission line missing"; exit 1; }
+          grep -q 'LEGACY_BRIDGE_QUEUED_OK' server.log || { echo "isQueued did not see a bridged task"; exit 1; }
+          grep -q 'LEGACY_BRIDGE_PENDING_OK' server.log || { echo "getPendingTasks did not list a bridged task"; exit 1; }
+          grep -q 'LEGACY_BRIDGE_REGION_SYNC_OK' server.log \
+            || { echo "a sync task scheduled from a region did not run on that region"; exit 1; }
+          grep -q 'LEGACY_REGION_TASK_OK' server.log \
+            || { echo "a RegionTask scheduled from onEnable did not run on the region owning its chunk"; exit 1; }
+          grep -q 'LEGACY_ENTITY_TASK_OK' server.log \
+            || { echo "an EntityTask did not run on the region owning its entity"; exit 1; }
+          grep -q 'LEGACY_ENTITY_RETIRED_OK' server.log \
+            || { echo "an EntityTask whose entity was removed was not retired without running"; exit 1; }
+          if grep -q 'LEGACY_BRIDGE_TIMER_RAN_AFTER_CANCEL' server.log; then
+            echo "a cancelled bridged timer kept running"; exit 1
+          fi
+          grep -q 'LEGACY_DISABLE_GLOBAL_SUBMIT_OK' server.log \
+            || { echo "a global task submitted from onDisable was not refused"; exit 1; }
+          grep -q 'LEGACY_DISABLE_BUKKIT_SUBMIT_OK' server.log \
+            || { echo "a Bukkit task submitted from onDisable was not refused"; exit 1; }
+          if grep -q '_WRONG' server.log; then
+            grep '_WRONG' server.log; echo "a bridged scheduler call ended in the wrong state"; exit 1
+          fi
+          # Every plugin's Bukkit tasks are cancelled on disable; for a native plugin that must not
+          # reach the region-threading base's refused legacy path (patch 0009).
+          if grep -q 'while cancelling Bukkit scheduler tasks' server.log; then
+            grep -A2 'while cancelling Bukkit scheduler tasks' server.log; exit 1
+          fi
+          echo "Legacy plugin loaded through the Aurora Bridge; sync, async, timer-cancel and world-access paths ran; clean exit."
+
+      - name: Boot twice with Aurora World Fabric storing the world
+        run: |
+          set -euo pipefail
+          # A fresh world with aurora.awf.worlds = ["world"]: every chunk the first boot generates
+          # is written through AWF, and the second boot must load them back from it. Evidence that
+          # the RegionFileStorage hook reads, writes, commits on shutdown and reopens; not a
+          # qualification (no load, no crash test, one small world).
+          mkdir -p run-awf/sourbycraft_config
+          cd run-awf
+          jar=$(find ../run -maxdepth 1 -type f -name 'SourbyCraft-26.2-*.jar' -print -quit)
+          test -n "$jar"
+          echo "eula=true" > eula.txt
+          printf 'online-mode=false\nmax-players=1\nlevel-type=minecraft\\:flat\nspawn-protection=0\n' > server.properties
+          printf '[aurora.awf]\nworlds = ["world"]\ncommit-interval-seconds = 5\n' > sourbycraft_config/aurora.toml
+          printf '[viaversion]\nauto-provision = false\n[protocollib]\nauto-provision = false\n[misc.auto_update]\nenabled = false\n' > sourbycraft_config/sourbycraft_global_config.toml
+
+          boot() {
+            # $2 runs right after Done; $3 runs 10 s later, then stop.
+            local log=$1 commands=$2 later=${3:-} pid status=0
+            rm -f stdin.pipe && mkfifo stdin.pipe
+            java -Xmx2G -XX:+UseG1GC -jar "$jar" --nogui < stdin.pipe > "$log" 2>&1 &
+            pid=$!
+            exec 3> stdin.pipe
+            for _ in $(seq 1 240); do
+              grep -q 'Done (' "$log" && break
+              kill -0 "$pid" 2>/dev/null || break
+              sleep 1
+            done
+            if ! grep -q 'Done (' "$log"; then
+              exec 3>&-; kill -KILL "$pid" 2>/dev/null || true; tail -60 "$log"
+              echo "AWF boot ($log) did not reach Done within 240s"; return 1
+            fi
+            printf '%s\n' "$commands" >&3 || true
+            if [ -n "$later" ]; then sleep 10; printf '%s\n' "$later" >&3 || true; fi
+            printf 'stop\n' >&3 || true
+            exec 3>&-
+            for _ in $(seq 1 90); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+            if kill -0 "$pid" 2>/dev/null; then
+              kill -KILL "$pid" 2>/dev/null || true; tail -60 "$log"
+              echo "AWF boot ($log) did not stop within 90s"; return 1
+            fi
+            wait "$pid" || status=$?
+            if [ "$status" -ne 0 ]; then tail -60 "$log"; echo "AWF boot ($log) exited with $status"; return 1; fi
+          }
+
+          boot first.log $'perf awf\nperf storage'
+          echo "----- AWF first boot -----"
+          grep -E 'Aurora World Fabric|AWF|resident / dirty|commit p50|reads / from region|Chunk-system reads|pending I/O' first.log || true
+          grep -q 'Aurora World Fabric: storing \[world\]' first.log || { echo "AWF did not attach"; exit 1; }
+          if grep -Eq 'Aurora World Fabric could not|AWF commit for .* failed|Failed to (read|write) chunk data' first.log; then
+            echo "AWF reported a storage failure"; exit 1
+          fi
+          stores=$(find world -type d -name '*.awf' | sort)
+          echo "stores:"; echo "$stores"
+          test -n "$stores" || { echo "no AWF store was created under world/"; exit 1; }
+          generations=$(find world -path '*.awf/generations-root/*' -type f | wc -l)
+          echo "generation files: $generations"
+          test "$generations" -gt 0 || { echo "no AWF generation was committed"; exit 1; }
+          mca=$(find world -name '*.mca' | wc -l)
+          echo "region files under world/: $mca"
+          test "$mca" -eq 0 || { echo "region files were written under an AWF world"; exit 1; }
+
+          # Force-load chunks the first boot generated, so the engine has to read them back from AWF.
+          boot second.log 'forceload add -48 -48 48 48' $'perf awf\nperf storage\nperf chunks\nperf entities'
+          echo "----- AWF second boot -----"
+          grep -E 'Aurora World Fabric|AWF|resident / dirty|reads / from region|chunks / regions|Total loaded chunks|entities / players|Total entities' second.log || true
+          grep -q 'Total loaded chunks' second.log || { echo "/perf chunks printed nothing"; exit 1; }
+          if grep -Eq 'Aurora World Fabric could not|AWF commit for .* failed|Failed to (read|write) chunk data' second.log; then
+            echo "AWF reported a storage failure on reopen"; exit 1
+          fi
+          test "$(find world -name '*.mca' | wc -l)" -eq 0 || { echo "region files appeared on the second boot"; exit 1; }
+          reads=$(sed 's/\x1b\[[0-9;]*m//g' second.log | grep -m1 'minecraft/overworld/region reads / from region files' \
+            | sed -E 's/.*: ([0-9]+) \/ ([0-9]+) \/ ([0-9]+)$/\1 \2/' || true)
+          echo "overworld chunk reads / region-file fall-throughs on reopen: $reads"
+          set -- $reads
+          test "${1:-0}" -gt "${2:-0}" || { echo "the second boot read no chunk back from AWF"; exit 1; }
+
+          # Third boot: export the world back to region files.
+          printf '[aurora.awf]\nworlds = []\nexport = ["world"]\n' > sourbycraft_config/aurora.toml
+          boot third.log ''
+          echo "----- AWF export boot -----"
+          grep -E 'Aurora World Fabric' third.log || true
+          grep -q 'Aurora World Fabric exported' third.log || { echo "no export line"; exit 1; }
+          test "$(find world -name '*.mca' | wc -l)" -gt 0 || { echo "export wrote no region files"; exit 1; }
+          test -z "$(find world -type d -name '*.awf')" || { echo "a store is still attached after export"; exit 1; }
+          test -n "$(find world -type d -name '*.awf.exported-*')" || { echo "the store backup is missing"; exit 1; }
+          echo "World stored through AWF: created, committed on shutdown, reopened with no region files written, then exported back to region files."
+
+      - name: Upload boot diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7 (v7.0.2)
+        with:
+          name: SourbyCraft-boot-diagnostics
+          path: |
+            run/server.log
+            run-bridge/server.log
+            run-offline/first-offline.log
+            run-offline/second-offline.log
+            run-awf/first.log
+            run-awf/second.log
+            run-awf/third.log
+            run/boot.jfr
+          retention-days: 7
+
+      - name: Build image (docker/Dockerfile + entrypoint COPY paths)
+        run: |
+          jar=release/SourbyCraft-26.2-${{ steps.relnum.outputs.channel }}.jar
           echo "Building image with $jar"
-          docker build --build-arg JAR="$jar" -t sourbycraft:ci .
+          docker build -f docker/Dockerfile --build-arg JAR="$jar" -t sourbycraft:ci .
 
       - name: Inspect image (non-root user + entrypoint present)
         run: |
           docker run --rm --entrypoint sh sourbycraft:ci -c \
             'id -un; test -x /app/entrypoint.sh && echo entrypoint-ok; test -f /app/server.jar && echo jar-ok'
 
-  release:
-    name: Publish release (auto)
+      - name: Upload verified slim jar for staging
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/26.2'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7 (v7.0.2)
+        with:
+          name: SourbyCraft-26.2-staging
+          path: build/libs/SourbyCraft-slim.jar
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Hand the verified jar to the release job
+        if: steps.relnum.outputs.publish == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7 (v7.0.2)
+        with:
+          name: SourbyCraft-26.2-release
+          path: |
+            release/SourbyCraft-26.2-${{ steps.relnum.outputs.channel }}.jar
+            release/SourbyCraft-26.2-${{ steps.relnum.outputs.channel }}.cdx.json
+          if-no-files-found: error
+          retention-days: 1
+
+  # Independent rebuild (Build 49): a second runner, a fresh checkout of the same commit, the same
+  # pinned toolchain and the same -P flags must produce a byte-identical slim jar. It is not
+  # independent of GitHub, of the two private deploy keys or of the pinned SourbyPatcher/SourbyClip
+  # revisions; it shows the jar is a function of the commit, not that those inputs are trustworthy.
+  # The release job needs it, so a non-reproducible jar is never published. Never on pull_request.
+  rebuild:
+    name: Rebuild slim jar and compare
+    needs: build
+    if: success() && github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
-    needs: [build, boot-test, docker-build]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/release/26.2'
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code (fresh, at the built commit)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7 (v7.0.1)
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0        # paperweight needs git history for patch application
+
+      # A checkout of a SHA is a detached HEAD, and the build properties record the branch name
+      # (gitBranch=, and the channel suffix derives from it), so give it the branch the first build had.
+      - name: Check out the same branch name at that commit
+        run: |
+          if [ "$GITHUB_REF_TYPE" = branch ]; then git checkout -B "$GITHUB_REF_NAME"; fi
+          git rev-parse --abbrev-ref HEAD
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+      - name: Pin SOURCE_DATE_EPOCH to the commit time
+        run: |
+          epoch=$(git log -1 --format=%ct)
+          test "$epoch" = "${{ needs.build.outputs.source_epoch }}" \
+            || { echo "commit time $epoch differs from the first build's ${{ needs.build.outputs.source_epoch }}"; exit 1; }
+          echo "SOURCE_DATE_EPOCH=$epoch" >> "$GITHUB_ENV"
+
+      - name: Validate gradle wrapper
+        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6 (v6.4.0)
+
+      # Must equal the build job's pin (scripts/test_reproducible_build.py).
+      - name: Setup Java 25 (Temurin 25.0.4+1)
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6 (v6.1.0)
+        with:
+          java-version: 25.0.4+1
+          distribution: temurin
+
+      - name: Set git identity (paperweight applies patches as commits)
+        run: |
+          git config --global user.email "no-reply@github.com"
+          git config --global user.name "Github Actions"
+          git config --global --add safe.directory '*'
+
+      - name: Read approved private revisions
+        id: toolchain
+        run: |
+          python3 - <<'PYTHON' >> "$GITHUB_OUTPUT"
+          import json
+          lock = json.load(open('build-data/private-toolchain.lock.json'))
+          print('clip=' + lock['SourbyClip']['revision'])
+          print('patcher=' + lock['SourbyPatcher']['revision'])
+          PYTHON
+
+      - name: Checkout private SourbyPatcher
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7 (v7.0.1)
+        with:
+          repository: YanIanZ/SourbyPatcher
+          ref: ${{ steps.toolchain.outputs.patcher }}
+          path: .private-toolchain/SourbyPatcher
+          ssh-key: ${{ secrets.SOURBYPATCHER_DEPLOY_KEY }}
+          persist-credentials: false
+
+      - name: Checkout private SourbyClip
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7 (v7.0.1)
+        with:
+          repository: YanIanZ/SourbyClip
+          ref: ${{ steps.toolchain.outputs.clip }}
+          path: .private-toolchain/SourbyClip
+          ssh-key: ${{ secrets.SOURBYCLIP_DEPLOY_KEY }}
+          persist-credentials: false
+
+      - name: Test and publish private tools to Maven Local
+        run: python3 scripts/private_toolchain.py --publish .private-toolchain
+
+      - name: Setup Metal (vendored — gen sources)
+        run: bash scripts/setup_metal.sh
+
+      - name: Apply all patches (Paper -> SourbyCraft)
+        run: ./gradlew applyAllPatches --no-daemon --stacktrace
+
+      - name: Show untracked files that enter the build identity
+        run: git status --porcelain --untracked-files=all | grep '^??' || echo "none"
+
+      # Same task, same -P flags as the build job's "Build slim server jar" step.
+      - name: Rebuild the slim server jar
+        run: ./gradlew slimServerJar --no-daemon --stacktrace -PsourbyBuild=${{ needs.build.outputs.number }} ${{ needs.build.outputs.publish == 'true' && '-PsourbyChannel=REL' || '' }}
+
+      - name: Download the first-build slim jar
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7 (v7.0.0)
+        with:
+          name: SourbyCraft-26.2-first-build-slim
+          path: first-build
+
+      - name: Compare the two slim jars
+        env:
+          EXPECTED_SHA256: ${{ needs.build.outputs.slim_sha256 }}
+        run: |
+          set -u
+          first=first-build/SourbyCraft-slim.jar
+          second=build/libs/SourbyCraft-slim.jar
+          first_sha=$(sha256sum "$first" | cut -d' ' -f1)
+          second_sha=$(sha256sum "$second" | cut -d' ' -f1)
+          echo "first build  (build job output) $EXPECTED_SHA256"
+          echo "first build  (artifact bytes)   $first_sha"
+          echo "rebuild                         $second_sha"
+          {
+            echo "## Slim jar rebuild"
+            echo
+            echo "| Build | SHA-256 |"
+            echo "|---|---|"
+            echo "| first build | \`$EXPECTED_SHA256\` |"
+            echo "| rebuild | \`$second_sha\` |"
+            echo
+            echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH, commit $GITHUB_SHA"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$first_sha" != "$EXPECTED_SHA256" ]; then
+            echo "The uploaded first-build jar is not the one the build job hashed." >&2
+            exit 1
+          fi
+          if [ "$first_sha" = "$second_sha" ]; then
+            echo "REPRODUCIBLE: the rebuild is byte-identical."
+            echo "Result: byte-identical." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "NOT REPRODUCIBLE: the rebuild differs from the first build." >&2
+          echo "Result: **NOT reproducible**; entry listing diff in the job log." >&2
+          echo "Result: **NOT reproducible**" >> "$GITHUB_STEP_SUMMARY"
+          # tail -n +2 drops the "Archive: <path>" line so only entries are compared. unzip -l shows
+          # length, date, time and name; unzip -v adds method, compressed size and CRC-32.
+          unzip -l "$first" | tail -n +2 > first.list || true
+          unzip -l "$second" | tail -n +2 > second.list || true
+          echo "----- unzip -l diff (first build vs rebuild) -----"
+          diff -u first.list second.list || true
+          unzip -v "$first" | tail -n +2 > first.crc || true
+          unzip -v "$second" | tail -n +2 > second.crc || true
+          echo "----- unzip -v diff (sizes, methods, CRC-32) -----"
+          diff -u first.crc second.crc || true
+          echo "----- nested entry-by-entry diff (build properties, manifests, nested jars) -----"
+          python3 scripts/jar_diff.py "$first" "$second" || true
+          exit 1
+
+  release:
+    name: Publish release
+    needs: [build, rebuild]
+    # success() is implicit only when a job has no if of its own; spelled out so a failed or
+    # skipped build never publishes. A pull request never reaches here.
+    if: success() && needs.build.outputs.publish == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/26.2'
+    runs-on: ubuntu-24.04
+    # The one job that writes to the repository: it creates the tag and the GitHub release.
     permissions:
       contents: write
+      # Provenance attestation (actions/attest-build-provenance): the OIDC token that signs it, and
+      # the right to store it. Only this job has them.
+      id-token: write
+      attestations: write
+    env:
+      # A secret cannot appear in a step's if:, so its presence is turned into a plain flag here.
+      # The value itself is only ever exposed to the signing step below.
+      HAS_RELEASE_SIGNING_KEY: ${{ secrets.SOURBYCRAFT_RELEASE_SIGNING_KEY != '' }}
+      RELEASE_PUBLIC_KEY: sourbycraft-server/src/main/resources/META-INF/sourbycraft-release.pub
     steps:
-      - name: Checkout (tags + history for the changelog)
-        uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7 (v7.0.1)
         with:
-          fetch-depth: 0
-          fetch-tags: true
+          fetch-depth: 0        # the notes list commits since the previous v26.2-r* tag
 
-      - name: Download jar
-        uses: actions/download-artifact@v4
+      - name: Download the verified jar
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7 (v7.0.0)
         with:
-          name: SourbyCraft-26.2
+          name: SourbyCraft-26.2-release
           path: release
+
+      # The jar this job publishes must be the one the build job hashed and the rebuild job reproduced.
+      - name: Check the handed-over jar is the reproduced slim jar
+        env:
+          EXPECTED_SHA256: ${{ needs.build.outputs.slim_sha256 }}
+          RELEASE_CHANNEL: ${{ needs.build.outputs.channel }}
+        run: |
+          set -eu
+          actual=$(sha256sum "release/SourbyCraft-26.2-$RELEASE_CHANNEL.jar" | cut -d' ' -f1)
+          test "$actual" = "$EXPECTED_SHA256" \
+            || { echo "release jar sha256 $actual is not the rebuilt slim jar $EXPECTED_SHA256" >&2; exit 1; }
+          echo "release jar sha256 $actual equals the reproduced slim jar"
+
+      # SEC-2 + signed release manifest ship together: the public key in the jar, the jar signature
+      # and the manifest signature. A key without the secret would publish an unsigned release that
+      # every server enforcing signatures refuses; a secret without the key would sign for nobody.
+      - name: Check release signing setup
+        run: |
+          set -eu
+          if [ -f "$RELEASE_PUBLIC_KEY" ] && [ "$HAS_RELEASE_SIGNING_KEY" != true ]; then
+            echo "$RELEASE_PUBLIC_KEY is in the tree but the SOURBYCRAFT_RELEASE_SIGNING_KEY secret is not set" >&2; exit 1
+          fi
+          if [ ! -f "$RELEASE_PUBLIC_KEY" ] && [ "$HAS_RELEASE_SIGNING_KEY" = true ]; then
+            echo "SOURBYCRAFT_RELEASE_SIGNING_KEY is set but $RELEASE_PUBLIC_KEY is not in the tree" >&2; exit 1
+          fi
+          echo "release signing: $([ "$HAS_RELEASE_SIGNING_KEY" = true ] && echo enabled || echo 'not configured (unsigned release, as before)')"
+
+      - name: Sign release jar and manifest (Ed25519)
+        if: env.HAS_RELEASE_SIGNING_KEY == 'true'
+        env:
+          SOURBYCRAFT_RELEASE_SIGNING_KEY: ${{ secrets.SOURBYCRAFT_RELEASE_SIGNING_KEY }}
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          RELEASE_CHANNEL: ${{ needs.build.outputs.channel }}
+        run: |
+          set -eu
+          openssl version
+          umask 077
+          key="$RUNNER_TEMP/release.key"
+          trap 'rm -f "$key"' EXIT
+          printf '%s\n' "$SOURBYCRAFT_RELEASE_SIGNING_KEY" > "$key"
+          jar=release/SourbyCraft-26.2-$RELEASE_CHANNEL.jar
+          manifest=release/sourbycraft-release-manifest.json
+          # rollout % from gradle.properties, yank list from build-data/yanked-releases.txt.
+          python3 scripts/release_manifest.py generate --tag "$RELEASE_TAG" --jar "$jar" -o "$manifest"
+          python3 scripts/release_manifest.py check "$manifest" --tag "$RELEASE_TAG" --jar "$jar"
+          for file in "$jar" "$manifest"; do
+            openssl pkeyutl -sign -rawin -inkey "$key" -in "$file" -out "$file.sig"
+            openssl pkeyutl -verify -rawin -pubin -inkey "$RELEASE_PUBLIC_KEY" -in "$file" -sigfile "$file.sig"
+            test "$(wc -c < "$file.sig")" -eq 64
+          done
+
+      # SLSA-style build provenance for the jar and its SBOM, stored with the repository and verifiable
+      # with `gh attestation verify <jar> --repo YanIanZ/SourbyCraft` (docs/releases/runbooks/build-49-real-test.md).
+      # It attests that this workflow run, at this commit, published these exact bytes (after the
+      # rebuild job reproduced them); it is not an attestation about the private toolchain.
+      - name: Attest build provenance of the release jar and SBOM
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4 (v4.2.2)
+        with:
+          subject-path: |
+            release/SourbyCraft-26.2-${{ needs.build.outputs.channel }}.jar
+            release/SourbyCraft-26.2-${{ needs.build.outputs.channel }}.cdx.json
 
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_NUMBER: ${{ needs.build.outputs.number }}
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          RELEASE_CHANNEL: ${{ needs.build.outputs.channel }}
         run: |
           set -eu
           last=$(git tag -l 'v26.2-r*' | sed -n 's#^v26\.2-r\([0-9]*\)$#\1#p' | sort -n | tail -1)
-          next=$(( ${last:-0} + 1 ))
-          tag="v26.2-r$next"
-          jar=$(ls release/SourbyCraft-*-REL.jar | head -1)
+          next="$RELEASE_NUMBER"
+          tag="$RELEASE_TAG"
+          jar=release/SourbyCraft-26.2-$RELEASE_CHANNEL.jar
+          test -f "$jar" || { echo "the build job did not hand over $jar"; exit 1; }
           sha=$(sha256sum "$jar" | cut -d' ' -f1)
           echo "$sha  $(basename "$jar")" > "$jar.sha256"
-          title="$(TZ=Asia/Jakarta date '+%A, %d %B %Y, %H:%M') (GMT+7) — 26.2-r$next [$(git log -1 --format=%s | cut -c1-80)]"
+          codename=$(sed -n 's/^codename=//p' gradle.properties)
+          # gradle.properties `release`: true publishes a normal release, pre publishes a
+          # prerelease (the auto-updater ignores prereleases unless allow-prerelease is set),
+          # false publishes nothing. An unqualified build must use pre.
+          mode=$(sed -n 's/^release=//p' gradle.properties | tr -d '[:space:]')
+          case "$mode" in
+            true) publish_flags="--latest" ;;
+            pre) publish_flags="--prerelease --latest=false" ;;
+            false) echo "release=false in gradle.properties; not publishing $tag"; exit 0 ;;
+            *) echo "release must be true, pre or false (got '$mode')" >&2; exit 1 ;;
+          esac
+          title="$(TZ=Asia/Jakarta date '+%A, %d %B %Y, %H:%M') (GMT+7) — 26.2-r$next $codename [$(git log -1 --format=%s | cut -c1-80)]"
           {
-            echo "**Build ${next}f** — \`$(basename "$jar")\` (sha256 \`$sha\`)"
+            echo "**SourbyCraft 26.2 Build ${next}** — \`$(basename "$jar")\` (sha256 \`$sha\`)"
             echo
-            echo "Auto-published from \`release/26.2\` after a green build + boot test."
+            echo "Auto-published from \`26.2\` after a green build + boot test."
             echo
+            # Build 47+ notes are named docs/releases/26.2-build-N-<codename>.md.
+            for notes in "docs/releases/$next.md" docs/releases/26.2-build-"$next"-*.md; do
+              if [ -f "$notes" ]; then
+                cat "$notes"
+                echo
+                break
+              fi
+            done
             echo "## Commits"
             if [ -n "${last:-}" ]; then
               git log "v26.2-r$last"..HEAD --format='- %s' | head -40
@@ -205,4 +1235,12 @@ jobs:
               git log -10 --format='- %s'
             fi
           } > notes.md
-          gh release create "$tag" --target "$GITHUB_SHA" --title "$title" --notes-file notes.md "$jar" "$jar.sha256"
+          sbom=release/SourbyCraft-26.2-$RELEASE_CHANNEL.cdx.json
+          test -f "$sbom" || { echo "the build job did not hand over $sbom"; exit 1; }
+          assets=("$jar" "$jar.sha256" "$sbom")
+          if [ "$HAS_RELEASE_SIGNING_KEY" = true ]; then
+            # Asset names are what SourbyUpdater matches: <jar>.sig, sourbycraft-release-manifest.json(.sig).
+            assets+=("$jar.sig" release/sourbycraft-release-manifest.json release/sourbycraft-release-manifest.json.sig)
+            for asset in "${assets[@]}"; do test -f "$asset" || { echo "missing signed asset $asset"; exit 1; }; done
+          fi
+          gh release create "$tag" $publish_flags --target "$GITHUB_SHA" --title "$title" --notes-file notes.md "${assets[@]}"

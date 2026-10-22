@@ -1,5 +1,6 @@
 package dev.iyanz.sourbycraft.console;
 
+import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.core.LogEvent;
 import org.apache.logging.log4j.core.config.plugins.Plugin;
 import org.apache.logging.log4j.core.pattern.ConverterKeys;
@@ -7,33 +8,35 @@ import org.apache.logging.log4j.core.pattern.LogEventPatternConverter;
 import org.apache.logging.log4j.core.pattern.PatternConverter;
 
 /**
- * SourbyCraft-branded logger-name converter for the log4j2 console pattern.
+ * {@code %scLogger}: the logger name as a short, readable {@code [tag]} for the console and file
+ * patterns in {@code log4j2.xml} (paper feature patch 0016).
  *
- * <p>Folia/Luminol config modules obtain their logger via
- * {@code com.mojang.logging.LogUtils.getLogger()}, which names the logger after the
- * fully-qualified class (e.g. {@code me.earthme.luminol.config.modules.optimizations.SIMDConfig}).
- * The stock console pattern renders that verbose FQN as {@code [%logger]}, producing lines like:
+ * <p>Stock Paper prints {@code [%logger]}, so any logger named after its class prints the fully
+ * qualified name, e.g. {@code [ca.spottedleaf.dataconverter.minecraft.datatypes.MCTypeRegistry]}
+ * or {@code [oshi.software.os.mac.MacOperatingSystem]}. This converter shortens only names in a
+ * fixed list of server-internal namespaces and prints every other name exactly as it is, so a
+ * plugin or library logger (including dotted names such as {@code My.Plugin} or
+ * {@code com.example.plugin.Main}) keeps its identity:
+ * <ul>
+ *   <li>{@code dev.iyanz.sourbycraft.*} becomes {@code SourbyCraft/<Class>};</li>
+ *   <li>{@code dev.iyanz.aurora.*} becomes {@code Aurora/<Class>};</li>
+ *   <li>{@code ca.spottedleaf.dataconverter.*} becomes {@code DataConverter}, {@code oshi.*} {@code OSHI};</li>
+ *   <li>{@code io.papermc.*}, {@code ca.spottedleaf.*}, {@code net.minecraft.*},
+ *       {@code org.bukkit.craftbukkit.*}, {@code com.mojang.*} and {@code com.destroystokyo.paper.*}
+ *       become their simple class name (the segment after the last dot, without a {@code $Inner}
+ *       suffix), which is what Paper's own class loggers already print;</li>
+ *   <li>anything else, and every name without a dot, is printed unchanged.</li>
+ * </ul>
+ * An empty (root) logger name prints nothing.
  *
- * <pre>[21:42:48 WARN]: [me.earthme.luminol.config.modules.optimizations.SIMDConfig] SIMD ...</pre>
+ * <p>The output is plain text. With the {@code console} option ({@code %scLogger{console}}) the
+ * {@code SourbyCraft} and {@code Aurora} tags are coloured, but only when TerminalConsoleAppender
+ * reports ANSI support (a real terminal) and only below WARN, where {@code %highlightError} does
+ * not already colour the whole line. Redirected output (a panel, {@code > server.log}, Docker logs)
+ * and {@code logs/latest.log} therefore never contain escape codes from this converter.
  *
- * <p>This converter replaces the {@code [%logger]} token in the <em>console</em> pattern with a
- * clean, hex/ANSI-colored SourbyCraft tag. Loggers that belong to the fork's internal packages
- * (Luminol, Leaves/Leaf, Purpur ports, Paper, and the authored {@code dev.iyanz.sourbycraft.*}
- * code) collapse to {@code SourbyCraft/SimpleClassName}; the {@code SourbyCraft} prefix is drawn
- * in the brand PRIMARY color (#FFB347) and the class in DIM grey. Vanilla / Mojang / unknown
- * third-party loggers keep their real (short) name uncolored, so nothing that isn't ours is
- * mislabelled.
- *
- * <p>Registered as a log4j2 pattern plugin via the {@code log4jPlugins} source set (the same
- * mechanism Paper uses for {@code %stripAnsi}); the annotation processor bakes it into
- * {@code Log4j2Plugins.dat}, so it is available the instant log4j reads {@code log4j2.xml} — no
- * programmatic reconfigure and no {@code net/minecraft} patch churn.
- *
- * <p>The color escapes are raw 24-bit ("truecolor") ANSI, matching the branded startup banner.
- * Paper/Folia's JLine console renders them on truecolor-capable terminals; on a terminal that
- * does not understand them they are inert and the text still reads. The converter is deliberately
- * used <em>only</em> in the {@code TerminalConsole} appender — the rolling {@code File} appender
- * keeps a plain {@code %logger}, so {@code logs/latest.log} stays ANSI-free and grep-friendly.
+ * <p>Compiled from the {@code log4jPlugins} source set, so the annotation processor lists it in
+ * {@code Log4j2Plugins.dat} and it is available when log4j first reads {@code log4j2.xml}.
  */
 @Plugin(name = "SourbyCraftLoggerConverter", category = PatternConverter.CATEGORY)
 @ConverterKeys({"scLogger"})
@@ -41,44 +44,37 @@ public final class SourbyCraftLoggerConverter extends LogEventPatternConverter {
 
     private static final String ESC = "\u001B";
     private static final String RESET = ESC + "[0m";
-
-    // Brand palette mirrored from dev.iyanz.sourbycraft.SourbyCraftColors (the log4jPlugins
-    // source set is compiled in isolation and cannot depend on the server module, so the two
-    // hex values are duplicated here on purpose — keep them in sync if the brand palette moves).
-    private static final String PRIMARY = fg(0xFF, 0xB3, 0x47); // #FFB347 SourbyCraft brand
-    private static final String DIM     = fg(0x80, 0x80, 0x80); // #808080 class name
+    // Brand palette mirrored from dev.iyanz.sourbycraft.SourbyCraftColors (this source set is
+    // compiled without the server module, so the values are duplicated; keep them in sync).
+    private static final String PRIMARY = fg(0xFF, 0xB3, 0x47); // #FFB347 SourbyCraft
+    private static final String AURORA = fg(0x22, 0xD3, 0xEE); // #22D3EE Aurora
 
     private static final String BRAND = "SourbyCraft";
+    private static final String ENGINE = "Aurora";
 
     /**
-     * Logger-name prefixes that belong to the fork and should collapse to the brand tag.
-     *
-     * <p>The Folia-era entries ({@code me.earthme.luminol.}, {@code org.leavesmc.},
-     * {@code org.dreeam.leaf.}, {@code org.purpurmc.}, {@code org.leaf.}, {@code abomination.},
-     * {@code com.kiocg.}) are kept even though that vendored source was stripped on the Canvas
-     * re-platform (feat/canvas-engine, PR #12) — they are inert string prefixes (never match
-     * anything now) and cost nothing to leave for anyone diffing against the archived Folia line.
+     * Known internal namespace prefix to tag. A tag ending in '/' gets the simple class name
+     * appended; an empty tag means the simple class name alone. Unlisted names are never changed.
      */
-    private static final String[] INTERNAL_PREFIXES = {
-        "me.earthme.luminol.",
-        "org.leavesmc.",
-        "org.dreeam.leaf.",
-        "org.purpurmc.",
-        "org.leaf.",
-        "dev.iyanz.sourbycraft.",
-        "io.papermc.paper.",
-        "io.canvasmc.",
-        "com.destroystokyo.paper.",
-        "abomination.",
-        "com.kiocg.",
+    private static final String[][] ALIASES = {
+        {"dev.iyanz.sourbycraft.", BRAND + "/"},
+        {"dev.iyanz.aurora.", ENGINE + "/"},
+        {"ca.spottedleaf.dataconverter.", "DataConverter"},
+        {"oshi.", "OSHI"},
+        // Server internals: the simple class name ("" = no prefix).
+        {"io.papermc.", ""},
+        {"ca.spottedleaf.", ""},
+        {"net.minecraft.", ""},
+        {"org.bukkit.craftbukkit.", ""},
+        {"com.mojang.", ""},
+        {"com.destroystokyo.paper.", ""},
     };
 
-    private static String fg(int r, int g, int b) {
-        return ESC + "[38;2;" + r + ";" + g + ";" + b + "m";
-    }
+    private final boolean console;
 
     private SourbyCraftLoggerConverter(final String[] options) {
         super("scLogger", "scLogger");
+        this.console = options != null && options.length > 0 && "console".equalsIgnoreCase(options[0]);
     }
 
     public static SourbyCraftLoggerConverter newInstance(final String[] options) {
@@ -87,53 +83,60 @@ public final class SourbyCraftLoggerConverter extends LogEventPatternConverter {
 
     @Override
     public void format(final LogEvent event, final StringBuilder toAppendTo) {
-        final String logger = event.getLoggerName();
-        if (logger == null || logger.isEmpty()) {
-            // Root logger et al. — the console pattern already omits the token for these via
-            // the LoggerNamePatternSelector, but guard anyway so we never print "[]".
+        final String tag = tag(event.getLoggerName());
+        if (tag == null) {
             return;
         }
-
-        if (logger.equals(BRAND)) {
-            // dev.iyanz.sourbycraft.util.SourbyLogger logs under the literal "SourbyCraft" logger
-            // name. simpleName() would yield "SourbyCraft" too, rendering the doubled
-            // [SourbyCraft/SourbyCraft] tag the boot log showed — so collapse it to a single clean
-            // [SourbyCraft] tag (no "/SourbyCraft" suffix).
-            toAppendTo.append('[')
-                      .append(PRIMARY).append(BRAND)
-                      .append(RESET)
-                      .append(']');
-        } else if (isInternal(logger)) {
-            // [SourbyCraft/SimpleName] with brand + dim coloring, then a hard reset so the
-            // surrounding %highlightError / %msg picks up its own color cleanly.
-            toAppendTo.append('[')
-                      .append(PRIMARY).append(BRAND)
-                      .append(DIM).append('/').append(simpleName(logger))
-                      .append(RESET)
-                      .append(']');
+        final String colour = this.console ? colour(tag, event.getLevel()) : null;
+        toAppendTo.append('[');
+        if (colour != null) {
+            toAppendTo.append(colour).append(tag).append(RESET);
         } else {
-            // Vanilla / Mojang / unknown third-party: keep the real logger name verbatim and
-            // uncolored, so nothing that isn't ours is renamed, recolored, or truncated. This
-            // exactly reproduces the stock [%logger] behavior for those loggers.
-            toAppendTo.append('[').append(logger).append(']');
+            toAppendTo.append(tag);
         }
+        toAppendTo.append(']');
     }
 
-    private static boolean isInternal(final String logger) {
-        if (logger.equals(BRAND)) {
-            return true; // dev.iyanz.sourbycraft.util.SourbyLogger uses the literal "SourbyCraft"
+    /** The short tag for a logger name, or {@code null} for the root logger. */
+    static String tag(final String logger) {
+        if (logger == null || logger.isEmpty()) {
+            return null;
         }
-        for (final String prefix : INTERNAL_PREFIXES) {
-            if (logger.startsWith(prefix)) {
-                return true;
+        if (logger.indexOf('.') < 0) {
+            return logger;
+        }
+        for (final String[] alias : ALIASES) {
+            if (logger.startsWith(alias[0])) {
+                return alias[1].isEmpty() || alias[1].endsWith("/") ? alias[1] + simpleName(logger) : alias[1];
             }
         }
-        return false;
+        return logger;
     }
 
-    /** Last dot-separated segment of a logger name (the simple class name), or the whole string. */
+    private static String colour(final String tag, final Level level) {
+        if (level != null && level.isMoreSpecificThan(Level.WARN)) {
+            return null; // %highlightError colours WARN/ERROR lines as a whole
+        }
+        final String colour = tag.equals(BRAND) || tag.startsWith(BRAND + "/") ? PRIMARY
+            : tag.equals(ENGINE) || tag.startsWith(ENGINE + "/") ? AURORA : null;
+        return colour != null && ansiSupported() ? colour : null;
+    }
+
+    private static boolean ansiSupported() {
+        return TerminalAnsiConverter.terminalAnsi();
+    }
+
+    /** Segment after the last dot, without a {@code $Inner} suffix; the whole name if that is empty. */
     private static String simpleName(final String logger) {
-        final int dot = logger.lastIndexOf('.');
-        return dot >= 0 && dot < logger.length() - 1 ? logger.substring(dot + 1) : logger;
+        String simple = logger.substring(logger.lastIndexOf('.') + 1);
+        final int inner = simple.indexOf('$');
+        if (inner > 0) {
+            simple = simple.substring(0, inner);
+        }
+        return simple.isEmpty() ? logger : simple;
+    }
+
+    private static String fg(final int r, final int g, final int b) {
+        return ESC + "[38;2;" + r + ";" + g + ";" + b + "m";
     }
 }

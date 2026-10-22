@@ -1,0 +1,871 @@
+--- /dev/null
++++ b/dev/iyanz/aurora/engine/threadedregions/scheduler/AffinitySchedulerThreadPool.java
+@@ -1,0 +_,868 @@
++package dev.iyanz.aurora.engine.threadedregions.scheduler;
++
++import ca.spottedleaf.common.util.TimeUtil;
++import ca.spottedleaf.concurrentutil.scheduler.SchedulableTick;
++import ca.spottedleaf.concurrentutil.scheduler.Scheduler;
++import ca.spottedleaf.concurrentutil.util.ConcurrentUtil;
++import dev.iyanz.aurora.engine.GlobalConfiguration;
++import dev.iyanz.aurora.engine.util.CpuInfoReport;
++import java.lang.invoke.VarHandle;
++import java.time.Duration;
++import java.util.ArrayList;
++import java.util.Arrays;
++import java.util.BitSet;
++import java.util.Comparator;
++import java.util.List;
++import java.util.concurrent.ThreadFactory;
++import java.util.concurrent.TimeUnit;
++import java.util.concurrent.atomic.AtomicBoolean;
++import java.util.concurrent.atomic.AtomicInteger;
++import java.util.concurrent.locks.LockSupport;
++import java.util.function.BooleanSupplier;
++import net.openhft.affinity.Affinity;
++import org.jetbrains.annotations.Contract;
++import org.jetbrains.annotations.UnknownNullability;
++import org.jspecify.annotations.Nullable;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++
++/**
++ * Scheduler thread pool implementation that uses EDF scheduling, based off
++ * {@link ca.spottedleaf.concurrentutil.scheduler.EDFSchedulerThreadPool}
++ * <p>
++ * Intermediate task execution is supported in this scheduler.
++ * </p>
++ * <p>
++ * NUMA aware scheduling is not supported in this scheduler.
++ * </p>
++ * <p>
++ * CPU affinity is supported in this scheduler
++ * </p>
++ *
++ * @author dueris, spottedleaf
++ */
++@SuppressWarnings("unused")
++public final class AffinitySchedulerThreadPool extends Scheduler {
++
++    public static final long DEFAULT_STEAL_THRESH_MILLIS = 3L;
++    public static final double DEFAULT_RUN_TASKS_BUFFER_MILLIS = (double) 80_000 / 1_000_000; // 0.08ms
++
++    static final Comparator<AffinitySchedulerThreadPool.ScheduledState> TICK_COMPARATOR_BY_TIME = (final AffinitySchedulerThreadPool.ScheduledState s1, final AffinitySchedulerThreadPool.ScheduledState s2) -> {
++        final SchedulableTick t1 = s1.tick;
++        final SchedulableTick t2 = s2.tick;
++
++        final int timeCompare = TimeUtil.compareTimes(t1.scheduledStart, t2.scheduledStart);
++        if (timeCompare != 0) {
++            return timeCompare;
++        }
++
++        return Long.signum(t1.id - t2.id);
++    };
++
++    static final Comparator<AffinitySchedulerThreadPool.ScheduledState> TICK_COMPARATOR_BY_QUEUE_INSERTION = (final AffinitySchedulerThreadPool.ScheduledState s1, final AffinitySchedulerThreadPool.ScheduledState s2) -> {
++        final SchedulableTick t1 = s1.tick;
++        final SchedulableTick t2 = s2.tick;
++
++        final int timeCompare = Long.compare(t1.lastQueueInsertion, t2.lastQueueInsertion);
++        if (timeCompare != 0) {
++            return timeCompare;
++        }
++
++        return Long.signum(s1.tick.id - s2.tick.id);
++    };
++
++    private static final Logger LOGGER = LoggerFactory.getLogger("Scheduler");
++
++    private final TickThreadRunner[] runners;
++    private final Thread[] threads;
++    private final BitSet idleThreads;
++
++    // we don't need this queue to be anything special, since no specific thread should own it
++    private final FastHeapPriorityQueue<ScheduledState> globalQueue = new FastHeapPriorityQueue<>(100, TICK_COMPARATOR_BY_TIME, ScheduledState.class);
++
++    private final Object scheduleLock = new Object();
++    private final long runTaskBuff;
++    private final long stealThresh;
++    private final BooleanSupplier linkingSupported;
++
++    private final AtomicInteger nextSteal = new AtomicInteger(0);
++
++    private volatile boolean halted;
++
++    public AffinitySchedulerThreadPool(
++        final int threads,
++        final ThreadFactory threadFactory,
++        final long runTaskBuff,
++        final long stealThresh,
++        final BooleanSupplier linkingSupported,
++        final boolean enableAffinity
++    ) {
++        this.runTaskBuff = runTaskBuff;
++        this.stealThresh = stealThresh;
++        this.linkingSupported = linkingSupported;
++
++        final BitSet idleThreads = new BitSet(threads);
++        for (int i = 0; i < threads; ++i) {
++            idleThreads.set(i);
++        }
++
++        this.idleThreads = idleThreads;
++
++        final BitSet affinitySet;
++        if (enableAffinity) {
++            if (!CpuInfoReport.isLinux()) {
++                LOGGER.warn("Affinity setting is only supported on Linux");
++                affinitySet = new BitSet();
++            }
++            else {
++                affinitySet = getAffinity(GlobalConfiguration.getInstance().regionScheduler.affinityScheduler.tickRegionAffinity);
++            }
++        }
++        else {
++            affinitySet = new BitSet();
++        }
++
++        if (!affinitySet.isEmpty()) {
++            if (affinitySet.cardinality() < threads) {
++                throw new IllegalArgumentException("Affinity setting needs 1 allocated core per tick thread");
++            }
++            LOGGER.info("Affinity scheduler now bound to: {}", affinitySet);
++        }
++
++        final TickThreadRunner[] runners = new TickThreadRunner[threads];
++        final Thread[] t = new Thread[threads];
++
++        for (int i = 0; i < threads; ++i) {
++            int cpuId = affinitySet.isEmpty() ? -1 : affinitySet.nextSetBit(0);
++            if (cpuId != -1) affinitySet.clear(cpuId);
++            runners[i] = new TickThreadRunner(i, this, cpuId);
++            t[i] = threadFactory.newThread(runners[i]);
++        }
++
++        this.threads = t;
++        this.runners = runners;
++    }
++
++    private BitSet getAffinity(final int[] affinity) {
++        if (affinity.length == 0) {
++            LOGGER.warn("No affinity set configured, backing off, logging CPU topology:\n{}", CpuInfoReport.gatherCPUReport());
++            return new BitSet();
++        }
++
++        final int maxAvailable = Runtime.getRuntime().availableProcessors();
++        final BitSet affinitySet = new BitSet(affinity.length);
++
++        Arrays.stream(affinity)
++            .distinct()
++            .filter(cpuId -> {
++                // don't log parse error cpus
++                if (cpuId == -1) return false;
++                if (cpuId >= 0 && cpuId < maxAvailable) {
++                    return true;
++                }
++                else {
++                    LOGGER.error("Invalid cpu id {}, ignoring.", cpuId);
++                    return false;
++                }
++            })
++            .forEach(affinitySet::set);
++
++        return affinitySet;
++    }
++
++    public void start() {
++        for (final Thread thread : this.threads) {
++            thread.start();
++        }
++    }
++
++    public TickThreadRunner getCurrentTickThreadRunner() {
++        final Thread current = Thread.currentThread();
++
++        for (final TickThreadRunner runner : this.runners) {
++            if (runner.thread == current) {
++                return runner;
++            }
++        }
++
++        throw new IllegalStateException("Not on tick runner");
++    }
++
++    private boolean join(final long msToWait, final boolean interruptible) throws InterruptedException {
++        final long nsToWait = TimeUnit.MILLISECONDS.toNanos(msToWait);
++        final long start = System.nanoTime();
++        final long deadline = start + nsToWait;
++
++        boolean interrupted = false;
++        try {
++            for (final Thread thread : this.threads) {
++                while (thread.isAlive()) {
++                    try {
++                        if (msToWait > 0L) {
++                            final long current = System.nanoTime();
++                            if (current - deadline >= 0L) {
++                                return false;
++                            }
++                            thread.join(Duration.ofNanos(deadline - current));
++                        }
++                        else {
++                            thread.join();
++                        }
++                    } catch (final InterruptedException ie) {
++                        if (interruptible) {
++                            throw ie;
++                        }
++                        interrupted = true;
++                    }
++                }
++            }
++
++            return true;
++        } finally {
++            if (interrupted) {
++                Thread.currentThread().interrupt();
++            }
++        }
++    }
++
++    public Thread[] getThreads() {
++        return this.threads.clone();
++    }
++
++    @Override
++    public Thread[] getAliveThreads() {
++        final List<Thread> ret = new ArrayList<>(this.threads.length);
++
++        for (final Thread thread : this.threads) {
++            if (thread.isAlive()) {
++                ret.add(thread);
++            }
++        }
++
++        return ret.toArray(new Thread[0]);
++    }
++
++    @Override
++    public Thread[] getCoreThreads() {
++        return this.getThreads();
++    }
++
++    @Override
++    public void halt() {
++        this.halted = true;
++
++        for (final Thread thread : this.threads) {
++            // force response to halt
++            LockSupport.unpark(thread);
++        }
++    }
++
++    @Override
++    public boolean join(final long msToWait) {
++        try {
++            return this.join(msToWait, false);
++        } catch (final InterruptedException ex) {
++            throw new IllegalStateException(ex);
++        }
++    }
++
++    @Override
++    public boolean joinInterruptable(final long msToWait) throws InterruptedException {
++        return this.join(msToWait, true);
++    }
++
++    @Override
++    public void schedule(final SchedulableTick task) {
++        synchronized (this.scheduleLock) {
++            final ScheduledState state = new ScheduledState(task);
++            if (!task.setState(state)) {
++                throw new IllegalStateException("Task " + task + " is already scheduled or cancelled");
++            }
++
++            if (!state.tryMarkScheduled()) {
++                throw new IllegalStateException();
++            }
++
++            state.schedulerOwnedBy = this;
++
++            this.insertFresh(state);
++        }
++    }
++
++    @Override
++    public void notifyTasks(final SchedulableTick task) {
++        if (task.state == null) return;
++        final ScheduledState state = (ScheduledState) task.state;
++        final boolean changed = state.markedWithTasks.compareAndSet(false, true);
++
++        // try wake owner if present. if the thread is parking to wait
++        // until next tick, we can wake and have it run intermediate tasks
++
++        final TickThreadRunner owner = state.ownedBy;
++        if (changed && owner != null) {
++            LockSupport.unpark(owner.getRunnerThread());
++        }
++    }
++
++    @Override
++    public boolean cancel(final SchedulableTick task) {
++        throw new UnsupportedOperationException("Unsupported in AFFINITY Scheduler");
++    }
++
++    @Nullable
++    private ScheduledState poll(final TickThreadRunner runner) {
++        final long now = System.nanoTime();
++
++        final ScheduledState globalHead = globalQueue.peek();
++        final ScheduledState localHead = runner.localQueue.peekEdf();
++
++        if (globalHead != null && globalHead == localHead) {
++            throw new IllegalStateException("Global queue and local queue contain same element");
++        }
++
++        // handle the local and/or global head being overdue already
++        final boolean localOverdue = localHead != null && localHead.isOverdue(now);
++        final boolean globalOverdue = globalHead != null && globalHead.isOverdue(now);
++        if (localOverdue && globalOverdue) {
++            // we should pick the more urgent one
++            if (TICK_COMPARATOR_BY_TIME.compare(localHead, globalHead) <= 0) {
++                return runner.localQueue.pollEdf();
++            }
++            else return globalQueue.poll();
++        }
++        else if (localOverdue) {
++            return runner.localQueue.pollEdf();
++        }
++        else if (globalOverdue) {
++            return globalQueue.poll();
++        }
++
++        ScheduledState best = null;
++        boolean bestIsLocal = false;
++
++        if (localHead != null && globalHead != null) {
++            if (TICK_COMPARATOR_BY_TIME.compare(localHead, globalHead) <= 0) {
++                best = localHead;
++                bestIsLocal = true;
++            }
++            else {
++                best = globalHead;
++            }
++        }
++        else if (localHead != null) {
++            best = localHead;
++            bestIsLocal = true;
++        }
++        else if (globalHead != null) {
++            best = globalHead;
++        }
++
++        final TickThreadRunner stealingFrom = runners[nextSteal.getAndUpdate(v -> (v + 1) % runners.length)];
++
++        if (stealingFrom != runner) {
++            final ScheduledState stealCandidate = stealingFrom.localQueue.peekEdf();
++            if (stealCandidate != null && stealCandidate.isStealable(now)) {
++                if (best == null ||
++                    TICK_COMPARATOR_BY_TIME.compare(stealCandidate, best) < 0) {
++                    return stealingFrom.localQueue.pollEdf();
++                }
++            }
++        }
++
++        if (best != null) {
++            return bestIsLocal ? runner.localQueue.pollEdf() : globalQueue.poll();
++        }
++
++        return null;
++    }
++
++    private void insertFresh(final ScheduledState task) {
++        final TickThreadRunner[] runners = this.runners;
++
++        for (final TickThreadRunner runner : runners) {
++            // if task is linked, don't insert to queues
++            if (runner.linked == task.tick) return;
++        }
++
++        // iterate all idle threads, not just the first one
++        for (int i = this.idleThreads.nextSetBit(0); i >= 0; i = this.idleThreads.nextSetBit(i + 1)) {
++            final TickThreadRunner runner = runners[i];
++            if (runner.linked == null) {
++                // push to idle thread
++                this.idleThreads.clear(i);
++                runner.acceptTask(task);
++                return;
++            }
++        }
++
++        // add to queue, will be picked up later
++        this.globalQueue.offer(task);
++    }
++
++    @Nullable
++    private ScheduledState returnTask(final TickThreadRunner runner, final @Nullable ScheduledState reschedule) {
++        final SchedulableTick linkedToRunner = runner.linked;
++
++        // offer back to whichever queue owns this
++        if (reschedule != null) {
++            // we don't wanna send this to the queue if linked
++            if (linkedToRunner == null || linkedToRunner.state == null || linkedToRunner.state != reschedule) {
++                runner.localQueue.insert(reschedule);
++            }
++        }
++
++        // if linked, return that, don't even bother polling
++        final ScheduledState ret;
++        if (linkedToRunner != null && linkedToRunner.state != null) {
++            // pinned
++            ret = (ScheduledState) linkedToRunner.state;
++        }
++        else {
++            // not pinned, using work stealing
++            ret = this.poll(runner);
++        }
++
++        if (ret == null && linkedToRunner == null) {
++            this.idleThreads.set(runner.id);
++
++            final int s = runner.localQueue.size();
++
++            if (s != 0) {
++                throw new IllegalStateException("Local queue must be drained before going idle. Currently " + s);
++            }
++        }
++
++        return ret;
++    }
++
++    public static final class ScheduledState {
++        private static final int SCHEDULE_STATE_NOT_SCHEDULED = 0;
++        private static final int SCHEDULE_STATE_SCHEDULED = 1;
++        private static final int SCHEDULE_STATE_CANCELLED = 2;
++
++        // package-private
++        final SchedulableTick tick;
++
++        private final AtomicInteger scheduled = new AtomicInteger();
++        private final AtomicBoolean markedWithTasks = new AtomicBoolean(false);
++
++        @Nullable
++        private AffinitySchedulerThreadPool schedulerOwnedBy;
++
++        @Nullable
++        private volatile TickThreadRunner ownedBy;
++
++        private ScheduledState(final SchedulableTick tick) {
++            this.tick = tick;
++        }
++
++        public boolean hasTasks() {
++            if (markedWithTasks.getAndSet(false)) {
++                return true;
++            }
++            return tick.hasTasks();
++        }
++
++        public boolean peekHasTasks() {
++            return markedWithTasks.get() || tick.hasTasks();
++        }
++
++        private boolean tryMarkScheduled() {
++            return this.scheduled.compareAndSet(SCHEDULE_STATE_NOT_SCHEDULED, SCHEDULE_STATE_SCHEDULED);
++        }
++
++        private boolean tryMarkCancelled() {
++            return this.scheduled.compareAndSet(SCHEDULE_STATE_SCHEDULED, SCHEDULE_STATE_CANCELLED);
++        }
++
++        private boolean isScheduled() {
++            return this.scheduled.get() == SCHEDULE_STATE_SCHEDULED;
++        }
++
++        // this ignores steal threshold
++        public boolean isOverdue(final long nanos) {
++            return (this.tick.getScheduledStart() - nanos) <= 0L;
++        }
++
++        public boolean isStealable(final long nanos) {
++            return (this.tick.getScheduledStart() - nanos) + (schedulerOwnedBy == null ? 0L : schedulerOwnedBy.stealThresh) <= 0L;
++        }
++    }
++
++    public static final class TickThreadRunner implements Runnable {
++
++        /**
++         * There are no tasks in this thread's runqueue, so it is parked.
++         * <p>
++         * stateTarget = null
++         * </p>
++         */
++        private static final int STATE_IDLE = 0;
++
++        /**
++         * The runner is waiting to tick a task, as it has no intermediate tasks to execute.
++         * <p>
++         * stateTarget = the task awaiting tick
++         * </p>
++         */
++        private static final int STATE_AWAITING_TICK = 1;
++
++        /**
++         * The runner is executing a tick for one of the tasks that was in its runqueue.
++         * <p>
++         * stateTarget = the task being ticked
++         * </p>
++         */
++        private static final int STATE_EXECUTING_TICK = 2;
++
++        /**
++         * The runner is running mid-tick tasks for one of the tasks that was in its runqueue.
++         * <p>
++         * stateTarget = the task being ticked
++         * </p>
++         */
++        private static final int STATE_EXECUTING_TASKS = 3;
++
++        @SuppressWarnings("FieldMayBeFinal") // we don't want this final since we control it via a var handle
++        private volatile TickThreadRunnerState state = new TickThreadRunnerState(null, STATE_IDLE);
++        private static final VarHandle STATE_HANDLE = ConcurrentUtil.getVarHandle(TickThreadRunner.class, "state", TickThreadRunnerState.class);
++
++        public final int id;
++        public final AffinitySchedulerThreadPool scheduler;
++
++        private final int affinity;
++        private final SchedulableTickFastQueue localQueue = new SchedulableTickFastQueue();
++
++        @UnknownNullability("null until the runner starts on a thread")
++        private volatile Thread thread;
++
++        @Nullable
++        private volatile SchedulableTick linked;
++
++        public TickThreadRunner(final int id, final AffinitySchedulerThreadPool scheduler, final int affinity) {
++            this.id = id;
++            this.scheduler = scheduler;
++            this.affinity = affinity;
++        }
++
++        // if swapping, the one we are swapping with must be unscheduled
++        public void link(final SchedulableTick task, final boolean isSwapping) {
++            synchronized (scheduler.scheduleLock) {
++                if (!scheduler.linkingSupported.getAsBoolean()) {
++                    throw new IllegalStateException("Linking not supported in this environment");
++                }
++                if (task.state != null && ((ScheduledState) task.state).ownedBy != this && !isSwapping) {
++                    throw new IllegalStateException("Cannot link task not owned by runner(" + this + "), owned by (" + ((ScheduledState) task.state).ownedBy + ")");
++                }
++                if (this.linked != null) {
++                    throw new IllegalStateException("Runner already linked");
++                }
++
++                this.linked = task;
++
++                if (task.state != null && scheduler.idleThreads.get(id)) {
++                    scheduler.idleThreads.clear(id);
++                    acceptTask((ScheduledState) task.state);
++                }
++            }
++        }
++
++        // must be called during tick or run tasks
++        public void unlink() {
++            synchronized (scheduler.scheduleLock) {
++                this.linked = null;
++            }
++        }
++
++        @Contract(pure = true)
++        public boolean isLinkedTo(final SchedulableTick from) {
++            return from.state instanceof ScheduledState && from == this.linked;
++        }
++
++        private void setStatePlain(final TickThreadRunnerState state) {
++            STATE_HANDLE.set(this, state);
++        }
++
++        private void setStateOpaque(final TickThreadRunnerState state) {
++            STATE_HANDLE.setOpaque(this, state);
++        }
++
++        private void setStateVolatile(final TickThreadRunnerState state) {
++            STATE_HANDLE.setVolatile(this, state);
++        }
++
++        public Thread getRunnerThread() {
++            return this.thread;
++        }
++
++        private void acceptTask(final ScheduledState task) {
++            if (task.ownedBy != null) {
++                throw new IllegalStateException("Already owned by another runner");
++            }
++            task.ownedBy = this;
++            final TickThreadRunnerState state = this.state;
++            if (state.state != STATE_IDLE) {
++                throw new IllegalStateException("Cannot accept task in state " + state);
++            }
++            this.setStateVolatile(new TickThreadRunnerState(task, STATE_AWAITING_TICK));
++            LockSupport.unpark(this.getRunnerThread());
++        }
++
++        // note: returns false if the expected state isn't the actual current state, true otherwise
++        private boolean tryExchangeState(final TickThreadRunnerState expected, final TickThreadRunnerState newState) {
++            synchronized (this.scheduler.scheduleLock) {
++                if (this.state != expected) {
++                    return false;
++                }
++                this.setStatePlain(newState);
++                return true;
++            }
++        }
++
++        private void returnTask(final ScheduledState task, final boolean reschedule) {
++            synchronized (this.scheduler.scheduleLock) {
++                task.ownedBy = null;
++
++                final ScheduledState newWait = this.scheduler.returnTask(this, reschedule && task.isScheduled() ? task : null);
++                if (newWait == null) {
++                    this.setStatePlain(new TickThreadRunnerState(null, STATE_IDLE));
++                }
++                else {
++                    if (newWait.ownedBy != null) {
++                        throw new IllegalStateException("Already owned by another runner");
++                    }
++                    newWait.ownedBy = this;
++                    this.setStatePlain(new TickThreadRunnerState(newWait, STATE_AWAITING_TICK));
++                }
++            }
++        }
++
++        @SuppressWarnings("UnnecessaryLabelOnContinueStatement")
++        @Override
++        public void run() {
++            this.thread = Thread.currentThread();
++
++            if (affinity != -1) {
++                Affinity.setAffinity(affinity);
++                LOGGER.debug("{} bound to CPU {}", this, affinity);
++            }
++
++            main_state_loop:
++            for (;;) {
++                final TickThreadRunnerState startState = this.state;
++                final int startStateType = startState.state;
++                final ScheduledState startStateTask = startState.stateTarget;
++
++                if (this.scheduler.halted) {
++                    return;
++                }
++
++                try {
++                    switch (startStateType) {
++                        case STATE_IDLE: {
++                            while (this.state.state == STATE_IDLE) {
++                                //noinspection ResultOfMethodCallIgnored
++                                Thread.interrupted();
++                                LockSupport.park();
++                                if (this.scheduler.halted) {
++                                    return;
++                                }
++                            }
++                            continue main_state_loop;
++                        }
++
++                        case STATE_AWAITING_TICK: {
++                            // wait until deadline, this will attempt to execute tasks
++                            // during the wait to try and be efficient with time
++                            if (waitUntilDeadline(startStateTask, startState)) continue main_state_loop;
++
++                            // try exchange state and execute tick
++                            if (tryExchangeState(startState, new TickThreadRunnerState(startStateTask, STATE_EXECUTING_TICK))) {
++                                final boolean reschedule = startStateTask.tick.runTick();
++
++                                // if runTick throws, then the task is technically orphaned if the exception handler
++                                // doesn't work properly, which probably should be how this works, since the tick failed
++                                this.returnTask(startStateTask, reschedule);
++                            }
++
++                            continue main_state_loop; // finished tick, continue
++                        }
++
++                        case STATE_EXECUTING_TICK: {
++                            throw new IllegalStateException("Tick execution must be set by runner thread, not by any other thread");
++                        }
++
++                        case STATE_EXECUTING_TASKS: {
++                            throw new IllegalStateException("Task execution must be set by runner thread, not by any other thread");
++                        }
++
++                        default: {
++                            throw new IllegalStateException("Unknown state: " + startState);
++                        }
++                    }
++                } catch (final Throwable thrown) {
++                    getRunnerThread().getUncaughtExceptionHandler().uncaughtException(getRunnerThread(), thrown);
++                    return;
++                }
++            }
++        }
++
++        // note: returns true if it should continue state loop
++        private boolean waitUntilDeadline(final ScheduledState startStateTask, final TickThreadRunnerState startState) {
++            final long deadline = startStateTask.tick.getScheduledStart();
++            final long adjustedForRunBuffer = deadline - scheduler.runTaskBuff;
++
++            mainLoop:
++            for (;;) {
++                if (this.state != startState) {
++                    // state was changed unexpectedly(async?)
++                    return true;
++                }
++
++                // check if we hit the deadline
++                final long diff = deadline - System.nanoTime();
++                if (diff <= 0L) {
++                    break;
++                }
++
++                // haven't hit deadline yet, try tasks and then try park
++                final TickThreadRunnerState runTasksState = new TickThreadRunnerState(startStateTask, STATE_EXECUTING_TASKS);
++                if (
++                    adjustedForRunBuffer - System.nanoTime() > 0L &&
++                    tryExchangeState(startState, runTasksState)
++                ) {
++                    // we are in run tasks state
++                    if (startStateTask.hasTasks()) {
++                        startStateTask.tick.runTasks(() -> !scheduler.halted && (adjustedForRunBuffer - System.nanoTime() > 0L));
++                    }
++
++                    if (!tryExchangeState(runTasksState, startState)) { // restore back to initial state
++                        throw new IllegalStateException("Couldn't set state back to AWAITING");
++                    }
++
++                    // if the start task no longer has tasks, we should poll
++                    // from the longest time in the queue
++
++                    // if we are linked, we have nothing to run except the 1 task
++                    // so we just don't try and run the rest, no point
++
++                    if (adjustedForRunBuffer - System.nanoTime() > 0 && linked == null) {
++                        boolean hasAnyTasks = false;
++
++                        // we have time, try and run through the rest of the queue
++                        final FastHeapPriorityQueue<ScheduledState> byQueueOrder = localQueue.snapshotQueue();
++
++                        // note: it is intentional that we remove and insert the
++                        //       cursor during the poll, thus resetting the last
++                        //       insertion time. this is for fairness, not a bug
++
++                        ScheduledState cursor;
++                        cursorLoop:
++                        while ((cursor = byQueueOrder.poll()) != null) {
++                            // check we aren't overdue first, if we are, cancel the rest of the loop
++                            if (adjustedForRunBuffer - System.nanoTime() <= 0L) {
++                                continue mainLoop;
++                            }
++
++                            // pre-filter to check if we should even attempt
++                            if (!cursor.peekHasTasks()) {
++                                //noinspection UnnecessaryLabelOnContinueStatement
++                                continue cursorLoop;
++                            }
++
++                            hasAnyTasks = true;
++
++                            // try to remove from the active queue to prevent other worker
++                            // threads from stealing the current task
++
++                            if (!localQueue.remove(cursor)) {
++                                //noinspection UnnecessaryLabelOnContinueStatement
++                                continue cursorLoop;
++                            }
++
++                            final TickThreadRunnerState cursorRunTasksState = new TickThreadRunnerState(cursor, STATE_EXECUTING_TASKS);
++
++                            // while yes, we already checked if it has tasks, we
++                            // have to call hasTasks specifically so that if the
++                            // flag markedWithTasks is true we set that to false
++
++                            // if exchange state fails, then this is sorta fine ig?
++                            // in the end, it always falls back to checking the
++                            // actual schedulable tick instance, so it doesn't really
++                            // matter all that much
++
++                            if (cursor.hasTasks() && tryExchangeState(startState, cursorRunTasksState)) {
++                                if (cursor.ownedBy != null) {
++                                    throw new IllegalStateException("Already owned by another runner");
++                                }
++                                cursor.ownedBy = this;
++
++                                try {
++                                    // try to run tick tasks for the state in the queue the longest
++                                    cursor.tick.runTasks(() -> !scheduler.halted && (adjustedForRunBuffer - System.nanoTime() > 0L));
++                                } finally {
++                                    // unset this
++                                    cursor.ownedBy = null;
++                                }
++
++                                // restore back to previous state
++                                if (!tryExchangeState(cursorRunTasksState, startState)) {
++                                    throw new IllegalStateException("Couldn't set state back to AWAITING");
++                                }
++
++                                // add back to the queue unless it got linked during tasks run
++                                if (this.linked != cursor.tick) {
++                                    localQueue.insert(cursor);
++                                }
++                            }
++                            else {
++                                // couldn't set the state??
++                                if (this.linked != cursor.tick) {
++                                    localQueue.insert(cursor);
++                                }
++                                continue mainLoop; // state probably changed, bail out
++                            }
++                        }
++
++                        if (hasAnyTasks) {
++
++                            // we processed tasks, so lets go around and check again to make
++                            // sure we drained ALL of them. if we end up not having any tasks
++                            // on the next pass, we fall through to parking until we are woken
++                            // or the nano diff is up
++
++                            //noinspection UnnecessaryLabelOnContinueStatement
++                            continue mainLoop;
++                        }
++                    }
++                }
++
++                // shouldn't or couldn't run tasks, park until deadline
++                //noinspection ResultOfMethodCallIgnored
++                Thread.interrupted();
++                LockSupport.parkNanos(startState, diff);
++                if (this.scheduler.halted) {
++                    // just continue to the head of the loop again
++                    // we have a check there for if we halted
++                    return true;
++                }
++            }
++
++            // if the scheduler is halted, return true so it kills the thread
++            // immediately instead of trying to run a tick
++            return this.scheduler.halted;
++        }
++
++        @Override
++        public String toString() {
++            return "AffinityRunner#" + id;
++        }
++
++        private record TickThreadRunnerState(
++            @UnknownNullability("null when state is idle")
++            ScheduledState stateTarget,
++            int state
++        ) {
++        }
++    }
++}

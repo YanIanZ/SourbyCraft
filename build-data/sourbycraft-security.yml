@@ -1,0 +1,62 @@
+# SourbyCraft security limits. Keep existing values when updating the server.
+# Sizes are bytes unless the key names a character count. Depth/list sizes are counts.
+# These limits are separate from Aurora scheduler settings and the utility TOML.
+crash-prevention:
+  nbt:
+    mode: LOG
+    max-bytes: 2097152
+    max-depth: 64
+    max-string-length: 4096
+    max-list-size: 65536
+  sign:
+    mode: LOG
+    max-line-length: 256
+    max-total-chars: 1024
+  anvil:
+    mode: LOG
+    max-item-name-length: 128
+  recipe-book:
+    mode: LOG
+    # Encoded incoming recipe packet bytes; native 26.x packet codecs are already bounded.
+    max-packet-size: 20480
+  creative-item:
+    mode: LOG
+    # Encoded item/component bytes. LOG observes; KICK disconnects rather than silently dropping/clamping.
+    max-nbt-size: 16384
+# Packet observation limits. LOG counts + rate-limited logs, KICK rejects; OFF disables.
+# max-per-tick counts operations per monotonic 50 ms bucket, not bytes or region ticks.
+packet-guard:
+  book-edit:
+    mode: LOG
+    max-total-chars: 65536
+  custom-payload:
+    mode: LOG
+    max-bytes: 8192
+  container-click:
+    mode: LOG
+    # A drag sends start + one packet per slot + end; cover that burst before treating it as spam.
+    max-per-tick: 256
+  recipe-book:
+    mode: LOG
+    max-per-tick: 16
+  connection:
+    mode: LOG
+    max-per-second: 1000
+    max-bytes-per-second: 8388608
+# Accepted TCP sockets and initial Login Hello packets, measured across channels. Limits, modes and
+# ipv6-prefix-length are LIVE after /sourbycraft reload. Windows are fixed 1 s buckets, so up to 2x a limit
+# can pass across one boundary. Per-address: a peer's IPv4 address or IPv6 prefix; loopback is exempt.
+# Behind BungeeCord / Velocity / PROXY protocol (detected at startup, RESTART_REQUIRED) the TCP peer is the
+# proxy: per-address socket limits are skipped and login starts are keyed by the forwarded player address.
+# A per-address KICK reject does not consume the global budget.
+connection-guard:
+  global:
+    mode: LOG
+    max-connections-per-second: 1000
+    max-login-starts-per-second: 100
+  per-address:
+    # IPv6 peers are grouped by this prefix (1..128); /64 is one typical end-user allocation.
+    ipv6-prefix-length: 64
+    mode: LOG
+    max-connections-per-second: 20
+    max-login-starts-per-second: 5

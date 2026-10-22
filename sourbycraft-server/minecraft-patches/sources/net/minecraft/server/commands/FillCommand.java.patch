@@ -1,0 +1,49 @@
+--- a/net/minecraft/server/commands/FillCommand.java
++++ b/net/minecraft/server/commands/FillCommand.java
+@@ -155,6 +_,12 @@
+             );
+     }
+ 
++    // Folia start - region threading
++    private static void sendMessage(CommandSourceStack src, CommandSyntaxException ex) {
++        src.sendFailure((Component)ex.getRawMessage());
++    }
++
++    // Folia end - region threading
+     private static int fillBlocks(
+         final CommandSourceStack source,
+         final BoundingBox region,
+@@ -178,6 +_,19 @@
+             throw ERROR_FAILED.create();
+         }
+ 
++        // Folia start - region threading
++        int buffer = 32;
++        // physics may spill into neighbour chunks, so use a buffer
++        level.moonrise$loadChunksAsync(
++                (region.minX() - buffer) >> 4,
++                (region.maxX() + buffer) >> 4,
++                (region.minZ() - buffer) >> 4,
++                (region.maxZ() + buffer) >> 4,
++                net.minecraft.world.level.chunk.status.ChunkStatus.FULL,
++                ca.spottedleaf.concurrentutil.util.Priority.NORMAL,
++                (chunks) -> {
++                    try {
++        // Folia end - region threading
+         int count = 0;
+ 
+         for (BlockPos pos : BlockPos.betweenClosed(region.minX(), region.minY(), region.minZ(), region.maxX(), region.maxY(), region.maxZ())) {
+@@ -219,7 +_,12 @@
+ 
+         int finalCount = count;
+         source.sendSuccess(() -> Component.translatable("commands.fill.success", finalCount), true);
+-        return count;
++        // Folia start - region threading
++        } catch (final CommandSyntaxException cse) {
++            sendMessage(source, cse);
++        }});
++        return 1;
++        // Folia end - region threading
+     }
+ 
+     @FunctionalInterface

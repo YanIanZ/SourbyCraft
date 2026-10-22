@@ -1,0 +1,32 @@
+--- a/net/minecraft/world/level/levelgen/PhantomSpawner.java
++++ b/net/minecraft/world/level/levelgen/PhantomSpawner.java
+@@ -19,7 +_,7 @@
+ import net.minecraft.world.level.material.FluidState;
+ 
+ public class PhantomSpawner implements CustomSpawner {
+-    private int nextTick;
++    // private int nextTick; // Folia - region threading
+ 
+     @Override
+     public void tick(final ServerLevel level, final boolean spawnEnemies) {
+@@ -31,15 +_,16 @@
+                 }
+                 // Paper end - Ability to control player's insomnia and phantoms
+                 RandomSource random = level.getRandom();
+-                this.nextTick--;
+-                if (this.nextTick <= 0) {
++                final io.papermc.paper.threadedregions.RegionizedWorldData worldData = level.getCurrentWorldData(); // Folia - region threading
++                worldData.phantomSpawnerNextTick--; // Folia - region threading
++                if (worldData.phantomSpawnerNextTick <= 0) { // Folia - region threading
+                     // Paper start - Ability to control player's insomnia and phantoms
+                     int spawnAttemptMinSeconds = level.paperConfig().entities.behavior.phantomsSpawnAttemptMinSeconds;
+                     int spawnAttemptMaxSeconds = level.paperConfig().entities.behavior.phantomsSpawnAttemptMaxSeconds;
+-                    this.nextTick += (spawnAttemptMinSeconds + random.nextInt(spawnAttemptMaxSeconds - spawnAttemptMinSeconds + 1)) * 20;
++                    worldData.phantomSpawnerNextTick += (spawnAttemptMinSeconds + random.nextInt(spawnAttemptMaxSeconds - spawnAttemptMinSeconds + 1)) * 20; // Folia - region threading
+                     // Paper end - Ability to control player's insomnia and phantoms
+                     if (level.getSkyDarken() >= 5 || !level.dimensionType().hasSkyLight()) {
+-                        for (ServerPlayer player : level.players()) {
++                        for (ServerPlayer player : level.getLocalPlayers()) { // Folia - region threading
+                             if (!player.isSpectator() && (!level.paperConfig().entities.behavior.phantomsDoNotSpawnOnCreativePlayers || !player.isCreative())) { // Paper - Add phantom creative and insomniac controls
+                                 BlockPos playerPos = player.blockPosition();
+                                 if (!level.dimensionType().hasSkyLight() || playerPos.getY() >= level.getSeaLevel() && level.canSeeSky(playerPos)) {

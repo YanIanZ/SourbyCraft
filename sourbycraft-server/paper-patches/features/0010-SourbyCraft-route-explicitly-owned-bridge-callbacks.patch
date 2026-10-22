@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Tue, 6 Oct 2026 21:55:42 +0700
+Subject: [PATCH] SourbyCraft - route explicitly owned bridge callbacks
+
+Carry callback target metadata into the bridge before scheduling. Explicit
+locations take precedence over the caller region. Preserve native global and
+async requests. The server resolver also supports the fingerprinted
+SuperiorSkyblock2 2026.3 spawn-biome initialization callback.
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java b/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
+index 4e5deef1d16f847d8401a084f07f2ed9f069132f..bd31b28d155c5a5a51b284ffc51384cfe0100085 100644
+--- a/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
++++ b/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
+@@ -560,6 +560,9 @@ public class CraftScheduler implements BukkitScheduler {
+             @Override public int id() { return task.getTaskId(); }
+             @Override public boolean sync() { return task.isSync(); }
+             @Override public boolean global() { return task.rTask instanceof dev.iyanz.sourbycraft.bridge.FoliaSchedulerCompatibility.GlobalCallback; }
++            @Override public dev.iyanz.sourbycraft.execution.region.RegionAnchor targetRegion() {
++                return dev.iyanz.sourbycraft.bridge.AuroraBridge.targetRegion(task.getOwner(), task.rTask);
++            }
+             @Override public long period() { return task.getPeriod(); }
+             @Override public boolean cancelled() { return task.isCancelled(); }
+             @Override public void markCancelled() {

@@ -1,0 +1,123 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Tue, 13 Oct 2026 23:45:29 +0700
+Subject: [PATCH] SourbyCraft - stage world creation around the initial spawn
+ search
+
+
+diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkTaskScheduler.java b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkTaskScheduler.java
+index 2b02cf932cbac18c58ac7cbc98c2f0196d34843b..ac2fd37a30574d616626bb887e10c1dea3d1118c 100644
+--- a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkTaskScheduler.java
++++ b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkTaskScheduler.java
+@@ -515,6 +515,37 @@ public final class ChunkTaskScheduler {
+         return true;
+     }
+ 
++    // SourbyCraft start - staged world creation
++    /**
++     * The first half of {@link #syncLoadNonFull} without the wait: adds the same non-full load
++     * ticket and starts the same load, then returns at once. The chunk can be polled with
++     * {@code moonrise$getSpecificChunkIfLoaded(chunkX, chunkZ, status)} from any thread; pass the
++     * returned id to {@link #endNonFullLoad} to drop the ticket. Legal wherever syncLoadNonFull
++     * is, including on the global tick for a world not yet added to the regionised server.
++     */
++    public Long beginNonFullLoad(final int chunkX, final int chunkZ, final ChunkStatus status) {
++        if (status == null || status.isOrAfter(ChunkStatus.FULL)) {
++            throw new IllegalArgumentException("Status: " + status);
++        }
++        if (this.hasShutdown()) {
++            throw new IllegalStateException(
++                "Chunk system has shut down, cannot process chunk requests in world '" + ca.spottedleaf.moonrise.common.util.WorldUtil.getWorldName(this.world) + "' at "
++                    + "(" + chunkX + "," + chunkZ + ") status: " + status
++            );
++        }
++        final Long ticketId = getNextNonFullLoadId();
++        this.chunkHolderManager.addTicketAtLevel(NON_FULL_CHUNK_LOAD, chunkX, chunkZ, getTicketLevel(status), ticketId);
++        this.chunkHolderManager.processTicketUpdates();
++        this.beginChunkLoadForNonFullSync(chunkX, chunkZ, status, Priority.BLOCKING);
++        return ticketId;
++    }
++
++    /** Drops the ticket {@link #beginNonFullLoad} added, as {@link #syncLoadNonFull} does after its wait. */
++    public void endNonFullLoad(final int chunkX, final int chunkZ, final ChunkStatus status, final Long ticketId) {
++        this.chunkHolderManager.removeTicketAtLevel(NON_FULL_CHUNK_LOAD, chunkX, chunkZ, getTicketLevel(status), ticketId);
++    }
++    // SourbyCraft end - staged world creation
++
+     // Note: on Moonrise the non-full sync load requires blocking on managedBlock, but this is fine since there is only
+     // one main thread. On Folia, it is required that the non-full load can occur completely asynchronously to avoid deadlock
+     // between regions
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index a63312e01cc7875423e8850441522cf5a37d74a0..65a83fd0a0b765106e64744de0370290ae64eebd 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -757,9 +757,14 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         this.initWorld(serverLevel, null);
+     }
+     public void initWorld(ServerLevel overworld, org.bukkit.@Nullable WorldCreator worldCreator) {
+-        final net.minecraft.world.level.storage.ServerLevelData levelData = overworld.serverLevelData;
+-        final WorldOptions worldOptions = overworld.worldGenSettings.options();
+-        final boolean isDebug = this.worldData.isDebugWorld();
++        // SourbyCraft start - staged world creation: the same two stages, back to back
++        this.initWorldBeforeSpawn(overworld);
++        this.initWorldSpawn(overworld, worldCreator);
++    }
++
++    /** The part of {@link #initWorld} up to and including {@code WorldInitEvent}. */
++    public void initWorldBeforeSpawn(final ServerLevel overworld) {
++        // SourbyCraft end - staged world creation
+         if (overworld.generator != null) {
+             overworld.getWorld().getPopulators().addAll(overworld.generator.getDefaultPopulators(overworld.getWorld()));
+         }
+@@ -768,6 +773,15 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         this.getPlayerList().addWorldborderListener(overworld);
+         this.server.getPluginManager().callEvent(new org.bukkit.event.world.WorldInitEvent(overworld.getWorld()));
+     // Paper end - rework world loading process
++        // SourbyCraft start - staged world creation
++    }
++
++    /** The rest of {@link #initWorld}: the initial spawn search, then the load focus. */
++    public void initWorldSpawn(final ServerLevel overworld, org.bukkit.@Nullable WorldCreator worldCreator) {
++        final net.minecraft.world.level.storage.ServerLevelData levelData = overworld.serverLevelData;
++        final WorldOptions worldOptions = overworld.worldGenSettings.options();
++        final boolean isDebug = this.worldData.isDebugWorld();
++        // SourbyCraft end - staged world creation
+         if (!levelData.isInitialized()) {
+             try {
+                 // Paper start - Allow direct setting spawn location
+@@ -803,6 +817,35 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         overworld.levelLoadListener.updateFocus(focusPos.dimension(), ChunkPos.containing(focusPos.pos())); // Paper - per world load listener
+     }
+ 
++    // SourbyCraft start - staged world creation
++    /**
++     * The chunk {@link #initWorldSpawn} loads first, to {@code ChunkStatus.SPAWN}, when it searches
++     * for the initial spawn: the chunk holding the climate sampler's spawn position. It is found by
++     * the same checks, in the same order, as {@code initWorldSpawn} and {@code setInitialSpawn},
++     * without loading anything. {@code null} when no search will run: the spawn is already set, the
++     * creator forces one, the world is a debug world, or its generator fixes one (a plugin's
++     * {@code getFixedSpawnLocation} is therefore asked once here and once more by the search).
++     */
++    public @Nullable ChunkPos initialSpawnSearchChunk(final ServerLevel level, final org.bukkit.@Nullable WorldCreator worldCreator) {
++        if (level.serverLevelData.isInitialized()) {
++            return null;
++        }
++        if (worldCreator != null && worldCreator.forcedSpawnPosition() != null) {
++            return null;
++        }
++        if (SharedConstants.DEBUG_ONLY_GENERATE_HALF_THE_WORLD && SharedConstants.DEBUG_WORLD_RECREATE || this.worldData.isDebugWorld()) {
++            return null;
++        }
++        if (level.generator != null) {
++            final org.bukkit.Location spawn = level.generator.getFixedSpawnLocation(level.getWorld(), new java.util.Random(level.getSeed()));
++            if (spawn != null && spawn.getWorld() != null) {
++                return null;
++            }
++        }
++        return ChunkPos.containing(level.getChunkSource().randomState().sampler().findSpawnPosition());
++    }
++    // SourbyCraft end - staged world creation
++
+     private static void setInitialSpawn(
+         final ServerLevel level,
+         final ServerLevelData levelData,

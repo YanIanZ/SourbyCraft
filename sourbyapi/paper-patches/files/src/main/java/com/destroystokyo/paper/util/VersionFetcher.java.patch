@@ -1,0 +1,21 @@
+--- a/src/main/java/com/destroystokyo/paper/util/VersionFetcher.java
++++ b/src/main/java/com/destroystokyo/paper/util/VersionFetcher.java
+@@ -25,6 +_,18 @@
+      * @apiNote This method may involve a web request which will block the executing thread
+      */
+     Component getVersionMessage();
++    // Canvas start - improve version command
++
++    /**
++     * Allows overriding the full output message with a custom one set by the version fetcher
++     * implementation. If this returns null it uses the Bukkit-provided one
++     *
++     * @return the nullable full out message
++     */
++    default @org.jspecify.annotations.Nullable Component getFullOutMessage() {
++        return null;
++    }
++    // Canvas end - improve version command
+ 
+     /**
+      * Gets the version message to cache and show to command senders.

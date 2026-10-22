@@ -1,0 +1,14 @@
+--- a/src/main/java/io/papermc/paper/datapack/PaperDatapack.java
++++ b/src/main/java/io/papermc/paper/datapack/PaperDatapack.java
+@@ -28,6 +_,11 @@
+ 
+     @Override
+     public void setEnabled(final boolean enabled) {
++        // Canvas start - region threading
++        if (true) {
++            throw new UnsupportedOperationException("Unsupported in region threading");
++        }
++        // Canvas end - region threading
+         final MinecraftServer server = MinecraftServer.getServer();
+         final List<Pack> enabledPacks = new ArrayList<>(server.getPackRepository().getSelectedPacks());
+         final Pack packToChange = server.getPackRepository().getPack(this.getName());

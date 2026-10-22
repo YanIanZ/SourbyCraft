@@ -1,0 +1,44 @@
+--- a/net/minecraft/world/level/block/SaplingBlock.java
++++ b/net/minecraft/world/level/block/SaplingBlock.java
+@@ -24,7 +_,7 @@
+     public static final IntegerProperty STAGE = BlockStateProperties.STAGE;
+     private static final VoxelShape SHAPE = Block.column(12.0, 0.0, 12.0);
+     protected final TreeGrower treeGrower;
+-    public static org.bukkit.@org.jspecify.annotations.Nullable TreeType treeType; // CraftBukkit
++    public static final ThreadLocal<org.bukkit.TreeType> treeTypeRT = new ThreadLocal<>(); // CraftBukkit // Folia - region threading
+ 
+     @Override
+     public MapCodec<? extends SaplingBlock> codec() {
+@@ -54,22 +_,23 @@
+             level.setBlock(pos, state.cycle(STAGE), Block.UPDATE_NONE);
+         } else {
+             // CraftBukkit start
+-            if (level.captureTreeGeneration) {
++            final io.papermc.paper.threadedregions.RegionizedWorldData worldData = level.getCurrentWorldData(); // Folia - region threading
++            if (worldData.captureTreeGeneration) { // Folia - region threading
+                 this.treeGrower.growTree(level, level.getChunkSource().getGenerator(), pos, state, random);
+             } else {
+-                level.captureTreeGeneration = true;
++                worldData.captureTreeGeneration = true; // Folia - region threading
+                 java.util.List<org.bukkit.craftbukkit.block.CraftBlockState> capturedBlockStates;
+                 org.bukkit.TreeType treeType;
+                 try {
+                     this.treeGrower.growTree(level, level.getChunkSource().getGenerator(), pos, state, random);
+                 } finally {
+-                    level.captureTreeGeneration = false;
+-
+-                    capturedBlockStates = new java.util.ArrayList<>(level.capturedBlockStates.values());
+-                    level.capturedBlockStates.clear();
+-
+-                    treeType = SaplingBlock.treeType;
+-                    SaplingBlock.treeType = null;
++                    worldData.captureTreeGeneration = false; // Folia - region threading
++
++                    capturedBlockStates = new java.util.ArrayList<>(worldData.capturedBlockStates.values()); // Folia - region threading
++                    worldData.capturedBlockStates.clear(); // Folia - region threading
++
++                    treeType = SaplingBlock.treeTypeRT.get(); // Folia - region threading
++                    SaplingBlock.treeTypeRT.set(null); // Folia - region threading
+                 }
+                 if (!capturedBlockStates.isEmpty()) {
+                     org.bukkit.Location location = org.bukkit.craftbukkit.util.CraftLocation.toBukkit(pos, level);

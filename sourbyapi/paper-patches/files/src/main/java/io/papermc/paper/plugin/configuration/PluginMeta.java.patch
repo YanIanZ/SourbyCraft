@@ -1,0 +1,15 @@
+--- a/src/main/java/io/papermc/paper/plugin/configuration/PluginMeta.java
++++ b/src/main/java/io/papermc/paper/plugin/configuration/PluginMeta.java
+@@ -189,4 +_,12 @@
+     default String namespace() {
+         return this.getName().toLowerCase(Locale.ROOT);
+     }
++    
++    // Folia start - block plugins not marked as supported
++    /**
++     * Returns whether the plugin has been marked to be compatible with regionised threading as provided
++     * by Folia
++     */
++    public boolean isFoliaSupported();
++    // Folia end - block plugins not marked as supported
+ }

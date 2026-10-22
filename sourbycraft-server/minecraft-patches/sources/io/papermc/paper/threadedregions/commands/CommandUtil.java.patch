@@ -1,0 +1,151 @@
+--- /dev/null
++++ b/io/papermc/paper/threadedregions/commands/CommandUtil.java
+@@ -1,0 +_,148 @@
++package io.papermc.paper.threadedregions.commands;
++
++import java.util.ArrayList;
++import java.util.List;
++import java.util.function.Function;
++import io.papermc.paper.threadedregions.TickRegionScheduler;
++import net.kyori.adventure.text.format.NamedTextColor;
++import net.kyori.adventure.text.format.TextColor;
++import net.kyori.adventure.util.HSVLike;
++import net.minecraft.server.MinecraftServer;
++import net.minecraft.server.level.ServerPlayer;
++import org.jspecify.annotations.NonNull;
++import org.jspecify.annotations.Nullable;
++
++public final class CommandUtil {
++    // Canvas start - region threading
++    public static final TextColor SPRINTING_COLOR = NamedTextColor.LIGHT_PURPLE;
++    public static final double diff2MultTps = 0.1D;
++    public static final double diff5MultTps = 0.25D;
++    public static final double diff10MultTps = 0.5D;
++    public static final double diff15MultMspt = 0.3D;
++    public static final double diff25MultMspt = 0.5D;
++    public static final double diff35MultMspt = 0.7D;
++    public static final double diff40MultMspt = 0.8D;
++    // Canvas end - region threading
++
++    @NonNull
++    public static List<String> getSortedList(final @NonNull Iterable<String> iterable) {
++        final List<String> ret = new ArrayList<>();
++        for (final String val : iterable) {
++            ret.add(val);
++        }
++
++        ret.sort(String.CASE_INSENSITIVE_ORDER);
++
++        return ret;
++    }
++
++    @NonNull
++    public static List<String> getSortedList(final @NonNull Iterable<String> iterable, final String prefix) {
++        final List<String> ret = new ArrayList<>();
++        for (final String val : iterable) {
++            if (val.regionMatches(true, 0, prefix, 0, prefix.length())) {
++                ret.add(val);
++            }
++        }
++
++        ret.sort(String.CASE_INSENSITIVE_ORDER);
++
++        return ret;
++    }
++
++    @NonNull
++    public static <T> List<String> getSortedList(final @NonNull Iterable<T> iterable, final Function<T, String> transform) {
++        final List<String> ret = new ArrayList<>();
++        for (final T val : iterable) {
++            final String transformed = transform.apply(val);
++            if (transformed != null) {
++                ret.add(transformed);
++            }
++        }
++
++        ret.sort(String.CASE_INSENSITIVE_ORDER);
++
++        return ret;
++    }
++
++    @NonNull
++    public static <T> List<String> getSortedList(final @NonNull Iterable<T> iterable, final Function<T, String> transform, final String prefix) {
++        final List<String> ret = new ArrayList<>();
++        for (final T val : iterable) {
++            final String string = transform.apply(val);
++            if (string != null && string.regionMatches(true, 0, prefix, 0, prefix.length())) {
++                ret.add(string);
++            }
++        }
++
++        ret.sort(String.CASE_INSENSITIVE_ORDER);
++
++        return ret;
++    }
++
++    @NonNull
++    public static TextColor getColourForTPS(final double tps) {
++        // Canvas start - region threading
++        final float rate = TickRegionScheduler.getTickRate();
++        final double difference = Math.min(Math.abs(rate - tps), rate);
++        final double coordinate;
++        if (difference <= (rate * diff2MultTps)) {
++            // >= 18 tps
++            coordinate = 70.0 + ((140.0 - 70.0)/(0.0 - (rate * diff2MultTps))) * (difference - (rate * diff2MultTps));
++        } else if (difference <= (rate * diff5MultTps)) {
++            // >= 15 tps
++            coordinate = 30.0 + ((70.0 - 30.0)/((rate * diff2MultTps) - (rate * diff5MultTps))) * (difference - (rate * diff5MultTps));
++        } else if (difference <= (rate * diff10MultTps)) {
++            // >= 10 tps
++            coordinate = 10.0 + ((30.0 - 10.0)/((rate * diff5MultTps) - (rate * diff10MultTps))) * (difference - (rate * diff10MultTps));
++        } else {
++            // >= 0.0 tps
++            coordinate = 0.0 + ((10.0 - 0.0)/((rate * diff10MultTps) - rate)) * (difference - rate);
++        }
++        // Canvas end - region threading
++
++        return TextColor.color(HSVLike.hsvLike((float)(coordinate / 360.0), 85.0f / 100.0f, 80.0f / 100.0f));
++    }
++
++    @NonNull
++    public static TextColor getColourForMSPT(final double mspt) {
++        // Canvas start - region threading
++        final float time = 1000 / TickRegionScheduler.getTickRate();
++        final double clamped = Math.min(Math.abs(mspt), time);
++        final double coordinate;
++        if (clamped <= (time * diff15MultMspt)) {
++            coordinate = 130.0 + ((140.0 - 130.0)/(0.0 - (time * diff15MultMspt))) * (clamped - (time * diff15MultMspt));
++        } else if (clamped <= (time * diff25MultMspt)) {
++            coordinate = 90.0 + ((130.0 - 90.0)/((time * diff15MultMspt) - (time * diff25MultMspt))) * (clamped - (time * diff25MultMspt));
++        } else if (clamped <= (time * diff35MultMspt)) {
++            coordinate = 30.0 + ((90.0 - 30.0)/((time * diff25MultMspt) - (time * diff35MultMspt))) * (clamped - (time * diff35MultMspt));
++        } else if (clamped <= (time * diff40MultMspt)) {
++            coordinate = 15.0 + ((30.0 - 15.0)/((time * diff35MultMspt) - (time * diff40MultMspt))) * (clamped - (time * diff40MultMspt));
++        } else {
++            coordinate = 0.0 + ((15.0 - 0.0)/((time * diff40MultMspt) - time)) * (clamped - time);
++        }
++        // Canvas end - region threading
++
++        return TextColor.color(HSVLike.hsvLike((float)(coordinate / 360.0), 85.0f / 100.0f, 80.0f / 100.0f));
++    }
++
++    @NonNull
++    public static TextColor getUtilisationColourRegion(final double util) {
++        // TODO anything better?
++        // assume 20TPS
++        return getColourForMSPT(util * (TickRegionScheduler.getTimeBetweenTicks() / 1_000_000F)); // Canvas - region threading
++    }
++
++    @Nullable
++    public static ServerPlayer getPlayer(final String name) {
++        for (final ServerPlayer player : MinecraftServer.getServer().getPlayerList().getPlayers()) {
++            if (player.getGameProfile().name().equalsIgnoreCase(name)) {
++                return player;
++            }
++        }
++
++        return null;
++    }
++
++    private CommandUtil() {}
++}

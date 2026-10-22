@@ -1,0 +1,22 @@
+--- a/net/minecraft/server/commands/data/DataAccessor.java
++++ b/net/minecraft/server/commands/data/DataAccessor.java
+@@ -16,4 +_,19 @@
+     Component getPrintSuccess(Tag data);
+ 
+     Component getPrintSuccess(NbtPathArgument.NbtPath path, double scale, int value);
++    // Canvas start - region threading
++    com.mojang.brigadier.exceptions.SimpleCommandExceptionType CSE_TARGET_NOT_SAME_REGION =
++        new com.mojang.brigadier.exceptions.SimpleCommandExceptionType(Component.literal("Target not in same region"));
++    // note: this should throw a CSE that says "not in same region" or something,
++    //       we do not trigger a REAL ISE thread check
++    default void ensureTickThread(final String reason) throws CommandSyntaxException {
++        // no-op
++    }
++    default void scheduleOrExecute(final java.util.function.Consumer<DataAccessor> consumer) {
++        // no-op
++    }
++    default boolean isTickThreadFor() {
++        return false;
++    }
++    // Canvas end - region threading
+ }

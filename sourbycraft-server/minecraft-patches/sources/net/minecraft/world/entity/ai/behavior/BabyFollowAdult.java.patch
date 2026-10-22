@@ -1,0 +1,28 @@
+--- a/net/minecraft/world/entity/ai/behavior/BabyFollowAdult.java
++++ b/net/minecraft/world/entity/ai/behavior/BabyFollowAdult.java
+@@ -27,6 +_,12 @@
+                             return false;
+                         } else {
+                             LivingEntity adult = i.get(nearestAdult);
++                            // Canvas start - region threading
++                            if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(adult)) {
++                                nearestAdult.erase();
++                                return true;
++                            }
++                            // Canvas end - region threading
+                             if (body.closerThan(adult, followRange.maxInclusive() + 1) && !body.closerThan(adult, followRange.minInclusive())) {
+                                 // CraftBukkit start
+                                 org.bukkit.event.entity.EntityTargetLivingEntityEvent event = org.bukkit.craftbukkit.event.CraftEventFactory.callEntityTargetLivingEvent(body, adult, org.bukkit.event.entity.EntityTargetEvent.TargetReason.FOLLOW_LEADER);
+@@ -37,6 +_,12 @@
+                                     walkTarget.erase();
+                                     return true;
+                                 }
++                                // Canvas start - region threading
++                                if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(((org.bukkit.craftbukkit.entity.CraftEntity)event.getTarget()).getHandleRaw())) {
++                                    nearestAdult.erase();
++                                    return true;
++                                }
++                                // Canvas end - region threading
+                                 adult = ((org.bukkit.craftbukkit.entity.CraftLivingEntity) event.getTarget()).getHandle();
+                                 // CraftBukkit end
+                                 WalkTarget target = new WalkTarget(

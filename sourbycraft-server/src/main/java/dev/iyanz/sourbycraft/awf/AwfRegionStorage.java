@@ -1,0 +1,871 @@
+package dev.iyanz.sourbycraft.awf;
+
+import dev.iyanz.sourbycraft.execution.ExecutionLane;
+import java.io.IOException;
+import java.nio.file.Path;
+import java.util.Optional;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+
+/**
+ * Aurora World Fabric under one of the engine's region storages ({@code RegionFileStorage}): the
+ * chunk, entity or POI data of one dimension of a world an operator listed in
+ * {@code aurora.awf.worlds}.
+ *
+ * <p><b>Layering.</b> The world's existing region files are the base. A chunk the engine writes
+ * or deletes after AWF is attached is owned by AWF and never goes to a region file; a chunk it has
+ * not touched is still read from the region file. {@link #read} says which: {@code null} means
+ * "not AWF's, read the region file", {@link #DELETED} means "AWF deleted it, there is no data".
+ * Region files are never written while AWF is attached, so they stay exactly as they were on the
+ * day it was enabled.</p>
+ *
+ * <p><b>Durability.</b> A write is in memory until a commit. Commits start every
+ * {@code commit-interval-seconds} on the governed storage lane ({@link #maintain}), and run
+ * synchronously on {@link #flush} and {@link #close} (save-all flush and shutdown). A crash can
+ * lose the writes of the last interval — region files lose less, since each write goes to the
+ * OS at once. That is the trade this storage makes, and why no world uses it unless listed.</p>
+ *
+ * <p><b>Once attached, attached.</b> The store under a region folder shadows the region files
+ * from then on. If the world is later removed from the list, the store is still opened: writing to
+ * the region files underneath it would be silently overridden by older AWF data on a later run.
+ * Leaving AWF needs an export, which does not exist yet.</p>
+ */
+public final class AwfRegionStorage {
+
+    /** {@link #read}'s answer for a chunk AWF deleted. Never modified; compare by identity. */
+    public static final byte[] DELETED = new byte[0];
+    /** Suffix of the store directory beside a region folder: {@code region} → {@code region.awf}. */
+    public static final String STORE_SUFFIX = ".awf";
+
+    private final String name;
+    private final AwfWorld world;
+    private final AwfSettings settings;
+    private final Executor storageLane;
+    private final Runnable onClose;
+    private final AtomicLong lastCommitNanos;
+    private final AtomicBoolean closed = new AtomicBoolean();
+    /**
+     * Makes {@link #write} and the close/discard transitions mutually exclusive. A write holds the
+     * read lock from its {@code closed}/{@code discarding} check until its bytes are in the world,
+     * so writes on many region threads still run side by side. {@link #close} and {@link #discard}
+     * take the write lock to flip their state, so a write admitted before close is in the world
+     * before close takes its final snapshot, and a write that comes after sees the new state.
+     */
+    private final java.util.concurrent.locks.ReentrantReadWriteLock transition =
+        new java.util.concurrent.locks.ReentrantReadWriteLock();
+    /** Runs inside {@link #write} once it is admitted; for tests that interleave close with it. */
+    private volatile Runnable admittedHook = () -> {};
+    /**
+     * Set when the world is being unloaded without saving: from then on writes are dropped and
+     * nothing more is committed, so the store keeps the state of its last commit.
+     */
+    private volatile boolean discarding;
+    /** The storage folder kind ({@code region}, ...) when empty new chunks are pruned, else null. */
+    private volatile String pruneKind;
+    private final AtomicLong pruned = new AtomicLong();
+    /** Chunks outside these are not stored; null for no bounds. */
+    private volatile dev.iyanz.sourbycraft.api.world.WorldProperties.Bounds saveBounds;
+    private final AtomicLong outOfBounds = new AtomicLong();
+    private final AtomicLong deletes = new AtomicLong();
+    private final AtomicLong reads = new AtomicLong();
+    private final AtomicLong baseFallthroughs = new AtomicLong();
+
+    /** Attempts a read of stored bytes gets before the position is fenced; see {@link #read}. */
+    static final int READ_ATTEMPTS = 3;
+    /** Pause before the second and third attempt. */
+    private static final long[] READ_BACKOFF_MILLIS = {100L, 400L};
+    /** No further attempt starts once this much time has gone into one read (a frozen backend). */
+    static final long READ_RETRY_BUDGET_NANOS = 5_000_000_000L;
+    /**
+     * After a read gave up, every read in this server gets a single attempt for this long. A chunk
+     * load pulls in hundreds of neighbouring chunks, and the chunk system has few I/O threads shared
+     * by every world: retrying each of them would back the I/O queue up for minutes (and a
+     * {@code save-all flush} waits for that queue on the region threads).
+     */
+    static final long FAIL_FAST_NANOS = 5_000_000_000L;
+    /** {@link System#nanoTime} until which reads are not retried, 0 for none; see {@link #FAIL_FAST_NANOS}. */
+    private static final AtomicLong failFastUntil = new AtomicLong();
+    /**
+     * {@link System#nanoTime} until which structure scans that would read the backend are refused, 0
+     * for none: opened for {@link #FAIL_FAST_NANOS} by a scan whose read failed; see {@link #scanRead}.
+     * Server-wide like {@link #failFastUntil}, since the backend (Redis) is shared by every world.
+     */
+    private static final AtomicLong scanRefuseUntil = new AtomicLong();
+    private final AtomicLong refusedScans = new AtomicLong();
+    private final AtomicLong scanFailures = new AtomicLong();
+    /**
+     * Positions whose stored bytes could not be read, with the time they were fenced. The engine
+     * treats a failed read as "no data" and generates the chunk again; writes of that position are
+     * refused from then on, so the regenerated chunk can never replace the stored one. A later
+     * successful read on the chunk-load path lifts the fence (see {@link #recovered}).
+     */
+    private final java.util.Map<ChunkKey, Long> unreadable = new java.util.concurrent.ConcurrentHashMap<>();
+    private final AtomicLong readRetries = new AtomicLong();
+    private final AtomicLong readFailures = new AtomicLong();
+    private final AtomicLong refusedWrites = new AtomicLong();
+    /** Rate-limits the log of failed reads: first per window with its stack, then one summary. */
+    private volatile ReadFailureLog failureLog;
+    /** Whether a read is on the engine's chunk-load path; tests replace it. */
+    private volatile java.util.function.BooleanSupplier loadPath = AwfRegionStorage::onChunkLoadPath;
+    /** Set when {@link #close} committed everything but the backend could not release the store. */
+    private volatile boolean releaseFailed;
+    /** Whether the last commit attempt (periodic, flush or close) failed; for flush reporting. */
+    private volatile boolean lastCommitFailed;
+    /** The engine's shutdown budget once shutdown has begun, else {@code null}; see {@link AwfShutdownBudget}. */
+    private final java.util.function.Supplier<AwfShutdownBudget> shutdown;
+    /** Where a close under the shutdown budget reports what it could confirm. */
+    private final java.util.function.Consumer<AwfShutdownReport.StorageResult> shutdownReport;
+    /** Writes refused because this storage was already closed. */
+    private final AtomicLong closedWrites = new AtomicLong();
+
+    AwfRegionStorage(final String name, final AwfWorld world, final AwfSettings settings, final Executor storageLane,
+                     final long nowNanos, final Runnable onClose) {
+        this(name, world, settings, storageLane, nowNanos, onClose, () -> null, result -> { });
+    }
+
+    AwfRegionStorage(final String name, final AwfWorld world, final AwfSettings settings, final Executor storageLane,
+                     final long nowNanos, final Runnable onClose,
+                     final java.util.function.Supplier<AwfShutdownBudget> shutdown,
+                     final java.util.function.Consumer<AwfShutdownReport.StorageResult> shutdownReport) {
+        this.name = name;
+        this.world = world;
+        this.settings = settings;
+        this.storageLane = storageLane;
+        this.lastCommitNanos = new AtomicLong(nowNanos);
+        this.onClose = onClose;
+        this.failureLog = ReadFailureLog.serverLog(name);
+        this.shutdown = shutdown;
+        this.shutdownReport = shutdownReport;
+    }
+
+    /** The FILE backend's store directory for a region folder. */
+    public static Path storeFor(final Path regionFolder) {
+        final Path absolute = regionFolder.toAbsolutePath().normalize();
+        return absolute.resolveSibling(absolute.getFileName() + STORE_SUFFIX);
+    }
+
+    /** Whether a storage folder belongs to one of the listed worlds; see {@link #worldNames}. */
+    static boolean listed(final Path regionFolder, final java.util.Set<String> worlds) {
+        if (worlds.isEmpty()) return false;
+        for (final String name : worldNames(regionFolder)) {
+            if (worlds.contains(name)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * The world names a storage folder ({@code region}, {@code entities}, {@code poi}) belongs to,
+     * read from the folder's own end of the path, never from the directories the server lives in:
+     * <ul>
+     *   <li>{@code <level>/dimensions/<namespace>/<name>/<storage>} (every dimension on 26.2):
+     *       the dimension's {@code <name>} and the level folder {@code <level>};</li>
+     *   <li>any other layout inside the server directory: the first element of the path
+     *       relative to it ({@code world/region} → {@code world});</li>
+     *   <li>any other layout outside it: the storage folder's parent and grandparent
+     *       ({@code <world>/region}, {@code <world>/DIM-1/region}).</li>
+     * </ul>
+     * Matching any path element instead let a managed world named like an ancestor directory of
+     * the server ({@code home} for {@code /home/mc/server}) claim every world's storage.
+     */
+    static java.util.Set<String> worldNames(final Path regionFolder) {
+        final Path folder = regionFolder.toAbsolutePath().normalize();
+        final int n = folder.getNameCount();
+        final java.util.Set<String> names = new java.util.LinkedHashSet<>(4);
+        if (n >= 5 && folder.getName(n - 4).toString().equals("dimensions")) {
+            names.add(folder.getName(n - 2).toString());
+            names.add(folder.getName(n - 5).toString());
+            return names;
+        }
+        final Path cwd = Path.of("").toAbsolutePath().normalize();
+        if (folder.startsWith(cwd) && !folder.equals(cwd)) {
+            final Path relative = cwd.relativize(folder);
+            if (relative.getNameCount() >= 2) names.add(relative.getName(0).toString());
+            return names;
+        }
+        if (n >= 2) names.add(folder.getName(n - 2).toString());
+        if (n >= 3) names.add(folder.getName(n - 3).toString());
+        return names;
+    }
+
+    public String name() {
+        return this.name;
+    }
+
+    /**
+     * The chunk's NBT bytes if AWF owns it or the world's template has it, {@link #DELETED} if AWF
+     * deleted it, or {@code null} when neither has it and the region file is authoritative.
+     *
+     * <p><b>A failed read is never "no data".</b> Reading stored bytes from the backend is retried
+     * ({@link #READ_ATTEMPTS} attempts, backing off, at most {@link #READ_RETRY_BUDGET_NANOS} per
+     * read, never on a region thread, never after close, and not for {@link #FAIL_FAST_NANOS} after
+     * a read anywhere in the server gave up). If it still fails the
+     * {@link IOException} is thrown, which the engine answers by generating the chunk again; so the
+     * position is fenced first: every later write of it is refused and counted, and the stored bytes
+     * stay as they were. The fence is lifted only by a successful read on the chunk-load path
+     * ({@code moonrise$readData}): that read means the regenerated chunk has left memory and the
+     * stored one is being loaded, so writes from then on derive from the stored bytes. A successful
+     * read on another path (a structure scan) returns the stored bytes but keeps the fence, because
+     * the regenerated chunk may still be loaded and would be saved over them.</p>
+     */
+    public byte[] read(final int chunkX, final int chunkZ) throws IOException {
+        final ChunkKey key = new ChunkKey(chunkX, chunkZ);
+        this.reads.incrementAndGet();
+        final boolean owned = this.world.owns(key);
+        final Optional<byte[]> bytes = readStored(key);
+        if (this.unreadable.containsKey(key)) recovered(key);
+        if (owned) return bytes.isPresent() ? bytes.get() : DELETED;
+        // An instance reads its template's chunk until it writes its own.
+        if (bytes.isPresent()) return bytes.get();
+        this.baseFallthroughs.incrementAndGet();
+        return null;
+    }
+
+    /**
+     * {@link #read} for a structure scan ({@code RegionFileStorage.scanChunk}: {@code StructureCheck}
+     * behind /locate, eyes of ender, dolphins and explorer maps). Those callers need the answer in
+     * the same call and run on the region thread; vanilla answers a scan that throws with
+     * {@code CHUNK_LOAD_NEEDED} and loads the chunk (to {@code STRUCTURE_STARTS}), which reads it
+     * through {@link #read} on the chunk-load path. So a scan that fails changes no answer, only where
+     * the wait happens. Hence:
+     * <ul>
+     *   <li>one attempt, never retried (the chunk load that follows has its own retries);</li>
+     *   <li>a failure never fences the position: a scan does not make the engine generate the chunk
+     *       again, and a fence would refuse the saves of a copy of the chunk that is loaded meanwhile;</li>
+     *   <li>after a scan read failed, or while reads are failing fast ({@link #FAIL_FAST_NANOS}), a
+     *       scan that would have to read the backend is refused at once with {@link ScanRefused}, so
+     *       one locate does not wait {@code timeout-ms} for every stored chunk it looks at. Scans
+     *       answered from memory, by a deletion or by the region file are never refused: for those a
+     *       refusal would turn vanilla's "no data" into a chunk load that can generate the chunk.</li>
+     * </ul>
+     * The chunk load is not made faster: during an outage it still waits for the backend
+     * ({@code timeout-ms}, retries), which is the floor for a caller that needs the answer now.
+     */
+    public byte[] scanRead(final int chunkX, final int chunkZ) throws IOException {
+        final ChunkKey key = new ChunkKey(chunkX, chunkZ);
+        final long now = System.nanoTime();
+        if ((scanRefusing(now) || failingFast(now)) && this.world.readLeavesMemory(key)) {
+            this.refusedScans.incrementAndGet();
+            throw new ScanRefused("AWF structure scan of chunk " + key + " of " + this.name
+                + " refused: the store failed a read in the last " + FAIL_FAST_NANOS / 1_000_000_000L + " s");
+        }
+        this.reads.incrementAndGet();
+        final boolean owned = this.world.owns(key);
+        final Optional<byte[]> bytes;
+        try {
+            bytes = this.world.read(key);
+        } catch (final IOException failed) {
+            this.scanFailures.incrementAndGet();
+            final long previous = scanRefuseUntil.getAndSet(System.nanoTime() + FAIL_FAST_NANOS);
+            if (previous == 0 || now - previous >= 0) {
+                dev.iyanz.sourbycraft.util.SourbyLogger.warn("AWF structure scan of chunk " + key + " of " + this.name
+                    + " failed (" + failed.getMessage() + "). For " + FAIL_FAST_NANOS / 1_000_000_000L + " s, structure"
+                    + " scans of stored chunks are refused and those chunks are loaded instead (vanilla's answer to an"
+                    + " unreadable chunk; same result, the load still waits for the store)");
+            }
+            throw new IOException("AWF structure scan could not read chunk " + key + " of " + this.name + ": "
+                + failed.getMessage(), failed);
+        }
+        if (owned) return bytes.isPresent() ? bytes.get() : DELETED;
+        if (bytes.isPresent()) return bytes.get();
+        this.baseFallthroughs.incrementAndGet();
+        return null;
+    }
+
+    /** A structure scan refused by {@link #scanRead}; thrown once per refused chunk, so no stack trace. */
+    public static final class ScanRefused extends IOException {
+        ScanRefused(final String message) {
+            super(message);
+        }
+
+        @Override
+        public synchronized Throwable fillInStackTrace() {
+            return this;
+        }
+    }
+
+    static boolean scanRefusing(final long now) {
+        final long until = scanRefuseUntil.get();
+        return until != 0 && now - until < 0;
+    }
+
+    /** Structure scans refused by {@link #scanRead} since this storage opened. */
+    public long refusedScans() {
+        return this.refusedScans.get();
+    }
+
+    /** Structure scans whose backend read failed since this storage opened. */
+    public long scanFailures() {
+        return this.scanFailures.get();
+    }
+
+    private Optional<byte[]> readStored(final ChunkKey key) throws IOException {
+        final long started = System.nanoTime();
+        // A region thread must not sleep: one attempt there, as before.
+        final boolean mayRetry = ExecutionLane.of(Thread.currentThread().getName()) != ExecutionLane.REGION_TICK
+            && !failingFast(started);
+        for (int attempt = 1; ; attempt++) {
+            try {
+                return this.world.read(key);
+            } catch (final IOException failed) {
+                final AwfShutdownBudget budget = this.shutdown.get();
+                final boolean again = mayRetry && attempt < READ_ATTEMPTS && !this.closed.get()
+                    && System.nanoTime() - started < READ_RETRY_BUDGET_NANOS && (budget == null || !budget.expired());
+                if (again) {
+                    this.readRetries.incrementAndGet();
+                    try {
+                        Thread.sleep(READ_BACKOFF_MILLIS[Math.min(attempt, READ_BACKOFF_MILLIS.length) - 1]);
+                        continue;
+                    } catch (final InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+                if (attempt > 1) failFastUntil.set(System.nanoTime() + FAIL_FAST_NANOS);
+                throw fence(key, failed, attempt);
+            }
+        }
+    }
+
+    private IOException fence(final ChunkKey key, final IOException failed, final int attempts) {
+        this.readFailures.incrementAndGet();
+        this.unreadable.putIfAbsent(key, System.nanoTime());
+        final String message = "AWF could not read chunk " + key + " of " + this.name + " (" + attempts
+            + " attempt(s)): " + failed.getMessage() + ". The stored chunk is kept: writes of this position are"
+            + " refused until it is read back when the chunk loads again; a chunk the server generates in its"
+            + " place meanwhile is not saved";
+        // One chunk load reads hundreds of positions and the chunk system logs each failure with
+        // the exception's stack (twice: MoonriseRegionFileIO and ChunkLoadTask). The first failure
+        // of a window is logged here with its stack and thrown with its cause; the rest are counted
+        // and thrown without a stack; RepeatedReadFailureLogFilter (installed by the first repeat)
+        // drops the chunk system's records of those, so a burst logs the first failure and one
+        // summary. Fencing above is the same either way.
+        if (this.failureLog.failed(message, failed)) return new IOException(message, failed);
+        RepeatedReadFailureLogFilter.ensureInstalled();
+        return new RepeatedReadFailure(message + " [" + failed + "; stack trace omitted, see the first AWF read"
+            + " failure of this window]");
+    }
+
+    /**
+     * A failed read after the first of its {@link ReadFailureLog} window: same message and meaning
+     * as the first, but no stack trace and no cause (both would repeat the first one's).
+     */
+    public static final class RepeatedReadFailure extends IOException {
+        RepeatedReadFailure(final String message) {
+            super(message);
+        }
+
+        @Override
+        public synchronized Throwable fillInStackTrace() {
+            return this;
+        }
+    }
+
+    /** Replaces the failed-read log. Tests only. */
+    void failureLog(final ReadFailureLog log) {
+        this.failureLog = log;
+    }
+
+    private void recovered(final ChunkKey key) {
+        if (!this.loadPath.getAsBoolean()) return;
+        if (this.unreadable.remove(key) != null) {
+            dev.iyanz.sourbycraft.util.SourbyLogger.info("AWF read chunk " + key + " of " + this.name
+                + " again; its stored bytes were loaded and writes of it are accepted again");
+        }
+    }
+
+    /** Whether the caller is the chunk system's load I/O ({@code RegionFileStorage.moonrise$readData}). */
+    private static boolean onChunkLoadPath() {
+        return StackWalker.getInstance().walk(frames -> frames.anyMatch(frame ->
+            "moonrise$readData".equals(frame.getMethodName())
+                && frame.getClassName().endsWith(".RegionFileStorage")));
+    }
+
+    private static boolean failingFast(final long now) {
+        final long until = failFastUntil.get();
+        return until != 0 && now - until < 0;
+    }
+
+    /** Ends the fail-fast window. Tests only. */
+    static void resetFailFast() {
+        failFastUntil.set(0);
+        scanRefuseUntil.set(0);
+    }
+
+    /** Replaces the chunk-load-path check. Tests only. */
+    void loadPath(final java.util.function.BooleanSupplier loadPath) {
+        this.loadPath = loadPath;
+    }
+
+    /** Positions fenced because their stored bytes could not be read. */
+    public java.util.Set<ChunkKey> unreadable() {
+        return java.util.Set.copyOf(this.unreadable.keySet());
+    }
+
+    /**
+     * Takes a chunk's new NBT bytes, or its deletion when {@code nbt} is {@code null}. The array is
+     * copied. Never touches a region file and never blocks on the backend.
+     */
+    public void write(final int chunkX, final int chunkZ, final byte[] nbt) throws IOException {
+        this.transition.readLock().lock();
+        try {
+            if (this.discarding) return;
+            if (this.closed.get()) {
+                this.closedWrites.incrementAndGet();
+                throw new IOException("AWF storage " + this.name + " is closed");
+            }
+            this.admittedHook.run();
+            admittedWrite(chunkX, chunkZ, nbt);
+        } finally {
+            this.transition.readLock().unlock();
+        }
+    }
+
+    private void admittedWrite(final int chunkX, final int chunkZ, final byte[] nbt) throws IOException {
+        if (!this.unreadable.isEmpty() && this.unreadable.containsKey(new ChunkKey(chunkX, chunkZ))) {
+            // Not derived from the stored bytes, which could not be read: never let it replace them.
+            this.refusedWrites.incrementAndGet();
+            return;
+        }
+        final dev.iyanz.sourbycraft.api.world.WorldProperties.Bounds bounds = this.saveBounds;
+        if (bounds != null && !bounds.contains(chunkX, chunkZ)) {
+            this.outOfBounds.incrementAndGet();
+            return;
+        }
+        final String prune = this.pruneKind;
+        if (prune != null && nbt != null) {
+            final ChunkKey key = new ChunkKey(chunkX, chunkZ);
+            // Only chunks nothing has ever stored: an emptied chunk must still shadow what it held.
+            if (!this.world.owns(key) && !this.world.baseHas(key) && ChunkPruning.isEmpty(prune, nbt)) {
+                this.pruned.incrementAndGet();
+                return;
+            }
+        }
+        final ChunkKey key = new ChunkKey(chunkX, chunkZ);
+        if (nbt == null) {
+            this.world.delete(key);
+            this.deletes.incrementAndGet();
+            return;
+        }
+        if (nbt.length > AwfFile.MAX_CHUNK_BYTES) {
+            throw new IOException("chunk " + key + " in " + this.name + " is " + nbt.length
+                + " bytes; AWF stores at most " + AwfFile.MAX_CHUNK_BYTES);
+        }
+        this.world.write(key, nbt);
+    }
+
+    /**
+     * Starts a commit on the storage lane when writes have waited at least the commit interval, or
+     * (when {@code aurora.awf.commit-dirty-bytes} is set) the unsaved chunks hold at least that many
+     * bytes, and none is already running. Never waits for the commit to finish, but submitting it takes the
+     * storage lane's queue lock, and a commit the lane rejects at once logs its warning on the
+     * calling thread. Called once a second by {@link AwfMaintenanceDriver}.
+     *
+     * @return whether a commit was started
+     */
+    public boolean maintain(final long nowNanos) {
+        this.failureLog.flush();
+        if (this.discarding || this.closed.get() || this.world.dirtyCount() == 0 || this.world.pendingSaveCount() > 0) return false;
+        final AwfShutdownBudget budget = this.shutdown.get();
+        if (budget != null && budget.expired()) return false;          // no new attempt after the deadline
+        final long last = this.lastCommitNanos.get();
+        final boolean intervalPassed = nowNanos - last >= this.settings.commitIntervalSeconds() * 1_000_000_000L;
+        // The byte trigger (off at 0) lets a large backlog commit before the interval; it never skips
+        // the checks above (no commit already pending, not discarding or closed).
+        if (!intervalPassed && !(this.settings.commitDirtyBytes() > 0
+            && this.world.dirtyBytesAtLeast(this.settings.commitDirtyBytes()))) return false;
+        if (!this.lastCommitNanos.compareAndSet(last, nowNanos)) return false;
+        this.world.save(this.settings.persistence(), this.storageLane, this.settings.commitAttempts())
+            .whenComplete((ok, failed) -> {
+                if (failed == null) this.lastCommitFailed = false;
+                if (failed != null && !(unwrap(failed) instanceof AwfWorld.FencedException)) {
+                    this.lastCommitFailed = true;
+                    dev.iyanz.sourbycraft.util.SourbyLogger.warn("AWF commit for " + this.name
+                        + " failed; its chunks stay in memory and the next commit retries them", failed);
+                }
+            });
+        return true;
+    }
+
+    private static Throwable unwrap(final Throwable failed) {
+        return failed instanceof java.util.concurrent.CompletionException && failed.getCause() != null
+            ? failed.getCause() : failed;
+    }
+
+    /**
+     * Commits everything written so far and returns once it is durable. On a region thread, where
+     * blocking on disk is not allowed, the commit is started on the storage lane instead and this
+     * returns at once.
+     */
+    public void flush() throws IOException {
+        if (this.discarding || this.closed.get()) return;
+        if (this.world.dirtyCount() == 0) return;
+        if (ExecutionLane.of(Thread.currentThread().getName()) == ExecutionLane.REGION_TICK) {
+            if (this.lastCommitFailed) {
+                // save-all reports success from here; say that this storage is not durable.
+                dev.iyanz.sourbycraft.util.SourbyLogger.warn("AWF commits for " + this.name + " are failing: "
+                    + this.world.dirtyCount() + " chunk(s) are only in memory; this flush starts another attempt"
+                    + " but does not wait for it");
+            }
+            this.lastCommitNanos.set(Long.MIN_VALUE / 2);
+            maintain(0L);
+            return;
+        }
+        final AwfShutdownBudget budget = this.shutdown.get();
+        try {
+            if (budget == null) {
+                this.world.saveNow(this.settings.persistence(), this.settings.commitAttempts());
+            } else {
+                // Shutdown (the region save of this world): within the shared budget. What the deadline
+                // stops here is reported by close, which follows.
+                if (budget.expired()) {
+                    this.lastCommitFailed = true;
+                    return;
+                }
+                this.world.saveNow(this.settings.persistence(), this.settings.commitAttempts(), budget);
+            }
+            this.lastCommitFailed = false;
+        } catch (final AwfDeadlineExceeded cut) {
+            this.lastCommitFailed = true;
+            return;
+        } catch (final IOException failed) {
+            this.lastCommitFailed = true;
+            throw failed;
+        }
+        this.lastCommitNanos.set(System.nanoTime());
+    }
+
+    /** One storage's answer to {@link #flushBarrier()}. */
+    public record FlushResult(String storage, FlushStatus status, int chunks, String error) {}
+
+    public enum FlushStatus {
+        /** Every chunk written before the barrier is committed and confirmed by the backend. */
+        DURABLE,
+        /** The commit failed or could not start; {@code chunks} are still only in memory. */
+        FAILED,
+        /** Closed or being discarded: nothing is committed for it any more. */
+        SKIPPED
+    }
+
+    /**
+     * A durability barrier for the writes this storage holds now: completes {@link FlushStatus#DURABLE}
+     * once a commit whose snapshot was taken after this call succeeded (or at once when nothing is
+     * dirty), else {@link FlushStatus#FAILED} with the chunks still dirty. Never blocks: the commit runs
+     * on the storage lane, behind any commit already running, and the snapshot is taken when it starts,
+     * so it holds every write admitted before this call. For {@code save-all flush} reporting.
+     */
+    public java.util.concurrent.CompletableFuture<FlushResult> flushBarrier() {
+        if (this.discarding) {
+            return java.util.concurrent.CompletableFuture.completedFuture(
+                new FlushResult(this.name, FlushStatus.SKIPPED, 0, "being unloaded without saving"));
+        }
+        if (this.closed.get()) {
+            return java.util.concurrent.CompletableFuture.completedFuture(
+                new FlushResult(this.name, FlushStatus.SKIPPED, 0, "closed"));
+        }
+        final int dirty = this.world.dirtyCount();
+        if (dirty == 0) {
+            return java.util.concurrent.CompletableFuture.completedFuture(new FlushResult(this.name, FlushStatus.DURABLE, 0, null));
+        }
+        this.lastCommitNanos.set(System.nanoTime());
+        final java.util.concurrent.CompletableFuture<AwfStore.CommitResult> commit;
+        try {
+            commit = this.world.save(this.settings.persistence(), this.storageLane, this.settings.commitAttempts())
+                .toCompletableFuture();
+        } catch (final RuntimeException rejected) {
+            this.lastCommitFailed = true;
+            return java.util.concurrent.CompletableFuture.completedFuture(
+                new FlushResult(this.name, FlushStatus.FAILED, this.world.dirtyCount(), String.valueOf(rejected.getMessage())));
+        }
+        return commit.handle((ok, failed) -> {
+            if (failed == null) {
+                this.lastCommitFailed = false;
+                return new FlushResult(this.name, FlushStatus.DURABLE, dirty, null);
+            }
+            this.lastCommitFailed = true;
+            final Throwable cause = unwrap(failed);
+            return new FlushResult(this.name, FlushStatus.FAILED, this.world.dirtyCount(),
+                cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage());
+        });
+    }
+
+    /** Chunks written or deleted and not yet committed. */
+    public int dirtyCount() {
+        return this.world.dirtyCount();
+    }
+
+    /**
+     * Forces the store's committed state into a self-contained generation (FILE: a full index),
+     * even when nothing is dirty — flush, maintenance and close skip a clean storage, this does
+     * not. Blocking; the engine runs it on the storage lane ({@link AwfEngine#compact}).
+     *
+     * @return the store's result, or {@code null} when it had nothing to compact
+     * @throws IOException when the commit fails; {@link IllegalStateException} once closed or discarding
+     */
+    public AwfStore.CommitResult compact() throws IOException {
+        if (this.discarding || this.closed.get()) {
+            throw new IllegalStateException("AWF storage " + this.name + " is closed or discarding");
+        }
+        final AwfStore.CommitResult result = this.world.compact();
+        if (result != null) this.lastCommitNanos.set(System.nanoTime());
+        return result;
+    }
+
+    /** Whether the store's current generation is self-contained; see {@link AwfStore#fullIndex()}. */
+    public boolean fullIndex() {
+        return this.world.fullIndex();
+    }
+
+    /** The store's committed generation. */
+    public long storeGeneration() throws IOException {
+        return this.world.storeGeneration();
+    }
+
+    /**
+     * {@link #close} could not confirm its final commit: the chunks it names may be lost. (A close
+     * whose commit succeeded but whose backend release failed does not throw; see
+     * {@link #releaseFailed()}.)
+     */
+    public static final class CloseFailure extends IOException {
+        private static final long serialVersionUID = 1L;
+        private final int uncommitted;
+
+        CloseFailure(final String message, final int uncommitted, final Throwable cause) {
+            super(message, cause);
+            this.uncommitted = uncommitted;
+        }
+
+        /** Chunks written since the last confirmed commit when the final commit failed. */
+        public int uncommitted() {
+            return this.uncommitted;
+        }
+    }
+
+    /**
+     * Flushes and forgets this storage. Called when the engine closes the region storage.
+     *
+     * <p>Once shutdown has begun ({@link AwfEngine#beginShutdown()}) the close runs within the shared
+     * {@link AwfShutdownBudget} and never throws for what it could not confirm: it reports the outcome
+     * to the engine's {@link AwfShutdownReport}, which logs it and fails the shutdown. Outside shutdown
+     * (a world unloading) it throws {@link CloseFailure} as before.</p>
+     */
+    public void close() throws IOException {
+        final AwfShutdownBudget budget = this.shutdown.get();
+        if (budget != null) {
+            closeWithin(budget);
+            return;
+        }
+        // Under the write lock: every write admitted before this point is in the world, and every
+        // later one sees closed and fails loudly, so the final commit below misses nothing.
+        this.transition.writeLock().lock();
+        try {
+            if (!this.closed.compareAndSet(false, true)) return;
+        } finally {
+            this.transition.writeLock().unlock();
+        }
+        this.failureLog.close();
+        if (!this.unreadable.isEmpty()) {
+            dev.iyanz.sourbycraft.util.SourbyLogger.warn("AWF " + this.name + ": " + this.unreadable.size()
+                + " chunk position(s) could not be read this session; their stored bytes were kept and "
+                + this.refusedWrites.get() + " write(s) of chunks generated in their place were not saved");
+        }
+        IOException commitFailed = null;
+        int uncommitted = 0;
+        try {
+            try {
+                if (!this.discarding && this.world.dirtyCount() > 0) {
+                    this.world.saveNow(this.settings.persistence(), this.settings.commitAttempts());
+                }
+            } catch (final IOException failed) {
+                commitFailed = failed;
+                uncommitted = this.world.dirtyCount();
+            }
+        } finally {
+            try {
+                this.world.closeStore();
+            } catch (final IOException releaseFailed) {
+                if (commitFailed != null) {
+                    commitFailed.addSuppressed(releaseFailed);
+                } else {
+                    // Everything is committed; only the backend's claim (a Redis lease) stays until it
+                    // expires. Not a failure of the close: callers would report chunks lost.
+                    this.releaseFailed = true;
+                    dev.iyanz.sourbycraft.util.SourbyLogger.warn("AWF committed " + this.name + " but its backend could"
+                        + " not release it (" + releaseFailed.getMessage() + "); no chunks are lost, and a lease"
+                        + " expires on its own");
+                }
+            } finally {
+                this.onClose.run();
+            }
+        }
+        if (commitFailed != null) {
+            throw new CloseFailure("AWF could not confirm the final commit of " + this.name + ": " + uncommitted
+                + " chunk(s) written since the last confirmed commit are lost, unless the backend applied the"
+                + " commit after reporting the failure (" + commitFailed.getMessage() + ")", uncommitted, commitFailed);
+        }
+    }
+
+    private void closeWithin(final AwfShutdownBudget budget) {
+        // Writers hold the read lock only while copying bytes into memory, never across backend I/O.
+        if (!budget.tryLock(this.transition.writeLock())) {
+            this.shutdownReport.accept(new AwfShutdownReport.StorageResult(this.name, AwfShutdownReport.Outcome.REFUSED,
+                this.world.dirtyCount(), this.world.dirtySample(AwfShutdownReport.POSITIONS_LISTED), 0,
+                this.refusedWrites.get() + this.closedWrites.get(), this.world.uncertainChunks(), false,
+                "a chunk write held the storage past the deadline; it was not closed"));
+            return;
+        }
+        try {
+            if (!this.closed.compareAndSet(false, true)) return;
+        } finally {
+            this.transition.writeLock().unlock();
+        }
+        this.failureLog.close();
+        if (!this.unreadable.isEmpty()) {
+            dev.iyanz.sourbycraft.util.SourbyLogger.warn("AWF " + this.name + ": " + this.unreadable.size()
+                + " chunk position(s) could not be read this session; their stored bytes were kept and "
+                + this.refusedWrites.get() + " write(s) of chunks generated in their place were not saved");
+        }
+        // Commits waiting on the storage lane behind the running one (if any); fenced below.
+        final int queued = Math.max(0, this.world.pendingSaveCount() - (this.world.commitRunning() ? 1 : 0));
+        AwfShutdownReport.Outcome outcome = AwfShutdownReport.Outcome.CONFIRMED;
+        String detail = null;
+        if (!this.discarding && this.world.dirtyCount() > 0) {
+            try {
+                this.world.saveNow(this.settings.persistence(), this.settings.commitAttempts(), budget);
+            } catch (final AwfDeadlineExceeded cut) {
+                outcome = cut.requestSent() ? AwfShutdownReport.Outcome.UNCERTAIN : AwfShutdownReport.Outcome.REFUSED;
+                detail = cut.getMessage();
+            } catch (final AwfWorld.FencedException fenced) {
+                outcome = AwfShutdownReport.Outcome.REFUSED;
+                detail = fenced.getMessage();
+            } catch (final IOException | RuntimeException failed) {
+                outcome = AwfShutdownReport.Outcome.FAILED;
+                detail = String.valueOf(failed.getMessage());
+            }
+        }
+        // A commit the deadline cut off earlier (periodic, or this world's flush) may have been applied.
+        if (outcome == AwfShutdownReport.Outcome.REFUSED && this.world.uncertainChunks() > 0) {
+            outcome = AwfShutdownReport.Outcome.UNCERTAIN;
+        }
+        boolean released;
+        try {
+            released = this.world.closeStore(budget);
+            if (!released) {
+                final String running = "a commit was still running at the deadline, so the store was not released under it";
+                detail = detail == null ? running : detail + "; " + running;
+                if (outcome == AwfShutdownReport.Outcome.CONFIRMED && this.world.dirtyCount() > 0) {
+                    outcome = AwfShutdownReport.Outcome.UNCERTAIN;
+                }
+            }
+        } catch (final IOException | RuntimeException releaseFailed) {
+            released = false;
+            if (outcome == AwfShutdownReport.Outcome.CONFIRMED) this.releaseFailed = true;
+            final String why = "release failed: " + releaseFailed.getMessage();
+            detail = detail == null ? why : detail + "; " + why;
+        } finally {
+            this.onClose.run();
+        }
+        final int dirty = this.discarding ? 0 : this.world.dirtyCount();
+        if (outcome == AwfShutdownReport.Outcome.CONFIRMED && dirty > 0) outcome = AwfShutdownReport.Outcome.UNCERTAIN;
+        if (outcome == AwfShutdownReport.Outcome.CONFIRMED && !released) {
+            dev.iyanz.sourbycraft.util.SourbyLogger.warn("AWF committed " + this.name + " but its backend could not"
+                + " release it (" + detail + "); no chunks are lost, and a lease expires on its own");
+        }
+        this.shutdownReport.accept(new AwfShutdownReport.StorageResult(this.name, outcome, dirty,
+            this.discarding ? java.util.List.of() : this.world.dirtySample(AwfShutdownReport.POSITIONS_LISTED),
+            outcome == AwfShutdownReport.Outcome.CONFIRMED ? 0 : queued,
+            this.refusedWrites.get() + this.closedWrites.get(),
+            outcome == AwfShutdownReport.Outcome.UNCERTAIN ? this.world.uncertainChunks() : 0, released, detail));
+    }
+
+    /** The shutdown deadline passed: commits that have not started (queued on the lane) commit nothing. */
+    void fenceAtDeadline() {
+        this.world.fence();
+    }
+
+    /** Writes refused because the storage was closed. */
+    public long closedWrites() {
+        return this.closedWrites.get();
+    }
+
+    /**
+     * Prunes empty chunks nothing has stored yet (see {@link ChunkPruning}). For worlds whose
+     * generator makes empty chunks, where regenerating one gives the same chunk.
+     */
+    public void pruneEmpty(final String storageFolder) {
+        this.pruneKind = storageFolder;
+    }
+
+    /** Stops storing chunks outside {@code bounds} (null: store everywhere). */
+    public void saveBounds(final dev.iyanz.sourbycraft.api.world.WorldProperties.Bounds bounds) {
+        this.saveBounds = bounds;
+    }
+
+    /** Writes dropped for being outside the save bounds since this storage opened. */
+    public long outOfBounds() {
+        return this.outOfBounds.get();
+    }
+
+    /** Stops pruning (null) or prunes for the given storage folder kind. */
+    void pruneKind(final String storageFolder) {
+        this.pruneKind = storageFolder;
+    }
+
+    /** Empty chunks not stored since this storage opened. */
+    public long pruned() {
+        return this.pruned.get();
+    }
+
+    /** Chunks this storage holds itself (not from its template): committed or waiting to be. */
+    public int storedChunks() {
+        return this.world.ownedCount();
+    }
+
+    /**
+     * Stops committing: writes from now on are dropped and close commits nothing, so the store
+     * keeps its last committed state. Chunks written but not yet committed are discarded too.
+     * Used to unload a world without saving it; there is no way back for this storage.
+     */
+    public void discard() {
+        this.transition.writeLock().lock();
+        try {
+            this.discarding = true;
+            // Queued commits that have not started yet commit nothing; see AwfWorld#fence.
+            this.world.fence();
+        } finally {
+            this.transition.writeLock().unlock();
+        }
+    }
+
+    /** Sets the hook {@link #write} runs once admitted. Tests only. */
+    void admittedHook(final Runnable hook) {
+        this.admittedHook = hook;
+    }
+
+    /** Whether a close or discard is waiting for admitted writes to finish. Tests only. */
+    boolean transitionWaiting() {
+        return this.transition.hasQueuedThreads();
+    }
+
+    public boolean discarding() {
+        return this.discarding;
+    }
+
+    /** Whether {@link #close} committed everything but could not release the store on its backend. */
+    public boolean releaseFailed() {
+        return this.releaseFailed;
+    }
+
+    public boolean closed() {
+        return this.closed.get();
+    }
+
+    /** A point-in-time view for {@code /perf awf}. */
+    public record Stats(String name, AwfMetrics.Snapshot world, long reads, long baseFallthroughs, long deletes,
+                        long evicted, long readRetries, long readFailures, int unreadable, long refusedWrites) {}
+
+    public Stats stats() {
+        return new Stats(this.name, this.world.metrics(), this.reads.get(), this.baseFallthroughs.get(),
+            this.deletes.get(), this.world.evicted(), this.readRetries.get(), this.readFailures.get(),
+            this.unreadable.size(), this.refusedWrites.get());
+    }
+}

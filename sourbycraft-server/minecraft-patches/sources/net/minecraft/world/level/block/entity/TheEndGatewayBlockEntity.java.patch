@@ -1,0 +1,248 @@
+--- a/net/minecraft/world/level/block/entity/TheEndGatewayBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/TheEndGatewayBlockEntity.java
+@@ -37,9 +_,14 @@
+     private static final boolean DEFAULT_EXACT_TELEPORT = false;
+     public long age = 0L;
+     private int teleportCooldown;
+-    public @Nullable BlockPos exitPortal;
++    public volatile @Nullable BlockPos exitPortal; // Folia - region threading - volatile
+     public boolean exactTeleport = false;
+ 
++    // Folia start - region threading
++    private static final java.util.concurrent.atomic.AtomicLong SEARCHING_FOR_EXIT_ID_GENERATOR = new java.util.concurrent.atomic.AtomicLong();
++    private Long searchingForExitId;
++
++    // Folia end - region threading
+     public TheEndGatewayBlockEntity(final BlockPos worldPosition, final BlockState blockState) {
+         super(BlockEntityTypes.END_GATEWAY, worldPosition, blockState);
+     }
+@@ -128,6 +_,104 @@
+         }
+     }
+ 
++    // Folia start - region threading
++    private void trySearchForExit(final ServerLevel world, final BlockPos fromPos) {
++        if (this.searchingForExitId != null) {
++            return;
++        }
++        this.searchingForExitId = Long.valueOf(SEARCHING_FOR_EXIT_ID_GENERATOR.getAndIncrement());
++        int chunkX = fromPos.getX() >> 4;
++        int chunkZ = fromPos.getZ() >> 4;
++        world.moonrise$getChunkTaskScheduler().chunkHolderManager.addTicketAtLevel(
++            net.minecraft.server.level.TicketType.END_GATEWAY_EXIT_SEARCH,
++            chunkX, chunkZ,
++            ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkHolderManager.BLOCK_TICKING_TICKET_LEVEL,
++            this.searchingForExitId
++        );
++
++        ca.spottedleaf.concurrentutil.completable.CallbackCompletable<BlockPos> complete = new ca.spottedleaf.concurrentutil.completable.CallbackCompletable<>();
++
++        complete.addWaiter((tpLoc, throwable) -> {
++            // create the exit portal
++            TheEndGatewayBlockEntity.LOGGER.debug("Creating portal at {}", tpLoc);
++            TheEndGatewayBlockEntity.spawnGatewayPortal(world, tpLoc, EndGatewayConfiguration.knownExit(fromPos, false));
++
++            // need to go onto the tick thread to avoid saving issues
++            io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
++                world, chunkX, chunkZ,
++                () -> {
++                    // update the exit portal location
++                    TheEndGatewayBlockEntity.this.exitPortal = tpLoc;
++
++                    // remove ticket keeping the gateway loaded
++                    world.moonrise$getChunkTaskScheduler().chunkHolderManager.removeTicketAtLevel(
++                        net.minecraft.server.level.TicketType.END_GATEWAY_EXIT_SEARCH,
++                        chunkX, chunkZ,
++                        ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkHolderManager.BLOCK_TICKING_TICKET_LEVEL,
++                        this.searchingForExitId
++                    );
++                    TheEndGatewayBlockEntity.this.searchingForExitId = null;
++                }
++            );
++        });
++
++        findOrCreateValidTeleportPosRegionThreading(world, fromPos, complete);
++    }
++
++    public static boolean teleportRegionThreading(final ServerLevel portalWorld, final BlockPos portalPos,
++                                                  final net.minecraft.world.entity.Entity toTeleport,
++                                                  final TheEndGatewayBlockEntity portalTile,
++                                                  final net.minecraft.world.level.portal.TeleportTransition.PostTeleportTransition post) {
++        // can we even teleport in this dimension?
++        if (portalTile.exitPortal == null && portalWorld.getTypeKey() != net.minecraft.world.level.dimension.LevelStem.END) {
++            return false;
++        }
++
++        // First, find the position we are trying to teleport to
++        BlockPos teleportPos = portalTile.exitPortal;
++        boolean isExactTeleport = portalTile.exactTeleport;
++
++        if (teleportPos == null) {
++            portalTile.trySearchForExit(portalWorld, portalPos);
++            return false;
++        }
++
++        // note: we handle the position from the TeleportTransition
++        net.minecraft.world.level.portal.TeleportTransition teleport = net.minecraft.world.level.block.EndGatewayBlock.getTeleportTransition(
++            portalWorld, toTeleport, Vec3.atCenterOf(teleportPos)
++        );
++
++
++        if (isExactTeleport) {
++            // blind teleport
++            return toTeleport.teleportAsync(
++                teleport, net.minecraft.world.entity.Entity.TELEPORT_FLAG_LOAD_CHUNK | net.minecraft.world.entity.Entity.TELEPORT_FLAG_TELEPORT_PASSENGERS,
++                post == null ? null : (net.minecraft.world.entity.Entity teleportedEntity) -> {
++                    post.onTransition(teleportedEntity);
++                }
++            );
++        } else {
++            // we could hack around by first loading the chunks, then calling back to here and checking if the entity
++            // should be teleported, something something else...
++            // however, we know the target location cannot differ by one region section: so we can
++            // just teleport and adjust the position after
++            return toTeleport.teleportAsync(
++                teleport, net.minecraft.world.entity.Entity.TELEPORT_FLAG_LOAD_CHUNK | net.minecraft.world.entity.Entity.TELEPORT_FLAG_TELEPORT_PASSENGERS,
++                (net.minecraft.world.entity.Entity teleportedEntity) -> {
++                    // adjust to the final exit position
++                    Vec3 adjusted = Vec3.atCenterOf(TheEndGatewayBlockEntity.findExitPosition(portalWorld, teleportedEntity.blockPosition())); // Canvas - region threading
++                    // teleportTo will adjust rider positions
++                    teleportedEntity.teleportTo(adjusted.x, adjusted.y, adjusted.z);
++
++                    if (post != null) {
++                        post.onTransition(teleportedEntity);
++                    }
++                }
++            );
++        }
++    }
++
++    // Folia end - region threading
+     public @Nullable Vec3 getPortalPosition(final ServerLevel currentLevel, final BlockPos portalEntryPos) {
+         if (this.exitPortal == null && currentLevel.getTypeKey() == net.minecraft.world.level.dimension.LevelStem.END) { // CraftBukkit - work in alternate worlds
+             BlockPos exitPortalPos = findOrCreateValidTeleportPos(currentLevel, portalEntryPos);
+@@ -172,6 +_,124 @@
+ 
+         return findTallestBlock(level, exitPortalPos, 16, true);
+     }
++
++    // Folia start - region threading
++    private static void findOrCreateValidTeleportPosRegionThreading(final ServerLevel world, final BlockPos pos,
++                                                                    final ca.spottedleaf.concurrentutil.completable.CallbackCompletable<BlockPos> complete) {
++        ca.spottedleaf.concurrentutil.completable.CallbackCompletable<Vec3> tentativeSelection = new ca.spottedleaf.concurrentutil.completable.CallbackCompletable<>();
++
++        tentativeSelection.addWaiter((vec3d, _) -> {
++            LevelChunk chunk = TheEndGatewayBlockEntity.getChunk(world, vec3d);
++            BlockPos blockposition1 = TheEndGatewayBlockEntity.findValidSpawnInChunk(chunk);
++            if (blockposition1 == null) {
++                BlockPos blockposition2 = BlockPos.containing(vec3d.x + 0.5D, 75.0D, vec3d.z + 0.5D);
++
++                TheEndGatewayBlockEntity.LOGGER.debug("Failed to find a suitable block to teleport to, spawning an island on {}", blockposition2);
++                world.registryAccess().lookup(Registries.CONFIGURED_FEATURE).flatMap((iregistry) -> {
++                    return iregistry.get(EndFeatures.END_ISLAND);
++                }).ifPresent((holder_c) -> {
++                    holder_c.value().place(world, world.getChunkSource().getGenerator(), RandomSource.create(blockposition2.asLong()), blockposition2);
++                });
++                blockposition1 = blockposition2;
++            } else {
++                TheEndGatewayBlockEntity.LOGGER.debug("Found suitable block to teleport to: {}", blockposition1);
++            }
++
++            // Here, there is no guarantee the chunks in 1 radius are in this region due to the fact that we just chained
++            // possibly 16x chunk loads along an axis (findExitPortalXZPosTentativeRegionThreading) using the chunk queue
++            // (regioniser only guarantees at least 8 chunks along a single axis)
++            // so, we need to schedule for the next tick
++            int posX = blockposition1.getX();
++            int posZ = blockposition1.getZ();
++            int radius = 16;
++
++            BlockPos finalBlockPosition1 = blockposition1;
++            world.moonrise$loadChunksAsync(blockposition1, radius,
++                ca.spottedleaf.concurrentutil.util.Priority.NORMAL,
++                (java.util.List<net.minecraft.world.level.chunk.ChunkAccess> chunks) -> {
++                    // make sure chunks are kept loaded
++                    for (net.minecraft.world.level.chunk.ChunkAccess access : chunks) {
++                        world.moonrise$getChunkTaskScheduler().chunkHolderManager.addTicketAtLevel(
++                            net.minecraft.server.level.TicketType.DELAYED, access.getPos(),
++                            ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkHolderManager.FULL_LOADED_TICKET_LEVEL,
++                            null
++                        );
++                    }
++                    // now after the chunks are loaded, we can delay by one tick
++                    io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
++                        world, posX >> 4, posZ >> 4, () -> {
++                            // find final location
++                            BlockPos tpLoc = TheEndGatewayBlockEntity.findTallestBlock(world, finalBlockPosition1, radius, true).above(GATEWAY_HEIGHT_ABOVE_SURFACE);
++
++                            // done
++                            complete.complete(tpLoc);
++                        }
++                    );
++                }
++            );
++        });
++
++        // fire off chain
++        findExitPortalXZPosTentativeRegionThreading(world, pos, tentativeSelection);
++    }
++
++    private static void findExitPortalXZPosTentativeRegionThreading(final ServerLevel world, final BlockPos pos,
++                                                                    final ca.spottedleaf.concurrentutil.completable.CallbackCompletable<Vec3> complete) {
++        Vec3 posDirFromOrigin = new Vec3(pos.getX(), 0.0D, pos.getZ()).normalize();
++        Vec3 posDirExtruded = posDirFromOrigin.scale(1024.0D);
++
++        class Vars {
++            int i = 16;
++            boolean mode = false;
++            Vec3 currPos = posDirExtruded;
++        }
++        Vars vars = new Vars();
++
++        Runnable handle = new Runnable() {
++            @Override
++            public void run() {
++                if (vars.mode != TheEndGatewayBlockEntity.isChunkEmpty(world, vars.currPos)) {
++                    vars.i = 0; // fall back to completing
++                }
++
++                // try to load next chunk
++                if (vars.i-- <= 0) {
++                    if (vars.mode) {
++                        complete.complete(vars.currPos);
++                        return;
++                    }
++                    vars.mode = true;
++                    vars.i = 16;
++                }
++
++                vars.currPos = vars.currPos.add(posDirFromOrigin.scale(vars.mode ? 16.0 : -16.0));
++                // schedule next iteration
++                world.moonrise$getChunkTaskScheduler().scheduleChunkLoad(
++                    ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkX(vars.currPos),
++                    ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkZ(vars.currPos),
++                    net.minecraft.world.level.chunk.status.ChunkStatus.FULL,
++                    true,
++                    ca.spottedleaf.concurrentutil.util.Priority.NORMAL,
++                    (_) -> {
++                        this.run();
++                    }
++                );
++            }
++        };
++
++        // kick off first chunk load
++        world.moonrise$getChunkTaskScheduler().scheduleChunkLoad(
++            ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkX(posDirExtruded),
++            ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkZ(posDirExtruded),
++            net.minecraft.world.level.chunk.status.ChunkStatus.FULL,
++            true,
++            ca.spottedleaf.concurrentutil.util.Priority.NORMAL,
++            (_) -> {
++                handle.run();
++            }
++        );
++    }
++    // Folia end - region threading
+ 
+     private static Vec3 findExitPortalXZPosTentative(final ServerLevel level, final BlockPos endGatewayPos) {
+         Vec3 teleportXZDirectionVector = new Vec3(endGatewayPos.getX(), 0.0, endGatewayPos.getZ()).normalize();

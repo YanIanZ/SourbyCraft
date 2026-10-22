@@ -1,0 +1,17 @@
+--- a/net/minecraft/world/entity/animal/allay/AllayAi.java
++++ b/net/minecraft/world/entity/animal/allay/AllayAi.java
+@@ -112,6 +_,14 @@
+         Optional<GlobalPos> likedNoteblockPos = brain.getMemory(MemoryModuleType.LIKED_NOTEBLOCK_POSITION);
+         if (likedNoteblockPos.isPresent()) {
+             GlobalPos position = likedNoteblockPos.get();
++            // Canvas start - region threading
++            if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(
++                net.minecraft.server.MinecraftServer.getServer().getLevel(position.dimension()), position.pos()
++            )) {
++                brain.eraseMemory(MemoryModuleType.LIKED_NOTEBLOCK_POSITION);
++                return Optional.empty();
++            }
++            // Canvas end - region threading
+             if (shouldDepositItemsAtLikedNoteblock(allay, brain, position)) {
+                 return Optional.of(new BlockPosTracker(position.pos().above()));
+             }

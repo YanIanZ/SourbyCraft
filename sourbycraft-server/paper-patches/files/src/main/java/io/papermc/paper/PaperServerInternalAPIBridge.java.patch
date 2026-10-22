@@ -1,0 +1,11 @@
+--- a/src/main/java/io/papermc/paper/PaperServerInternalAPIBridge.java
++++ b/src/main/java/io/papermc/paper/PaperServerInternalAPIBridge.java
+@@ -188,7 +_,7 @@
+ 
+     @Override
+     public VersionFetcher getVersionFetcher() {
+-        return new PaperVersionFetcher();
++        return new dev.iyanz.aurora.engine.util.version.AuroraVersionFetcher(); // Canvas - Rebrand // Aurora - renamed
+     }
+ 
+     @Override

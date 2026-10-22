@@ -6,6 +6,11 @@ repositories {
 
 dependencies {
     findProject(":sourbyapi")?.also { implementation(it) }
+    testImplementation("org.junit.jupiter:junit-jupiter:6.0.3")
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 tasks.processResources {

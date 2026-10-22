@@ -1,0 +1,22 @@
+--- a/net/minecraft/world/entity/ai/sensing/Sensing.java
++++ b/net/minecraft/world/entity/ai/sensing/Sensing.java
+@@ -2,8 +_,6 @@
+ 
+ import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
+ import it.unimi.dsi.fastutil.ints.IntSet;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.entity.Entity;
+ import net.minecraft.world.entity.Mob;
+ 
+@@ -31,10 +_,7 @@
+             return false;
+         }
+ 
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("hasLineOfSight");
+         boolean hasLineOfSight = this.mob.hasLineOfSight(target);
+-        profiler.pop();
+         if (hasLineOfSight) {
+             this.seen.add(targetId);
+         } else {

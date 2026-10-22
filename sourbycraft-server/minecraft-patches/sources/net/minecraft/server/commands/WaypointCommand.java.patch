@@ -1,0 +1,77 @@
+--- a/net/minecraft/server/commands/WaypointCommand.java
++++ b/net/minecraft/server/commands/WaypointCommand.java
+@@ -97,38 +_,44 @@
+     }
+ 
+     private static int setWaypointStyle(final CommandSourceStack source, final WaypointTransmitter waypoint, final ResourceKey<WaypointStyleAsset> style) {
+-        mutateIcon(source, waypoint, icon -> icon.style = style);
++        regionThreadingIconMutation(source, waypoint, icon -> icon.style = style, () -> { // Canvas - region threading
+         source.sendSuccess(() -> Component.translatable("commands.waypoint.modify.style"), false);
++        }); // Canvas - region threading
+         return 0;
+     }
+ 
+     private static int setWaypointColor(final CommandSourceStack source, final WaypointTransmitter waypoint, final TeamColor color) {
+-        mutateIcon(source, waypoint, icon -> icon.color = Optional.of(color.rgb()));
++        regionThreadingIconMutation(source, waypoint, icon -> icon.color = Optional.of(color.rgb()), () -> { // Canvas - region threading
+         source.sendSuccess(
+             () -> Component.translatable("commands.waypoint.modify.color", Component.literal(color.getSerializedName()).withColor(color.textColor())), false
+         );
++        }); // Canvas - region threading
+         return 0;
+     }
+ 
+     private static int setWaypointColor(final CommandSourceStack source, final WaypointTransmitter waypoint, final Integer color) {
+-        mutateIcon(source, waypoint, icon -> icon.color = Optional.of(color));
++        regionThreadingIconMutation(source, waypoint, icon -> icon.color = Optional.of(color), () -> { // Canvas - region threading
+         source.sendSuccess(
+             () -> Component.translatable(
+                 "commands.waypoint.modify.color", Component.literal(HexFormat.of().withUpperCase().toHexDigits(ARGB.color(0, color), 6)).withColor(color)
+             ),
+             false
+         );
++        }); // Canvas - region threading
+         return 0;
+     }
+ 
+     private static int resetWaypointColor(final CommandSourceStack source, final WaypointTransmitter waypoint) {
+-        mutateIcon(source, waypoint, icon -> icon.color = Optional.empty());
++        regionThreadingIconMutation(source, waypoint, icon -> icon.color = Optional.empty(), () -> { // Canvas - region threading
+         source.sendSuccess(() -> Component.translatable("commands.waypoint.modify.color.reset"), false);
++        }); // Canvas - region threading
+         return 0;
+     }
+ 
+     private static int listWaypoints(final CommandSourceStack source) {
+         ServerLevel level = source.getLevel();
++        // Canvas - note: transmitters function is safe in our waypoint rewrite, it snapshots
++        //                the current data so this is safe to execute anywhere in parallel
+         Set<WaypointTransmitter> waypoints = level.getWaypointManager().transmitters();
+         String dimension = level.dimension().identifier().toString();
+         if (waypoints.isEmpty()) {
+@@ -164,6 +_,25 @@
+             return waypoints.size();
+         }
+     }
++    // Canvas start - region threading
++
++    private static void regionThreadingIconMutation(final CommandSourceStack source, final WaypointTransmitter waypoint, final Consumer<Waypoint.Icon> iconConsumer, final Runnable callback) {
++        if (waypoint instanceof LivingEntity livingEntity) {
++            // schedule this to the entity in question
++            livingEntity.getBukkitEntity().taskScheduler.scheduleOrExecute((LivingEntity targetEntity) -> {
++                mutateIcon(source, targetEntity, iconConsumer);
++                callback.run();
++            });
++        }
++        else {
++            // no fucking clue what this is, just schedule to global
++            io.papermc.paper.threadedregions.RegionizedServer.getInstance().scheduleToOrExecute(() -> {
++                mutateIcon(source, waypoint, iconConsumer);
++                callback.run();
++            });
++        }
++    }
++    // Canvas end - region threading
+ 
+     private static void mutateIcon(final CommandSourceStack source, final WaypointTransmitter waypoint, final Consumer<Waypoint.Icon> iconConsumer) {
+         ServerLevel level = (waypoint instanceof LivingEntity livingEntity) ? (ServerLevel) livingEntity.level() : source.getLevel(); // Paper - MC-300685 use level of waypoint if it's a living entity for broadcast

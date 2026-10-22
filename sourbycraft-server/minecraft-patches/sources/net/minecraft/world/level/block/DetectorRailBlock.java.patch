@@ -1,0 +1,13 @@
+--- a/net/minecraft/world/level/block/DetectorRailBlock.java
++++ b/net/minecraft/world/level/block/DetectorRailBlock.java
+@@ -134,8 +_,8 @@
+         RailState rail = new RailState(level, pos, state);
+ 
+         for (BlockPos connectionPos : rail.getConnections()) {
+-            BlockState connectionState = level.getBlockState(connectionPos);
+-            level.neighborChanged(connectionState, connectionPos, connectionState.getBlock(), null, false);
++            BlockState connectionState = !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(level, connectionPos, 25) ? null : level.getBlockStateIfLoaded(connectionPos); // Folia - block updates in unloaded chunks
++            if (connectionState != null) level.neighborChanged(connectionState, connectionPos, connectionState.getBlock(), null, false); // Folia - block updates in unloaded chunks
+         }
+     }
+ 

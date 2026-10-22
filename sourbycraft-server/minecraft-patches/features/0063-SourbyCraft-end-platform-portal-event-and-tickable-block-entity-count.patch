@@ -1,0 +1,76 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Wed, 21 Oct 2026 02:14:12 +0700
+Subject: [PATCH] SourbyCraft - end platform portal event and tickable block
+ entity count
+
+EndPlatformFeature fires PortalCreateEvent(END_PLATFORM) only when an entity caused the platform and this thread owns it (EndPlatformEvents.shouldFire); world generation still builds it silently. TickRegions.RegionStats publishes each region's ticking block entity count at the end of its tick so World#getTickableTileEntityCount can sum it.
+
+diff --git a/io/papermc/paper/threadedregions/TickRegions.java b/io/papermc/paper/threadedregions/TickRegions.java
+index 1681226c682606c6ba3aa75440b545b747994b20..3ac4ab7f6b92e1cb018ef91c3a6f7238b2e48dd0 100644
+--- a/io/papermc/paper/threadedregions/TickRegions.java
++++ b/io/papermc/paper/threadedregions/TickRegions.java
+@@ -221,6 +221,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+         private final AtomicInteger entityCount = new AtomicInteger();
+         private final AtomicInteger playerCount = new AtomicInteger();
+         private final AtomicInteger chunkCount = new AtomicInteger();
++        private final AtomicInteger tickableBlockEntityCount = new AtomicInteger(); // SourbyCraft - World#getTickableTileEntityCount
+ 
+         public int getEntityCount() {
+             return this.entityCount.get();
+@@ -234,6 +235,17 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+             return this.chunkCount.get();
+         }
+ 
++        // SourbyCraft start - World#getTickableTileEntityCount sums this over a world's regions
++        public int getTickableBlockEntityCount() {
++            return this.tickableBlockEntityCount.get();
++        }
++
++        /** Published by the region's own thread after it ticks its block entities, so additions and removals show even when no entity or chunk changed. */
++        public void publishTickableBlockEntityCount(final int count) {
++            this.tickableBlockEntityCount.setRelease(count);
++        }
++        // SourbyCraft end
++
+         void updateFrom(final RegionizedWorldData data) {
+             this.entityCount.setRelease(data == null ? 0 : data.getEntityCount());
+             this.playerCount.setRelease(data == null ? 0 : data.getPlayerCount());
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+index 911a44be219633e80c49f34d0bf85a6c4567d889..945524aa885f353dbd37018b1d7b2c03db1c4bad 100644
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -5046,7 +5046,7 @@ public abstract class Entity
+                         targetPos, 16, // load 16 blocks to be safe from block physics
+                         ca.spottedleaf.concurrentutil.util.Priority.HIGH,
+                         (_) -> {
+-                            net.minecraft.world.level.levelgen.feature.EndPlatformFeature.createEndPlatform(destination, targetPos.below(), true, null);
++                            net.minecraft.world.level.levelgen.feature.EndPlatformFeature.createEndPlatform(destination, targetPos.below(), true, this); // SourbyCraft - pass the portaling entity so PortalCreateEvent(END_PLATFORM) can fire on the destination region
+ 
+                             // the portal obsidian is placed at targetPos.y - 2, so if we want to place the entity
+                             // on the obsidian, we need to spawn at targetPos.y - 1
+diff --git a/net/minecraft/world/level/Level.java b/net/minecraft/world/level/Level.java
+index 7d22ec367e0d75aae81da472d4e7b551801fc9d0..81afb1bcf6b170d61cf3b235c62f33d449bcf47c 100644
+--- a/net/minecraft/world/level/Level.java
++++ b/net/minecraft/world/level/Level.java
+@@ -1643,6 +1643,7 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+ 
+         // Canvas end - optimize BE iteration
+         regionizedWorldData.setTickingBlockEntities(false); // Folia - region threading
++        regionizedWorldData.regionData.getRegionStats().publishTickableBlockEntityCount(blockEntityTickers.size()); // SourbyCraft - World#getTickableTileEntityCount
+     }
+ 
+     public <T extends Entity> void guardEntityTick(final Consumer<T> tick, final T entity) {
+diff --git a/net/minecraft/world/level/levelgen/feature/EndPlatformFeature.java b/net/minecraft/world/level/levelgen/feature/EndPlatformFeature.java
+index b67f5f7b76037ab77548c37a83e4d0918915223a..f8e20bfdc79fa70c633fc9b067b42e363fec4fc5 100644
+--- a/net/minecraft/world/level/levelgen/feature/EndPlatformFeature.java
++++ b/net/minecraft/world/level/levelgen/feature/EndPlatformFeature.java
+@@ -46,7 +46,7 @@ public class EndPlatformFeature extends Feature<NoneFeatureConfiguration> {
+ 
+         // CraftBukkit start
+         // SPIGOT-7746: Entity will only be null during world generation, which is async, so just generate without event
+-        if (false) { // Folia - region threading
++        if (dev.iyanz.sourbycraft.guards.EndPlatformEvents.shouldFire(entity, newLevel, origin)) { // Folia - region threading - SourbyCraft: fire only with an entity and on the region that owns the platform
+             org.bukkit.World bworld = newLevel.getLevel().getWorld();
+             org.bukkit.event.world.PortalCreateEvent portalEvent = new org.bukkit.event.world.PortalCreateEvent((java.util.List<org.bukkit.block.BlockState>) (java.util.List) blockList.getSnapshotBlocks(), bworld, entity.getBukkitEntity(), org.bukkit.event.world.PortalCreateEvent.CreateReason.END_PLATFORM);
+             newLevel.getLevel().getCraftServer().getPluginManager().callEvent(portalEvent);

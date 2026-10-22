@@ -1,0 +1,170 @@
+--- a/io/papermc/paper/entity/activation/ActivationRange.java
++++ b/io/papermc/paper/entity/activation/ActivationRange.java
+@@ -55,33 +_,34 @@
+ 
+     private static int checkInactiveWakeup(final Entity entity) {
+         final Level world = entity.level();
++        final io.papermc.paper.threadedregions.RegionizedWorldData worldData = world.getCurrentWorldData(); // Folia - region threading
+         final SpigotWorldConfig config = world.spigotConfig;
+-        final long inactiveFor = MinecraftServer.currentTick - entity.activatedTick;
++        final long inactiveFor = io.papermc.paper.threadedregions.RegionizedServer.getCurrentTick() - entity.activatedTick; // Folia - region threading
+         if (entity.activationType == ActivationType.VILLAGER) {
+-            if (inactiveFor > config.wakeUpInactiveVillagersEvery && world.wakeupInactiveRemainingVillagers > 0) {
+-                world.wakeupInactiveRemainingVillagers--;
++            if (inactiveFor > config.wakeUpInactiveVillagersEvery && worldData.wakeupInactiveRemainingVillagers > 0) { // Folia - region threading
++                worldData.wakeupInactiveRemainingVillagers--; // Folia - region threading
+                 return config.wakeUpInactiveVillagersFor;
+             }
+         } else if (entity.activationType == ActivationType.ANIMAL) {
+-            if (inactiveFor > config.wakeUpInactiveAnimalsEvery && world.wakeupInactiveRemainingAnimals > 0) {
+-                world.wakeupInactiveRemainingAnimals--;
++            if (inactiveFor > config.wakeUpInactiveAnimalsEvery && worldData.wakeupInactiveRemainingAnimals > 0) { // Folia - region threading
++                worldData.wakeupInactiveRemainingAnimals--; // Folia - region threading
+                 return config.wakeUpInactiveAnimalsFor;
+             }
+         } else if (entity.activationType == ActivationType.FLYING_MONSTER) {
+-            if (inactiveFor > config.wakeUpInactiveFlyingEvery && world.wakeupInactiveRemainingFlying > 0) {
+-                world.wakeupInactiveRemainingFlying--;
++            if (inactiveFor > config.wakeUpInactiveFlyingEvery && worldData.wakeupInactiveRemainingFlying > 0) { // Folia - region threading
++                worldData.wakeupInactiveRemainingFlying--; // Folia - region threading
+                 return config.wakeUpInactiveFlyingFor;
+             }
+         } else if (entity.activationType == ActivationType.MONSTER || entity.activationType == ActivationType.RAIDER) {
+-            if (inactiveFor > config.wakeUpInactiveMonstersEvery && world.wakeupInactiveRemainingMonsters > 0) {
+-                world.wakeupInactiveRemainingMonsters--;
++            if (inactiveFor > config.wakeUpInactiveMonstersEvery && worldData.wakeupInactiveRemainingMonsters > 0) { // Folia - region threading
++                worldData.wakeupInactiveRemainingMonsters--; // Folia - region threading
+                 return config.wakeUpInactiveMonstersFor;
+             }
+         }
+         return -1;
+     }
+ 
+-    static AABB maxBB = new AABB(0, 0, 0, 0, 0, 0);
++    // static AABB maxBB = new AABB(0, 0, 0, 0, 0, 0); // Folia - region threading - replaced by local variable
+ 
+     /**
+      * These entities are excluded from Activation range checks.
+@@ -129,10 +_,13 @@
+         final int waterActivationRange = world.spigotConfig.waterActivationRange;
+         final int flyingActivationRange = world.spigotConfig.flyingMonsterActivationRange;
+         final int villagerActivationRange = world.spigotConfig.villagerActivationRange;
+-        world.wakeupInactiveRemainingAnimals = Math.min(world.wakeupInactiveRemainingAnimals + 1, world.spigotConfig.wakeUpInactiveAnimals);
+-        world.wakeupInactiveRemainingVillagers = Math.min(world.wakeupInactiveRemainingVillagers + 1, world.spigotConfig.wakeUpInactiveVillagers);
+-        world.wakeupInactiveRemainingMonsters = Math.min(world.wakeupInactiveRemainingMonsters + 1, world.spigotConfig.wakeUpInactiveMonsters);
+-        world.wakeupInactiveRemainingFlying = Math.min(world.wakeupInactiveRemainingFlying + 1, world.spigotConfig.wakeUpInactiveFlying);
++        // Folia start - region threading
++        final io.papermc.paper.threadedregions.RegionizedWorldData worldData = world.getCurrentWorldData();
++        worldData.wakeupInactiveRemainingAnimals = Math.min(worldData.wakeupInactiveRemainingAnimals + 1, world.spigotConfig.wakeUpInactiveAnimals);
++        worldData.wakeupInactiveRemainingVillagers = Math.min(worldData.wakeupInactiveRemainingVillagers + 1, world.spigotConfig.wakeUpInactiveVillagers);
++        worldData.wakeupInactiveRemainingMonsters = Math.min(worldData.wakeupInactiveRemainingMonsters + 1, world.spigotConfig.wakeUpInactiveMonsters);
++        worldData.wakeupInactiveRemainingFlying = Math.min(worldData.wakeupInactiveRemainingFlying + 1, world.spigotConfig.wakeUpInactiveFlying);
++        // Folia end - region threading
+ 
+         int maxRange = Math.max(monsterActivationRange, animalActivationRange);
+         maxRange = Math.max(maxRange, raiderActivationRange);
+@@ -142,30 +_,39 @@
+         maxRange = Math.max(maxRange, villagerActivationRange);
+         maxRange = Math.min((world.spigotConfig.simulationDistance << 4) - 8, maxRange);
+ 
+-        for (final Player player : world.players()) {
+-            player.activatedTick = MinecraftServer.currentTick;
++        for (final Player player : world.getLocalPlayers()) { // Folia - region threading
++            player.activatedTick = io.papermc.paper.threadedregions.RegionizedServer.getCurrentTick(); // Folia - region threading
+             if (world.spigotConfig.ignoreSpectatorActivation && player.isSpectator()) {
+                 continue;
+             }
+ 
+             final int worldHeight = world.getHeight();
+-            ActivationRange.maxBB = player.getBoundingBox().inflate(maxRange, worldHeight, maxRange);
+-            ActivationType.MISC.boundingBox = player.getBoundingBox().inflate(miscActivationRange, worldHeight, miscActivationRange);
+-            ActivationType.RAIDER.boundingBox = player.getBoundingBox().inflate(raiderActivationRange, worldHeight, raiderActivationRange);
+-            ActivationType.ANIMAL.boundingBox = player.getBoundingBox().inflate(animalActivationRange, worldHeight, animalActivationRange);
+-            ActivationType.MONSTER.boundingBox = player.getBoundingBox().inflate(monsterActivationRange, worldHeight, monsterActivationRange);
+-            ActivationType.WATER.boundingBox = player.getBoundingBox().inflate(waterActivationRange, worldHeight, waterActivationRange);
+-            ActivationType.FLYING_MONSTER.boundingBox = player.getBoundingBox().inflate(flyingActivationRange, worldHeight, flyingActivationRange);
+-            ActivationType.VILLAGER.boundingBox = player.getBoundingBox().inflate(villagerActivationRange, worldHeight, villagerActivationRange);
++            // Folia start - region threading
++            final AABB maxBB = player.getBoundingBox().inflate(maxRange, worldHeight, maxRange);
++            final AABB[] bbByType = new AABB[ActivationType.values().length];
++            bbByType[ActivationType.MISC.ordinal()] = player.getBoundingBox().inflate(miscActivationRange, worldHeight, miscActivationRange);
++            bbByType[ActivationType.RAIDER.ordinal()] = player.getBoundingBox().inflate(raiderActivationRange, worldHeight, raiderActivationRange);
++            bbByType[ActivationType.ANIMAL.ordinal()] = player.getBoundingBox().inflate(animalActivationRange, worldHeight, animalActivationRange);
++            bbByType[ActivationType.MONSTER.ordinal()] = player.getBoundingBox().inflate(monsterActivationRange, worldHeight, monsterActivationRange);
++            bbByType[ActivationType.WATER.ordinal()] = player.getBoundingBox().inflate(waterActivationRange, worldHeight, waterActivationRange);
++            bbByType[ActivationType.FLYING_MONSTER.ordinal()] = player.getBoundingBox().inflate(flyingActivationRange, worldHeight, flyingActivationRange);
++            bbByType[ActivationType.VILLAGER.ordinal()] = player.getBoundingBox().inflate(villagerActivationRange, worldHeight, villagerActivationRange);
++            // Folia end - region threading
+ 
+-            final List<Entity> entities = world.getEntities((Entity) null, ActivationRange.maxBB, e -> true);
++            final java.util.List<Entity> entities = new java.util.ArrayList<>();  // Folia - region threading - bypass getEntities thread check, we perform a check on the entities later
++            ((net.minecraft.server.level.ServerLevel)world).moonrise$getEntityLookup().getEntities((Entity)null, maxBB, entities, null); // Folia - region threading - bypass getEntities thread check, we perform a check on the entities later
+             final boolean tickMarkers = world.paperConfig().entities.markers.tick;
+             for (final Entity entity : entities) {
++                // Folia start - region threading
++                if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(entity)) {
++                    continue;
++                }
++                // Folia end - region threading
+                 if (!tickMarkers && entity instanceof Marker) {
+                     continue;
+                 }
+ 
+-                ActivationRange.activateEntity(entity);
++                ActivationRange.activateEntity(entity, bbByType); // Folia - region threading
+             }
+         }
+     }
+@@ -175,14 +_,14 @@
+      *
+      * @param entity
+      */
+-    private static void activateEntity(final Entity entity) {
+-        if (MinecraftServer.currentTick > entity.activatedTick) {
++    private static void activateEntity(final Entity entity, final AABB[] bbByType) { // Folia - region threading
++        if (io.papermc.paper.threadedregions.RegionizedServer.getCurrentTick() > entity.activatedTick) { // Folia - region threading
+             if (entity.defaultActivationState) {
+-                entity.activatedTick = MinecraftServer.currentTick;
++                entity.activatedTick = io.papermc.paper.threadedregions.RegionizedServer.getCurrentTick(); // Folia - region threading
+                 return;
+             }
+-            if (entity.activationType.boundingBox.intersects(entity.getBoundingBox())) {
+-                entity.activatedTick = MinecraftServer.currentTick;
++            if (bbByType[entity.activationType.ordinal()].intersects(entity.getBoundingBox())) { // Folia - region threading
++                entity.activatedTick = io.papermc.paper.threadedregions.RegionizedServer.getCurrentTick(); // Folia - region threading
+             }
+         }
+     }
+@@ -203,10 +_,10 @@
+         if (entity.getRemainingFireTicks() > 0) {
+             return 2;
+         }
+-        if (entity.activatedImmunityTick >= MinecraftServer.currentTick) {
++        if (entity.activatedImmunityTick >= io.papermc.paper.threadedregions.RegionizedServer.getCurrentTick()) { // Folia - region threading
+             return 1;
+         }
+-        final long inactiveFor = MinecraftServer.currentTick - entity.activatedTick;
++        final long inactiveFor = io.papermc.paper.threadedregions.RegionizedServer.getCurrentTick() - entity.activatedTick; // Folia - region threading
+         if ((entity.activationType != ActivationType.WATER && entity.isInWater() && entity.isPushedByFluid())) {
+             return 100;
+         }
+@@ -303,16 +_,16 @@
+             return true;
+         }
+ 
+-        boolean isActive = entity.activatedTick >= MinecraftServer.currentTick;
++        boolean isActive = entity.activatedTick >= io.papermc.paper.threadedregions.RegionizedServer.getCurrentTick(); // Folia - region threading
+         entity.isTemporarilyActive = false;
+ 
+         // Should this entity tick?
+         if (!isActive) {
+-            if ((MinecraftServer.currentTick - entity.activatedTick - 1) % 20 == 0) {
++            if ((io.papermc.paper.threadedregions.RegionizedServer.getCurrentTick() - entity.activatedTick - 1) % 20 == 0) { // Folia - region threading
+                 // Check immunities every 20 ticks.
+                 final int immunity = checkEntityImmunities(entity);
+                 if (immunity >= 0) {
+-                    entity.activatedTick = MinecraftServer.currentTick + immunity;
++                    entity.activatedTick = io.papermc.paper.threadedregions.RegionizedServer.getCurrentTick() + immunity; // Folia - region threading
+                 } else {
+                     entity.isTemporarilyActive = true;
+                 }

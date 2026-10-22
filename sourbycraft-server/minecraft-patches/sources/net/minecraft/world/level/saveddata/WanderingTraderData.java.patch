@@ -1,0 +1,10 @@
+--- a/net/minecraft/world/level/saveddata/WanderingTraderData.java
++++ b/net/minecraft/world/level/saveddata/WanderingTraderData.java
+@@ -18,6 +_,7 @@
+     );
+     private int spawnDelay;
+     private int spawnChance;
++    public int tickDelay = Integer.MIN_VALUE; // Paper - Add Wandering Trader spawn rate config options // Folia - moved from WanderingTraderSpawner
+ 
+     public WanderingTraderData() {
+         this(24000, 25);

@@ -1,0 +1,44 @@
+--- a/net/minecraft/world/level/block/RedstoneTorchBlock.java
++++ b/net/minecraft/world/level/block/RedstoneTorchBlock.java
+@@ -69,10 +_,10 @@
+     protected void tick(final BlockState state, final ServerLevel level, final BlockPos pos, final RandomSource random) {
+         boolean neighborSignal = this.hasNeighborSignal(level, pos, state);
+         // Paper start - Faster redstone torch rapid clock removal
+-        java.util.ArrayDeque<RedstoneTorchBlock.Toggle> toggles = level.redstoneUpdateInfos;
++        java.util.ArrayDeque<RedstoneTorchBlock.Toggle> toggles = level.getCurrentWorldData().redstoneUpdateInfos; // Folia - region threading
+         if (toggles != null) {
+             RedstoneTorchBlock.Toggle curr;
+-            while ((curr = toggles.peek()) != null && level.getGameTime() - curr.when > 60L) {
++            while ((curr = toggles.peek()) != null && level.getRedstoneGameTime() - curr.when > 60L) { // Folia - region threading
+                 toggles.poll();
+             }
+         }
+@@ -147,13 +_,13 @@
+ 
+     private static boolean isToggledTooFrequently(final Level level, final BlockPos pos, final boolean add) {
+         // Paper start - Faster redstone torch rapid clock removal
+-        java.util.ArrayDeque<RedstoneTorchBlock.Toggle> toggles = level.redstoneUpdateInfos;
++        java.util.ArrayDeque<RedstoneTorchBlock.Toggle> toggles = level.getCurrentWorldData().redstoneUpdateInfos; // Folia - region threading
+         if (toggles == null) {
+-            toggles = level.redstoneUpdateInfos = new java.util.ArrayDeque<>();
++            toggles = level.getCurrentWorldData().redstoneUpdateInfos = new java.util.ArrayDeque<>(); // Folia - region threading
+         }
+         // Paper end - Faster redstone torch rapid clock removal
+         if (add) {
+-            toggles.add(new RedstoneTorchBlock.Toggle(pos.immutable(), level.getGameTime()));
++            toggles.add(new RedstoneTorchBlock.Toggle(pos.immutable(), level.getRedstoneGameTime())); // Folia - region threading
+         }
+ 
+         int count = 0;
+@@ -181,5 +_,11 @@
+             this.pos = pos;
+             this.when = when;
+         }
++        // Folia start - region threading
++
++        public void offsetTime(long offset) {
++            this.when += offset;
++        }
++        // Folia end - region threading
+     }
+ }

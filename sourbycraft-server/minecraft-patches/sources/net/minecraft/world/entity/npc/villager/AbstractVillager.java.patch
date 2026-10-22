@@ -1,0 +1,21 @@
+--- a/net/minecraft/world/entity/npc/villager/AbstractVillager.java
++++ b/net/minecraft/world/entity/npc/villager/AbstractVillager.java
+@@ -215,9 +_,17 @@
+ 
+     @Override
+     public @Nullable Entity teleport(final TeleportTransition transition) {
+-        this.stopTrading();
++        this.preChangeDimension(); // Folia - region threading - move into preChangeDimension
+         return super.teleport(transition);
+     }
++    // Folia start - region threading
++
++    @Override
++    public void preChangeDimension() {
++        super.preChangeDimension();
++        this.stopTrading();
++    }
++    // Folia end - region threading
+ 
+     protected void stopTrading() {
+         this.setTradingPlayer(null);

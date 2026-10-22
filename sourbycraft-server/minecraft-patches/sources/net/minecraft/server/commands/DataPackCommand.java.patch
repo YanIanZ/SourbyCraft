@@ -1,0 +1,111 @@
+--- a/net/minecraft/server/commands/DataPackCommand.java
++++ b/net/minecraft/server/commands/DataPackCommand.java
+@@ -99,75 +_,26 @@
+         dispatcher.register(
+             Commands.literal("datapack")
+                 .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+-                .then(
+-                    Commands.literal("enable")
+-                        .then(
+-                            Commands.argument("name", StringArgumentType.string())
+-                                .suggests(UNSELECTED_PACKS)
+-                                .executes(
+-                                    c -> enablePack(
+-                                        c.getSource(), getPack(c, "name", true), (l, p) -> p.getDefaultPosition().insert(l, p, Pack::selectionConfig, false)
+-                                    )
+-                                )
+-                                .then(
+-                                    Commands.literal("after")
+-                                        .then(
+-                                            Commands.argument("existing", StringArgumentType.string())
+-                                                .suggests(SELECTED_PACKS)
+-                                                .executes(
+-                                                    c -> enablePack(
+-                                                        c.getSource(),
+-                                                        getPack(c, "name", true),
+-                                                        (l, p) -> l.add(l.indexOf(getPack(c, "existing", false)) + 1, p)
+-                                                    )
+-                                                )
+-                                        )
+-                                )
+-                                .then(
+-                                    Commands.literal("before")
+-                                        .then(
+-                                            Commands.argument("existing", StringArgumentType.string())
+-                                                .suggests(SELECTED_PACKS)
+-                                                .executes(
+-                                                    c -> enablePack(
+-                                                        c.getSource(), getPack(c, "name", true), (l, p) -> l.add(l.indexOf(getPack(c, "existing", false)), p)
+-                                                    )
+-                                                )
+-                                        )
+-                                )
+-                                .then(Commands.literal("last").executes(c -> enablePack(c.getSource(), getPack(c, "name", true), List::add)))
+-                                .then(Commands.literal("first").executes(c -> enablePack(c.getSource(), getPack(c, "name", true), (l, p) -> l.add(0, p))))
+-                        )
+-                )
+-                .then(
+-                    Commands.literal("disable")
+-                        .then(
+-                            Commands.argument("name", StringArgumentType.string())
+-                                .suggests(SELECTED_PACKS)
+-                                .executes(c -> disablePack(c.getSource(), getPack(c, "name", false)))
+-                        )
+-                )
++                // Canvas start - region threading
++                //
++                // I think honestly it's a good idea if we keep this read-only of sorts, since we can't restore
++                // the whole command because reloading the server registries in region threading is like... no...
++                // SO we are going to make it so that this command can only read the selected enabled packs on
++                // the server and ONLY that.  We also are going to comment out the FULL code in the command because
++                // if there are changes made to this command it's probably best that we track those changes closely
++                //
++                // note: this doesn't need to be scheduled at all either since the selected packs is immutable
++                //
++                // Useful in issue reports and stuff to provide further information about the server
++                //
++                // Canvas end - region threading
+                 .then(
+                     Commands.literal("list")
+                         .executes(c -> listPacks(c.getSource()))
+-                        .then(Commands.literal("available").executes(c -> listAvailablePacks(c.getSource())))
++                        // Canvas - region threading - don't show available packs
+                         .then(Commands.literal("enabled").executes(c -> listEnabledPacks(c.getSource())))
+                 )
+-                .then(
+-                    Commands.literal("create")
+-                        .requires(Commands.hasPermission(Commands.LEVEL_OWNERS))
+-                        .then(
+-                            Commands.argument("id", StringArgumentType.string())
+-                                .then(
+-                                    Commands.argument("description", ComponentArgument.textComponent(context))
+-                                        .executes(
+-                                            c -> createPack(
+-                                                c.getSource(), StringArgumentType.getString(c, "id"), ComponentArgument.getResolvedComponent(c, "description")
+-                                            )
+-                                        )
+-                                )
+-                        )
+-                )
++                // Canvas - region threading - we don't want to allow "creation" of packs
+         );
+     }
+ 
+@@ -238,7 +_,7 @@
+     }
+ 
+     private static int listPacks(final CommandSourceStack source) {
+-        return listEnabledPacks(source) + listAvailablePacks(source);
++        return listEnabledPacks(source); // Canvas - region threading - we shouldn't include available packs, since we can't load datapacks safely in region threading
+     }
+ 
+     private static int listAvailablePacks(final CommandSourceStack source) {
+@@ -266,7 +_,7 @@
+ 
+     private static int listEnabledPacks(final CommandSourceStack source) {
+         PackRepository repository = source.getServer().getPackRepository();
+-        repository.reload();
++        // Canvas - region threading - we shouldn't reload the repository
+         Collection<? extends Pack> selectedPacks = repository.getSelectedPacks();
+         if (selectedPacks.isEmpty()) {
+             source.sendSuccess(() -> Component.translatable("commands.datapack.list.enabled.none"), false);

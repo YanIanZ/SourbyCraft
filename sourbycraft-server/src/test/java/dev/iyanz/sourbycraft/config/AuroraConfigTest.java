@@ -1,0 +1,326 @@
+package dev.iyanz.sourbycraft.config;
+
+import com.electronwill.nightconfig.core.file.CommentedFileConfig;
+import dev.iyanz.sourbycraft.SourbyCraftConfig;
+import dev.iyanz.sourbycraft.perf.AsyncPathProcessor;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import static org.junit.jupiter.api.Assertions.*;
+
+public class AuroraConfigTest {
+    private static AuroraConfig.Parsed parse(Map<String, Object> values) {
+        return AuroraConfig.parse(new ConfigSnapshot(values));
+    }
+
+    @Test void absentSettingsRemainDefaultOff() {
+        var result = parse(Map.of());
+        assertEquals(AuroraConfig.DEFAULT, result.config());
+        assertTrue(result.invalidKeys().isEmpty());
+        assertTrue(result.deprecatedKeys().isEmpty());
+    }
+
+    @Test void newKeyWinsEvenWhenExplicitlyFalse() {
+        var result = parse(Map.of(AuroraConfig.ASYNC_PATH_KEY, false,
+            AuroraConfig.LEGACY_ASYNC_PATH_KEY, true));
+        assertFalse(result.config().entity().asyncPathfinding());
+        assertTrue(result.deprecatedKeys().isEmpty());
+    }
+
+    @Test void legacyOnlyRemainsReadableAndReportsDeprecation() {
+        var result = parse(Map.of(AuroraConfig.LEGACY_ASYNC_PATH_KEY, true));
+        assertTrue(result.config().entity().asyncPathfinding());
+        assertEquals(List.of(AuroraConfig.LEGACY_ASYNC_PATH_KEY), result.deprecatedKeys());
+    }
+
+    @Test void invalidModernKeyNeverEnablesLegacyTrue() {
+        for (Object invalid : List.of("true", 1, List.of(true))) {
+            var result = parse(Map.of(AuroraConfig.ASYNC_PATH_KEY, invalid,
+                AuroraConfig.LEGACY_ASYNC_PATH_KEY, true));
+            assertFalse(result.config().entity().asyncPathfinding());
+            assertEquals(List.of(AuroraConfig.ASYNC_PATH_KEY), result.invalidKeys());
+        }
+    }
+
+    @Test void malformedNamespacesDoNotFallThroughToLegacy() {
+        for (String parent : List.of("aurora", "aurora.entity")) {
+            var result = parse(Map.of(parent, "invalid", AuroraConfig.LEGACY_ASYNC_PATH_KEY, true));
+            assertFalse(result.config().entity().asyncPathfinding());
+            assertEquals(List.of(parent), result.invalidKeys());
+        }
+    }
+
+    @Test void invalidLegacySettingRemainsOff() {
+        var result = parse(Map.of(AuroraConfig.LEGACY_ASYNC_PATH_KEY, "yes"));
+        assertFalse(result.config().entity().asyncPathfinding());
+        assertEquals(List.of(AuroraConfig.LEGACY_ASYNC_PATH_KEY), result.invalidKeys());
+    }
+
+    @Test void typedValuesAndDiagnosticsCannotAliasParserInput() {
+        var input = new HashMap<String, Object>();
+        input.put(AuroraConfig.LEGACY_ASYNC_PATH_KEY, true);
+        var result = parse(input);
+        input.put(AuroraConfig.LEGACY_ASYNC_PATH_KEY, false);
+        assertTrue(result.config().entity().asyncPathfinding());
+        assertThrows(UnsupportedOperationException.class, () -> result.deprecatedKeys().clear());
+    }
+
+    @Test void liveReloadSummaryDoesNotInventRestartRequiredChanges() {
+        // Diagnostics held at the default, so this asserts the async key alone counts as one.
+        var enabled = new AuroraConfig(new AuroraConfig.Entity(true), AuroraConfig.DEFAULT.diagnostics(),
+            AuroraConfig.DEFAULT.cpu());
+        assertEquals(AuroraConfig.Lifecycle.LIVE, AuroraConfig.ASYNC_PATH.lifecycle());
+        assertTrue(enabled.reloadSummary(AuroraConfig.DEFAULT).contains("1 live change(s)"));
+        assertTrue(enabled.reloadSummary(enabled).contains("0 live change(s)"));
+        assertTrue(enabled.reloadSummary(AuroraConfig.DEFAULT).contains("restart required: none"));
+    }
+
+    @Test void newFilesSeedAuroraWhileExistingLegacyFilesKeepFallback(@TempDir Path dir) throws Exception {
+        var flag = SourbyCraftConfig.class.getDeclaredField("newFile");
+        flag.setAccessible(true);
+        boolean previous = flag.getBoolean(null);
+        var seed = SourbyCraftConfig.class.getDeclaredMethod("seedDefaults", CommentedFileConfig.class);
+        seed.setAccessible(true);
+        Path existing = dir.resolve("existing.toml");
+        String original = "# operator\n[perf.ai]\nasync-pathfinding=true\n";
+        Files.writeString(existing, original);
+        try {
+            flag.setBoolean(null, false);
+            try (var file = CommentedFileConfig.of(existing)) {
+                file.load();
+                seed.invoke(null, file);
+                assertFalse(file.contains(AuroraConfig.ASYNC_PATH_KEY));
+                assertTrue(AuroraConfig.parse(ConfigSnapshot.copyOf(file)).config().entity().asyncPathfinding());
+                assertEquals(original, Files.readString(existing));
+            }
+            flag.setBoolean(null, true);
+            Path created = dir.resolve("new.toml");
+            // Aurora keys no longer land in the unified file: the engine has its own, seeded
+            // separately by seedAurora(). What seedDefaults must still do is leave this file
+            // free of them, so a unified file never becomes a second source of engine truth.
+            try (var file = CommentedFileConfig.builder(created).sync().build()) {
+                seed.invoke(null, file);
+                assertFalse(file.contains(AuroraConfig.ASYNC_PATH_KEY),
+                    "the unified file must not carry Aurora keys any more");
+                assertFalse(file.contains(AuroraConfig.LANE_SAMPLING_KEY));
+                assertTrue(file.contains("branding.gc-advisor.enabled"),
+                    "utility keys still seed here");
+            }
+        } finally {
+            flag.setBoolean(null, previous);
+        }
+    }
+
+    @Test void disablingLiveAdmissionLetsAnAdmittedSolveFinish() throws Exception {
+        var started = new java.util.concurrent.CountDownLatch(1);
+        var finish = new java.util.concurrent.CountDownLatch(1);
+        try {
+            AsyncPathProcessor.setEnabled(true);
+            var result = AsyncPathProcessor.submit(() -> {
+                started.countDown();
+                try {
+                    if (!finish.await(5, java.util.concurrent.TimeUnit.SECONDS)) throw new AssertionError("timeout");
+                } catch (InterruptedException interrupted) {
+                    throw new AssertionError(interrupted);
+                }
+                return 42;
+            });
+            assertTrue(started.await(5, java.util.concurrent.TimeUnit.SECONDS));
+            AsyncPathProcessor.setEnabled(false);
+            assertFalse(AsyncPathProcessor.isEnabled());
+            assertFalse(result.isDone());
+            finish.countDown();
+            assertEquals(42, result.get(5, java.util.concurrent.TimeUnit.SECONDS));
+        } finally {
+            finish.countDown();
+            AsyncPathProcessor.shutdown();
+        }
+    }
+
+    @Test void loadingAndReloadingLegacyFilePreservesBytesAndUpdatesRuntime(@TempDir Path dir) throws Exception {
+        Path path = dir.resolve("operator.toml");
+        String legacy = "# preserve spacing and comments\n[perf.ai]\nasync-pathfinding = true\n";
+        Files.writeString(path, legacy);
+        var field = SourbyCraftConfig.class.getDeclaredField("loaded");
+        field.setAccessible(true);
+        Object previous = field.get(null);
+        boolean previousEnabled = AsyncPathProcessor.isEnabled();
+        var load = SourbyCraftConfig.class.getDeclaredMethod(
+            "loadSnapshot", CommentedFileConfig.class, CommentedFileConfig.class);
+        load.setAccessible(true);
+        try (var file = CommentedFileConfig.of(path)) {
+            file.load();
+            load.invoke(null, file, null);
+            assertTrue(SourbyCraftConfig.aurora().entity().asyncPathfinding());
+            assertTrue(AsyncPathProcessor.isEnabled());
+            assertEquals(legacy, Files.readString(path));
+            String modern = legacy + "\n[aurora.entity]\nasync-pathfinding = false\n";
+            Files.writeString(path, modern);
+            file.load();
+            load.invoke(null, file, null);
+            assertFalse(SourbyCraftConfig.aurora().entity().asyncPathfinding());
+            assertFalse(AsyncPathProcessor.isEnabled());
+            assertEquals(modern, Files.readString(path));
+        } finally {
+            AsyncPathProcessor.shutdown();
+            AsyncPathProcessor.setEnabled(previousEnabled);
+            field.set(null, previous);
+        }
+    }
+
+    // --- aurora.diagnostics ------------------------------------------------------------------
+
+    @Test
+    void laneSamplingDefaultsOnSoADefaultServerCanSayWhereTimeWent() {
+        assertTrue(AuroraConfig.DEFAULT.diagnostics().laneSampling());
+        assertTrue(parse(Map.of()).config().diagnostics().laneSampling());
+    }
+
+    @Test
+    void laneSamplingCanBeTurnedOff() {
+        final AuroraConfig.Parsed parsed = parse(Map.of(AuroraConfig.LANE_SAMPLING_KEY, false));
+        assertFalse(parsed.config().diagnostics().laneSampling());
+        assertEquals(List.of(), parsed.invalidKeys());
+    }
+
+    @Test
+    void anUnreadableLaneSamplingValueKeepsTheDefaultAndIsReported() {
+        // Falling back to off would silently disable the thing that explains where CPU went,
+        // which is a worse outcome than ignoring a typo.
+        final AuroraConfig.Parsed parsed = parse(Map.of(AuroraConfig.LANE_SAMPLING_KEY, "yes"));
+        assertTrue(parsed.config().diagnostics().laneSampling());
+        assertEquals(List.of(AuroraConfig.LANE_SAMPLING_KEY), parsed.invalidKeys());
+    }
+
+    @Test
+    void aMalformedDiagnosticsContainerDoesNotExposeSettingsUnderneathIt() {
+        final Map<String, Object> values = new HashMap<>();
+        values.put("aurora.diagnostics", "nonsense");
+        values.put(AuroraConfig.LANE_SAMPLING_KEY, false);
+        final AuroraConfig.Parsed parsed = parse(values);
+        assertSame(AuroraConfig.DEFAULT, parsed.config());
+        assertEquals(List.of("aurora.diagnostics"), parsed.invalidKeys());
+    }
+
+    @Test
+    void bothSettingsAreReadFromOneSnapshot() {
+        final Map<String, Object> values = new HashMap<>();
+        values.put(AuroraConfig.ASYNC_PATH_KEY, true);
+        values.put(AuroraConfig.LANE_SAMPLING_KEY, false);
+        final AuroraConfig config = parse(values).config();
+        assertTrue(config.entity().asyncPathfinding());
+        assertFalse(config.diagnostics().laneSampling());
+    }
+
+    @Test
+    void aTypoInOneSettingDoesNotRevertAnother() {
+        // The operator turned async pathfinding on deliberately. A mistyped diagnostics value is
+        // their typo to fix; silently switching off the other setting is not a fix.
+        final Map<String, Object> values = new HashMap<>();
+        values.put(AuroraConfig.ASYNC_PATH_KEY, true);
+        values.put(AuroraConfig.LANE_SAMPLING_KEY, "yes");
+        final AuroraConfig.Parsed parsed = parse(values);
+
+        assertTrue(parsed.config().entity().asyncPathfinding(), "the valid setting must survive");
+        assertTrue(parsed.config().diagnostics().laneSampling(), "the invalid one falls back");
+        assertEquals(List.of(AuroraConfig.LANE_SAMPLING_KEY), parsed.invalidKeys());
+    }
+
+    // --- Aurora's own file, layered over the unified one ----------------------------------
+
+    @Test
+    void auroraOwnFileWinsOverTheUnifiedOne() {
+        // A deployment that already had the key in the unified file, then gained aurora.toml.
+        final Map<String, Object> legacy = new HashMap<>();
+        legacy.put(AuroraConfig.ASYNC_PATH_KEY, false);
+        final Map<String, Object> aurora = new HashMap<>();
+        aurora.put(AuroraConfig.ASYNC_PATH_KEY, true);
+
+        final AuroraConfig config = AuroraConfig.parse(ConfigSnapshot.layered(
+            new ConfigSnapshot(legacy), new ConfigSnapshot(aurora))).config();
+
+        assertTrue(config.entity().asyncPathfinding(), "the Aurora file is authoritative");
+    }
+
+    @Test
+    void aDeploymentWithoutTheAuroraFileKeepsItsExistingSetting() {
+        // The whole point of layering: never silently revert a server that predates the split.
+        final Map<String, Object> legacy = new HashMap<>();
+        legacy.put(AuroraConfig.ASYNC_PATH_KEY, true);
+
+        final AuroraConfig config = AuroraConfig.parse(ConfigSnapshot.layered(
+            new ConfigSnapshot(legacy), new ConfigSnapshot(Map.of()))).config();
+
+        assertTrue(config.entity().asyncPathfinding());
+    }
+
+    @Test
+    void layeringLeavesUntouchedKeysAlone() {
+        final Map<String, Object> legacy = new HashMap<>();
+        legacy.put(AuroraConfig.ASYNC_PATH_KEY, true);
+        legacy.put(AuroraConfig.LANE_SAMPLING_KEY, false);
+        final Map<String, Object> aurora = new HashMap<>();
+        aurora.put(AuroraConfig.ASYNC_PATH_KEY, false);
+
+        final AuroraConfig config = AuroraConfig.parse(ConfigSnapshot.layered(
+            new ConfigSnapshot(legacy), new ConfigSnapshot(aurora))).config();
+
+        assertFalse(config.entity().asyncPathfinding(), "overridden");
+        assertFalse(config.diagnostics().laneSampling(), "not overridden, so the legacy value stands");
+    }
+
+    @Test
+    void theReloadSummaryCountsEverySettingThatChanged() {
+        final AuroraConfig after = new AuroraConfig(
+            new AuroraConfig.Entity(true), new AuroraConfig.Diagnostics(false),
+            AuroraConfig.DEFAULT.cpu());
+        assertTrue(after.reloadSummary(AuroraConfig.DEFAULT).startsWith("Aurora: 2 live change(s)"));
+        assertTrue(AuroraConfig.DEFAULT.reloadSummary(AuroraConfig.DEFAULT)
+            .startsWith("Aurora: 0 live change(s)"));
+    }
+
+    @Test
+    void commandBlocksAreOffByDefaultLiveAndOffOnATypo() {
+        assertFalse(AuroraConfig.DEFAULT.world().commandBlocks());
+        assertEquals(AuroraConfig.Lifecycle.LIVE, AuroraConfig.COMMAND_BLOCKS.lifecycle());
+        assertEquals("aurora.world.command-blocks", AuroraConfig.COMMAND_BLOCKS_KEY);
+        assertTrue(parse(Map.of(AuroraConfig.COMMAND_BLOCKS_KEY, true)).config().world().commandBlocks());
+        for (Object invalid : List.of("true", 1, List.of(true))) {
+            var result = parse(Map.of(AuroraConfig.COMMAND_BLOCKS_KEY, invalid));
+            assertFalse(result.config().world().commandBlocks());
+            assertEquals(List.of(AuroraConfig.COMMAND_BLOCKS_KEY), result.invalidKeys());
+        }
+        var malformed = parse(Map.of("aurora.world", "on", AuroraConfig.COMMAND_BLOCKS_KEY, true));
+        assertFalse(malformed.config().world().commandBlocks());
+        assertEquals(List.of("aurora.world"), malformed.invalidKeys());
+    }
+
+    @Test
+    void commandBlocksCountAsOneLiveChange() {
+        final AuroraConfig on = parse(Map.of(AuroraConfig.COMMAND_BLOCKS_KEY, true)).config();
+        assertTrue(on.reloadSummary(AuroraConfig.DEFAULT).startsWith("Aurora: 1 live change(s)"));
+        assertTrue(on.reloadSummary(AuroraConfig.DEFAULT).contains("restart required: none"));
+    }
+
+    @Test
+    void tickFunctionsAreOffByDefaultLiveAndOffOnATypo() {
+        assertFalse(AuroraConfig.DEFAULT.world().tickFunctions());
+        assertEquals(AuroraConfig.Lifecycle.LIVE, AuroraConfig.TICK_FUNCTIONS.lifecycle());
+        assertEquals("aurora.world.tick-functions", AuroraConfig.TICK_FUNCTIONS_KEY);
+        final AuroraConfig on = parse(Map.of(AuroraConfig.TICK_FUNCTIONS_KEY, true)).config();
+        assertTrue(on.world().tickFunctions());
+        assertFalse(on.world().commandBlocks(), "independent of the command-block switch");
+        for (Object invalid : List.of("true", 1, List.of(true))) {
+            var result = parse(Map.of(AuroraConfig.TICK_FUNCTIONS_KEY, invalid, AuroraConfig.COMMAND_BLOCKS_KEY, true));
+            assertFalse(result.config().world().tickFunctions());
+            assertTrue(result.config().world().commandBlocks(), "a typo in one key keeps the other");
+            assertEquals(List.of(AuroraConfig.TICK_FUNCTIONS_KEY), result.invalidKeys());
+        }
+        assertTrue(on.reloadSummary(AuroraConfig.DEFAULT).startsWith("Aurora: 1 live change(s)"));
+        assertTrue(on.reloadSummary(AuroraConfig.DEFAULT).contains("restart required: none"));
+    }
+}

@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/level/block/entity/EnchantingTableBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/EnchantingTableBlockEntity.java
+@@ -28,7 +_,7 @@
+     public float rot;
+     public float oRot;
+     public float tRot;
+-    private static final RandomSource RANDOM = RandomSource.create();
++    private static final RandomSource RANDOM = io.papermc.paper.threadedregions.util.ThreadLocalRandomSource.INSTANCE; // Canvas - region threading
+     private @Nullable Component name;
+ 
+     public EnchantingTableBlockEntity(final BlockPos worldPosition, final BlockState blockState) {

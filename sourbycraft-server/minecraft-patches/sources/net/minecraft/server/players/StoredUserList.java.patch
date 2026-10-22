@@ -1,0 +1,29 @@
+--- a/net/minecraft/server/players/StoredUserList.java
++++ b/net/minecraft/server/players/StoredUserList.java
+@@ -125,6 +_,7 @@
+     }
+ 
+     public void save() throws IOException {
++        synchronized (this) { // Folia - region threading
+         this.removeExpired(); // Paper - remove expired values before saving
+         JsonArray result = new JsonArray();
+         this.map.values().stream().map(entry -> Util.make(new JsonObject(), entry::serialize)).forEach(result::add);
+@@ -132,9 +_,11 @@
+         try (BufferedWriter writer = Files.newWriter(this.file, StandardCharsets.UTF_8)) {
+             GSON.toJson(result, GSON.newJsonWriter(writer));
+         }
++        } // Folia - region threading
+     }
+ 
+     public void load() throws IOException {
++        synchronized (this) { // Folia - region threading
+         if (this.file.exists()) {
+             try (BufferedReader reader = Files.newReader(this.file, StandardCharsets.UTF_8)) {
+                 this.map.clear();
+@@ -159,5 +_,6 @@
+             }
+             // Spigot end
+         }
++        } // Folia - region threading
+     }
+ }

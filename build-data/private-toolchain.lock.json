@@ -1,0 +1,10 @@
+{
+  "SourbyPatcher": {
+    "repository": "YanIanZ/SourbyPatcher",
+    "revision": "1270d7e32b6cf310c18838e462d317e419dbda39"
+  },
+  "SourbyClip": {
+    "repository": "YanIanZ/SourbyClip",
+    "revision": "e5de0f4ba2d10fc81e95b0d23069b3b9d59d73bf"
+  }
+}

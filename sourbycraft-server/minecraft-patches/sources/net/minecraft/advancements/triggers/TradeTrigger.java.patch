@@ -1,0 +1,10 @@
+--- a/net/minecraft/advancements/triggers/TradeTrigger.java
++++ b/net/minecraft/advancements/triggers/TradeTrigger.java
+@@ -20,6 +_,7 @@
+     }
+ 
+     public void trigger(final ServerPlayer player, final AbstractVillager villager, final ItemStack itemStack) {
++        if (player.level().canvasConfig().disableCriterionTrigger) return; // Canvas - disable criterion trigger config
+         LootContext villagerContext = EntityPredicate.createContext(player, villager);
+         this.trigger(player, t -> t.matches(villagerContext, itemStack));
+     }

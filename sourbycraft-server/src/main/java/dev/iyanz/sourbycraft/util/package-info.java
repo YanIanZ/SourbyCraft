@@ -1,5 +1,5 @@
 /**
- * Small, dependency-light helpers shared across the SourbyCraft utility layer.
+ * Small, dependency-light helpers shared across SourbyCraft, outside the Aurora engine.
  *
  * <p>{@link dev.iyanz.sourbycraft.util.BarUtil} renders the {@code ▰▱} progress bars every panel
  * command uses; {@link dev.iyanz.sourbycraft.util.ContainerMemory} detects the cgroup/host memory

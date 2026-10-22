@@ -1,0 +1,26 @@
+--- a/net/minecraft/world/entity/vehicle/minecart/MinecartCommandBlock.java
++++ b/net/minecraft/world/entity/vehicle/minecart/MinecartCommandBlock.java
+@@ -87,6 +_,11 @@
+ 
+     @Override
+     public InteractionResult interact(final Player player, final InteractionHand hand, final Vec3 location) {
++        // Canvas start - region threading
++        if (true) {
++            return InteractionResult.FAIL;
++        }
++        // Canvas end - region threading
+         if (!player.canUseGameMasterBlocks() && (!player.isCreative() || !player.getBukkitEntity().hasPermission("minecraft.commandblock"))) { // Paper - command block permission
+             return InteractionResult.PASS;
+         }
+@@ -149,5 +_,11 @@
+             return (ServerLevel) MinecartCommandBlock.this.level();
+         }
+         // CraftBukkit end
++        // Folia start
++        @Override
++        public void threadCheck() {
++            ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(MinecartCommandBlock.this, "Asynchronous sendSystemMessage to a command block");
++        }
++        // Folia end
+     }
+ }

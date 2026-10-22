@@ -1,0 +1,10 @@
+--- a/net/minecraft/advancements/triggers/KilledByArrowTrigger.java
++++ b/net/minecraft/advancements/triggers/KilledByArrowTrigger.java
+@@ -32,6 +_,7 @@
+     }
+ 
+     public void trigger(final ServerPlayer player, final Collection<Entity> victims, final @Nullable ItemStack firedByWeapon) {
++        if (player.level().canvasConfig().disableCriterionTrigger) return; // Canvas - disable criterion trigger config
+         List<LootContext> victimContexts = Lists.newArrayList();
+         Set<EntityType<?>> entityTypes = Sets.newHashSet();
+ 

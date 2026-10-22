@@ -1,0 +1,10 @@
+--- a/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
++++ b/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
+@@ -514,6 +_,7 @@
+     }
+ 
+     protected CraftTask handle(final CraftTask task, final long delay) { // Paper
++        if (true) throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - region threading
+         // Paper start
+         if (!this.isAsyncScheduler && !task.isSync()) {
+             this.asyncScheduler.handle(task, delay);

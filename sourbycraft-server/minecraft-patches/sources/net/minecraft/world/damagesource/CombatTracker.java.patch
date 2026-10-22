@@ -1,0 +1,20 @@
+--- a/net/minecraft/world/damagesource/CombatTracker.java
++++ b/net/minecraft/world/damagesource/CombatTracker.java
+@@ -74,7 +_,7 @@
+     private Component getMessageForAssistedFall(
+         final Entity attackerEntity, final Component attackerName, final String messageWithItem, final String messageWithoutItem
+     ) {
+-        ItemStack attackerItem = attackerEntity instanceof LivingEntity livingEntity ? livingEntity.getMainHandItem() : ItemStack.EMPTY;
++        ItemStack attackerItem = attackerEntity instanceof LivingEntity livingEntity && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(livingEntity) ? livingEntity.getMainHandItem() : ItemStack.EMPTY; // Folia - region threading
+         return !attackerItem.isEmpty() && attackerItem.has(DataComponents.CUSTOM_NAME)
+             ? Component.translatable(messageWithItem, this.mob.getDisplayName(), attackerName, attackerItem.getDisplayName())
+             : Component.translatable(messageWithoutItem, this.mob.getDisplayName(), attackerName);
+@@ -100,7 +_,7 @@
+     }
+ 
+     private static @Nullable Component getDisplayName(final @Nullable Entity entity) {
+-        return entity == null ? null : entity.getDisplayName();
++        return entity == null || !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(entity) ? null : entity.getDisplayName(); // Folia - region threading
+     }
+ 
+     public Component getDeathMessage() {

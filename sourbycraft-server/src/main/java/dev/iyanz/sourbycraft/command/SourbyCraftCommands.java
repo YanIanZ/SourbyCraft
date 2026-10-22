@@ -14,7 +14,7 @@ import java.util.Map;
  * ({@code /tps}, {@code /ping}, {@code /ver}, ...) resolve to the SourbyCraft styled versions —
  * not Paper's built-ins.
  *
- * <p><b>Single-phase claim (Canvas boot order).</b> {@link #registerAll()} runs from
+ * <p><b>Single-phase claim (server boot order).</b> {@link #registerAll()} runs from
  * {@link dev.iyanz.sourbycraft.core.SourbyCraftBootstrap}, called from a hand-authored
  * {@code minecraft-patch} right AFTER {@code PaperCommands.registerCommands(this)} in
  * {@code DedicatedServer#initServer} — so we claim the bare names AFTER Paper's built-ins are
@@ -30,7 +30,7 @@ public final class SourbyCraftCommands {
 
     /**
      * Builds every SourbyCraft styled command, drops any foreign command-map entry for the same
-     * bare/namespaced name, claims the bare name in the command map, and registers the HUD
+     * bare name, claims the bare name in the command map, and registers the HUD
      * quit-listener. Idempotent — a second call is a no-op.
      */
     public static synchronized void registerAll() {
@@ -45,24 +45,24 @@ public final class SourbyCraftCommands {
         OURS.clear();
         OURS.put("ping", new PingCommand("ping"));
         OURS.put("sys", new SysCommand("sys"));
+        OURS.put("spec", new SpecCommand("spec"));
         OURS.put("plugins", new PluginsCommand("plugins"));
         OURS.put("speedtest", new SpeedtestCommand("speedtest"));
         OURS.put("ver", new VerCommand("ver"));
         OURS.put("maxp", new MaxpCommand("maxp"));
         OURS.put("tps", new TpsCommand("tps"));
         OURS.put("mspt", new MsptCommand("mspt"));
+        OURS.put("ram", new PerfCommand("ram"));
+        OURS.put("perf", new PerfCommand("perf"));
+        OURS.put("awf", new AwfCommand("awf"));
         OURS.put("tpsbar", new HudBarCommand("tpsbar", true));
         OURS.put("rambar", new HudBarCommand("rambar", false));
+        OURS.put("perfbar", new PerfBarCommand());
         OURS.put("update", new UpdateCommand("update"));
         OURS.put("sourbycraft", new SourbyCraftCommand("sourbycraft"));
+        OURS.put("aurora", new SourbyCraftCommand("aurora"));
 
-        final Map<String, Command> known = commandMap.getKnownCommands();
-        for (Map.Entry<String, Command> e : OURS.entrySet()) {
-            final String name = e.getKey();
-            dropForeign(known, name);
-            commandMap.register("sourbycraft", e.getValue()); // ensures a sourbycraft:<name> alias always exists
-            known.put(name, e.getValue());                    // claim the bare name (runs AFTER Paper's own registration)
-        }
+        for (Command command : OURS.values()) claim(commandMap, command);
 
         try {
             Bukkit.getPluginManager().registerEvents(
@@ -75,15 +75,19 @@ public final class SourbyCraftCommands {
         registered = true;
         org.slf4j.LoggerFactory.getLogger("SourbyCraft").info(
             "Registered " + OURS.size() + " SourbyCraft commands (bare names; /minecraft:<name> or "
-            + "/paper:<name> still reach the built-ins). Native /spark is provided by Canvas.");
+            + "/paper:<name> still reach the built-ins). Native /spark is provided by the server integration.");
     }
 
-    /** Remove every command-map entry for {@code name} that is NOT one of ours (bare + all namespaces). */
-    private static void dropForeign(Map<String, Command> known, String name) {
-        final String lower = name.toLowerCase(Locale.ROOT);
-        known.remove(lower);
-        for (String ns : new String[]{"bukkit", "minecraft", "paper", "spigot"}) {
-            known.remove(ns + ":" + lower);
+    /** Claim the bare name and aliases, preserving upstream namespaced commands. */
+    static void claim(CommandMap commandMap, Command command) {
+        Map<String, Command> known = commandMap.getKnownCommands();
+        known.remove(command.getName().toLowerCase(Locale.ROOT));
+        for (String alias : command.getAliases()) known.remove(alias.toLowerCase(Locale.ROOT));
+        commandMap.register("sourbycraft", command);
+        known.put(command.getName().toLowerCase(Locale.ROOT), command);
+        for (String alias : command.getAliases()) {
+            known.put(alias.toLowerCase(Locale.ROOT), command);
+            known.put("sourbycraft:" + alias.toLowerCase(Locale.ROOT), command);
         }
     }
 

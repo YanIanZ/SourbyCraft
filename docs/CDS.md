@@ -1,52 +1,13 @@
-# Auto-CDS — faster JVM startup, everywhere
+# Class Data Sharing (CDS) — opt-in JVM startup speed
 
-SourbyCraft ships **Class Data Sharing (CDS)** so the JVM loads its class metadata
-from a memory-mapped archive instead of parsing it every boot. Startup drops roughly
-**30–50%**. The archive is written to `cache/sourbycraft.jsa` on the server data
-directory and self-heals when the jar or JDK changes.
+SourbyCraft does **not** ship an automatic CDS layer. The legacy Auto-CDS launcher
+(`SourbyBootstrap` / `CdsEnvironment`) that detected the deployment environment and forked a
+second JVM was dead code — the slim jar's launcher is SourbyClip, which never ran it — and has
+been removed. Class Data Sharing is now purely an explicit JVM flag the operator adds.
 
-The bootstrap picks a strategy per environment instead of blindly forking a second
-JVM — because forking is actively harmful in containers and process-managed panels.
-
-Environment classification is an ordered detector chain (`CdsEnvironment`) covering:
-
-| Environment | Signals | Policy |
-|---|---|---|
-| Pterodactyl / Pelican | `P_SERVER_*`, `PELICAN` | inline + hint |
-| Generic game panel | `SERVER_MEMORY` + `SERVER_IP` | inline + hint |
-| Kubernetes | `KUBERNETES_SERVICE_HOST`, `/var/run/secrets/kubernetes.io` | inline + hint |
-| Nomad | `NOMAD_ALLOC_ID` / `NOMAD_TASK_NAME` | inline + hint |
-| Docker / containerd | `/.dockerenv`, `/proc/1/cgroup` slice | inline + hint |
-| Podman | `/run/.containerenv`, `container=podman` | inline + hint |
-| LXC / OpenVZ | `container=lxc`, `/proc/vz`, `/proc/1/environ` | inline + hint |
-| systemd service | `INVOCATION_ID`, `NOTIFY_SOCKET`, `MANAGERPID` | inline + hint |
-| CI runner | `CI`, `GITHUB_ACTIONS`, `GITLAB_CI`, … | inline + hint |
-| cgroup v1/v2 cap | `memory.max` / `memory.limit_in_bytes` | inline + hint |
-| WSL | `microsoft` in `/proc/sys/kernel/osrelease` | fork OK¹ |
-| Cloud VM (AWS/GCP/Azure) | DMI `sys_vendor` | fork OK¹ |
-| Bare metal | (no marker) | fork OK¹ |
-
-¹ Fork-permitted environments still boot inline + hint when a large committed heap
-(`-Xms` ≥ 256M) is present, since forking would double-commit it. Adding a new
-scenario is a single detector entry — no growing `if` ladder.
-
-## Why not just fork a helper JVM?
-
-The old model launched a tiny orchestrator JVM that re-execs the real server with a
-CDS flag. That is fine on a bare-metal shell, but under Docker / Pterodactyl / Pelican
-it breaks two things:
-
-1. **Double-committed heap → OOM kill.** Panel eggs set `-Xms = -Xmx` (e.g. `-Xms8G`).
-   `-Xms` commits the full heap immediately. The orchestrator commits 8G *and* the
-   forked server commits 8G → 16G against an 8G cgroup limit → the kernel OOM-kills
-   the container.
-2. **Wrong tracked process.** The panel/daemon watches the orchestrator PID, so the
-   memory graph shows ~30 MB (the orchestrator, not the server) and stop signals
-   target the wrong process.
-
-So on containers and panels SourbyCraft **does not fork**. It boots inline and, once,
-prints the exact single-JVM CDS flag to add. That flag gives the same speedup with
-zero extra process and correct panel accounting.
+CDS lets the JVM load class metadata from a memory-mapped archive instead of parsing it every
+boot, cutting startup substantially. The archive is written to `cache/sourbycraft.jsa` on the
+server data directory and self-heals when the jar or JDK changes.
 
 ## The one flag that always works
 
@@ -54,27 +15,22 @@ zero extra process and correct panel accounting.
 -XX:+AutoCreateSharedArchive -XX:SharedArchiveFile=cache/sourbycraft.jsa
 ```
 
-`-XX:+AutoCreateSharedArchive` (JDK 19+) creates the archive on first clean shutdown,
-uses it afterwards, and recreates it automatically when it goes stale — one flag, one
-JVM. When you pass it yourself, the bootstrap detects it and stays out of the way.
+`-XX:+AutoCreateSharedArchive` (JDK 19+) creates the archive on first clean shutdown, uses it
+afterwards, and recreates it automatically when it goes stale — one flag, one JVM. Add it in
+front of `-jar` in your launch command.
 
 ## Per-environment setup
 
 ### Docker
 
-Already baked in. The reference `Dockerfile` + `docker/entrypoint.sh` launch the
-server as PID 1 (`exec java …`) with the CDS flag above and Aikar G1 tuning. The
-archive lives on the `/data` volume, so it persists across `docker restart`.
+Already baked in. The reference `docker/entrypoint.sh` launches the server as PID 1 (`exec java …`)
+with the CDS flag above and Aikar G1 tuning. The archive lives on the `/data` volume, so it
+persists across `docker restart`.
 
-```bash
-./gradlew applyAllPatches :sourbycraft-server:compileJava assembleReleaseArtifacts
-docker compose up -d --build
-```
+### Pterodactyl / Pelican
 
-### Pterodactyl
-
-Edit the server's **Startup** command (or the egg's `STARTUP`) and add the CDS flag
-in front of `-jar`:
+Edit the server's **Startup** command (or the egg's `STARTUP`) and add the CDS flag in front of
+`-jar`:
 
 ```
 java -Xms${SERVER_MEMORY}M -Xmx${SERVER_MEMORY}M \
@@ -82,61 +38,34 @@ java -Xms${SERVER_MEMORY}M -Xmx${SERVER_MEMORY}M \
   -jar {{SERVER_JARFILE}} --nogui
 ```
 
-Wings tracks the single `java` PID → memory graph and Stop work correctly. Add the
-usual [Aikar flags](https://docs.papermc.io/paper/aikar-flags) too for large servers.
-
-### Pelican
-
-Same as Pterodactyl — Pelican reuses the `P_SERVER_*` / `SERVER_MEMORY` egg variables.
-Add the CDS flag to the Startup command in front of `-jar`. SourbyCraft detects a
-Pelican/Pterodactyl environment and will remind you once in the console if it is
-missing.
-
-### Bare metal (shell / dev box)
-
-Two options:
-
-- **Zero-config:** just run `java -jar SourbyCraft-26.2-REL.jar`. With no committed
-  `-Xms`, the bootstrap forks one child using `-XX:+AutoCreateSharedArchive` and
-  manages it (console + Stop forwarded). Good for a dev box.
-- **Recommended for production:** add the flag yourself so there is a single JVM:
-  ```
-  java -Xms8G -Xmx8G -XX:+AutoCreateSharedArchive -XX:SharedArchiveFile=cache/sourbycraft.jsa \
-    <aikar flags> -jar SourbyCraft-26.2-REL.jar --nogui
-  ```
+Wings tracks the single `java` PID → memory graph and Stop work correctly. Add the usual
+[Aikar flags](https://docs.papermc.io/paper/aikar-flags) too for large servers.
 
 ### systemd service
 
-Detected via `INVOCATION_ID` / `NOTIFY_SOCKET`. The bootstrap **does not fork** here —
-forking would make the unit's `MainPID` the wrapper, so `systemctl stop`/`status`,
-`Type=notify` readiness, and cgroup accounting would target the wrong process. It boots
-inline and hints the flag once. Add it to your `ExecStart` for single-JVM CDS:
+Add the flag to your `ExecStart` for single-JVM CDS:
 
 ```
 ExecStart=/usr/bin/java -Xms8G -Xmx8G -XX:+AutoCreateSharedArchive \
   -XX:SharedArchiveFile=cache/sourbycraft.jsa <aikar flags> -jar SourbyCraft-26.2-REL.jar --nogui
 ```
 
-## Modes + overrides
+### Bare metal (shell / dev box)
 
-Control the layer with a system property or env var:
+```
+java -Xms8G -Xmx8G -XX:+AutoCreateSharedArchive -XX:SharedArchiveFile=cache/sourbycraft.jsa \
+  <aikar flags> -jar SourbyCraft-26.2-REL.jar --nogui
+```
 
-| `sourbycraft.cds.mode` / `$SOURBYCRAFT_CDS_MODE` | Behaviour |
-|---|---|
-| `auto` *(default)* | Fork only when safe (no committed `-Xms`, not a container/panel); otherwise boot inline + hint the flag. |
-| `flag` | Never fork; always print the flag hint and boot inline. |
-| `fork` | Always fork (legacy bare-metal behaviour). |
-| `off` | No CDS layer at all. |
+## Archive path override
 
-Archive path override: `-Dsourbycraft.cds.path=/abs/path.jsa` or
-`$SOURBYCRAFT_CDS_PATH` (useful for read-only working dirs).
+The archive defaults to `cache/sourbycraft.jsa` relative to the working directory. The path is
+controlled entirely by the flag above; there is no SourbyCraft property that changes it.
 
 ## Advanced: AOT cache (JDK 24+)
 
-For the fastest cold start, Java 25's **AOT cache** (Project Leyden) also links classes
-ahead of time. It is a two-step, operator-managed flow, so SourbyCraft does not
-automate it — but if you pass `-XX:AOTCache=…` / `-XX:AOTMode=…` the bootstrap detects
-it and leaves the archive entirely to the JVM:
+For the fastest cold start, Java 25's **AOT cache** (Project Leyden) also links classes ahead of
+time. It is a two-step, operator-managed flow — SourbyCraft does not automate it:
 
 ```bash
 # 1. record a training run, then create the cache

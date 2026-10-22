@@ -1,0 +1,76 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Thu, 22 Oct 2026 06:36:24 +0700
+Subject: [PATCH] SourbyCraft - hold a stop requested during startup until
+ startup ends
+
+A plugin that calls Bukkit.shutdown() from onEnable runs on the server
+thread inside DedicatedServer#initServer. The region-threading stop
+path started the region shutdown thread at once, which disabled
+plugins, closed every world's chunk storage, saved and exited while the
+server thread kept running the rest of startup: its startup save then
+flushed into closed region files (ClosedChannelException), the region
+scheduler was started and "Done (" was logged after "Stopping server",
+or System.exit cut the server thread off in the middle of startup.
+
+stopServer now asks StartupStopGate first: a stop requested by the
+server thread before startup has ended is only marked. Startup goes on
+as on Paper, where halt only clears the running flag (remaining plugins
+enable, worlds stay loaded); initServer then skips the query/rcon
+listeners, the startup save and the started notification, and
+runServer logs StartupStopGate.ABANDONED_MESSAGE instead of starting the
+region scheduler and logging "Done (", and runs the stop, which saves
+every world once with its storage open. If startup throws after such a
+request, the held stop still runs. Stops from any other thread keep the
+old behaviour; a normal startup is unchanged.
+
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index 087a7a5b92199925f34110b7ca97795f86363cab..7327ca578a57c7425c505d204e4ac7694ce52900 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -1076,7 +1076,10 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         new io.papermc.paper.threadedregions.RegionShutdownThread("Region shutdown thread").start();
+     }
+ 
++    public final dev.iyanz.sourbycraft.startup.StartupStopGate startupStopGate = new dev.iyanz.sourbycraft.startup.StartupStopGate(); // SourbyCraft - stop requested during startup
++
+     public void stopServer() {
++        if (this.startupStopGate.holdIfStarting(Thread.currentThread() == this.serverThread)) return; // SourbyCraft - stop requested during startup: held until startup ends on this thread
+         // halt scheduler
+         // don't wait, we may be on a scheduler thread
+         io.papermc.paper.threadedregions.TickRegions.getScheduler().halt(false, 0L);
+@@ -1333,6 +1336,13 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+             if (!this.initServer()) {
+                 throw new IllegalStateException("Failed to initialize server");
+             }
++            // SourbyCraft start - stop requested during startup
++            if (this.startupStopGate.finishStartup()) {
++                LOGGER.info(dev.iyanz.sourbycraft.startup.StartupStopGate.ABANDONED_MESSAGE);
++                this.stopServer();
++                return;
++            }
++            // SourbyCraft end - stop requested during startup
+ 
+             this.nextTickTimeNanos = Util.getNanos();
+             this.initTickSchedule(); // Paper - improve tick loop
+@@ -1440,6 +1450,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+             }
+ 
+             this.onServerCrash(report);
++            if (this.startupStopGate.finishStartup()) this.stopServer(); // SourbyCraft - stop requested during startup: startup failed afterwards, still run the held stop
+         } if (false) { // Canvas - region threading
+             try {
+                 this.stopped = true;
+diff --git a/net/minecraft/server/dedicated/DedicatedServer.java b/net/minecraft/server/dedicated/DedicatedServer.java
+index b2b161cc561fc871f253aea09f91010c07b9516a..afde7a601783ba1206973090e802a78b51e50a31 100644
+--- a/net/minecraft/server/dedicated/DedicatedServer.java
++++ b/net/minecraft/server/dedicated/DedicatedServer.java
+@@ -366,6 +366,8 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface
+             this.getAllLevels().forEach(l -> l.getGameRules().set(GameRules.SHOW_ADVANCEMENT_MESSAGES, properties.announcePlayerAchievements, this.overworld())); // Paper - per-world game rules
+         }
+ 
++        if (this.startupStopGate.stopHeld()) return true; // SourbyCraft - stop requested during startup: no listeners, no startup save; the stop saves once
++
+         if (properties.enableQuery) {
+             LOGGER.info("Starting GS4 status listener");
+             this.queryThreadGs4 = QueryThreadGs4.create(this);

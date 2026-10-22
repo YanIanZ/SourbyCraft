@@ -1,0 +1,39 @@
+--- a/net/minecraft/world/entity/ai/village/poi/PoiManager.java
++++ b/net/minecraft/world/entity/ai/village/poi/PoiManager.java
+@@ -60,11 +_,13 @@
+     }
+ 
+     private void updateDistanceTracking(long section) {
++        synchronized (this.villageDistanceTracker) { // Folia - region threading
+         if (this.isVillageCenter(section)) {
+             this.villageDistanceTracker.setSource(section, POI_DATA_SOURCE);
+         } else {
+             this.villageDistanceTracker.removeSource(section);
+         }
++        } // Folia - region threading
+     }
+ 
+     @Override
+@@ -420,10 +_,12 @@
+     }
+ 
+     public int sectionsToVillage(final SectionPos sectionPos) {
++        synchronized (this.villageDistanceTracker) { // Folia - region threading
+         // Paper start - rewrite chunk system
+         this.villageDistanceTracker.propagateUpdates();
+         return convertBetweenLevels(this.villageDistanceTracker.getLevel(ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkSectionKey(sectionPos)));
+         // Paper end - rewrite chunk system
++        } // Folia - region threading
+     }
+ 
+     private boolean isVillageCenter(final long sectionPos) {
+@@ -434,7 +_,9 @@
+ 
+     @Override
+     public void tick(final BooleanSupplier haveTime) {
++        synchronized (this.villageDistanceTracker) { // Folia - region threading
+         this.villageDistanceTracker.propagateUpdates(); // Paper - rewrite chunk system
++        } // Folia - region threading
+     }
+ 
+     @Override

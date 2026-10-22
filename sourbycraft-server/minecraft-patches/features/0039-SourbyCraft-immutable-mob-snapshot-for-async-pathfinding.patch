@@ -1,0 +1,653 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Tue, 20 Oct 2026 02:01:24 +0700
+Subject: [PATCH] SourbyCraft - immutable mob snapshot for async pathfinding
+
+Audit ENG-8: the async path worker read the live Mob off its owner thread (position, bounding box, pathfindingMalus EnumMap, canStandOnFluid, maxUpStep, getMaxFallDistance, getRandom, and noCollision(mob, box) building an EntityCollisionContext from isDescending/getMainHandItem).
+
+Every mob member the solve reads is now captured on the owner in dev.iyanz.sourbycraft.perf.MobPathSnapshot (captureDetached in PathNavigation.sourbyKickAsyncRecompute). PathFinder.findPath(PathNavigationRegion, MobPathSnapshot, ...) prepares the evaluator with the snapshot and a null mob; Walk/Fly/Swim/Amphibious/Frog evaluators read this.subject() instead of this.mob, collision goes through the snapshot off-thread and the live mob on the owner, level minY comes from the region. The synchronous solve captures the same snapshot lazily on the owner after the prepare chain, keeping the mob's own RandomSource, so the feature-off path is unchanged.
+
+Creaking's navigation refuses the offload: HomeNodeEvaluator reads Creaking.this.getHomePos() outside the Mob API. Sniffer and AmphibiousPathNavigation stay refused as before.
+
+Tests: MobPathSnapshotTest (sealed mob fake, unchanged result after mutation, sync == snapshot, fluid table, border), AsyncPathEvaluatorIsolationTest, AsyncPathRefusalTest.
+
+diff --git a/net/minecraft/world/entity/ai/navigation/PathNavigation.java b/net/minecraft/world/entity/ai/navigation/PathNavigation.java
+index 1e61ab4e0aabdd4c140a0957dda48dd54a0e9536..89a384174ee88eb2a2081baa13d36c5bf2436bcf 100644
+--- a/net/minecraft/world/entity/ai/navigation/PathNavigation.java
++++ b/net/minecraft/world/entity/ai/navigation/PathNavigation.java
+@@ -121,16 +121,6 @@ public abstract class PathNavigation {
+     // SourbyCraft start - async pathfinding
+     private volatile boolean sourbyAsyncPathPending = false;
+ 
+-    /**
+-     * Recompute the path off the region thread. The setup — target validation, {@code
+-     * EntityPathfindEvent}, the immutable {@link dev.iyanz.aurora.level.SnapshotPathRegion} and a
+-     * fresh thread-isolated {@code PathFinder}/{@code NodeEvaluator} — all happens HERE on the region
+-     * thread. Only the A* solve runs on the worker pool, against the immutable snapshot (block reads
+-     * are safe; the mob is only read, never structurally mutated, during a solve). The mob keeps its
+-     * current path until the result lands, which is applied back on the mob's own region thread via
+-     * its {@code EntityScheduler}. Returns {@code false} (caller falls back to the vanilla sync path)
+-     * if the mob can't path right now or the event cancelled every target.
+-     */
+     /**
+      * Whether this navigation's node evaluator only reads the mob during a solve.
+      *
+@@ -168,13 +158,23 @@ public abstract class PathNavigation {
+         return solver;
+     }
+ 
++    /**
++     * Recompute the path off the region thread. The setup — target validation, {@code
++     * EntityPathfindEvent}, the immutable {@link dev.iyanz.aurora.level.SnapshotPathRegion}, the
++     * immutable {@link dev.iyanz.sourbycraft.perf.MobPathSnapshot} and a fresh thread-isolated
++     * {@code PathFinder}/{@code NodeEvaluator} — all happens HERE on the region thread. Only the A*
++     * solve runs on the worker pool, and it holds neither the level nor the mob: block reads come
++     * from the region snapshot, mob reads from the mob snapshot (audit ENG-8). The mob keeps its
++     * current path until the result lands, which is applied back on the mob's own region thread via
++     * its {@code EntityScheduler}. Returns {@code false} (caller falls back to the vanilla sync path)
++     * if the mob can't path right now or the event cancelled every target.
++     */
+     private boolean sourbyKickAsyncRecompute(final net.minecraft.core.BlockPos targetPos, final int reachRange) {
+-        // The solve runs on a worker, so anything it touches on the mob is touched from a thread
+-        // that does not own the entity. Reads of position and bounding box are tolerable -- they
+-        // are the same kind of staleness a path always races against. Writes are not:
+-        // Mob.pathfindingMalus is a plain EnumMap, and AmphibiousNodeEvaluator's save-and-restore
+-        // around a solve can lose the original cost permanently if the owning region starts its
+-        // own solve in between. Refuse those, and fall back to the synchronous recompute.
++        // The solve reads the mob only through the snapshot captured below, so reads are covered.
++        // Writes are not: Mob.pathfindingMalus is a plain EnumMap, and AmphibiousNodeEvaluator's
++        // save-and-restore around a solve can lose the original cost permanently if the owning
++        // region starts its own solve in between; Sniffer writes it from onPathfindingStart/Done,
++        // which an off-thread solve does not invoke. Refuse those, and fall back to the synchronous recompute.
+         if (!this.sourbyAsyncSolveSafe() || this.mob.sourbyPathfindingMutatesMob()) {
+             return false;
+         }
+@@ -205,6 +205,9 @@ public abstract class PathNavigation {
+             this.sourbyIsolatedPathFinder(net.minecraft.util.Mth.floor(maxPathLength * 16.0F));
+         final float mult = this.maxVisitedNodesMultiplier;
+         final net.minecraft.world.entity.Mob mob = this.mob;
++        // Every mob field the evaluators read, captured here on the owner. The solve below is handed
++        // this and the region snapshot only; it never sees `mob`, which only the completion uses.
++        final dev.iyanz.sourbycraft.perf.MobPathSnapshot subject = dev.iyanz.sourbycraft.perf.MobPathSnapshot.captureDetached(mob);
+         // The path the mob is following right now, as this solve's validity token. Every event
+         // that invalidates the result replaces this object: the synchronous recompute below
+         // (which still runs while a solve is in flight, because the pending flag only skips the
+@@ -215,7 +218,7 @@ public abstract class PathNavigation {
+         this.sourbyAsyncPathPending = true;
+         final java.util.concurrent.CompletableFuture<net.minecraft.world.level.pathfinder.Path> solving =
+             dev.iyanz.sourbycraft.perf.AsyncPathProcessor
+-                .trySubmit(() -> solver.findPath(snapshot, mob, targets, maxPathLength, reachRange, mult));
++                .trySubmit(() -> solver.findPath(snapshot, subject, targets, maxPathLength, reachRange, mult));
+         if (solving == null) {
+             // Another region filled the pool since hasCapacity(): run the synchronous recompute
+             // now instead of keeping the stale path. Rare; the pathfind event then fires twice.
+diff --git a/net/minecraft/world/entity/animal/frog/Frog.java b/net/minecraft/world/entity/animal/frog/Frog.java
+index 7fc78e9f73fc5cdd0fe8cccfb6490c66f600249b..01d1de4e3a4fe51351d1f8b6248bcef0069bd3eb 100644
+--- a/net/minecraft/world/entity/animal/frog/Frog.java
++++ b/net/minecraft/world/entity/animal/frog/Frog.java
+@@ -355,11 +355,11 @@ public class Frog extends Animal {
+ 
+         @Override
+         public Node getStart() {
+-            return !this.mob.isInWater()
++            return !this.subject().isInWater() // SourbyCraft - async pathfinding: read the snapshot
+                 ? super.getStart()
+                 : this.getStartNode(
+                     new BlockPos(
+-                        Mth.floor(this.mob.getBoundingBox().minX), Mth.floor(this.mob.getBoundingBox().minY), Mth.floor(this.mob.getBoundingBox().minZ)
++                        Mth.floor(this.subject().getBoundingBox().minX), Mth.floor(this.subject().getBoundingBox().minY), Mth.floor(this.subject().getBoundingBox().minZ)
+                     )
+                 );
+         }
+diff --git a/net/minecraft/world/entity/monster/creaking/Creaking.java b/net/minecraft/world/entity/monster/creaking/Creaking.java
+index 63416201b435516be80e82995ea62e42a47edb0b..111390f67f6f32cdb4aa0d0c4830c94c9799a1a3 100644
+--- a/net/minecraft/world/entity/monster/creaking/Creaking.java
++++ b/net/minecraft/world/entity/monster/creaking/Creaking.java
+@@ -589,6 +589,14 @@ public class Creaking extends Monster {
+             }
+         }
+ 
++        // SourbyCraft start - async pathfinding: HomeNodeEvaluator reads Creaking.this.getHomePos() (synched
++        // entity data on the outer instance) during the solve, which MobPathSnapshot does not carry; keep it synchronous.
++        @Override
++        protected boolean sourbyAsyncSolveSafe() {
++            return false;
++        }
++        // SourbyCraft end - async pathfinding
++
+         @Override
+         protected PathFinder createPathFinder(final int maxVisitedNodes) {
+             this.nodeEvaluator = Creaking.this.new HomeNodeEvaluator();
+diff --git a/net/minecraft/world/level/pathfinder/AmphibiousNodeEvaluator.java b/net/minecraft/world/level/pathfinder/AmphibiousNodeEvaluator.java
+index 21d969b49e22c00f456befc7bea25a927de6f2fb..42cb442a406b1a7c3e0ad2e8c354dab1235b525e 100644
+--- a/net/minecraft/world/level/pathfinder/AmphibiousNodeEvaluator.java
++++ b/net/minecraft/world/level/pathfinder/AmphibiousNodeEvaluator.java
+@@ -28,18 +28,23 @@ public class AmphibiousNodeEvaluator extends WalkNodeEvaluator {
+ 
+     @Override
+     public void done() {
+-        this.mob.setPathfindingMalus(PathType.WALKABLE, this.oldWalkableCost);
+-        this.mob.setPathfindingMalus(PathType.WATER_BORDER, this.oldWaterBorderCost);
++        // SourbyCraft start - async pathfinding: this evaluator writes the live mob in prepare/done, so
++        // AmphibiousPathNavigation refuses the offload; an off-thread solve (mob == null) never gets here.
++        if (this.mob != null) {
++            this.mob.setPathfindingMalus(PathType.WALKABLE, this.oldWalkableCost);
++            this.mob.setPathfindingMalus(PathType.WATER_BORDER, this.oldWaterBorderCost);
++        }
++        // SourbyCraft end - async pathfinding
+         super.done();
+     }
+ 
+     @Override
+     public Node getStart() {
+-        return !this.mob.isInWater()
++        return !this.subject().isInWater()
+             ? super.getStart()
+             : this.getStartNode(
+                 new BlockPos(
+-                    Mth.floor(this.mob.getBoundingBox().minX), Mth.floor(this.mob.getBoundingBox().minY + 0.5), Mth.floor(this.mob.getBoundingBox().minZ)
++                    Mth.floor(this.subject().getBoundingBox().minX), Mth.floor(this.subject().getBoundingBox().minY + 0.5), Mth.floor(this.subject().getBoundingBox().minZ)
+                 )
+             );
+     }
+@@ -55,8 +60,8 @@ public class AmphibiousNodeEvaluator extends WalkNodeEvaluator {
+         PathType blockPathTypeAbove = this.getCachedPathType(pos.x, pos.y + 1, pos.z);
+         PathType blockPathTypeCurrent = this.getCachedPathType(pos.x, pos.y, pos.z);
+         int jumpSize;
+-        if (this.mob.getPathfindingMalus(blockPathTypeAbove) >= 0.0F && blockPathTypeCurrent != PathType.STICKY_HONEY) {
+-            jumpSize = Mth.floor(Math.max(1.0F, this.mob.maxUpStep()));
++        if (this.subject().getPathfindingMalus(blockPathTypeAbove) >= 0.0F && blockPathTypeCurrent != PathType.STICKY_HONEY) {
++            jumpSize = Mth.floor(Math.max(1.0F, this.subject().maxUpStep()));
+         } else {
+             jumpSize = 0;
+         }
+@@ -74,7 +79,7 @@ public class AmphibiousNodeEvaluator extends WalkNodeEvaluator {
+ 
+         for (int i = 0; i < numValidNeighbors; i++) {
+             Node neighbor = neighbors[i];
+-            if (neighbor.type == PathType.WATER && this.prefersShallowSwimming && neighbor.y < this.mob.level().getSeaLevel() - 10) {
++            if (neighbor.type == PathType.WATER && this.prefersShallowSwimming && neighbor.y < this.subject().getSeaLevel() - 10) {
+                 neighbor.costMalus++;
+             }
+         }
+diff --git a/net/minecraft/world/level/pathfinder/FlyNodeEvaluator.java b/net/minecraft/world/level/pathfinder/FlyNodeEvaluator.java
+index 95985269148e290fed45dd55f5472db9ca8a000b..0b2464917995f916beba462b7f9ea8eee9629fcc 100644
+--- a/net/minecraft/world/level/pathfinder/FlyNodeEvaluator.java
++++ b/net/minecraft/world/level/pathfinder/FlyNodeEvaluator.java
+@@ -27,7 +27,7 @@ public class FlyNodeEvaluator extends WalkNodeEvaluator {
+ 
+     @Override
+     public void done() {
+-        this.mob.onPathfindingDone();
++        if (this.mob != null) this.mob.onPathfindingDone(); // SourbyCraft - async pathfinding: no mob on an off-thread solve
+         this.pathTypeByPosCache.clear();
+         super.done();
+     }
+@@ -35,23 +35,23 @@ public class FlyNodeEvaluator extends WalkNodeEvaluator {
+     @Override
+     public Node getStart() {
+         int startY;
+-        if (this.canFloat() && this.mob.isInWater()) {
+-            startY = this.mob.getBlockY();
+-            BlockPos.MutableBlockPos reusableBlockPos = new BlockPos.MutableBlockPos(this.mob.getX(), startY, this.mob.getZ());
++        if (this.canFloat() && this.subject().isInWater()) {
++            startY = this.subject().getBlockY();
++            BlockPos.MutableBlockPos reusableBlockPos = new BlockPos.MutableBlockPos(this.subject().getX(), startY, this.subject().getZ());
+ 
+             for (BlockState state = this.currentContext.getBlockState(reusableBlockPos);
+                 state.is(Blocks.WATER);
+                 state = this.currentContext.getBlockState(reusableBlockPos)
+             ) {
+-                reusableBlockPos.set(this.mob.getX(), ++startY, this.mob.getZ());
++                reusableBlockPos.set(this.subject().getX(), ++startY, this.subject().getZ());
+             }
+         } else {
+-            startY = Mth.floor(this.mob.getY() + 0.5);
++            startY = Mth.floor(this.subject().getY() + 0.5);
+         }
+ 
+-        BlockPos startPos = BlockPos.containing(this.mob.getX(), startY, this.mob.getZ());
++        BlockPos startPos = BlockPos.containing(this.subject().getX(), startY, this.subject().getZ());
+         if (!this.canStartAt(startPos)) {
+-            for (BlockPos testedPosition : this.iteratePathfindingStartNodeCandidatePositions(this.mob)) {
++            for (BlockPos testedPosition : this.iteratePathfindingStartNodeCandidatePositions(this.subject())) { // SourbyCraft - async pathfinding
+                 if (this.canStartAt(testedPosition)) {
+                     return super.getStartNode(testedPosition);
+                 }
+@@ -64,7 +64,7 @@ public class FlyNodeEvaluator extends WalkNodeEvaluator {
+     @Override
+     protected boolean canStartAt(final BlockPos pos) {
+         PathType blockPathType = this.getCachedPathType(pos.getX(), pos.getY(), pos.getZ());
+-        return this.mob.getPathfindingMalus(blockPathType) >= 0.0F;
++        return this.subject().getPathfindingMalus(blockPathType) >= 0.0F;
+     }
+ 
+     @Override
+@@ -267,7 +267,7 @@ public class FlyNodeEvaluator extends WalkNodeEvaluator {
+     protected @Nullable Node findAcceptedNode(final int x, final int y, final int z) {
+         Node best = null;
+         PathType pathType = this.getCachedPathType(x, y, z);
+-        float pathCost = this.mob.getPathfindingMalus(pathType);
++        float pathCost = this.subject().getPathfindingMalus(pathType);
+         if (pathCost >= 0.0F) {
+             best = this.getNode(x, y, z);
+             best.type = pathType;
+@@ -282,7 +282,7 @@ public class FlyNodeEvaluator extends WalkNodeEvaluator {
+ 
+     @Override
+     protected PathType getCachedPathType(final int x, final int y, final int z) {
+-        return this.pathTypeByPosCache.computeIfAbsent(BlockPos.asLong(x, y, z), key -> this.getPathTypeOfMob(this.currentContext, x, y, z, this.mob));
++        return this.pathTypeByPosCache.computeIfAbsent(BlockPos.asLong(x, y, z), key -> this.getPathTypeOfMob(this.currentContext, x, y, z, this.subject())); // SourbyCraft - async pathfinding
+     }
+ 
+     @Override
+@@ -313,7 +313,7 @@ public class FlyNodeEvaluator extends WalkNodeEvaluator {
+         return blockPathType;
+     }
+ 
+-    private Iterable<BlockPos> iteratePathfindingStartNodeCandidatePositions(final Mob mob) {
++    private Iterable<BlockPos> iteratePathfindingStartNodeCandidatePositions(final dev.iyanz.sourbycraft.perf.MobPathSnapshot mob) { // SourbyCraft - async pathfinding
+         AABB boundingBox = mob.getBoundingBox();
+         boolean isSmallMob = boundingBox.getSize() < 1.0;
+         if (!isSmallMob) {
+diff --git a/net/minecraft/world/level/pathfinder/NodeEvaluator.java b/net/minecraft/world/level/pathfinder/NodeEvaluator.java
+index f4a30761483c4032b5942f84df7706b10976cb5d..f52c59923460ed844219c705f3de82deca199191 100644
+--- a/net/minecraft/world/level/pathfinder/NodeEvaluator.java
++++ b/net/minecraft/world/level/pathfinder/NodeEvaluator.java
+@@ -10,10 +10,16 @@ import net.minecraft.world.level.PathNavigationRegion;
+ import net.minecraft.world.level.block.Blocks;
+ import net.minecraft.world.level.block.CampfireBlock;
+ import net.minecraft.world.level.block.state.BlockState;
++import org.jspecify.annotations.Nullable;
++import dev.iyanz.sourbycraft.perf.MobPathSnapshot; // SourbyCraft - async pathfinding
+ 
+ public abstract class NodeEvaluator {
+     protected PathfindingContext currentContext;
+-    protected Mob mob;
++    protected @Nullable Mob mob; // SourbyCraft - async pathfinding: null during an off-thread solve
++    // SourbyCraft start - async pathfinding: the evaluators read the mob only through this snapshot
++    /** Captured on the owner; null until the first {@link #subject()} of a synchronous solve. */
++    protected @Nullable MobPathSnapshot subject;
++    // SourbyCraft end - async pathfinding
+     protected final Int2ObjectMap<Node> nodes = new Int2ObjectOpenHashMap<>();
+     protected int entityWidth;
+     protected int entityHeight;
+@@ -26,15 +32,49 @@ public abstract class NodeEvaluator {
+     public void prepare(final PathNavigationRegion level, final Mob entity) {
+         this.currentContext = new PathfindingContext(level, entity);
+         this.mob = entity;
++        this.subject = null; // SourbyCraft - async pathfinding: captured lazily, after the whole prepare chain has written the mob
+         this.nodes.clear();
+         this.entityWidth = Mth.floor(entity.getBbWidth() + 1.0F);
+         this.entityHeight = Mth.floor(entity.getBbHeight() + 1.0F);
+         this.entityDepth = Mth.floor(entity.getBbWidth() + 1.0F);
+     }
+ 
++    // SourbyCraft start - async pathfinding
++    /**
++     * Prepares a solve that has no mob: everything the evaluator would read from it comes from the
++     * snapshot captured on the owner. Pathfinding callbacks ({@code onPathfindingStart/Done}) are
++     * not invoked, so a navigation whose mob needs them must refuse the offload
++     * ({@code Mob.sourbyPathfindingMutatesMob}).
++     */
++    public void prepare(final PathNavigationRegion level, final dev.iyanz.sourbycraft.perf.MobPathSnapshot subject) {
++        this.currentContext = new PathfindingContext(level, subject.blockPosition());
++        this.mob = null;
++        this.subject = subject;
++        this.nodes.clear();
++        this.entityWidth = Mth.floor(subject.getBbWidth() + 1.0F);
++        this.entityHeight = Mth.floor(subject.getBbHeight() + 1.0F);
++        this.entityDepth = Mth.floor(subject.getBbWidth() + 1.0F);
++    }
++
++    /**
++     * The mob as the solve sees it. A synchronous solve captures it here on first use, which is
++     * after {@code prepare} returned, so the callback and malus writes made there are included;
++     * an off-thread solve was given it by {@link #prepare(PathNavigationRegion, dev.iyanz.sourbycraft.perf.MobPathSnapshot)}.
++     */
++    protected final dev.iyanz.sourbycraft.perf.MobPathSnapshot subject() {
++        dev.iyanz.sourbycraft.perf.MobPathSnapshot subject = this.subject;
++        if (subject == null) {
++            subject = dev.iyanz.sourbycraft.perf.MobPathSnapshot.capture(java.util.Objects.requireNonNull(this.mob, "prepare was not called"));
++            this.subject = subject;
++        }
++        return subject;
++    }
++    // SourbyCraft end - async pathfinding
++
+     public void done() {
+         this.currentContext = null;
+         this.mob = null;
++        this.subject = null; // SourbyCraft - async pathfinding
+     }
+ 
+     protected Node getNode(final BlockPos pos) {
+@@ -55,7 +95,13 @@ public abstract class NodeEvaluator {
+ 
+     public abstract int getNeighbors(Node[] neighbors, Node pos);
+ 
+-    public abstract PathType getPathTypeOfMob(PathfindingContext context, int x, int y, int z, Mob mob);
++    // SourbyCraft start - async pathfinding: the solve passes its snapshot; the Mob form stays for callers on the owner
++    public abstract PathType getPathTypeOfMob(PathfindingContext context, int x, int y, int z, dev.iyanz.sourbycraft.perf.MobPathSnapshot mob);
++
++    public PathType getPathTypeOfMob(final PathfindingContext context, final int x, final int y, final int z, final Mob mob) {
++        return this.getPathTypeOfMob(context, x, y, z, dev.iyanz.sourbycraft.perf.MobPathSnapshot.capture(mob));
++    }
++    // SourbyCraft end - async pathfinding
+ 
+     public abstract PathType getPathType(PathfindingContext context, int x, int y, int z);
+ 
+diff --git a/net/minecraft/world/level/pathfinder/PathFinder.java b/net/minecraft/world/level/pathfinder/PathFinder.java
+index 582471e4020f79c860dd5e317bb59805170dda67..cef96e271438a6e9f26c3ffbe2eff3a813579240 100644
+--- a/net/minecraft/world/level/pathfinder/PathFinder.java
++++ b/net/minecraft/world/level/pathfinder/PathFinder.java
+@@ -47,6 +47,29 @@ public class PathFinder {
+     ) {
+         this.openSet.clear();
+         this.nodeEvaluator.prepare(level, entity);
++        return this.findPrepared(targets, maxPathLength, reachRange, maxVisitedNodesMultiplier); // SourbyCraft - async pathfinding
++    }
++
++    // SourbyCraft start - async pathfinding
++    /**
++     * As {@link #findPath(PathNavigationRegion, Mob, Set, float, int, float)}, for a solve that holds
++     * no mob: the evaluator reads the snapshot captured on the owner and nothing else.
++     */
++    public @Nullable Path findPath(
++        final PathNavigationRegion level,
++        final dev.iyanz.sourbycraft.perf.MobPathSnapshot subject,
++        final Set<BlockPos> targets,
++        final float maxPathLength,
++        final int reachRange,
++        final float maxVisitedNodesMultiplier
++    ) {
++        this.openSet.clear();
++        this.nodeEvaluator.prepare(level, subject);
++        return this.findPrepared(targets, maxPathLength, reachRange, maxVisitedNodesMultiplier);
++    }
++
++    private @Nullable Path findPrepared(final Set<BlockPos> targets, final float maxPathLength, final int reachRange, final float maxVisitedNodesMultiplier) {
++    // SourbyCraft end - async pathfinding
+         Node from = this.nodeEvaluator.getStart();
+         if (from == null) {
+             return null;
+diff --git a/net/minecraft/world/level/pathfinder/PathfindingContext.java b/net/minecraft/world/level/pathfinder/PathfindingContext.java
+index e01bb2b30552a6bb8f35d780e235cec6cb969fa6..a80ad8c4ccb491605d7a80d5cb6bedcd8a2e4696 100644
+--- a/net/minecraft/world/level/pathfinder/PathfindingContext.java
++++ b/net/minecraft/world/level/pathfinder/PathfindingContext.java
+@@ -30,6 +30,15 @@ public class PathfindingContext {
+         this.mobPosition = mob.blockPosition();
+     }
+ 
++    // SourbyCraft start - async pathfinding: a context with no mob, for a solve that reads a MobPathSnapshot.
++    // No shared cache: the regionized PathTypeCache belongs to the owning region's tick thread.
++    public PathfindingContext(final CollisionGetter level, final BlockPos mobPosition) {
++        this.level = level;
++        this.cache = null;
++        this.mobPosition = mobPosition;
++    }
++    // SourbyCraft end - async pathfinding
++
+     public PathType getPathTypeFromState(final int x, final int y, final int z) {
+         BlockPos pos = this.mutablePos.set(x, y, z);
+         return this.cache == null ? WalkNodeEvaluator.getPathTypeFromState(this.level, pos) : this.cache.getOrCompute(this.level, pos);
+diff --git a/net/minecraft/world/level/pathfinder/SwimNodeEvaluator.java b/net/minecraft/world/level/pathfinder/SwimNodeEvaluator.java
+index e55558448f91410f6174548edc88327191358825..54dfe3839a094ccbb7170c6f4bfca7f08d905a10 100644
+--- a/net/minecraft/world/level/pathfinder/SwimNodeEvaluator.java
++++ b/net/minecraft/world/level/pathfinder/SwimNodeEvaluator.java
+@@ -37,7 +37,7 @@ public class SwimNodeEvaluator extends NodeEvaluator {
+     @Override
+     public Node getStart() {
+         return this.getNode(
+-            Mth.floor(this.mob.getBoundingBox().minX), Mth.floor(this.mob.getBoundingBox().minY + 0.5), Mth.floor(this.mob.getBoundingBox().minZ)
++            Mth.floor(this.subject().getBoundingBox().minX), Mth.floor(this.subject().getBoundingBox().minY + 0.5), Mth.floor(this.subject().getBoundingBox().minZ)
+         );
+     }
+ 
+@@ -86,7 +86,7 @@ public class SwimNodeEvaluator extends NodeEvaluator {
+         Node best = null;
+         PathType pathType = this.getCachedBlockType(x, y, z);
+         if (this.allowBreaching && pathType == PathType.BREACH || pathType == PathType.WATER) {
+-            float pathCost = this.mob.getPathfindingMalus(pathType);
++            float pathCost = this.subject().getPathfindingMalus(pathType);
+             if (pathCost >= 0.0F) {
+                 best = this.getNode(x, y, z);
+                 best.type = pathType;
+@@ -106,11 +106,11 @@ public class SwimNodeEvaluator extends NodeEvaluator {
+ 
+     @Override
+     public PathType getPathType(final PathfindingContext context, final int x, final int y, final int z) {
+-        return this.getPathTypeOfMob(context, x, y, z, this.mob);
++        return this.getPathTypeOfMob(context, x, y, z, this.subject()); // SourbyCraft - async pathfinding
+     }
+ 
+     @Override
+-    public PathType getPathTypeOfMob(final PathfindingContext context, final int x, final int y, final int z, final Mob mob) {
++    public PathType getPathTypeOfMob(final PathfindingContext context, final int x, final int y, final int z, final dev.iyanz.sourbycraft.perf.MobPathSnapshot mob) { // SourbyCraft - async pathfinding
+         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+ 
+         for (int xx = x; xx < x + this.entityWidth; xx++) {
+diff --git a/net/minecraft/world/level/pathfinder/WalkNodeEvaluator.java b/net/minecraft/world/level/pathfinder/WalkNodeEvaluator.java
+index a11325f35ea3d8631c94f653de35a2b624186083..35f9c0cbdecccdd20f427f3bc36b08553c3d1ab5 100644
+--- a/net/minecraft/world/level/pathfinder/WalkNodeEvaluator.java
++++ b/net/minecraft/world/level/pathfinder/WalkNodeEvaluator.java
+@@ -43,7 +43,7 @@ public class WalkNodeEvaluator extends NodeEvaluator {
+ 
+     @Override
+     public void done() {
+-        this.mob.onPathfindingDone();
++        if (this.mob != null) this.mob.onPathfindingDone(); // SourbyCraft - async pathfinding: no mob on an off-thread solve
+         this.pathTypesByPosCacheByMob.clear();
+         this.collisionCache.clear();
+         super.done();
+@@ -52,22 +52,22 @@ public class WalkNodeEvaluator extends NodeEvaluator {
+     @Override
+     public Node getStart() {
+         BlockPos.MutableBlockPos reusablePos = new BlockPos.MutableBlockPos();
+-        int startY = this.mob.getBlockY();
+-        BlockState blockState = this.currentContext.getBlockState(reusablePos.set(this.mob.getX(), startY, this.mob.getZ()));
+-        if (!this.mob.canStandOnFluid(blockState.getFluidState())) {
+-            if (this.canFloat() && this.mob.isInWater()) {
++        int startY = this.subject().getBlockY();
++        BlockState blockState = this.currentContext.getBlockState(reusablePos.set(this.subject().getX(), startY, this.subject().getZ()));
++        if (!this.subject().canStandOnFluid(blockState.getFluidState())) {
++            if (this.canFloat() && this.subject().isInWater()) {
+                 while (true) {
+                     if (!blockState.is(Blocks.WATER) && blockState.getFluidState() != Fluids.WATER.getSource(false)) {
+                         startY--;
+                         break;
+                     }
+ 
+-                    blockState = this.currentContext.getBlockState(reusablePos.set(this.mob.getX(), ++startY, this.mob.getZ()));
++                    blockState = this.currentContext.getBlockState(reusablePos.set(this.subject().getX(), ++startY, this.subject().getZ()));
+                 }
+-            } else if (this.mob.onGround()) {
+-                startY = Mth.floor(this.mob.getY() + 0.5);
++            } else if (this.subject().onGround()) {
++                startY = Mth.floor(this.subject().getY() + 0.5);
+             } else {
+-                reusablePos.set(this.mob.getX(), this.mob.getY() + 1.0, this.mob.getZ());
++                reusablePos.set(this.subject().getX(), this.subject().getY() + 1.0, this.subject().getZ());
+ 
+                 while (reusablePos.getY() > this.currentContext.level().getMinY()) {
+                     startY = reusablePos.getY();
+@@ -79,16 +79,16 @@ public class WalkNodeEvaluator extends NodeEvaluator {
+                 }
+             }
+         } else {
+-            while (this.mob.canStandOnFluid(blockState.getFluidState())) {
+-                blockState = this.currentContext.getBlockState(reusablePos.set(this.mob.getX(), ++startY, this.mob.getZ()));
++            while (this.subject().canStandOnFluid(blockState.getFluidState())) {
++                blockState = this.currentContext.getBlockState(reusablePos.set(this.subject().getX(), ++startY, this.subject().getZ()));
+             }
+ 
+             startY--;
+         }
+ 
+-        BlockPos startPos = this.mob.blockPosition();
++        BlockPos startPos = this.subject().blockPosition();
+         if (!this.canStartAt(reusablePos.set(startPos.getX(), startY, startPos.getZ()))) {
+-            AABB mobBB = this.mob.getBoundingBox();
++            AABB mobBB = this.subject().getBoundingBox();
+             if (this.canStartAt(reusablePos.set(mobBB.minX, startY, mobBB.minZ))
+                 || this.canStartAt(reusablePos.set(mobBB.minX, startY, mobBB.maxZ))
+                 || this.canStartAt(reusablePos.set(mobBB.maxX, startY, mobBB.minZ))
+@@ -103,13 +103,13 @@ public class WalkNodeEvaluator extends NodeEvaluator {
+     protected Node getStartNode(final BlockPos pos) {
+         Node node = this.getNode(pos);
+         node.type = this.getCachedPathType(node.x, node.y, node.z);
+-        node.costMalus = this.mob.getPathfindingMalus(node.type);
++        node.costMalus = this.subject().getPathfindingMalus(node.type);
+         return node;
+     }
+ 
+     protected boolean canStartAt(final BlockPos pos) {
+         PathType blockPathType = this.getCachedPathType(pos.getX(), pos.getY(), pos.getZ());
+-        return blockPathType != PathType.OPEN && this.mob.getPathfindingMalus(blockPathType) >= 0.0F;
++        return blockPathType != PathType.OPEN && this.subject().getPathfindingMalus(blockPathType) >= 0.0F;
+     }
+ 
+     @Override
+@@ -123,8 +123,8 @@ public class WalkNodeEvaluator extends NodeEvaluator {
+         int jumpSize = 0;
+         PathType blockPathTypeAbove = this.getCachedPathType(pos.x, pos.y + 1, pos.z);
+         PathType blockPathTypeCurrent = this.getCachedPathType(pos.x, pos.y, pos.z);
+-        if (this.mob.getPathfindingMalus(blockPathTypeAbove) >= 0.0F && blockPathTypeCurrent != PathType.STICKY_HONEY) {
+-            jumpSize = Mth.floor(Math.max(1.0F, this.mob.maxUpStep()));
++        if (this.subject().getPathfindingMalus(blockPathTypeAbove) >= 0.0F && blockPathTypeCurrent != PathType.STICKY_HONEY) {
++            jumpSize = Mth.floor(Math.max(1.0F, this.subject().maxUpStep()));
+         }
+ 
+         double posHeight = this.getFloorLevel(new BlockPos(pos.x, pos.y, pos.z));
+@@ -170,8 +170,8 @@ public class WalkNodeEvaluator extends NodeEvaluator {
+         }
+ 
+         if (ew.type != PathType.WALKABLE_DOOR && ns.type != PathType.WALKABLE_DOOR) {
+-            if (!(this.mob.getBbWidth() > 1.0F) || !(ew.costMalus > 0.0F) && !(ns.costMalus > 0.0F)) {
+-                boolean canPassBetweenPosts = ns.type == PathType.FENCE && ew.type == PathType.FENCE && this.mob.getBbWidth() < 0.5;
++            if (!(this.subject().getBbWidth() > 1.0F) || !(ew.costMalus > 0.0F) && !(ns.costMalus > 0.0F)) {
++                boolean canPassBetweenPosts = ns.type == PathType.FENCE && ew.type == PathType.FENCE && this.subject().getBbWidth() < 0.5;
+                 return (ns.y < pos.y || ns.costMalus >= 0.0F || canPassBetweenPosts) && (ew.y < pos.y || ew.costMalus >= 0.0F || canPassBetweenPosts);
+             } else {
+                 return false;
+@@ -190,9 +190,9 @@ public class WalkNodeEvaluator extends NodeEvaluator {
+     }
+ 
+     private boolean canReachWithoutCollision(final Node posTo) {
+-        AABB bb = this.mob.getBoundingBox();
++        AABB bb = this.subject().getBoundingBox();
+         Vec3 delta = new Vec3(
+-            posTo.x - this.mob.getX() + bb.getXsize() / 2.0, posTo.y - this.mob.getY() + bb.getYsize() / 2.0, posTo.z - this.mob.getZ() + bb.getZsize() / 2.0
++            posTo.x - this.subject().getX() + bb.getXsize() / 2.0, posTo.y - this.subject().getY() + bb.getYsize() / 2.0, posTo.z - this.subject().getZ() + bb.getZsize() / 2.0
+         );
+         int steps = Mth.ceil(delta.length() / bb.getSize());
+         delta = delta.scale(1.0F / steps);
+@@ -239,7 +239,7 @@ public class WalkNodeEvaluator extends NodeEvaluator {
+         }
+ 
+         PathType pathType = this.getCachedPathType(x, y, z);
+-        float pathCost = this.mob.getPathfindingMalus(pathType);
++        float pathCost = this.subject().getPathfindingMalus(pathType);
+         if (pathCost >= 0.0F) {
+             best = this.getNodeAndUpdateCostToMax(x, y, z, pathType, pathCost);
+         }
+@@ -271,7 +271,7 @@ public class WalkNodeEvaluator extends NodeEvaluator {
+     }
+ 
+     private double getMobJumpHeight() {
+-        return Math.max(1.125, this.mob.maxUpStep());
++        return Math.max(1.125, this.subject().maxUpStep());
+     }
+ 
+     private Node getNodeAndUpdateCostToMax(final int x, final int y, final int z, final PathType pathType, final float cost) {
+@@ -311,7 +311,7 @@ public class WalkNodeEvaluator extends NodeEvaluator {
+             return null;
+         }
+ 
+-        if (this.mob.getBbWidth() >= 1.0F) {
++        if (this.subject().getBbWidth() >= 1.0F) {
+             return nodeAbove;
+         }
+ 
+@@ -321,13 +321,13 @@ public class WalkNodeEvaluator extends NodeEvaluator {
+ 
+         double centerX = x - travelDirection.getStepX() + 0.5;
+         double centerZ = z - travelDirection.getStepZ() + 0.5;
+-        double halfWidth = this.mob.getBbWidth() / 2.0;
++        double halfWidth = this.subject().getBbWidth() / 2.0;
+         AABB grow = new AABB(
+             centerX - halfWidth,
+             this.getFloorLevel(reusablePos.set(centerX, y + 1, centerZ)) + 0.001,
+             centerZ - halfWidth,
+             centerX + halfWidth,
+-            this.mob.getBbHeight() + this.getFloorLevel(reusablePos.set((double)nodeAbove.x, (double)nodeAbove.y, (double)nodeAbove.z)) - 0.002,
++            this.subject().getBbHeight() + this.getFloorLevel(reusablePos.set((double)nodeAbove.x, (double)nodeAbove.y, (double)nodeAbove.z)) - 0.002,
+             centerZ + halfWidth
+         );
+         return this.hasCollisions(grow) ? null : nodeAbove;
+@@ -336,13 +336,13 @@ public class WalkNodeEvaluator extends NodeEvaluator {
+     private @Nullable Node tryFindFirstNonWaterBelow(final int x, int y, final int z, @Nullable Node best) {
+         y--;
+ 
+-        while (y > this.mob.level().getMinY()) {
++        while (y > this.currentContext.level().getMinY()) { // SourbyCraft - async pathfinding: the region's minY is the level's
+             PathType pathTypeLocal = this.getCachedPathType(x, y, z);
+             if (pathTypeLocal != PathType.WATER) {
+                 return best;
+             }
+ 
+-            best = this.getNodeAndUpdateCostToMax(x, y, z, pathTypeLocal, this.mob.getPathfindingMalus(pathTypeLocal));
++            best = this.getNodeAndUpdateCostToMax(x, y, z, pathTypeLocal, this.subject().getPathfindingMalus(pathTypeLocal));
+             y--;
+         }
+ 
+@@ -350,13 +350,13 @@ public class WalkNodeEvaluator extends NodeEvaluator {
+     }
+ 
+     private Node tryFindFirstGroundNodeBelow(final int x, final int y, final int z) {
+-        for (int currentY = y - 1; currentY >= this.mob.level().getMinY(); currentY--) {
+-            if (y - currentY > this.mob.getMaxFallDistance()) {
++        for (int currentY = y - 1; currentY >= this.currentContext.level().getMinY(); currentY--) { // SourbyCraft - async pathfinding
++            if (y - currentY > this.subject().getMaxFallDistance()) {
+                 return this.getBlockedNode(x, currentY, z);
+             }
+ 
+             PathType pathType = this.getCachedPathType(x, currentY, z);
+-            float pathCost = this.mob.getPathfindingMalus(pathType);
++            float pathCost = this.subject().getPathfindingMalus(pathType);
+             if (pathType != PathType.OPEN) {
+                 if (pathCost >= 0.0F) {
+                     return this.getNodeAndUpdateCostToMax(x, currentY, z, pathType, pathCost);
+@@ -370,15 +370,20 @@ public class WalkNodeEvaluator extends NodeEvaluator {
+     }
+ 
+     private boolean hasCollisions(final AABB aabb) {
+-        return this.collisionCache.computeIfAbsent(aabb, bb -> !this.currentContext.level().noCollision(this.mob, aabb));
++        // SourbyCraft start - async pathfinding: on the owner the live mob answers exactly as vanilla; off-thread there is
++        // no mob, and the snapshot builds the collision context (see MobPathSnapshot.noCollision for what differs)
++        return this.collisionCache.computeIfAbsent(aabb, bb -> this.mob != null
++            ? !this.currentContext.level().noCollision(this.mob, aabb)
++            : !this.subject().noCollision(this.currentContext.level(), aabb));
++        // SourbyCraft end - async pathfinding
+     }
+ 
+     protected PathType getCachedPathType(final int x, final int y, final int z) {
+-        return this.pathTypesByPosCacheByMob.computeIfAbsent(BlockPos.asLong(x, y, z), k -> this.getPathTypeOfMob(this.currentContext, x, y, z, this.mob));
++        return this.pathTypesByPosCacheByMob.computeIfAbsent(BlockPos.asLong(x, y, z), k -> this.getPathTypeOfMob(this.currentContext, x, y, z, this.subject())); // SourbyCraft - async pathfinding
+     }
+ 
+     @Override
+-    public PathType getPathTypeOfMob(final PathfindingContext context, final int x, final int y, final int z, final Mob mob) {
++    public PathType getPathTypeOfMob(final PathfindingContext context, final int x, final int y, final int z, final dev.iyanz.sourbycraft.perf.MobPathSnapshot mob) { // SourbyCraft - async pathfinding
+         Set<PathType> blockTypes = this.getPathTypeWithinMobBB(context, x, y, z);
+         if (blockTypes.size() == 1) {
+             return blockTypes.iterator().next();
+@@ -430,7 +435,7 @@ public class WalkNodeEvaluator extends NodeEvaluator {
+                     int yy = dy + y;
+                     int zz = dz + z;
+                     PathType blockType = this.getPathType(context, xx, yy, zz);
+-                    BlockPos mobPosition = this.mob.blockPosition();
++                    BlockPos mobPosition = this.subject().blockPosition();
+                     boolean canPassDoors = this.canPassDoors();
+                     if (blockType == PathType.DOOR_WOOD_CLOSED && this.canOpenDoors() && canPassDoors) {
+                         blockType = PathType.WALKABLE_DOOR;

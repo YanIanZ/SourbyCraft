@@ -1,0 +1,61 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Tue, 20 Oct 2026 17:36:38 +0700
+Subject: [PATCH] SourbyCraft - publish the horizontal-movement predicate as a
+ volatile boolean with the float threshold
+
+
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+index b315e4ebfc493896b34a48cc5e3ae0be3c46dbd3..db45248a8b3e3d843026518d776b2f8a34da437b 100644
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -407,12 +407,13 @@ public abstract class Entity
+     // (caller allocates a fresh Vec3 from the Player, SulfurCube, or KineticWeapon call
+     // site), so no per-tick alloc from the per-tick field change.
+     private double lastKnownSpeedX, lastKnownSpeedY, lastKnownSpeedZ;
+-    // x^2 + z^2 of the speed above, stored by computeSpeed. hasMovedHorizontallyRecently is the one
+-    // reader another region's thread can reach (FollowPlayerRiddenEntityGoal reads the entity it
+-    // follows, at any distance); reading one field there cannot mix x of one tick with z of another
+-    // the way reading two fields could, which the former Vec3 reference could not do either.
+-    // See docs/architecture/scratch-reentrancy-proof.md (DEV-A).
+-    private double lastKnownSpeedHorizontalSq;
++    // hasMovedHorizontallyRecently() of the speed above, decided by computeSpeed on the owner with
++    // upstream's arithmetic and float threshold. It is the one reader another region's thread can
++    // reach (FollowPlayerRiddenEntityGoal reads the entity it follows, at any distance), so it is
++    // published as ONE volatile boolean: never x of one tick with z of another (two fields), never
++    // half of a double (JLS 17.7 lets a plain double tear), and never cached indefinitely by the
++    // reader. Written only when it changes. See docs/architecture/scratch-reentrancy-proof.md (DEV-A).
++    private volatile boolean lastKnownMovedHorizontally;
+     private @Nullable Vec3 lastKnownPosition;
+     // SourbyCraft end
+     public net.kyori.adventure.util.TriState visualFire = net.kyori.adventure.util.TriState.NOT_SET; // Paper - improve visual fire API
+@@ -1046,7 +1047,13 @@ public abstract class Entity
+         this.lastKnownSpeedX = speedX;
+         this.lastKnownSpeedY = speedY;
+         this.lastKnownSpeedZ = speedZ;
+-        this.lastKnownSpeedHorizontalSq = speedX * speedX + speedZ * speedZ;
++        // Upstream: Math.abs(lastKnownSpeed.horizontalDistance()) > 1.0E-5F, where horizontalDistance()
++        // is Math.sqrt(x * x + z * z) and the float literal widens to 9.999999747378752E-6; abs of a
++        // sqrt changes nothing. Same doubles, same operations, same threshold.
++        final boolean moved = Math.sqrt(speedX * speedX + speedZ * speedZ) > 1.0E-5F;
++        if (moved != this.lastKnownMovedHorizontally) {
++            this.lastKnownMovedHorizontally = moved;
++        }
+         this.lastKnownPosition = pos;
+         // SourbyCraft end
+     }
+@@ -1524,11 +1531,9 @@ public abstract class Entity
+     }
+ 
+     public boolean hasMovedHorizontallyRecently() {
+-        // SourbyCraft start - read from 3-double lastKnownSpeed directly. horizontalDistance is
+-        // sqrt(x^2 + z^2); we keep the same threshold (1.0E-5F, which means any movement faster
+-        // than 1.0E-5 blocks per tick triggers true, identical to the old Vec3-based check).
+-        // One field read, same arithmetic: the sum was formed from the same two doubles in computeSpeed.
+-        return Math.sqrt(this.lastKnownSpeedHorizontalSq) > 1.0E-5D;
++        // SourbyCraft start - one volatile read of the predicate computeSpeed decided with upstream's
++        // arithmetic and 1.0E-5F threshold (see the field).
++        return this.lastKnownMovedHorizontally;
+         // SourbyCraft end
+     }
+ 

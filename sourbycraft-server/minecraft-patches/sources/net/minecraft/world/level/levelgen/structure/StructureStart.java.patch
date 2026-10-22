@@ -1,0 +1,64 @@
+--- a/net/minecraft/world/level/levelgen/structure/StructureStart.java
++++ b/net/minecraft/world/level/levelgen/structure/StructureStart.java
+@@ -26,7 +_,7 @@
+     private final Structure structure;
+     private final PiecesContainer pieceContainer;
+     private final ChunkPos chunkPos;
+-    private int references;
++    private final java.util.concurrent.atomic.AtomicInteger references; // Folia - region threading
+     private volatile @Nullable BoundingBox cachedBoundingBox;
+ 
+     // CraftBukkit start
+@@ -38,7 +_,7 @@
+     public StructureStart(final Structure structure, final ChunkPos chunkPos, final int references, final PiecesContainer pieceContainer) {
+         this.structure = structure;
+         this.chunkPos = chunkPos;
+-        this.references = references;
++        this.references = new java.util.concurrent.atomic.AtomicInteger(references); // Folia - region threading
+         this.pieceContainer = pieceContainer;
+     }
+ 
+@@ -129,7 +_,7 @@
+             tag.putString("id", context.registryAccess().lookupOrThrow(Registries.STRUCTURE).getKey(this.structure).toString());
+             tag.putInt("ChunkX", chunkPos.x());
+             tag.putInt("ChunkZ", chunkPos.z());
+-            tag.putInt("references", this.references);
++            tag.putInt("references", this.references.get()); // Folia - region threading
+             tag.put("Children", this.pieceContainer.save(context));
+             return tag;
+         } else {
+@@ -147,15 +_,29 @@
+     }
+ 
+     public boolean canBeReferenced() {
+-        return this.references < this.getMaxReferences();
+-    }
+-
++        throw new UnsupportedOperationException("Use tryReference()"); // Folia - region threading
++    }
++
++    // Folia start - region threading
++    public boolean tryReference() {
++        for (int curr = this.references.get();;) {
++            if (curr >= this.getMaxReferences()) {
++                return false;
++            }
++
++            if (curr == (curr = this.references.compareAndExchange(curr, curr + 1))) {
++                return true;
++            } // else: try again
++        }
++    }
++
++    // Folia end - region threading
+     public void addReference() {
+-        this.references++;
++       throw new UnsupportedOperationException("Use tryReference()"); // Folia - region threading
+     }
+ 
+     public int getReferences() {
+-        return this.references;
++        return this.references.get(); // Folia - region threading
+     }
+ 
+     protected int getMaxReferences() {

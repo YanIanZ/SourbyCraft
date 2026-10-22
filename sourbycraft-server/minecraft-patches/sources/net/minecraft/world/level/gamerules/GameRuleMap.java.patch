@@ -1,0 +1,67 @@
+--- a/net/minecraft/world/level/gamerules/GameRuleMap.java
++++ b/net/minecraft/world/level/gamerules/GameRuleMap.java
+@@ -17,7 +_,7 @@
+ 
+ public final class GameRuleMap extends SavedData {
+     public static final Codec<GameRuleMap> CODEC = Codec.<GameRule<?>, Object>dispatchedMap(BuiltInRegistries.GAME_RULE.byNameCodec(), GameRule::valueCodec)
+-        .xmap(GameRuleMap::ofTrusted, GameRuleMap::map);
++        .xmap(GameRuleMap::ofTrusted, gameRuleMap -> copyOf(gameRuleMap).map()); // Canvas - region threading
+     public static final SavedDataType<GameRuleMap> TYPE = new SavedDataType<>(
+         Identifier.withDefaultNamespace("game_rules"), GameRuleMap::of, CODEC, DataFixTypes.SAVED_DATA_GAME_RULES
+     );
+@@ -49,7 +_,9 @@
+     }
+ 
+     public static GameRuleMap copyOf(final GameRuleMap gameRuleMap) {
++        synchronized (gameRuleMap) { // Folia - region threading
+         return new GameRuleMap(new Reference2ObjectOpenHashMap<>(gameRuleMap.map));
++        } // Folia - region threadeing
+     }
+ 
+     public boolean has(final GameRule<?> gameRule) {
+@@ -60,7 +_,7 @@
+         return (T)this.idAccess[gameRule.gameRuleIndex]; // Paper - array backed gamerule access
+     }
+ 
+-    public <T> void set(final GameRule<T> gameRule, final T value) {
++    public synchronized <T> void set(final GameRule<T> gameRule, final T value) { // Folia - region threading
+         this.setDirty();
+         this.map.put(gameRule, value);
+         this.idAccess[gameRule.gameRuleIndex] = value; // Paper - array backed gamerule access - above map is kept in sync instead of fully removing the map, which needs more diff.
+@@ -70,22 +_,22 @@
+         this.set(gameRule, gameRule.defaultValue());
+     }
+ 
+-    public <T> @Nullable T remove(final GameRule<T> gameRule) {
++    public synchronized <T> @Nullable T remove(final GameRule<T> gameRule) { // Folia - region threading
+         this.setDirty();
+         this.idAccess[gameRule.gameRuleIndex] = null; // Paper - array backed gamerule access
+         return (T)this.map.remove(gameRule);
+     }
+ 
+-    public Set<GameRule<?>> keySet() {
+-        return this.map.keySet();
++    public synchronized Set<GameRule<?>> keySet() { // Canvas - region threading
++        return Set.copyOf(this.map.keySet()); // Canvas - region threading
+     }
+ 
+-    public int size() {
++    public synchronized int size() { // Folia - region threading
+         return this.map.size();
+     }
+ 
+     @Override
+-    public String toString() {
++    public synchronized String toString() { // Folia - region threading
+         return this.map.toString();
+     }
+ 
+@@ -124,7 +_,7 @@
+     }
+ 
+     @Override
+-    public int hashCode() {
++    public synchronized int hashCode() { // Folia - region threading
+         return Objects.hash(this.map);
+     }
+ 

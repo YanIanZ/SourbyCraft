@@ -1,0 +1,100 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Thu, 22 Oct 2026 02:03:18 +0700
+Subject: [PATCH] SourbyCraft - ServerTickManager backed by server-wide tick
+ state
+
+Every CraftServerTickManager method threw the owned TICK_MANAGER
+refusal. They now delegate to ServerTickControl, which holds the state
+in vanilla's own ServerTickRateManager driven by the global tick for
+every region, and to the one server-wide tick rate (Paper's 1 to
+10,000 range check). isFrozen(Entity) answers from the owning region's
+tick state (its own pause combined with the server-wide state) on the
+entity's owner thread, and from the server-wide state off it.
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServerTickManager.java b/src/main/java/org/bukkit/craftbukkit/CraftServerTickManager.java
+index c5eb8cedd92777abc8e1f8dfb5f5d8da7887aef3..7a5ba385364c481e8324b7e56e1be85979fcfb77 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServerTickManager.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServerTickManager.java
+@@ -16,66 +16,68 @@ final class CraftServerTickManager implements ServerTickManager {
+ 
+     @Override
+     public boolean isRunningNormally() {
+-        throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - region threading - SourbyCraft: owned refusal message
++        return dev.iyanz.sourbycraft.guards.ServerTickControl.get().isRunningNormally(); // SourbyCraft - server-wide tick state on the global tick, for every region
+     }
+ 
+     @Override
+     public boolean isStepping() {
+-        throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - region threading - SourbyCraft: owned refusal message
++        return dev.iyanz.sourbycraft.guards.ServerTickControl.get().isStepping(); // SourbyCraft - server-wide tick state on the global tick, for every region
+     }
+ 
+     @Override
+     public boolean isSprinting() {
+-        throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - region threading - SourbyCraft: owned refusal message
++        return dev.iyanz.sourbycraft.guards.ServerTickControl.get().isSprinting(); // SourbyCraft - server-wide tick state on the global tick, for every region
+     }
+ 
+     @Override
+     public boolean isFrozen() {
+-        throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - region threading - SourbyCraft: owned refusal message
++        return dev.iyanz.sourbycraft.guards.ServerTickControl.get().isFrozen(); // SourbyCraft - server-wide tick state on the global tick, for every region
+     }
+ 
+     @Override
+     public float getTickRate() {
+-        throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - region threading - SourbyCraft: owned refusal message
++        return dev.iyanz.sourbycraft.guards.ServerTickControl.get().getTickRate(); // SourbyCraft - server-wide tick state on the global tick, for every region
+     }
+ 
+     @Override
+     public void setTickRate(final float tickRate) {
+-        throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - region threading - SourbyCraft: owned refusal message
++        dev.iyanz.sourbycraft.guards.ServerTickControl.get().setTickRate(tickRate); // SourbyCraft - server-wide tick state on the global tick, for every region
+     }
+ 
+     @Override
+     public void setFrozen(final boolean frozen) {
+-        throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - region threading - SourbyCraft: owned refusal message
++        dev.iyanz.sourbycraft.guards.ServerTickControl.get().setFrozen(frozen); // SourbyCraft - server-wide tick state on the global tick, for every region
+     }
+ 
+     @Override
+     public boolean stepGameIfFrozen(final int ticks) {
+-        throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - region threading - SourbyCraft: owned refusal message
++        return dev.iyanz.sourbycraft.guards.ServerTickControl.get().stepGameIfFrozen(ticks); // SourbyCraft - server-wide tick state on the global tick, for every region
+     }
+ 
+     @Override
+     public boolean stopStepping() {
+-        throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - region threading - SourbyCraft: owned refusal message
++        return dev.iyanz.sourbycraft.guards.ServerTickControl.get().stopStepping(); // SourbyCraft - server-wide tick state on the global tick, for every region
+     }
+ 
+     @Override
+     public boolean requestGameToSprint(final int ticks) {
+-        throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - region threading - SourbyCraft: owned refusal message
++        return dev.iyanz.sourbycraft.guards.ServerTickControl.get().requestGameToSprint(ticks); // SourbyCraft - server-wide tick state on the global tick, for every region
+     }
+ 
+     @Override
+     public boolean stopSprinting() {
+-        throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - region threading - SourbyCraft: owned refusal message
++        return dev.iyanz.sourbycraft.guards.ServerTickControl.get().stopSprinting(); // SourbyCraft - server-wide tick state on the global tick, for every region
+     }
+ 
+     @Override
+     public boolean isFrozen(final Entity entity) {
+-        throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - region threading - SourbyCraft: owned refusal message
++        Preconditions.checkArgument(entity != null, "The given entity must not be null"); // SourbyCraft - server-wide tick state on the global tick, for every region
++        final net.minecraft.world.entity.Entity handle = ((CraftEntity) entity).getHandle(); // SourbyCraft - server-wide tick state on the global tick, for every region
++        return dev.iyanz.sourbycraft.guards.ServerTickControl.get().isEntityFrozen(handle, owned -> owned.level().getCurrentWorldData().regionData.getRegionSchedulingHandle().getTickManager().isEntityFrozen(owned)); // SourbyCraft - region and server-wide state on the owner; server-wide state off it
+     }
+ 
+     @Override
+     public int getFrozenTicksToRun() {
+-        throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - region threading - SourbyCraft: owned refusal message
++        return dev.iyanz.sourbycraft.guards.ServerTickControl.get().getFrozenTicksToRun(); // SourbyCraft - server-wide tick state on the global tick, for every region
+     }
+ }

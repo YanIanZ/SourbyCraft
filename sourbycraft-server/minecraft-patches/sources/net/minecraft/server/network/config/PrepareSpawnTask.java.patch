@@ -1,0 +1,157 @@
+--- a/net/minecraft/server/network/config/PrepareSpawnTask.java
++++ b/net/minecraft/server/network/config/PrepareSpawnTask.java
+@@ -95,19 +_,47 @@
+                 spawnDataLevel = this.server.overworld();
+             }
+             ServerLevel spawnLevel;
++            boolean obtainedWorldStageLock = false; // Canvas - region threading
+             if (resourceKey == null) {
+                 spawnLevel = spawnDataLevel;
+             } else {
+                 spawnLevel = this.server.getLevel(resourceKey);
+-                if (spawnLevel == null) {
++                // Canvas start - region threading
++                if (spawnLevel != null) {
++                    spawnLevel.canvas$obtainWorldStageLock();
++                    obtainedWorldStageLock = true;
++                }
++                // if it is null, the dimension doesn't exist
++                if (spawnLevel == null || spawnLevel.canvas$unloadTicket.isPresent()) {
++                    if (spawnLevel != null) {
++                        // if we reach here, we are unloading
++                        spawnLevel.canvas$releaseWorldStageLock();
++                        obtainedWorldStageLock = false;
++                    }
++                    // the overworld cannot be unloaded because of the bukkit api rule
++                // Canvas end - region threading
+                     LOGGER.warn("Unknown respawn dimension {}, defaulting to overworld", resourceKey);
+                     spawnLevel = spawnDataLevel;
+                 }
+             }
+-            final ServerLevel finalSpawnLevel = spawnLevel;
+-            CompletableFuture<Vec3> spawnPosition = loadedPosition.position()
+-                .map(CompletableFuture::completedFuture)
+-                .orElseGet(() -> PlayerSpawnFinder.findSpawn(finalSpawnLevel, respawnData.pos()));
++            spawnLevel.canvas$incrementJoiningPlayers(nameAndId.name()); // Canvas - region threading
++            if (obtainedWorldStageLock) spawnLevel.canvas$releaseWorldStageLock(); // Canvas - region threading
++            // Folia start - region threading
++            CompletableFuture<Vec3> spawnPosition = new java.util.concurrent.CompletableFuture<>();
++            if (loadedPosition.position().isPresent()) {
++                spawnPosition.complete(loadedPosition.position().get());
++            } else {
++                ca.spottedleaf.concurrentutil.completable.CallbackCompletable<org.bukkit.Location> spawnComplete = new ca.spottedleaf.concurrentutil.completable.CallbackCompletable<>();
++                spawnComplete.addWaiter((final org.bukkit.Location loc, final Throwable throwable) -> {
++                    if (throwable != null) {
++                        spawnPosition.completeExceptionally(throwable);
++                    } else {
++                        spawnPosition.complete(io.papermc.paper.util.MCUtil.toVec3(loc));
++                    }
++                });
++                ServerPlayer.fudgeSpawnLocation(spawnLevel, spawnComplete);
++            }
++            // Folia end - region threading
+             // Paper end - move logic in Entity to here, to use bukkit supplied world UUID & reset to main world spawn if no valid world is found
+             Vec2 spawnAngle = loadedPosition.rotation().orElse(new Vec2(respawnData.yaw(), respawnData.pitch()));
+             this.state = new PrepareSpawnTask.Preparing(spawnLevel, spawnPosition, spawnAngle);
+@@ -132,14 +_,42 @@
+         };
+     }
+ 
+-    public ServerPlayer spawnPlayer(final Connection connection, final CommonListenerCookie cookie) {
+-        if (this.state instanceof PrepareSpawnTask.Ready ready) {
+-            return ready.spawn(connection, cookie);
+-        } else {
+-            throw new IllegalStateException("Player spawn was not ready");
+-        }
+-    }
+-
++    // Folia start - region threading
++    // note: added ServerPlayer param
++    public ServerPlayer spawnPlayer(final Connection connection, final CommonListenerCookie cookie, final ServerPlayer player) {
++        if (this.state instanceof PrepareSpawnTask.Ready ready) {
++            return ready.spawn(connection, cookie, player); // add ServerPlayer param
++        } else {
++            throw new IllegalStateException("Player spawn was not ready");
++        }
++    }
++
++    public ServerLevel getSpawnWorld() {
++        if (this.state instanceof PrepareSpawnTask.Ready ready) {
++            return ready.getSpawnWorld();
++        } else {
++            throw new IllegalStateException("Player spawn was not ready");
++        }
++    }
++
++    // copy of spawnPlayer but only invokes createPlayer
++    public ServerPlayer createPlayer(final Connection connection, final CommonListenerCookie cookie) {
++        if (this.state instanceof PrepareSpawnTask.Ready ready) {
++            return ready.createPlayer(connection, cookie);
++        } else {
++            throw new IllegalStateException("Player spawn was not ready");
++        }
++    }
++
++    public Vec3 getSpawnPosition() {
++        if (this.state instanceof PrepareSpawnTask.Ready ready) {
++            return ready.getSpawnPosition();
++        } else {
++            throw new IllegalStateException("Player spawn was not ready");
++        }
++    }
++
++    // Folia end - region threading
+     public void keepAlive() {
+         if (this.state instanceof PrepareSpawnTask.Ready ready) {
+             ready.keepAlive();
+@@ -185,7 +_,7 @@
+             Vec3 spawnPosition = this.spawnPosition.join();
+             if (this.chunkLoadFuture == null) {
+                 // Paper start - PlayerSpawnLocationEvent
+-                if (this.eventFuture == null && org.spigotmc.event.player.PlayerSpawnLocationEvent.getHandlerList().getRegisteredListeners().length != 0) {
++                if (false && this.eventFuture == null && org.spigotmc.event.player.PlayerSpawnLocationEvent.getHandlerList().getRegisteredListeners().length != 0) { // Folia - region threading
+                     ServerPlayer player;
+                     if (PrepareSpawnTask.this.listener.connection.savedPlayerForLegacyEvents != null) {
+                         player = PrepareSpawnTask.this.listener.connection.savedPlayerForLegacyEvents;
+@@ -259,14 +_,26 @@
+             this.spawnPosition = spawnPosition;
+             this.spawnAngle = spawnAngle;
+         }
++        // Folia start - region threading
++        public ServerLevel getSpawnWorld() {
++            return this.spawnLevel;
++        }
++
++        public Vec3 getSpawnPosition() {
++            return this.spawnPosition;
++        }
++
++        // Folia end - region threading
+ 
+         public void keepAlive() {
+             this.spawnLevel.getChunkSource().addTicketWithRadius(TicketType.PLAYER_SPAWN, ChunkPos.containing(BlockPos.containing(this.spawnPosition)), 3);
+         }
+ 
+-        public ServerPlayer spawn(final Connection connection, final CommonListenerCookie cookie) {
+-            ChunkPos spawnChunk = ChunkPos.containing(BlockPos.containing(this.spawnPosition));
+-            this.spawnLevel.waitForEntities(spawnChunk, 3);
++        // Folia start - region threading - split out createPlayer and spawn
++        public ServerPlayer createPlayer(final Connection connection, final CommonListenerCookie cookie) {
++            // ChunkPos spawnChunk = ChunkPos.containing(BlockPos.containing(this.spawnPosition));
++            // this.spawnLevel.waitForEntities(spawnChunk, 3); // Not needed on Moonrise chunk system
++        // Folia end - region threading
+             // Paper start - configuration api - possibly use legacy saved server player instance
+             ServerPlayer player;
+             if (connection.savedPlayerForLegacyEvents != null) {
+@@ -281,6 +_,11 @@
+             }
+             // Paper end - configuration api - possibly use legacy saved server player instance
+             PrepareSpawnTask.this.listener.paperConnection.applyPendingEntityId(player); // Paper - internal entity id api - possibly override player network id if plugins used internal API to configure it.
++            // Folia start - region threading - split out createPlayer and spawn
++            return player;
++        }
++        public ServerPlayer spawn(final Connection connection, final CommonListenerCookie cookie, final ServerPlayer player) {
++            // Folia end - region threading - split out createPlayer and spawn
+ 
+             try (ProblemReporter.ScopedCollector reporter = new ProblemReporter.ScopedCollector(player.problemPath(), PrepareSpawnTask.LOGGER)) {
+                 Optional<ValueInput> input = PrepareSpawnTask.this.server

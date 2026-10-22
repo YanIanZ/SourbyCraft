@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/level/storage/LevelStorageSource.java
++++ b/net/minecraft/world/level/storage/LevelStorageSource.java
+@@ -460,7 +_,7 @@
+         private DirectoryLock lock;
+         private final LevelStorageSource.LevelDirectory levelDirectory;
+         private final String levelId;
+-        private final Map<LevelResource, Path> resources = Maps.newHashMap();
++        private final Map<LevelResource, Path> resources = Maps.newConcurrentMap(); // Canvas - region threading - accessed by multiple threads, use concurrent equivalent
+ 
+         private LevelStorageAccess(final String levelId, final Path path) throws IOException {
+             this.levelId = levelId;

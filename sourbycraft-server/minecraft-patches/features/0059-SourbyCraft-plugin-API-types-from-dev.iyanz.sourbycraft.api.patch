@@ -1,0 +1,103 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Wed, 21 Oct 2026 01:53:23 +0700
+Subject: [PATCH] SourbyCraft - plugin API types from dev.iyanz.sourbycraft.api
+
+The region-threading plugin API (formerly Canvas's API package) moved to
+dev.iyanz.sourbycraft.api in Build 48 (owner decision 2026-10-21, no
+compatibility shim). The engine baseline names these types by their
+simple names only, because a baseline line may not name a SourbyCraft
+package; this patch supplies the imports.
+
+diff --git a/dev/iyanz/aurora/engine/threadedregions/CanvasRegionizedWorldData.java b/dev/iyanz/aurora/engine/threadedregions/CanvasRegionizedWorldData.java
+index cabed06a58adb9e8e11965582273fde81711566c..2c0b85f4a240cbd479cdb2e5da12a9fd1e8b88d1 100644
+--- a/dev/iyanz/aurora/engine/threadedregions/CanvasRegionizedWorldData.java
++++ b/dev/iyanz/aurora/engine/threadedregions/CanvasRegionizedWorldData.java
+@@ -19,6 +19,7 @@ import net.minecraft.world.level.material.FlowingFluid;
+ import org.bukkit.craftbukkit.CraftWorld;
+ import org.jspecify.annotations.NullMarked;
+ import org.jspecify.annotations.Nullable;
++import dev.iyanz.sourbycraft.api.region.RegionTickData;
+ 
+ @SuppressWarnings("unused")
+ public class CanvasRegionizedWorldData {
+diff --git a/dev/iyanz/aurora/engine/threadedregions/ServerRegionTickManager.java b/dev/iyanz/aurora/engine/threadedregions/ServerRegionTickManager.java
+index 5db811d01e4bd6d667ccfb39cbc263755fba7ddb..797c8a6a3020f3dca42c91f930b9aecf41887f08 100644
+--- a/dev/iyanz/aurora/engine/threadedregions/ServerRegionTickManager.java
++++ b/dev/iyanz/aurora/engine/threadedregions/ServerRegionTickManager.java
+@@ -7,6 +7,7 @@ import java.util.Objects;
+ import org.bukkit.Chunk;
+ import org.bukkit.craftbukkit.CraftWorld;
+ import org.jetbrains.annotations.ApiStatus;
++import dev.iyanz.sourbycraft.api.region.RegionThreadingTickManager;
+ 
+ // this class is literally just an abstraction layer between the Bukkit API and Canvas internals
+ @ApiStatus.Internal
+diff --git a/io/papermc/paper/threadedregions/ThreadedRegionizer.java b/io/papermc/paper/threadedregions/ThreadedRegionizer.java
+index 7bb93c955683af8b19b4fa5c8a376d934df6f233..1f46e8614678ccd97ab063f94304de26b2759293 100644
+--- a/io/papermc/paper/threadedregions/ThreadedRegionizer.java
++++ b/io/papermc/paper/threadedregions/ThreadedRegionizer.java
+@@ -27,6 +27,8 @@ import net.minecraft.world.level.ChunkPos;
+ import org.bukkit.World;
+ import org.jspecify.annotations.NonNull;
+ import org.slf4j.Logger;
++import dev.iyanz.sourbycraft.api.region.RegionTickData;
++import dev.iyanz.sourbycraft.api.region.WorldRegionizer;
+ 
+ public final class ThreadedRegionizer<R extends ThreadedRegionizer.ThreadedRegionData<R, S>, S extends ThreadedRegionizer.ThreadedRegionSectionData> implements WorldRegionizer { // Canvas - region threading
+ 
+diff --git a/io/papermc/paper/threadedregions/TickRegions.java b/io/papermc/paper/threadedregions/TickRegions.java
+index 8a5c2236ddff34c092fe1db851f592733f0a4d5f..1681226c682606c6ba3aa75440b545b747994b20 100644
+--- a/io/papermc/paper/threadedregions/TickRegions.java
++++ b/io/papermc/paper/threadedregions/TickRegions.java
+@@ -31,6 +31,9 @@ import org.bukkit.World;
+ import org.jetbrains.annotations.Contract;
+ import org.jspecify.annotations.NonNull;
+ import org.slf4j.Logger;
++import dev.iyanz.sourbycraft.api.region.RegionThreadingTickManager;
++import dev.iyanz.sourbycraft.api.region.RegionTickData;
++import dev.iyanz.sourbycraft.api.region.WorldRegionizer;
+ 
+ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> {
+ 
+diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
+index e1aed4970090e1c77dc07b456c8e63f2732c9919..82a0acac65c60d3e1e5cd3d3fb948bd8ab711a1f 100644
+--- a/net/minecraft/server/level/ServerPlayer.java
++++ b/net/minecraft/server/level/ServerPlayer.java
+@@ -203,6 +203,9 @@ import net.minecraft.world.scores.TeamColor;
+ import net.minecraft.world.scores.criteria.ObjectiveCriteria;
+ import org.jspecify.annotations.Nullable;
+ import org.slf4j.Logger;
++import dev.iyanz.sourbycraft.api.event.PlayerPostRespawnAsyncEvent;
++import dev.iyanz.sourbycraft.api.event.PlayerRespawnAsyncEvent;
++import dev.iyanz.sourbycraft.api.event.PlayerViewEndCreditsEvent;
+ 
+ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patches.chunk_system.player.ChunkSystemServerPlayer { // Paper - rewrite chunk system
+     private static final Logger LOGGER = LogUtils.getLogger();
+diff --git a/net/minecraft/server/players/PlayerList.java b/net/minecraft/server/players/PlayerList.java
+index d7f7935d29e336fa01cb22913edff18e58bdc5b8..a459c6867dffeb19d811b6ff68ac3a995234b788 100644
+--- a/net/minecraft/server/players/PlayerList.java
++++ b/net/minecraft/server/players/PlayerList.java
+@@ -101,6 +101,7 @@ import net.minecraft.world.scores.PlayerTeam;
+ import net.minecraft.world.scores.Team;
+ import org.jspecify.annotations.Nullable;
+ import org.slf4j.Logger;
++import dev.iyanz.sourbycraft.api.event.PlayerSaveEvent;
+ 
+ public abstract class PlayerList {
+     public static final File USERBANLIST_FILE = new File("banned-players.json");
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+index 454d4c4aa3360cb0d670a6f9fd774dda0f4bcf3c..911a44be219633e80c49f34d0bf85a6c4567d889 100644
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -152,6 +152,10 @@ import net.minecraft.world.waypoints.WaypointTransmitter;
+ import org.jetbrains.annotations.Contract;
+ import org.jspecify.annotations.Nullable;
+ import org.slf4j.Logger;
++import dev.iyanz.sourbycraft.api.event.EntityPortalAsyncEvent;
++import dev.iyanz.sourbycraft.api.event.EntityPostPortalAsyncEvent;
++import dev.iyanz.sourbycraft.api.event.EntityPostTeleportAsyncEvent;
++import dev.iyanz.sourbycraft.api.event.EntityTeleportAsyncEvent;
+ 
+ public abstract class Entity
+     implements Nameable,

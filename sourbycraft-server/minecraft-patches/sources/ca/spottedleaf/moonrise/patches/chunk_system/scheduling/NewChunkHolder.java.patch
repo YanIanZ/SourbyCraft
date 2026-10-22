@@ -1,0 +1,20 @@
+--- a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/NewChunkHolder.java
++++ b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/NewChunkHolder.java
+@@ -1350,7 +_,7 @@
+         }
+ 
+         // must be scheduled to main, we do not trust the callback to not do anything stupid
+-        this.scheduler.scheduleChunkTask(this.chunkX, this.chunkZ, () -> {
++        this.scheduler.scheduleChunkTaskEventually(this.chunkX, this.chunkZ, () -> { // Folia - region threading
+             for (final Consumer<ChunkAccess> consumer : consumers) {
+                 try {
+                     consumer.accept(chunk);
+@@ -1378,7 +_,7 @@
+         }
+ 
+         // must be scheduled to main, we do not trust the callback to not do anything stupid
+-        this.scheduler.scheduleChunkTask(this.chunkX, this.chunkZ, () -> {
++        this.scheduler.scheduleChunkTaskEventually(this.chunkX, this.chunkZ, () -> { // Folia - region threading
+             for (final Consumer<LevelChunk> consumer : consumers) {
+                 try {
+                     consumer.accept(chunk);

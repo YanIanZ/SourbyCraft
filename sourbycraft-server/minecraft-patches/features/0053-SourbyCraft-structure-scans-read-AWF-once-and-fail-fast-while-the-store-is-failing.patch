@@ -1,0 +1,20 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Tue, 20 Oct 2026 19:46:19 +0700
+Subject: [PATCH] SourbyCraft - structure scans read AWF once and fail fast
+ while the store is failing
+
+
+diff --git a/net/minecraft/world/level/chunk/storage/RegionFileStorage.java b/net/minecraft/world/level/chunk/storage/RegionFileStorage.java
+index 48ad36d1c7bb1cd8e3e932b348e62b9e2c48dd8b..837da38f567aacb4cd8657ecb58a906f9156c655 100644
+--- a/net/minecraft/world/level/chunk/storage/RegionFileStorage.java
++++ b/net/minecraft/world/level/chunk/storage/RegionFileStorage.java
+@@ -457,7 +457,7 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
+     public void scanChunk(final ChunkPos pos, final StreamTagVisitor scanner) throws IOException {
+         // SourbyCraft start - Aurora World Fabric: structure scans must see the chunk AWF holds
+         if (this.sourby$awf != null) {
+-            final byte[] owned = this.sourby$awf.read(pos.x(), pos.z());
++            final byte[] owned = this.sourby$awf.scanRead(pos.x(), pos.z()); // SourbyCraft - structure scans: one attempt, no fence, refused while the store is failing
+             if (owned == dev.iyanz.sourbycraft.awf.AwfRegionStorage.DELETED) return;
+             if (owned != null) {
+                 try (DataInputStream in = new DataInputStream(new java.io.ByteArrayInputStream(owned))) {

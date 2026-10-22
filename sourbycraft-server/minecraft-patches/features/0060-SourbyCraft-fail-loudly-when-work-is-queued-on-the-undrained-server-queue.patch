@@ -1,0 +1,20 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Wed, 21 Oct 2026 02:13:57 +0700
+Subject: [PATCH] SourbyCraft - fail loudly when work is queued on the
+ undrained server queue
+
+MinecraftServer.processQueue is only polled inside a block region threading never runs, so anything added to it (Spigot /restart, Bukkit conversations, sync chat and pre-login events) silently never executed. The field is now dev.iyanz.sourbycraft.guards.UndrainedQueue: add/offer throw an owned UnsupportedOperationException naming the caller and log it at ERROR once per caller; reads report an empty queue.
+
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index 65a83fd0a0b765106e64744de0370290ae64eebd..bfc3088469ec4b7e7863d55d38ce49a04430ed2f 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -540,6 +540,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+     ) {
+         super("Server", propagatesCrashes);
+         SERVER = this; // Paper - better singleton
++        this.processQueue = dev.iyanz.sourbycraft.guards.UndrainedQueue.create(); // SourbyCraft - nothing drains this under region threading: adding fails loudly
+         this.registries = worldStem.registries();
+         if (false && !this.registries.compositeAccess().lookupOrThrow(Registries.LEVEL_STEM).containsKey(LevelStem.OVERWORLD)) { // CraftBukkit - initialised later
+             throw new IllegalStateException("Missing Overworld dimension data");

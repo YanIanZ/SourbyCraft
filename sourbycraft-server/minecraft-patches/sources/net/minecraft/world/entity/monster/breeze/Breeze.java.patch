@@ -1,0 +1,24 @@
+--- a/net/minecraft/world/entity/monster/breeze/Breeze.java
++++ b/net/minecraft/world/entity/monster/breeze/Breeze.java
+@@ -12,8 +_,6 @@
+ import net.minecraft.util.debug.DebugBreezeInfo;
+ import net.minecraft.util.debug.DebugSubscriptions;
+ import net.minecraft.util.debug.DebugValueSource;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.damagesource.DamageSource;
+ import net.minecraft.world.entity.AnimationState;
+ import net.minecraft.world.entity.Entity;
+@@ -232,12 +_,8 @@
+ 
+     @Override
+     protected void customServerAiStep(final ServerLevel level) {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("breezeBrain");
+         this.getBrain().tick(level, this);
+-        profiler.popPush("breezeActivityUpdate");
+         BreezeAi.updateActivity(this);
+-        profiler.pop();
+         super.customServerAiStep(level);
+     }
+ 

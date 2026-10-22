@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Wed, 7 Oct 2026 04:55:10 +0700
+Subject: [PATCH] SourbyCraft - persist world metadata on autosave and save-all
+
+
+diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
+index cdb3f31a98570a30d11b3ce406ae269cc5ea93bd..9c26108e00de6bcceb5a79523b66de0d7a97320a 100644
+--- a/io/papermc/paper/threadedregions/RegionizedServer.java
++++ b/io/papermc/paper/threadedregions/RegionizedServer.java
+@@ -435,6 +435,13 @@ public final class RegionizedServer {
+                     toSave.add(ServerClockManager.class);
+                 }
+ 
++                // SourbyCraft start - persist world metadata on autosave
++                // game time, spawn, game type, difficulty (paper:level_overrides): advanced on the global tick and
++                // read from this file at world load; without it a crash after save-all rewinds game time to the
++                // last clean stop. Global-owned only; region-owned SavedData stays out of this list.
++                dev.iyanz.sourbycraft.world.WorldMetadataAutosave.addGlobalOwnedTypes(toSave);
++                // SourbyCraft end - persist world metadata on autosave
++
+                 // TODO - world border - needs MASSIVE changes...
+                 // TODO - raids - can we even do this?
+ 

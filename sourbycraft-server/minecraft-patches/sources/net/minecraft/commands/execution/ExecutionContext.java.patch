@@ -1,0 +1,31 @@
+--- a/net/minecraft/commands/execution/ExecutionContext.java
++++ b/net/minecraft/commands/execution/ExecutionContext.java
+@@ -20,7 +_,6 @@
+     private static final Logger LOGGER = LogUtils.getLogger();
+     private final int commandLimit;
+     private final int forkLimit;
+-    private final ProfilerFiller profiler;
+     private @Nullable TraceCallbacks tracer;
+     private int commandQuota;
+     private boolean queueOverflow;
+@@ -28,10 +_,9 @@
+     private final List<CommandQueueEntry<T>> newTopCommands = new ObjectArrayList<>();
+     private int currentFrameDepth;
+ 
+-    public ExecutionContext(final int commandLimit, final int forkLimit, final ProfilerFiller profiler) {
++    public ExecutionContext(final int commandLimit, final int forkLimit) {
+         this.commandLimit = commandLimit;
+         this.forkLimit = forkLimit;
+-        this.profiler = profiler;
+         this.commandQuota = commandLimit;
+     }
+ 
+@@ -130,7 +_,7 @@
+     }
+ 
+     public ProfilerFiller profiler() {
+-        return this.profiler;
++        return net.minecraft.util.profiling.InactiveProfiler.INSTANCE;
+     }
+ 
+     public int forkLimit() {

@@ -39,13 +39,6 @@ public final class GcAdvisor {
         return dev.iyanz.sourbycraft.SourbyCraftConfig.cfgBool("branding.gc-advisor.enabled", true);
     }
 
-    private static final String ESC = "\u001B";
-    private static final String RESET = ESC + "[0m";
-
-    private static String fg(TextColor c) {
-        return ESC + "[38;2;" + c.red() + ";" + c.green() + ";" + c.blue() + "m";
-    }
-
     private GcAdvisor() {}
 
     /**
@@ -65,7 +58,44 @@ public final class GcAdvisor {
         List<String> jvmArgs = ManagementFactory.getRuntimeMXBean().getInputArguments();
         long xms = parseMemArg(jvmArgs, "-Xms");
         long xmx = parseMemArg(jvmArgs, "-Xmx");
-        return evaluate(gcNames, jvmArgs, xms, xmx);
+        final Result flags = evaluate(gcNames, jvmArgs, xms, xmx);
+        final List<String> all = new ArrayList<>(flags.warnings());
+        all.addAll(headroom(Runtime.getRuntime().maxMemory(),
+            dev.iyanz.sourbycraft.util.ContainerMemory.limitBytes()));
+        return new Result(all.isEmpty(), List.copyOf(all));
+    }
+
+    /** Heap that leaves the container no room for everything else the JVM needs. */
+    static final double HEAP_SHARE_LIMIT = 0.85;
+
+    /**
+     * Warns when the heap is sized so close to the container limit that the process must overrun it.
+     *
+     * <p>A heap maximum is not the process's memory: metaspace, the code cache, thread stacks, GC
+     * structures and Netty's direct buffers all live outside it, and on a Minecraft server those
+     * run to a gigabyte or more. A panel allocation of 10 GiB with a 10 GiB heap therefore does not
+     * fit, and the kernel resolves it with swap — where a JVM heap is catastrophic for tick times,
+     * and where an allocation with OOM-kill disabled will thrash rather than fail. This is the
+     * failure that makes an operator say the server "randomly" lags.</p>
+     *
+     * @param heapMaxBytes       the JVM's maximum heap
+     * @param containerLimitBytes the container's memory limit, or a non-positive value if unknown
+     * @return one warning, or nothing when the sizing leaves room or cannot be judged
+     */
+    static List<String> headroom(final long heapMaxBytes, final long containerLimitBytes) {
+        if (heapMaxBytes <= 0 || containerLimitBytes <= 0) {
+            return List.of();                 // Outside a container, or the limit is unreadable.
+        }
+        final double share = (double) heapMaxBytes / containerLimitBytes;
+        if (share <= HEAP_SHARE_LIMIT) {
+            return List.of();
+        }
+        return List.of("Heap maximum is " + Math.round(share * 100) + "% of the container's "
+            + dev.iyanz.sourbycraft.util.ContainerMemory.fmt(containerLimitBytes)
+            + " — metaspace, code cache, thread stacks and direct buffers live outside the heap, so "
+            + "the process will overrun its limit and swap. Size the heap to about "
+            + Math.round(HEAP_SHARE_LIMIT * 100) + "% (e.g. -XX:MaxRAMPercentage="
+            + Math.round(HEAP_SHARE_LIMIT * 100) + ".0).");
     }
 
     /**
@@ -114,14 +144,14 @@ public final class GcAdvisor {
     /** Compact WARN lines instead of the old box banner (whose advice was outdated anyway). */
     public static String renderWarningBanner(Result r) {
         if (r.acceptable()) return "";
-        final String w = fg(SourbyCraftColors.WARNING);
+        ConsoleStyle style = ConsoleStyle.current();
         StringBuilder sb = new StringBuilder();
-        sb.append(w).append("[SourbyCraft] JVM flag advisor:").append(RESET).append('\n');
-        for (String warn : r.warnings()) {
-            sb.append(w).append("[SourbyCraft]   - ").append(warn).append(RESET).append('\n');
+        sb.append(style.paint("[SourbyCraft] JVM flag advisor:", SourbyCraftColors.WARNING)).append('\n');
+        for (String warning : r.warnings()) {
+            sb.append(style.paint("[SourbyCraft]   - " + warning, SourbyCraftColors.WARNING)).append('\n');
         }
-        sb.append(w).append("[SourbyCraft]   Recommended (Java 25): -Xms2G -Xmx<75-85% of allocation> "
-            + "-XX:+UseZGC -XX:ZUncommitDelay=60 --add-modules=jdk.incubator.vector").append(RESET).append('\n');
+        sb.append(style.paint("[SourbyCraft]   Recommended (Java 25): -Xms2G -Xmx<75-85% of allocation> "
+            + "-XX:+UseZGC -XX:ZUncommitDelay=60 --add-modules=jdk.incubator.vector", SourbyCraftColors.WARNING)).append('\n');
         return sb.toString();
     }
 }

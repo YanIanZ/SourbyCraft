@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Tue, 20 Oct 2026 01:59:29 +0700
+Subject: [PATCH] SourbyCraft - separate NBT depth from codec bias
+
+Observe actual NBT container nesting without counting Paper codec depth.
+Keep the native combined complexity limit unchanged.
+
+diff --git a/net/minecraft/nbt/NbtAccounter.java b/net/minecraft/nbt/NbtAccounter.java
+index ee8180732c0dcca8c580874b302af6f0aede258e..4c4bb8008d0d3b7e3b7ea5291900bebc4c5269a8 100644
+--- a/net/minecraft/nbt/NbtAccounter.java
++++ b/net/minecraft/nbt/NbtAccounter.java
+@@ -10,6 +10,7 @@ public class NbtAccounter {
+     private long usage;
+     private final int maxDepth;
+     private int depth;
++    private int sourbycraft$nbtDepth; // SourbyCraft - actual container nesting excludes Paper's codec-depth bias
+ 
+     public NbtAccounter(final long quota, final int maxDepth) {
+         this.quota = quota;
+@@ -57,7 +58,6 @@ public class NbtAccounter {
+             throw new NbtAccounterException("Tried to read NBT tag with too high complexity, depth > " + this.maxDepth);
+         } else {
+             this.depth += depth;
+-            dev.iyanz.sourbycraft.security.SecurityGuards.INSTANCE.check(dev.iyanz.sourbycraft.security.SecurityGuards.Limit.NBT_DEPTH, this.depth); // SourbyCraft
+         }
+     }
+     // Paper end - Track codec depth
+@@ -68,7 +68,8 @@ public class NbtAccounter {
+         }
+ 
+         this.depth++;
+-        dev.iyanz.sourbycraft.security.SecurityGuards.INSTANCE.check(dev.iyanz.sourbycraft.security.SecurityGuards.Limit.NBT_DEPTH, this.depth); // SourbyCraft
++        this.sourbycraft$nbtDepth++;
++        dev.iyanz.sourbycraft.security.SecurityGuards.INSTANCE.check(dev.iyanz.sourbycraft.security.SecurityGuards.Limit.NBT_DEPTH, this.sourbycraft$nbtDepth); // SourbyCraft
+     }
+ 
+     public void popDepth() {
+@@ -77,6 +78,7 @@ public class NbtAccounter {
+         }
+ 
+         this.depth--;
++        if (this.sourbycraft$nbtDepth > 0) this.sourbycraft$nbtDepth--; // SourbyCraft
+     }
+ 
+     @VisibleForTesting

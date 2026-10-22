@@ -1,0 +1,10 @@
+--- a/src/main/java/org/bukkit/craftbukkit/entity/CraftParched.java
++++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftParched.java
+@@ -11,6 +_,7 @@
+ 
+     @Override
+     public Parched getHandle() {
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.entity, "Accessing entity state off owning region's thread"); // Folia - region threading
+         return (Parched) this.entity;
+     }
+ 

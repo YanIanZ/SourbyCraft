@@ -1,0 +1,10 @@
+--- a/net/minecraft/advancements/triggers/TargetBlockTrigger.java
++++ b/net/minecraft/advancements/triggers/TargetBlockTrigger.java
+@@ -20,6 +_,7 @@
+     }
+ 
+     public void trigger(final ServerPlayer player, final Entity projectile, final Vec3 hitPosition, final int signalStrength) {
++        if (player.level().canvasConfig().disableCriterionTrigger) return; // Canvas - disable criterion trigger config
+         LootContext projectileContext = EntityPredicate.createContext(player, projectile);
+         this.trigger(player, t -> t.matches(projectileContext, hitPosition, signalStrength));
+     }

@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: SourbyCraft <agent@local>
+Date: Sun, 30 Aug 2026 00:00:00 +0000
+Subject: [PATCH] SourbyCraft - eliminate elytra glide-slot stream allocation
+
+
+diff --git a/net/minecraft/world/entity/LivingEntity.java b/net/minecraft/world/entity/LivingEntity.java
+index ef4da5aa9de55db1e7d4fc91355d88a6e3a0ab5a..9d9071d96354e2d3189e3502ebeff3728dab7da8 100644
+--- a/net/minecraft/world/entity/LivingEntity.java
++++ b/net/minecraft/world/entity/LivingEntity.java
+@@ -3915,8 +3915,15 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+             if (checkFallFlyTicks % 10 == 0) {
+                 int freeFallInterval = checkFallFlyTicks / 10;
+                 if (freeFallInterval % 2 == 0) {
+-                    List<EquipmentSlot> slotsWithGliders = EquipmentSlot.VALUES.stream().filter(slot -> canGlideUsing(this.getItemBySlot(slot), slot)).toList();
+-                    EquipmentSlot slotToDamage = Util.getRandom(slotsWithGliders, this.random);
++                    // SourbyCraft start - elytra glide: vanilla's pick (Util.getRandom over the glider slots:
++                    // one nextInt(count), same slot, same draw from this.random) without the per-call list
++                    // and stream; the selection lives in dev.iyanz.sourbycraft.entity.GliderSlots.
++                    int sourbyGliders = 0;
++                    for (int i = 0; i < EquipmentSlot.VALUES.size(); i++) {
++                        if (canGlideUsing(this.getItemBySlot(EquipmentSlot.VALUES.get(i)), EquipmentSlot.VALUES.get(i))) sourbyGliders = dev.iyanz.sourbycraft.entity.GliderSlots.with(sourbyGliders, i);
++                    }
++                    EquipmentSlot slotToDamage = EquipmentSlot.VALUES.get(dev.iyanz.sourbycraft.entity.GliderSlots.nthSetBit(sourbyGliders, this.random.nextInt(dev.iyanz.sourbycraft.entity.GliderSlots.count(sourbyGliders))));
++                    // SourbyCraft end
+                     this.getItemBySlot(slotToDamage).hurtAndBreak(1, this, slotToDamage);
+                 }
+ 

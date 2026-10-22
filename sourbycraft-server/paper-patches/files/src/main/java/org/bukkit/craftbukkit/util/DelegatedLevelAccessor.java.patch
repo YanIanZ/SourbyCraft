@@ -1,0 +1,16 @@
+--- a/src/main/java/org/bukkit/craftbukkit/util/DelegatedLevelAccessor.java
++++ b/src/main/java/org/bukkit/craftbukkit/util/DelegatedLevelAccessor.java
+@@ -66,6 +_,13 @@
+         this.delegate = delegate;
+     }
+ 
++    // Folia start - region threading
++    @Override
++    public net.minecraft.world.level.StructureManager structureManager() {
++        return this.delegate.structureManager();
++    }
++
++    // Folia end - region threading
+     public WorldGenLevel getDelegate() {
+         return this.delegate;
+     }

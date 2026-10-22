@@ -1,0 +1,87 @@
+name: ProtocolLib pin probe
+on:
+  schedule:
+    - cron: '17 6 * * *'  # daily 06:17 UTC; off-peak, before any release window
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Read-only drift probe for the pinned ProtocolLib release (SEC-7). It fails when the
+# pinned tag/asset metadata or the asset bytes drift upstream, and lists newer tagged
+# releases for a compatibility review. It NEVER auto-updates the pin and NEVER follows
+# dev-build.
+jobs:
+  protocollib-pin:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7 (v7.0.1)
+
+      - name: Read pinned asset metadata
+        id: pinned
+        run: |
+          python3 - <<'PYTHON' >> "$GITHUB_OUTPUT"
+          import json
+          pin = json.load(open('build-data/protocollib-pin.json'))
+          print('tag=' + pin['release'].rsplit('/', 1)[-1])
+          print('release_id=' + str(pin['release_id']))
+          print('asset_id=' + str(pin['asset_id']))
+          print('asset_name=' + pin['asset_name'])
+          print('expected_sha=' + pin['sha256'])
+          print('expected_size=' + str(pin['size_bytes']))
+          print('download_url=' + pin['download_url'])
+          PYTHON
+
+      - name: Fetch upstream release metadata
+        id: upstream
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          tag="${{ steps.pinned.outputs.tag }}"
+          curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" \
+            "https://api.github.com/repos/dmulloy2/ProtocolLib/releases/tags/${tag}" > release.json
+          python3 - <<'PYTHON' >> "$GITHUB_OUTPUT"
+          import json
+          release = json.load(open('release.json'))
+          print('published=' + release['published_at'])
+          for asset in release['assets']:
+              if asset['name'] == '${{ steps.pinned.outputs.asset_name }}':
+                  print('upstream_asset_id=' + str(asset['id']))
+                  print('upstream_asset_size=' + str(asset['size']))
+          PYTHON
+
+      - name: Verify the pinned asset byte-for-byte
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" \
+            "${{ steps.pinned.outputs.download_url }}" -o probe.jar
+          actual_sha=$(sha256sum probe.jar | cut -d' ' -f1)
+          actual_size=$(wc -c < probe.jar)
+          echo "expected sha=${{ steps.pinned.outputs.expected_sha }} size=${{ steps.pinned.outputs.expected_size }} asset_id=${{ steps.pinned.outputs.asset_id }}"
+          echo "actual   sha=${actual_sha} size=${actual_size} asset_id=${{ steps.upstream.outputs.upstream_asset_id }}"
+          test "${actual_size}" = "${{ steps.pinned.outputs.expected_size }}" || { echo "size drift"; exit 1; }
+          test "${actual_sha}" = "${{ steps.pinned.outputs.expected_sha }}" || { echo "digest drift"; exit 1; }
+          test "${{ steps.upstream.outputs.upstream_asset_id }}" = "${{ steps.pinned.outputs.asset_id }}" || { echo "asset_id drift"; exit 1; }
+
+      - name: List newer tagged releases (informational; never auto-updates)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" \
+            "https://api.github.com/repos/dmulloy2/ProtocolLib/releases?per_page=20" > releases.json
+          python3 - <<'PYTHON'
+          import json
+          releases = json.load(open('releases.json'))
+          tagged = [r for r in releases
+                    if not r['prerelease'] and not r['draft'] and r['tag_name'] != 'dev-build']
+          tagged.sort(key=lambda r: r['published_at'], reverse=True)
+          print('current pin tag:', '${{ steps.pinned.outputs.tag }}')
+          for r in tagged[:8]:
+              marker = ' <-- CURRENT' if r['tag_name'] == '${{ steps.pinned.outputs.tag }}' else ''
+              print(f"  {r['tag_name']:>12}  {r['published_at']}  release_id={r['id']}{marker}")
+          PYTHON

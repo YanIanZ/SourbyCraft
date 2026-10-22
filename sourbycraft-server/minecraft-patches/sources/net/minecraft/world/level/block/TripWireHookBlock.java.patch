@@ -1,0 +1,10 @@
+--- a/net/minecraft/world/level/block/TripWireHookBlock.java
++++ b/net/minecraft/world/level/block/TripWireHookBlock.java
+@@ -128,6 +_,7 @@
+ 
+             for (int i = 1; i < 42; i++) {
+                 BlockPos testPos = pos.relative(direction, i);
++                if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(level, testPos, 4)) return; // Folia - region threading
+                 BlockState wireState = level.getBlockState(testPos);
+                 if (wireState.is(Blocks.TRIPWIRE_HOOK)) {
+                     if (wireState.getValue(FACING) == direction.getOpposite()) {

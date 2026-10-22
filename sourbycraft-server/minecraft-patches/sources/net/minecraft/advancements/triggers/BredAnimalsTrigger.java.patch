@@ -1,0 +1,10 @@
+--- a/net/minecraft/advancements/triggers/BredAnimalsTrigger.java
++++ b/net/minecraft/advancements/triggers/BredAnimalsTrigger.java
+@@ -20,6 +_,7 @@
+     }
+ 
+     public void trigger(final ServerPlayer player, final Animal parent, final Animal partner, final @Nullable AgeableMob child) {
++        if (player.level().canvasConfig().disableCriterionTrigger) return; // Canvas - disable criterion trigger config
+         LootContext parentContext = EntityPredicate.createContext(player, parent);
+         LootContext partnerContext = EntityPredicate.createContext(player, partner);
+         LootContext childContext = child != null ? EntityPredicate.createContext(player, child) : null;

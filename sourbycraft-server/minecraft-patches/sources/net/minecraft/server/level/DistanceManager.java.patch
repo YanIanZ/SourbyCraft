@@ -1,0 +1,61 @@
+--- a/net/minecraft/server/level/DistanceManager.java
++++ b/net/minecraft/server/level/DistanceManager.java
+@@ -54,18 +_,18 @@
+     }
+     // Paper end - rewrite chunk system
+     // Paper start - chunk tick iteration optimisation
+-    private final ca.spottedleaf.moonrise.common.misc.PositionCountingAreaMap<ServerPlayer> spawnChunkTracker = new ca.spottedleaf.moonrise.common.misc.PositionCountingAreaMap<>();
++    // Folia - move to regionized world data
+     // Note: Cannot do narrow tracking on Paper due to custom spawn range
+ 
+     @Override
+     public final void moonrise$addPlayer(final ServerPlayer player, final SectionPos pos) {
+-        this.spawnChunkTracker.add(player, pos.x(), pos.z(), ca.spottedleaf.moonrise.patches.chunk_tick_iteration.ChunkTickConstants.PLAYER_SPAWN_TRACK_RANGE);
++        this.moonrise$getChunkMap().level.getCurrentWorldData().spawnChunkTracker.add(player, pos.x(), pos.z(), ca.spottedleaf.moonrise.patches.chunk_tick_iteration.ChunkTickConstants.PLAYER_SPAWN_TRACK_RANGE); // Folia - region threading
+         // Note: Cannot do narrow tracking on Paper due to custom spawn range
+     }
+ 
+     @Override
+     public final void moonrise$removePlayer(final ServerPlayer player, final SectionPos pos) {
+-        this.spawnChunkTracker.remove(player);
++        this.moonrise$getChunkMap().level.getCurrentWorldData().spawnChunkTracker.remove(player); // Folia - region threading
+         // Note: Cannot do narrow tracking on Paper due to custom spawn range
+     }
+ 
+@@ -74,10 +_,10 @@
+                                             final SectionPos oldPos, final SectionPos newPos,
+                                             final boolean oldIgnore, final boolean newIgnore) {
+         if (newIgnore) {
+-            this.spawnChunkTracker.remove(player);
++            this.moonrise$getChunkMap().level.getCurrentWorldData().spawnChunkTracker.remove(player); // Folia - region threading
+             // Note: Cannot do narrow tracking on Paper due to custom spawn range
+         } else {
+-            this.spawnChunkTracker.addOrUpdate(player, newPos.x(), newPos.z(), ca.spottedleaf.moonrise.patches.chunk_tick_iteration.ChunkTickConstants.PLAYER_SPAWN_TRACK_RANGE);
++            this.moonrise$getChunkMap().level.getCurrentWorldData().spawnChunkTracker.addOrUpdate(player, newPos.x(), newPos.z(), ca.spottedleaf.moonrise.patches.chunk_tick_iteration.ChunkTickConstants.PLAYER_SPAWN_TRACK_RANGE); // Folia - region threading
+             // Note: Cannot do narrow tracking on Paper due to custom spawn range
+         }
+     }
+@@ -159,12 +_,12 @@
+     }
+ 
+     public int getNaturalSpawnChunkCount() {
+-        return this.spawnChunkTracker.getTotalPositions(); // Paper - chunk tick iteration optimisation
++        return this.moonrise$getChunkMap().level.getCurrentWorldData().spawnChunkTracker.getTotalPositions(); // Paper - chunk tick iteration optimisation // Folia - region threading
+     }
+ 
+     public TriState hasPlayersNearby(final long pos) {
+         // Note: Cannot do narrow tracking on Paper due to custom spawn range // Paper - chunk tick iteration optimisation
+-        return this.spawnChunkTracker.hasObjectsNear(ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkX(pos), ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkZ(pos)) ? net.minecraft.util.TriState.DEFAULT : net.minecraft.util.TriState.FALSE; // Paper - chunk tick iteration optimisation
++        return this.moonrise$getChunkMap().level.getCurrentWorldData().spawnChunkTracker.hasObjectsNear(ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkX(pos), ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkZ(pos)) ? net.minecraft.util.TriState.DEFAULT : net.minecraft.util.TriState.FALSE; // Paper - chunk tick iteration optimisation // Folia - region threading
+     }
+ 
+     public void forEachEntityTickingChunk(final LongConsumer consumer) {
+@@ -183,7 +_,7 @@
+     }
+ 
+     public LongIterator getSpawnCandidateChunks() {
+-        return this.spawnChunkTracker.getPositions().iterator(); // Paper - chunk tick iteration optimisation
++        return this.moonrise$getChunkMap().level.getCurrentWorldData().spawnChunkTracker.getPositions().iterator(); // Paper - chunk tick iteration optimisation // Folia - region threading
+     }
+ 
+     public String getDebugStatus() {

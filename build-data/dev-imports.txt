@@ -12,3 +12,7 @@
 #     mc_data chat_type/chat.json
 #     mc_data dimension_type/overworld.json
 #
+# Formerly Canvas's region-threading imports: classes the SourbyCraft patches use from leafpile
+# without patching them, so paperweight's patch scan would not import them on its own.
+leafpile ca/spottedleaf/concurrentutil/scheduler/SchedulableTick.java
+leafpile ca/spottedleaf/common/time/TickData.java

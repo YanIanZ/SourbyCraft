@@ -50,6 +50,14 @@ public final class GeoUtil {
      */
     private static final String DB_URL = "https://download.db-ip.com/free/dbip-city-lite-%s.mmdb.gz";
 
+    /**
+     * Size limits for the download: the gzipped body and the database written to disk. Generous
+     * bounds against an endless or decompression-bomb body, not tuned to the file's real size
+     * (not measured here); a body over either limit fails the download like a network error.
+     */
+    static final long MAX_COMPRESSED_BYTES = 512L * 1024 * 1024;
+    static final long MAX_DATABASE_BYTES = 1024L * 1024 * 1024;
+
     private static final Map<String, String> cache = new ConcurrentHashMap<>();
 
     /** Guards one-time reader init / download. */
@@ -189,8 +197,9 @@ public final class GeoUtil {
             throw new IOException("HTTP " + resp.statusCode() + " for " + url);
         }
         Path tmp = Files.createTempFile(DB_PATH.getParent(), "dbip", ".mmdb.tmp");
-        try (InputStream in = new GZIPInputStream(resp.body())) {
-            Files.copy(in, tmp, StandardCopyOption.REPLACE_EXISTING);
+        try (InputStream body = resp.body();
+             InputStream in = new GZIPInputStream(BoundedIo.limited(body, MAX_COMPRESSED_BYTES))) {
+            BoundedIo.copy(in, tmp, MAX_DATABASE_BYTES);
             Files.move(tmp, DB_PATH, StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException e) {
             Files.deleteIfExists(tmp);

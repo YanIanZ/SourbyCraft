@@ -1,0 +1,10 @@
+--- /dev/null
++++ b/dev/iyanz/aurora/engine/threadedregions/package-info.java
+@@ -1,0 +_,7 @@
++/**
++ * The root class containing all region threading classes created by CanvasMC
++ */
++@NullMarked
++package dev.iyanz.aurora.engine.threadedregions;
++
++import org.jspecify.annotations.NullMarked;

@@ -1,0 +1,20 @@
+--- a/ca/spottedleaf/moonrise/paper/PaperHooks.java
++++ b/ca/spottedleaf/moonrise/paper/PaperHooks.java
+@@ -108,7 +_,7 @@
+         }
+ 
+         for (final EnderDragonPart part : parts) {
+-            if (part != entity && part.getBoundingBox().intersects(boundingBox) && (predicate == null || predicate.test(part))) {
++            if (part != entity && part.getBoundingBox().intersects(boundingBox) && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(part) && (predicate == null || predicate.test(part))) { // Folia - region threading
+                 into.add(part);
+             }
+         }
+@@ -130,7 +_,7 @@
+                 continue;
+             }
+             final T casted = (T)entityTypeTest.tryCast(part);
+-            if (casted != null && (predicate == null || predicate.test(casted))) {
++            if (casted != null && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(part) && (predicate == null || predicate.test(casted))) { // Folia - region threading
+                 into.add(casted);
+                 if (into.size() >= maxCount) {
+                     break;

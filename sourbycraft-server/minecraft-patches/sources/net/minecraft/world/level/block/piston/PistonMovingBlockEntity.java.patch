@@ -1,0 +1,43 @@
+--- a/net/minecraft/world/level/block/piston/PistonMovingBlockEntity.java
++++ b/net/minecraft/world/level/block/piston/PistonMovingBlockEntity.java
+@@ -44,9 +_,19 @@
+     private static final ThreadLocal<Direction> NOCLIP = ThreadLocal.withInitial(() -> null);
+     private float progress = 0.0F;
+     private float progressO = 0.0F;
+-    private long lastTicked;
++    private long lastTicked = Long.MIN_VALUE; // Folia - region threading
+     private int deathTicks;
+ 
++    // Folia start - region threading
++    @Override
++    public void updateTicks(long fromTickOffset, long fromRedstoneTimeOffset) {
++        super.updateTicks(fromTickOffset, fromRedstoneTimeOffset);
++        if (this.lastTicked != Long.MIN_VALUE) {
++            this.lastTicked += fromRedstoneTimeOffset;
++        }
++    }
++
++    // Folia end - region threading
+     public PistonMovingBlockEntity(final BlockPos worldPosition, final BlockState blockState) {
+         super(BlockEntityTypes.PISTON, worldPosition, blockState);
+     }
+@@ -160,8 +_,8 @@
+ 
+                                 entity.setDeltaMovement(dx, dy, dz);
+                                 // Paper - EAR items stuck in slime pushed by a piston
+-                                entity.activatedTick = Math.max(entity.activatedTick, net.minecraft.server.MinecraftServer.currentTick + 10);
+-                                entity.activatedImmunityTick = Math.max(entity.activatedImmunityTick, net.minecraft.server.MinecraftServer.currentTick + 10);
++                                entity.activatedTick = Math.max(entity.activatedTick, io.papermc.paper.threadedregions.RegionizedServer.getCurrentTick() + 10); // Folia - region threading
++                                entity.activatedImmunityTick = Math.max(entity.activatedImmunityTick, io.papermc.paper.threadedregions.RegionizedServer.getCurrentTick() + 10); // Folia - region threading
+                                 // Paper end
+                                 break;
+                             }
+@@ -312,7 +_,7 @@
+     }
+ 
+     public static void tick(final Level level, final BlockPos pos, final BlockState state, final PistonMovingBlockEntity entity) {
+-        entity.lastTicked = level.getGameTime();
++        entity.lastTicked = level.getRedstoneGameTime(); // Folia - region threading
+         entity.progressO = entity.progress;
+         if (entity.progressO >= 1.0F) {
+             if (level.isClientSide() && entity.deathTicks < 5) {

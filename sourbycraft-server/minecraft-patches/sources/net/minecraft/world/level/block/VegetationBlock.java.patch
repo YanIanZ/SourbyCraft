@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/level/block/VegetationBlock.java
++++ b/net/minecraft/world/level/block/VegetationBlock.java
+@@ -38,7 +_,7 @@
+         // CraftBukkit start
+         if (!state.canSurvive(level, pos)) {
+             // Suppress during worldgen
+-            if (!(level instanceof net.minecraft.server.level.ServerLevel serverLevel && serverLevel.hasPhysicsEvent) || !org.bukkit.craftbukkit.event.CraftEventFactory.callBlockPhysicsEvent(serverLevel, pos).isCancelled()) { // Paper
++            if (!(level instanceof net.minecraft.server.level.ServerLevel serverLevel && serverLevel.getCurrentWorldData().hasPhysicsEvent) || !org.bukkit.craftbukkit.event.CraftEventFactory.callBlockPhysicsEvent(serverLevel, pos).isCancelled()) { // Paper // Folia - region threading
+                 return Blocks.AIR.defaultBlockState();
+             }
+         }

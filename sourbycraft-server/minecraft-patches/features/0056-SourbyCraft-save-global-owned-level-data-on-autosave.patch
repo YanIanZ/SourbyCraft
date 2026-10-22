@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Wed, 21 Oct 2026 01:55:44 +0700
+Subject: [PATCH] SourbyCraft - save global-owned level data on autosave
+
+
+diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
+index 9c26108e00de6bcceb5a79523b66de0d7a97320a..f04fc11ac622afe30921438a045046c4653ee17a 100644
+--- a/io/papermc/paper/threadedregions/RegionizedServer.java
++++ b/io/papermc/paper/threadedregions/RegionizedServer.java
+@@ -388,6 +388,12 @@ public final class RegionizedServer {
+                 return toSave;
+             });
+ 
++            // SourbyCraft start - save global-owned level data on autosave
++            // random sequences, /data storage containers and level.dat: written only at a clean stop before;
++            // one saveSpecific per type, level.dat synchronously as vanilla's main-thread autosave does.
++            dev.iyanz.sourbycraft.world.WorldMetadataAutosave.saveServerOwnedData(server, sync);
++            // SourbyCraft end - save global-owned level data on autosave
++
+             // if sync we need to just join here. this shouldn't be done
+             // for autosave or every tick since this blocks waiting for completion
+ 
+@@ -464,6 +470,11 @@ public final class RegionizedServer {
+                 return toSave;
+             });
+ 
++            // SourbyCraft start - save global-owned level data on autosave
++            // the world border is ticked here and was written only at a clean stop; own saveSpecific call.
++            dev.iyanz.sourbycraft.world.WorldMetadataAutosave.saveWorldOwnedData(level.getDataStorage(), sync);
++            // SourbyCraft end - save global-owned level data on autosave
++
+             // if sync we need to just join here. this shouldn't be done
+             // for autosave or every tick since this blocks waiting for completion
+ 

@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/inventory/AbstractContainerMenu.java
++++ b/net/minecraft/world/inventory/AbstractContainerMenu.java
+@@ -710,7 +_,7 @@
+     }
+ 
+     private static void dropOrPlaceInInventory(final Player player, final ItemStack carried) {
+-        boolean playerRemovedNotChangingDimension = !player.isAlive() && player.getRemovalReason() != Entity.RemovalReason.CHANGED_DIMENSION; // Paper - Make sure player is dead (https://github.com/PaperMC/Paper/pull/13002)
++        boolean playerRemovedNotChangingDimension = (player.getHealth() <= 0.0f) || (player.isRemoved() && player.getRemovalReason() != Entity.RemovalReason.CHANGED_DIMENSION); // Folia - region threading
+         boolean serverPlayerHasDisconnected = player instanceof ServerPlayer serverPlayer && serverPlayer.hasDisconnected();
+         if (playerRemovedNotChangingDimension || serverPlayerHasDisconnected) {
+             player.drop(carried, false);

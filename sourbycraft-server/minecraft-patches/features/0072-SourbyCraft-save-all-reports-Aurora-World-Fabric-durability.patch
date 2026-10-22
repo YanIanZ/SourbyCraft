@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Wed, 21 Oct 2026 23:37:04 +0700
+Subject: [PATCH] SourbyCraft - save-all reports Aurora World Fabric durability
+
+On a region thread an AWF flush only starts a commit, so save-all
+flush printed "Saved the game" while AWF commits could be failing
+(audit D4). The final success now goes through SaveAllFeedback: with
+no AWF storage open it sends exactly the vanilla success; with AWF
+storages it sends a pending line first, and for save-all flush the
+vanilla success only after every storage confirmed a commit of what
+the save wrote (waited for off the region threads), otherwise a
+failure naming each storage that is not durable and its dirty count.
+
+diff --git a/net/minecraft/server/commands/SaveAllCommand.java b/net/minecraft/server/commands/SaveAllCommand.java
+index df5f736c230e865a9721d362d67a1a421b523e38..8e263603491bc251198240029c4c265f825bcb10 100644
+--- a/net/minecraft/server/commands/SaveAllCommand.java
++++ b/net/minecraft/server/commands/SaveAllCommand.java
+@@ -81,7 +81,7 @@ public class SaveAllCommand {
+                         }
+ 
+                         // now we have warned, so we can send success
+-                        source.sendSuccess(() -> Component.translatable("commands.save.success"), true);
++                        dev.iyanz.sourbycraft.command.SaveAllFeedback.saved(source, flush); // SourbyCraft - AWF durability: success only once Aurora World Fabric confirmed what this save wrote
+                     }
+                 }
+             };

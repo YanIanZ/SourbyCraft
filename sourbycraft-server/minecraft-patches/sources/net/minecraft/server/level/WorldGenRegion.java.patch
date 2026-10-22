@@ -1,0 +1,24 @@
+--- a/net/minecraft/server/level/WorldGenRegion.java
++++ b/net/minecraft/server/level/WorldGenRegion.java
+@@ -108,6 +_,13 @@
+         return this.getLightEngine().getRawBrightness(blockPos, subtract);
+     }
+     // Paper end - rewrite chunk system
++    // Folia start - region threading
++    private final net.minecraft.world.level.StructureManager structureManager;
++    @Override
++    public net.minecraft.world.level.StructureManager structureManager() {
++        return this.structureManager;
++    }
++    // Folia end - region threading
+ 
+     public WorldGenRegion(final ServerLevel level, final StaticCache2D<GenerationChunkHolder> cache, final ChunkStep generatingStep, final ChunkAccess center) {
+         this.generatingStep = generatingStep;
+@@ -123,6 +_,7 @@
+         this.centerChunkX = centerPos.x();
+         this.centerChunkZ = centerPos.z();
+         this.writeRadius = generatingStep.blockStateWriteRadius();
++        this.structureManager = level.structureManager().forWorldGenRegion(this); // Folia - region threading
+     }
+ 
+     public boolean isOldChunkAround(final ChunkPos pos, final int range) {

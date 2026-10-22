@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Tue, 6 Oct 2026 21:10:32 +0700
+Subject: [PATCH] SourbyCraft - cancelling a native plugin's Bukkit tasks is a
+ no-op
+
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java b/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
+index 7d7a961cfdc3048043677cf75c9cacf40cbad187..4e5deef1d16f847d8401a084f07f2ed9f069132f 100644
+--- a/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
++++ b/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
+@@ -319,6 +319,12 @@ public class CraftScheduler implements BukkitScheduler {
+     public void cancelTasks(final Plugin plugin) {
+         Preconditions.checkArgument(plugin != null, "Cannot cancel tasks of null plugin");
+         if (dev.iyanz.sourbycraft.bridge.AuroraBridge.cancelAll(plugin)) return; // SourbyCraft - Aurora Bridge
++        // SourbyCraft start - a plugin the bridge does not handle has no task in this scheduler on a
++        // region-threaded server (handle() refuses it), so there is nothing to cancel. Falling
++        // through would schedule the legacy cancel task, which handle() refuses: every native
++        // plugin's disable then logged "Unsupported in region threading".
++        if (true) return;
++        // SourbyCraft end
+         // Paper start
+         if (!this.isAsyncScheduler) {
+             this.asyncScheduler.cancelTasks(plugin);

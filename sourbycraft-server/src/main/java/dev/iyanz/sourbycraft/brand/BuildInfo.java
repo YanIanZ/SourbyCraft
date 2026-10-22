@@ -2,6 +2,7 @@ package dev.iyanz.sourbycraft.brand;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Locale;
 import java.util.Properties;
 
 /**
@@ -10,18 +11,63 @@ import java.util.Properties;
  * auto-updater so they all report the same version/build/tagline without re-parsing the jar.
  *
  * @param version        the channel version, e.g. {@code "26.2-REL"}
- * @param build          the human-facing build id, e.g. {@code "4c"} (c = Canvas base); may be empty
+ * @param build          the build label, e.g. {@code "48-dirty"}; may be empty
+ * @param buildNumber    the raw build number for update comparison, e.g. {@code "43.1"}, without
+ *                       the platform suffix; derived from {@code build} when the properties file
+ *                       predates the field
  * @param mcVersion       the Minecraft version this build targets
  * @param tagline        short marketing tagline shown in the startup banner
  * @param buildTimestamp ISO-8601 instant the jar was built, or empty if unknown
+ * @param gitBranch      source branch, from the same provider as the manifest's Git-Branch
+ * @param gitCommit      full source commit, matching the manifest's Git-Commit
  */
 public record BuildInfo(
     String version,
     String build,
+    String buildNumber,
     String mcVersion,
+    String codename,
     String tagline,
-    String buildTimestamp
+    String buildTimestamp,
+    String gitBranch,
+    String gitCommit
 ) {
+
+    /** Compatibility constructor for callers without source metadata. */
+    public BuildInfo(String version, String build, String buildNumber, String mcVersion,
+                     String codename, String tagline, String buildTimestamp) {
+        this(version, build, buildNumber, mcVersion, codename, tagline, buildTimestamp, "", "");
+    }
+
+    /**
+     * The engine name shown to operators. Since Build 47 it is always Aurora: the release codename
+     * ({@code aurora-nexus}) names the release, not the engine, and is shown separately by
+     * {@link #codenameDisplay()}.
+     */
+    public String engineName() {
+        return "Aurora";
+    }
+
+    /** Human-readable release codename, e.g. aurora-nexus -> Aurora Nexus. */
+    public String codenameDisplay() {
+        return codenameDisplay(this.codename);
+    }
+
+    private static String codenameDisplay(String codename) {
+        if (codename == null || codename.isBlank() || "dev".equalsIgnoreCase(codename)) {
+            return "Development";
+        }
+        final String[] parts = codename.split("[-_ ]+");
+        final StringBuilder out = new StringBuilder();
+        for (final String part : parts) {
+            if (part.isBlank()) continue;
+            if (!out.isEmpty()) out.append(' ');
+            out.append(part.substring(0, 1).toUpperCase(Locale.ROOT));
+            if (part.length() > 1) out.append(part.substring(1).toLowerCase(Locale.ROOT));
+        }
+        return out.isEmpty() ? codename : out.toString();
+    }
+
     /**
      * Human-facing build id, e.g. {@code "build 4c"} (c = Canvas base) — the channel version
      * ({@code 26.2-REL}) is deliberately NOT shown here (it stays on the
@@ -31,7 +77,7 @@ public record BuildInfo(
     public String displayVersion() {
         return (build == null || build.isEmpty())
             ? version
-            : "build " + build;
+            : "Build " + stripPlatformSuffix(build);
     }
 
     /**
@@ -52,7 +98,7 @@ public record BuildInfo(
         } catch (final Throwable ignored) {
             // never break a version-reporting path over the build id
         }
-        return "SourbyCraft build " + id;
+        return "SourbyCraft Build " + stripPlatformSuffix(id);
     }
 
     private static final String RESOURCE = "/META-INF/sourbycraft-build.properties";
@@ -91,12 +137,73 @@ public record BuildInfo(
                 // fall through to defaults
             }
         }
+        String build = p.getProperty("build", "");
+        String buildNumber = p.getProperty("buildNumber", "");
+        if (buildNumber.isEmpty() && !build.isEmpty()) {
+            buildNumber = stripPlatformSuffix(build);
+        }
         return new BuildInfo(
             p.getProperty("version", "dev"),
-            p.getProperty("build", ""),
+            build,
+            buildNumber,
             p.getProperty("mcVersion", "unknown"),
+            p.getProperty("codename", ""),
             p.getProperty("tagline", "Lightning Fast Performance · Feature Rich"),
-            p.getProperty("buildTimestamp", "")
+            p.getProperty("buildTimestamp", ""),
+            p.getProperty("gitBranch", ""),
+            p.getProperty("gitCommit", "")
         );
+    }
+
+    /** Display-only channel from the baked version suffix; never assumes a release. */
+    public String channel() {
+        if (version == null) return "UNKNOWN";
+        int dash = version.lastIndexOf('-');
+        return dash < 0 ? "UNKNOWN" : normalizeChannel(version.substring(dash + 1));
+    }
+
+    private static String normalizeChannel(String channel) {
+        if (channel == null) return "UNKNOWN";
+        return switch (channel.trim().toUpperCase(Locale.ROOT)) {
+            case "REL" -> "REL";
+            case "DEV" -> "DEV";
+            case "EXP" -> "EXP";
+            default -> "UNKNOWN";
+        };
+    }
+
+    /** Shared display text only; version/build fields retain their machine-readable formats. */
+    public String releaseIdentity() {
+        final String commit = sourceOrUnknown(gitCommit);
+        return formatReleaseIdentity(build, codename, channel(), gitBranch,
+            commit.substring(0, Math.min(7, commit.length())));
+    }
+
+    /** Pure release formatter. The codename is the raw build codename; commit is already short. */
+    public static String formatReleaseIdentity(String buildNumber, String codename, String channel,
+                                               String branch, String shortCommit) {
+        final String release = "Build " + stripPlatformSuffix(sourceOrUnknown(buildNumber));
+        final String name = codenameDisplay(codename);
+        final String identity = "Development".equals(name) ? release : release + " — " + name;
+        final String actualChannel = normalizeChannel(channel);
+        return "REL".equals(actualChannel) ? identity
+            : identity + " (" + actualChannel + ", " + sourceOrUnknown(branch)
+                + "@" + sourceOrUnknown(shortCommit) + ")";
+    }
+
+    private static String sourceOrUnknown(String value) {
+        return value == null || value.isBlank() || "unknown".equalsIgnoreCase(value.trim())
+            ? "?" : value.trim();
+    }
+
+    /** Strip historical single-letter platform suffixes from build ids. */
+    private static String stripPlatformSuffix(String build) {
+        if (build.length() >= 2) {
+            char last = build.charAt(build.length() - 1);
+            if ((last == 'c' || last == 'f') && !Character.isLetter(build.charAt(build.length() - 2))) {
+                return build.substring(0, build.length() - 1);
+            }
+        }
+        return build;
     }
 }

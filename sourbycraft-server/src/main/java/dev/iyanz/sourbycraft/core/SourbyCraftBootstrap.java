@@ -7,6 +7,7 @@ import dev.iyanz.sourbycraft.brand.PluginLoadDiagnostics;
 import dev.iyanz.sourbycraft.brand.StartupBanner;
 import dev.iyanz.sourbycraft.command.SourbyCraftCommands;
 import dev.iyanz.sourbycraft.lang.SourbyJoinLeaveListener;
+import dev.iyanz.sourbycraft.lang.SourbyMotd;
 import dev.iyanz.sourbycraft.maxplayers.MaxPlayersBypass;
 import dev.iyanz.sourbycraft.maxplayers.MaxPlayersConfig;
 import dev.iyanz.sourbycraft.update.AutoUpdateSettings;
@@ -15,148 +16,296 @@ import dev.iyanz.sourbycraft.util.VirtualExecutor;
 import org.bukkit.plugin.Plugin;
 
 /**
- * SourbyCraft's single boot hook on the Canvas re-platform (feat/canvas-engine, PR #12).
+ * Owns the ordered startup and cleanup of SourbyCraft services and publishes Aurora lifecycle state.
  *
- * <p>The archived Folia build hooked its post-config boot sequence via
- * {@code me.earthme.luminol.commands.CommandRegister#register()} (itself invoked from Luminol's
- * {@code ConfigManager#loadConfigFiles}, called from {@code DedicatedServer#initServer}). Canvas
- * carries no Luminol, so this class is called directly from a small hand-authored
- * {@code minecraft-patch} to {@code DedicatedServer#initServer} instead — right after Paper's own
- * {@code PaperCommands.registerCommands(this)} call (so our commands claim the bare names AFTER
- * Paper registers its built-ins, with no two-phase reclaim needed) and before
- * {@code CraftServer#loadPlugins()} (so {@link PluginLoadDiagnostics} is installed in time to
- * observe a plugin load failure, and the config file exists before any plugin might read it).
+ * <p>The downstream {@code DedicatedServer#initServer} patch invokes {@link #init()} after
+ * Paper command registration and before plugin loading. This lets SourbyCraft register its
+ * commands and install {@link PluginLoadDiagnostics} before plugins are loaded.</p>
  *
- * <p>Deliberately minimal: only the utility layer lives here now. The self-tuning perf-engine,
- * anti-xray raytrace reveal and proxy-forwarding/hardening-advisor security layer that the archived
- * {@code PerfEngineBootstrap} also wired are DEFERRED on this benchmark build — see the PR #12 task
- * brief. Every step is wrapped so a single failure can never abort boot.
+ * <p>Individual stage failures are logged and isolated. Completion publishes RUNNING when every
+ * stage succeeded, DEGRADED when some failed, and FAILED only when all of them failed (see
+ * {@link #verdict}). Diagnostics do not tune JVM options or operator configuration.</p>
  *
- * <p>r40 adds two standalone memory-management steps (9-10) that are NOT part of the deferred
- * perf-engine: {@link dev.iyanz.sourbycraft.perf.SmartSwap} (adaptive heap reclaim) and
- * {@link dev.iyanz.sourbycraft.swap.AutoSwap} (optional OS swapfile creation).
+ * <p>The server owns the call order: startup precedes shutdown. Synchronization prevents duplicate
+ * initialization; it does not serialize {@link #close()} against initialization.</p>
  */
 public final class SourbyCraftBootstrap {
 
     private static volatile boolean started = false;
 
+    /** The engine's console tag: stage results, the boot summary and the thread ledger print as {@code [Aurora]}. */
+    static final java.util.logging.Logger AURORA = java.util.logging.Logger.getLogger("Aurora");
+    /** Same logger through the log4j API, for real DEBUG events. */
+    private static final org.apache.logging.log4j.Logger AURORA_DEBUG = org.apache.logging.log4j.LogManager.getLogger("Aurora");
+
+    /** A stage running longer than this gets one "still running" WARN (the watchdog covers longer hangs). */
+    private static volatile long slowStageMillis = 10_000L;
+    private static volatile java.util.function.Consumer<String> slowStageSink = AURORA::warning;
+
+    /** Test seam: replaces the slow-stage threshold and sink until closed. */
+    static AutoCloseable slowStageWarningForTesting(final long millis, final java.util.function.Consumer<String> sink) {
+        final long previousMillis = slowStageMillis;
+        final java.util.function.Consumer<String> previousSink = slowStageSink;
+        slowStageMillis = millis;
+        slowStageSink = sink;
+        return () -> {
+            slowStageMillis = previousMillis;
+            slowStageSink = previousSink;
+        };
+    }
+
     private SourbyCraftBootstrap() {}
 
     /**
-     * Runs every utility-layer boot step in order (config, ViaVersion config seeding, startup
-     * banner, plugin-load diagnostics, command registration, join/leave messages, max-players,
-     * the virtual-thread executor, the auto-updater, SmartSwap, auto-swap). Idempotent — a second
-     * call is a no-op. Each step is individually wrapped so one failure never aborts the rest or the
-     * server boot.
+     * Runs service cleanup after plugin disable, publishing STOPPING before cleanup and STOPPED
+     * after all attempts. Each failure is logged without preventing the remaining cleanup steps;
+     * STOPPED reports completion of this sequence, not proof that every service stopped successfully.
+     */
+    public static void close() {
+        // Before the first service goes down, so anything consulting acceptingWork() stops
+        // admitting during the window when shutdown is in flight and work is still arriving.
+        AuroraRuntime.transition(AuroraRuntime.State.STOPPING);
+        // Before the first AWF wait of the shutdown (the storage lane draining below, then the region
+        // saves, the chunk I/O drain and AwfEngine.closeAll): one deadline for all of them.
+        try { dev.iyanz.sourbycraft.awf.AwfEngine.beginShutdown(); }
+        catch (Throwable failure) { SourbyLogger.error("AWF shutdown deadline could not start", failure); }
+        try { dev.iyanz.sourbycraft.hud.HudBars.close(); }
+        catch (Throwable failure) { SourbyLogger.error("HUD shutdown failed", failure); }
+        try { AutoUpdateSettings.stopUpdater(); }
+        catch (Throwable failure) { SourbyLogger.error("Updater shutdown failed", failure); }
+        try { dev.iyanz.sourbycraft.diagnostics.StallRecorderRuntime.stop(); }
+        catch (Throwable failure) { SourbyLogger.error("Stall recorder shutdown failed", failure); }
+        try { dev.iyanz.sourbycraft.perf.MetricsRuntime.close(org.bukkit.Bukkit.getServicesManager()); }
+        catch (Throwable failure) { SourbyLogger.error("Metrics shutdown failed", failure); }
+        try { dev.iyanz.sourbycraft.perf.GcTracker.stop(); }
+        catch (Throwable failure) { SourbyLogger.error("GC sampler shutdown failed", failure); }
+        try { dev.iyanz.sourbycraft.perf.AsyncPathProcessor.shutdown(); }
+        catch (Throwable failure) { SourbyLogger.error("Path worker shutdown failed", failure); }
+        try { VirtualExecutor.shutdown(); }
+        catch (Throwable failure) { SourbyLogger.error("I/O shutdown failed", failure); }
+        try { dev.iyanz.sourbycraft.execution.ResourceGovernor.GLOBAL.shutdown(10_000L); }
+        catch (Throwable failure) { SourbyLogger.error("Resource Governor shutdown failed", failure); }
+        AuroraRuntime.transition(AuroraRuntime.State.STOPPED);
+    }
+
+    /**
+     * Starts metrics, network counters, configuration, the stall recorder, plugin config provisioning, branding,
+     * diagnostics, the startup index, commands, listeners, player-slot settings, I/O workers, the
+     * updater and GC sampling, in that order.
+     * A second invocation is a no-op, including after a partially failed startup. Individual stage
+     * failures are logged and counted without skipping subsequent stages.
      */
     public static synchronized void init() {
         if (started) return;
         started = true;
 
+        AuroraRuntime.transition(AuroraRuntime.State.BOOTSTRAPPING);
+        AuroraRuntime.transition(AuroraRuntime.State.STARTING);
         final Plugin owner = MinecraftInternalPlugin.INSTANCE;
+        final long begun = System.nanoTime();
+        stageCount = 0;
+        failureCount = 0;
 
-        // 1. Load + seed the unified TOML (messages, /maxp, auto-updater settings).
-        try {
+        // Before command and plugin loading; shutdown keeps it readable through plugin disable.
+        stage("metrics runtime", () -> {
+            dev.iyanz.sourbycraft.perf.MetricsRuntime.start(org.bukkit.Bukkit.getServicesManager(), owner);
+        });
+
+        // Wire bytes and packets per direction; rates are sampled by the metrics collector.
+        stage("network counters", () -> {
+            dev.iyanz.sourbycraft.perf.NetworkMetrics.install();
+        });
+
+        // The unified TOML: messages, /maxp, auto-updater settings.
+        stage("configuration", () -> {
             SourbyCraftConfig.init();
-        } catch (Throwable t) {
-            SourbyLogger.error("SourbyCraftConfig.init failed; utility layer will use hardcoded defaults", t);
-        }
+        });
 
-        // 1b. Write the shipped default ViaVersion/ViaBackwards config.yml (1.20 floor) into
-        //     plugins/<name>/, only when absent — must run before CraftServer#enablePlugins,
-        //     where Via reads its config in onEnable.
-        try {
-            PluginProvisioner.provisionConfigs(SourbyCraftConfig.cfgBool("viaversion.auto-provision", true));
-        } catch (Throwable t) {
-            SourbyLogger.error("PluginProvisioner.provisionConfigs failed", t);
-        }
+        // After configuration (reads aurora.diagnostics.stall-recorder.*, RESTART_REQUIRED). Its own daemon
+        // thread; evidence for a hung tick on hosts with no shell. Disabled = no thread, no hook.
+        stage("stall recorder", () -> {
+            dev.iyanz.sourbycraft.diagnostics.StallRecorderRuntime.start(
+                SourbyCraftConfig.aurora().diagnostics().stallRecorder());
+        });
 
-        // 2. Branded startup banner + GC/JVM advisory (console output; warn-only).
-        try {
-            StartupBanner.printOnce();
-        } catch (Throwable t) {
-            SourbyLogger.error("StartupBanner.printOnce failed", t);
-        }
-
-        // 3. Capture plugin-load failures for /sys — must be installed before CraftServer#loadPlugins.
-        try {
-            PluginLoadDiagnostics.install();
-        } catch (Throwable t) {
-            SourbyLogger.error("PluginLoadDiagnostics.install failed", t);
-        }
-
-        // 4. Claim the bare command names (/tps, /ping, /ver, ...) + register the HUD quit-listener.
-        try {
-            SourbyCraftCommands.registerAll();
-        } catch (Throwable t) {
-            SourbyLogger.error("SourbyCraftCommands.registerAll failed", t);
-        }
-
-        // 5. Varied join/leave broadcast messages.
-        try {
-            SourbyJoinLeaveListener.register(owner);
-        } catch (Throwable t) {
-            SourbyLogger.error("SourbyJoinLeaveListener.register failed", t);
-        }
-
-        // 6. /maxp persisted value + opt-in full-server bypass.
-        try {
-            MaxPlayersConfig.applyAtBoot();
-        } catch (Throwable t) {
-            SourbyLogger.error("MaxPlayersConfig.applyAtBoot failed", t);
-        }
-        try {
-            MaxPlayersBypass.register(owner);
-        } catch (Throwable t) {
-            SourbyLogger.error("MaxPlayersBypass.register failed", t);
-        }
-
-        // 7. Virtual-thread executor for off-thread command work (/speedtest, /update, /ping geoip).
-        try {
-            VirtualExecutor.init();
-        } catch (Throwable t) {
-            SourbyLogger.error("VirtualExecutor.init failed", t);
-        }
-
-        // 8. Auto-updater (+ ViaVersion/ViaBackwards keep-current on the same cadence).
-        try {
-            AutoUpdateSettings.startUpdater();
-        } catch (Throwable t) {
-            SourbyLogger.error("AutoUpdateSettings.startUpdater failed", t);
-        }
-
-        // 9. SmartSwap — standalone adaptive heap-reclaim sensor (r40; config-gated, reloadable).
-        //    DEFAULT OFF: SourbyCraft ships with no automatic perf-tuning (operator opts in). The
-        //    repeating sensor loop is only scheduled when explicitly enabled, so when off there is no
-        //    background task at all — not merely a per-sample no-op. A later /sourbycraft reload that
-        //    flips it on will schedule it via SmartSwap.configure()'s start path.
-        try {
-            if (SourbyCraftConfig.cfgBool("perf.smart-swap.enabled", false)) {
-                dev.iyanz.sourbycraft.perf.SmartSwap.ensureStarted();
+        // AuroraWorlds API: before plugins enable, so they can look it up in onEnable.
+        stage("aurora worlds", () -> {
+            try {
+                dev.iyanz.sourbycraft.awf.world.AuroraWorldsRuntime.start(owner);
+            } catch (final java.io.IOException failed) {
+                throw new java.io.UncheckedIOException(failed);
             }
-        } catch (Throwable t) {
-            SourbyLogger.error("SmartSwap.ensureStarted failed", t);
-        }
+        });
 
-        // 9b. GcTracker — always-on, lightweight GC-health sampler feeding /sys and the perf readout.
-        //     GC pauses are invisible in TPS/MSPT, so this rolling-window tracker is the only source
-        //     for collections/min + GC-time%. One daemon thread; never throws.
-        try {
+        // ORDERING: must precede CraftServer#enablePlugins, where Via reads its config in
+        // onEnable. Writes the shipped default ViaVersion/ViaBackwards config only when absent.
+        stage("plugin provisioning", () -> {
+            PluginProvisioner.provisionConfigs(SourbyCraftConfig.cfgBool("viaversion.auto-provision", true));
+        });
+
+        stage("banner", () -> {
+            StartupBanner.printOnce();
+        });
+
+        // ORDERING: must precede CraftServer#loadPlugins, or load failures go uncaptured for /sys.
+        stage("plugin diagnostics", () -> {
+            PluginLoadDiagnostics.install();
+            // Folia no longer cancels Bukkit-scheduler tasks on disable; bridged ones must be.
+            dev.iyanz.sourbycraft.bridge.AuroraBridge.registerListener(owner);
+        });
+
+        // ORDERING: must precede CraftServer#loadPlugins so the operator learns which jars the
+        // base will refuse before the refusals scroll past. Analysis only; loads nothing.
+        stage("startup index", () -> {
+            dev.iyanz.sourbycraft.startup.StartupIndexStage.run();
+            dev.iyanz.sourbycraft.startup.StartupTimeline.registerListener(owner);
+        });
+
+        // Claims the bare command names (/tps, /ping, /ver, ...) and the HUD quit-listener.
+        stage("commands", () -> {
+            SourbyCraftCommands.registerAll();
+        });
+
+        // Both read messages.*: the join/quit broadcasts, and the server-list MOTD (set in memory only,
+        // server.properties is not rewritten; motd = [] keeps the server.properties MOTD).
+        stage("messages", () -> {
+            SourbyJoinLeaveListener.register(owner);
+            SourbyMotd.apply(org.bukkit.Bukkit::motd);
+        });
+
+        // Persisted /maxp value, then the opt-in full-server bypass.
+        stage("player slots", () -> {
+            MaxPlayersConfig.applyAtBoot();
+            MaxPlayersBypass.register(owner);
+        });
+
+        // Off-thread command work: /speedtest, /update, /ping geoip.
+        stage("virtual executor", () -> {
+            VirtualExecutor.init();
+        });
+
+        stage("auto updater", () -> {
+            AutoUpdateSettings.startUpdater();
+        });
+
+        // MXBean collection counts and elapsed collection time, including concurrent GC work.
+        // These are not stop-the-world pause measurements.
+        stage("gc tracker", () -> {
             dev.iyanz.sourbycraft.perf.GcTracker.start();
-        } catch (Throwable t) {
-            SourbyLogger.error("GcTracker.start failed", t);
-        }
+        });
 
-        // 10. Auto-swap — optional OS swapfile creation on boot (r40; config-gated, default off).
-        //     Dispatched on the virtual-thread executor so a slow fallocate/dd fallback on an unusual
-        //     filesystem can never delay boot; AutoSwap.attempt() itself never throws.
-        try {
-            final boolean swapEnabled = SourbyCraftConfig.cfgBool("swap.auto-create.enabled", false);
-            final String swapPath = SourbyCraftConfig.cfgGet("swap.auto-create.path", "cache/sourbycraft.swap");
-            final int swapMaxMb = SourbyCraftConfig.cfgInt("swap.auto-create.max-size-mb", 8192);
-            VirtualExecutor.run(() -> dev.iyanz.sourbycraft.swap.AutoSwap.attempt(swapEnabled, swapPath, swapMaxMb));
-        } catch (Throwable t) {
-            SourbyLogger.error("AutoSwap.attempt dispatch failed", t);
+        publishBootStages();
+        // One log call per line, so the readiness hint after the summary gets its own timestamp.
+        for (final String line : dev.iyanz.sourbycraft.brand.AuroraBoot.summary(
+                TOTAL_STAGES, failureCount, (System.nanoTime() - begun) / 1_000_000L).split("\n")) {
+            AURORA.info(line);
         }
+        // Configured thread ceilings per pool against the processors (audit ENG-9). Report only.
+        try {
+            for (final String line : dev.iyanz.sourbycraft.execution.ThreadLedger.format(
+                dev.iyanz.sourbycraft.execution.ThreadLedger.collect(), Runtime.getRuntime().availableProcessors())) {
+                AURORA.info(line);
+            }
+        } catch (final RuntimeException unavailable) {
+            SourbyLogger.debug("thread ledger unavailable: " + unavailable);
+        }
+        // Build 47 lifecycle truth: a partial boot is operational but DEGRADED, not healthy.
+        // FAILED is reserved for a bootstrap where no stage came up.
+        AuroraRuntime.transition(verdict(failureCount, TOTAL_STAGES));
+    }
+
+    /** The lifecycle state a finished bootstrap publishes: none failed RUNNING, some DEGRADED, all FAILED. */
+    static AuroraRuntime.State verdict(final int failures, final int totalStages) {
+        return failures >= totalStages
+            ? AuroraRuntime.State.FAILED
+            : failures > 0 ? AuroraRuntime.State.DEGRADED : AuroraRuntime.State.RUNNING;
+    }
+
+    /** Makes the stages run so far readable through {@link #bootStages()} and starts the next attempt empty. */
+    private static void publishBootStages() {
+        bootStages = java.util.List.copyOf(progress);
+        progress.clear();
+    }
+
+    /**
+     * Test seam: clears the stage counters and published stages, and clears them again when closed.
+     * It does not touch {@code started} or the {@link AuroraRuntime} state, so {@link #init()}
+     * stays unreachable from tests.
+     */
+    static synchronized AutoCloseable resetStagesForTesting() {
+        stageCount = 0;
+        failureCount = 0;
+        progress.clear();
+        bootStages = java.util.List.of();
+        return () -> {
+            stageCount = 0;
+            failureCount = 0;
+            progress.clear();
+            bootStages = java.util.List.of();
+        };
+    }
+
+    /** Test seam: what {@link #publishBootStages()} publishes, as {@link #bootStages()} would show it. */
+    static synchronized java.util.List<dev.iyanz.sourbycraft.brand.AuroraBoot.Stage> publishBootStagesForTesting() {
+        publishBootStages();
+        return bootStages;
+    }
+
+    /** Test seam: failures counted since the last reset. */
+    static synchronized int failureCountForTesting() { return failureCount; }
+
+    /** Stages the engine brings up, in order; the denominator of the boot bar. */
+    private static final int TOTAL_STAGES = 15;
+    private static int stageCount;
+    private static int failureCount;
+    private static final java.util.List<dev.iyanz.sourbycraft.brand.AuroraBoot.Stage> progress = new java.util.ArrayList<>();
+    private static volatile java.util.List<dev.iyanz.sourbycraft.brand.AuroraBoot.Stage> bootStages = java.util.List.of();
+
+    /** Completed bootstrap attempts, not a claim about Minecraft/plugin readiness. */
+    public static java.util.List<dev.iyanz.sourbycraft.brand.AuroraBoot.Stage> bootStages() { return bootStages; }
+
+    /**
+     * Runs one boot stage and reports it.
+     *
+     * <p>A stage that throws is counted, logged and stepped past: none of these are load-bearing
+     * enough to abort a server start, and a half-started engine that says which part is missing is
+     * more useful than one that refuses to boot. The bar turns critical from the first failure, so
+     * the progress line cannot read healthy while something is broken.</p>
+     */
+    static void stage(final String name, final Runnable body) {
+        // The console gets one line per stage, written when it finishes (OK or FAIL). START is a
+        // log4j DEBUG event (JUL FINE would arrive as TRACE), shown with a log4j config that sets
+        // <Logger name="Aurora" level="debug"/>. A stage still running after SLOW_STAGE_MILLIS
+        // gets a WARN naming it, so a hang is visible without DEBUG.
+        AURORA_DEBUG.debug("START {}/{}  {}", stageCount + 1, TOTAL_STAGES, name);
+        final long stageBegun = System.nanoTime();
+        final java.util.concurrent.atomic.AtomicBoolean finished = new java.util.concurrent.atomic.AtomicBoolean();
+        final java.util.function.Consumer<String> slowSink = slowStageSink;
+        final long slowAfter = slowStageMillis;
+        final String slowMessage = "Stage " + (stageCount + 1) + "/" + TOTAL_STAGES + " \"" + name
+            + "\" is still running after " + slowAfter + " ms";
+        java.util.concurrent.CompletableFuture.runAsync(() -> {
+            if (!finished.get()) {
+                slowSink.accept(slowMessage);
+            }
+        }, java.util.concurrent.CompletableFuture.delayedExecutor(slowAfter, java.util.concurrent.TimeUnit.MILLISECONDS,
+            Runnable::run));
+        boolean successful = true;
+        try {
+            body.run();
+        } catch (final Throwable failure) {
+            failureCount++;
+            successful = false;
+            SourbyLogger.error(name + " failed during Aurora boot", failure);
+        } finally {
+            finished.set(true);
+        }
+        dev.iyanz.sourbycraft.startup.StartupTimeline.phase("boot:" + name, System.nanoTime() - stageBegun);
+        stageCount++;
+        var result = new dev.iyanz.sourbycraft.brand.AuroraBoot.Stage(name, successful,
+            (System.nanoTime() - stageBegun) / 1_000_000L);
+        progress.add(result);
+        AURORA.info(dev.iyanz.sourbycraft.brand.AuroraBoot.render(
+            stageCount, TOTAL_STAGES, result, failureCount, dev.iyanz.sourbycraft.brand.ConsoleStyle.current()));
     }
 }

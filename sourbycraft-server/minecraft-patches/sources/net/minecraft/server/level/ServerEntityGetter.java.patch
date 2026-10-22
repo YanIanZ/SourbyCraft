@@ -1,0 +1,32 @@
+--- a/net/minecraft/server/level/ServerEntityGetter.java
++++ b/net/minecraft/server/level/ServerEntityGetter.java
+@@ -16,17 +_,17 @@
+     ServerLevel getLevel();
+ 
+     default @Nullable Player getNearestPlayer(final TargetingConditions targetConditions, final LivingEntity source) {
+-        return this.getNearestEntity(this.players(), targetConditions, source, source.getX(), source.getY(), source.getZ());
++        return this.getNearestEntity(this.getLocalPlayers(), targetConditions, source, source.getX(), source.getY(), source.getZ()); // Folia - region threading
+     }
+ 
+     default @Nullable Player getNearestPlayer(
+         final TargetingConditions targetConditions, final LivingEntity source, final double x, final double y, final double z
+     ) {
+-        return this.getNearestEntity(this.players(), targetConditions, source, x, y, z);
++        return this.getNearestEntity(this.getLocalPlayers(), targetConditions, source, x, y, z); // Folia - region threading
+     }
+ 
+     default @Nullable Player getNearestPlayer(final TargetingConditions targetConditions, final double x, final double y, final double z) {
+-        return this.getNearestEntity(this.players(), targetConditions, null, x, y, z);
++        return this.getNearestEntity(this.getLocalPlayers(), targetConditions, null, x, y, z); // Folia - region threading
+     }
+ 
+     default <T extends LivingEntity> @Nullable T getNearestEntity(
+@@ -108,7 +_,7 @@
+     default List<Player> getNearbyPlayers(final TargetingConditions targetConditions, final LivingEntity source, final AABB bb) {
+         List<Player> foundPlayers = new ArrayList<>();
+ 
+-        for (Player player : this.players()) {
++        for (Player player : this.getLocalPlayers()) { // Folia - region threading
+             if (bb.contains(player.getX(), player.getY(), player.getZ()) && targetConditions.test(this.getLevel(), source, player)) {
+                 foundPlayers.add(player);
+             }

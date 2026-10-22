@@ -1,0 +1,34 @@
+--- a/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/EntityLookup.java
++++ b/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/EntityLookup.java
+@@ -468,6 +_,19 @@
+         return slices == null || !slices.isPreventingStatusUpdates();
+     }
+ 
++    // Folia start - region threading
++    // only appropriate to use when in shutdown, as this performs no logic hooks to properly add to world
++    public boolean addEntityForShutdownTeleportComplete(final Entity entity) {
++        final BlockPos pos = entity.blockPosition();
++        final int sectionX = pos.getX() >> 4;
++        final int sectionY = Mth.clamp(pos.getY() >> 4, WorldUtil.getMinSection(this.world), WorldUtil.getMaxSection(this.world));
++        final int sectionZ = pos.getZ() >> 4;
++        final ChunkEntitySlices slices = this.getOrCreateChunk(sectionX, sectionZ);
++
++        return slices.addEntity(entity, sectionY);
++    }
++
++    // Folia end - region threading
+     protected void removeEntity(final Entity entity) {
+         final int sectionX = ((ChunkSystemEntity)entity).moonrise$getSectionX();
+         final int sectionY = ((ChunkSystemEntity)entity).moonrise$getSectionY();
+@@ -994,6 +_,11 @@
+             EntityLookup.this.removeEntityCallback(entity);
+ 
+             this.entity.setLevelCallback(NoOpCallback.INSTANCE);
++            // Folia start - region threading
++
++            // only AFTER full removal callbacks, so that thread checking will work.
++            EntityLookup.this.world.getCurrentWorldData().removeEntity(entity);
++            // Folia end - region threading
+         }
+     }
+ 

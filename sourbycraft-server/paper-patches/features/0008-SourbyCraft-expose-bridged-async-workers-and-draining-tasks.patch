@@ -1,0 +1,44 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Tue, 6 Oct 2026 17:44:04 +0700
+Subject: [PATCH] SourbyCraft - expose bridged async workers and draining tasks
+
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java b/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
+index c431d15758685ab0db9310651b159bfd77cdaa06..7d7a961cfdc3048043677cf75c9cacf40cbad187 100644
+--- a/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
++++ b/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
+@@ -363,7 +363,9 @@ public class CraftScheduler implements BukkitScheduler {
+ 
+     @Override
+     public boolean isCurrentlyRunning(final int taskId) {
+-        if (dev.iyanz.sourbycraft.bridge.AuroraBridge.knows(taskId)) return dev.iyanz.sourbycraft.bridge.AuroraBridge.isRunning(taskId); // SourbyCraft - Aurora Bridge
++        // SourbyCraft - cancelled async task bodies remain running until their last invocation finishes
++        if (dev.iyanz.sourbycraft.bridge.AuroraBridge.isRunning(taskId)) return true;
++        if (dev.iyanz.sourbycraft.bridge.AuroraBridge.knows(taskId)) return false;
+         // Paper start
+         if (!this.isAsyncScheduler) {
+             if (this.asyncScheduler.isCurrentlyRunning(taskId)) {
+@@ -409,7 +411,10 @@ public class CraftScheduler implements BukkitScheduler {
+         // Paper start
+         if (!isAsyncScheduler) {
+             //noinspection TailRecursion
+-            return this.asyncScheduler.getActiveWorkers();
++            // SourbyCraft - include actual workers on the governed bridge I/O lane once
++            final List<BukkitWorker> workers = new ArrayList<>(this.asyncScheduler.getActiveWorkers());
++            workers.addAll(dev.iyanz.sourbycraft.bridge.AuroraBridge.activeWorkers());
++            return workers;
+         }
+         // Paper end
+         final ArrayList<BukkitWorker> workers = new ArrayList<BukkitWorker>();
+@@ -585,7 +590,9 @@ public class CraftScheduler implements BukkitScheduler {
+         int id;
+         do {
+             id = this.ids.updateAndGet(CraftScheduler.INCREMENT_IDS);
+-        } while (this.runners.containsKey(id)); // Avoid generating duplicate IDs
++        } while (this.runners.containsKey(id)
++            || dev.iyanz.sourbycraft.bridge.AuroraBridge.knows(id)
++            || dev.iyanz.sourbycraft.bridge.AuroraBridge.isRunning(id)); // SourbyCraft - include bridged/draining IDs
+         return id;
+     }
+ 

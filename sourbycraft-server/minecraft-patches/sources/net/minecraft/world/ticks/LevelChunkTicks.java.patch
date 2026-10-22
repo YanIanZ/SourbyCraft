@@ -1,0 +1,24 @@
+--- a/net/minecraft/world/ticks/LevelChunkTicks.java
++++ b/net/minecraft/world/ticks/LevelChunkTicks.java
+@@ -44,6 +_,21 @@
+         this.dirty = false;
+     }
+     // Paper end - rewrite chunk system
++    // Folia start - region threading
++    public void offsetTicks(final long offset) {
++        if (offset == 0 || this.tickQueue.isEmpty()) {
++            return;
++        }
++        final ScheduledTick<T>[] queue = this.tickQueue.toArray(new ScheduledTick[0]);
++        this.tickQueue.clear();
++        for (final ScheduledTick<T> entry : queue) {
++            final ScheduledTick<T> newEntry = new ScheduledTick<>(
++                entry.type(), entry.pos(), entry.triggerTick() + offset, entry.subTickOrder()
++            );
++            this.tickQueue.add(newEntry);
++        }
++    }
++    // Folia end - region threading
+ 
+     public LevelChunkTicks() {
+     }

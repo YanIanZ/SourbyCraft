@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: SourbyCraft <agent@local>
+Date: Mon, 14 Sep 2026 00:00:00 +0000
+Subject: [PATCH] SourbyCraft - retain caller-owned entity query overload
+
+Keep the previously published NMS overload for binary compatibility. Mob pickup
+uses upstream local query results again; this overload imposes no entity-held cache.
+
+diff --git a/net/minecraft/world/level/Level.java b/net/minecraft/world/level/Level.java
+index 29cd4bad197b49b58781c0b9d5e1cc9b293e13b9..7d22ec367e0d75aae81da472d4e7b551801fc9d0 100644
+--- a/net/minecraft/world/level/Level.java
++++ b/net/minecraft/world/level/Level.java
+@@ -229,6 +229,19 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+         return ret;
+     }
+ 
++    // SourbyCraft start - 4-arg overload of getEntitiesOfClass that fills a caller-provided
++    // output list instead of allocating a new ObjectArrayList per call. Mirrors the existing
++    // getEntities(type, bb, selector, output) 4-arg overload (line ~1937). Retained for callers compiled
++    // against earlier SourbyCraft builds. The caller owns the lifetime of output; the
++    // upstream Mob pickup path no longer caches its result list on the entity.
++    public final <T extends Entity> void getEntitiesOfClass(
++        final Class<T> entityClass, final AABB boundingBox, final Predicate<? super T> predicate,
++        final List<? super T> output
++    ) {
++        ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevel)this).moonrise$getEntityLookup().getEntities(entityClass, null, boundingBox, output, predicate);
++    }
++    // SourbyCraft end
++
+     @Override
+     public final List<Entity> moonrise$getHardCollidingEntities(final Entity entity, final AABB box, final Predicate<? super Entity> predicate) {
+         final List<Entity> ret = new it.unimi.dsi.fastutil.objects.ObjectArrayList<>(); // Canvas - use optimized collection

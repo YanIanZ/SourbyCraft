@@ -1,0 +1,14 @@
+--- a/net/minecraft/world/entity/ai/behavior/PoiCompetitorScan.java
++++ b/net/minecraft/world/entity/ai/behavior/PoiCompetitorScan.java
+@@ -19,6 +_,11 @@
+                     i,
+                     (jobSite, nearestEntities) -> (level, body, timestamp) -> {
+                         GlobalPos pos = i.get(jobSite);
++                        // Folia start - region threading
++                        if (pos.dimension() != level.dimension() || !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(level, pos.pos())) {
++                            return true;
++                        }
++                        // Folia end - region threading
+                         level.getPoiManager()
+                             .getType(pos.pos())
+                             .ifPresent(

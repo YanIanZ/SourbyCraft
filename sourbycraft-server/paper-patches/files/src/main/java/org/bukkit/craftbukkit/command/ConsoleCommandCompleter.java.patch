@@ -1,0 +1,20 @@
+--- a/src/main/java/org/bukkit/craftbukkit/command/ConsoleCommandCompleter.java
++++ b/src/main/java/org/bukkit/craftbukkit/command/ConsoleCommandCompleter.java
+@@ -48,7 +_,7 @@
+                         return syncEvent.callEvent() ? syncEvent.getCompletions() : com.google.common.collect.ImmutableList.of();
+                     }
+                 };
+-                server.getServer().processQueue.add(syncCompletions);
++                io.papermc.paper.threadedregions.RegionizedServer.getInstance().addTask(syncCompletions); // Folia - region threading
+                 try {
+                     final List<String> legacyCompletions = syncCompletions.get();
+                     completions.removeIf(it -> !legacyCompletions.contains(it.suggestion())); // remove any suggestions that were removed
+@@ -80,7 +_,7 @@
+                 return tabEvent.isCancelled() ? Collections.emptyList() : tabEvent.getCompletions();
+             }
+         };
+-        server.getServer().processQueue.add(waitable); // Paper - Remove "this."
++        io.papermc.paper.threadedregions.RegionizedServer.getInstance().addTask(waitable); // Folia - region threading
+         try {
+             List<String> offers = waitable.get();
+             if (offers == null) {

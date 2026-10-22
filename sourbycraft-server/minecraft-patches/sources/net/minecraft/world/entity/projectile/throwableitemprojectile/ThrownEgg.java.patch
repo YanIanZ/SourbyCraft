@@ -1,0 +1,30 @@
+--- a/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEgg.java
++++ b/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEgg.java
+@@ -61,6 +_,12 @@
+     protected void onHitEntity(final EntityHitResult hitResult) {
+         super.onHitEntity(hitResult);
+         hitResult.getEntity().hurt(this.damageSources().thrown(this, this.getOwner()), 0.0F);
++        // Canvas start - egg can knockback player config
++        if (level().canvasConfig().combat.eggCanKnockbackPlayers && hitResult.getEntity() instanceof net.minecraft.server.level.ServerPlayer serverPlayer) {
++            serverPlayer.knockback(0.4F, this.getX() - hitResult.getEntity().getX(), this.getZ() - hitResult.getEntity().getZ(), damageSources().generic(), 0.0F);
++            serverPlayer.hurtMarked = true;
++        }
++        // Canvas end - egg can knockback player config
+     }
+ 
+     @Override
+@@ -103,12 +_,13 @@
+                 for (int i = 0; i < count; i++) {
+                     net.minecraft.world.entity.Entity chicken = newEntityType.create(this.level(), net.minecraft.world.entity.EntitySpawnReason.TRIGGERED); // CraftBukkit
+                     if (chicken != null) {
++                        chicken.snapTo(this.getX(), this.getY(), this.getZ(), this.getYRot(), 0.0F); // Folia - region threading - moved up
+                         // CraftBukkit start
+                         if (chicken.getBukkitEntity() instanceof org.bukkit.entity.Ageable ageable) {
+                             ageable.setBaby();
+                         }
+                         // CraftBukkit end
+-                        chicken.snapTo(this.getX(), this.getY(), this.getZ(), this.getYRot(), 0.0F);
++                        // Folia - region threading - move up
+                         // CraftBukkit start
+                         if (chicken instanceof Chicken realChicken) {
+                             Optional.ofNullable(this.getItem().get(DataComponents.CHICKEN_VARIANT)).ifPresent(realChicken::setVariant);

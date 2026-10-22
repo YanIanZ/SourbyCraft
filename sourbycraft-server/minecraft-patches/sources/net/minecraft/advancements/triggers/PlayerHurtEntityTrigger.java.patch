@@ -1,0 +1,10 @@
+--- a/net/minecraft/advancements/triggers/PlayerHurtEntityTrigger.java
++++ b/net/minecraft/advancements/triggers/PlayerHurtEntityTrigger.java
+@@ -22,6 +_,7 @@
+     public void trigger(
+         final ServerPlayer player, final Entity victim, final DamageSource source, final float originalDamage, final float actualDamage, final boolean blocked
+     ) {
++        if (player.level().canvasConfig().disableCriterionTrigger) return; // Canvas - disable criterion trigger config
+         LootContext victimContext = EntityPredicate.createContext(player, victim);
+         this.trigger(player, t -> t.matches(player, victimContext, source, originalDamage, actualDamage, blocked));
+     }

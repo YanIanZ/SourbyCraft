@@ -1,0 +1,22 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: agent <agent@local>
+Date: Mon, 5 Oct 2026 15:02:20 +0700
+Subject: [PATCH] SourbyCraft - yellow SourbyCraft logger prefix on the console
+
+
+diff --git a/src/main/resources/log4j2.xml b/src/main/resources/log4j2.xml
+index 4d881018248133d51661b45a087ebafdca62be8f..86451d114ca7afec3695448615be092c8129bf57 100644
+--- a/src/main/resources/log4j2.xml
++++ b/src/main/resources/log4j2.xml
+@@ -11,6 +11,11 @@
+                     <!-- Disable prefix for various plugins that bypass the plugin logger -->
+                     <PatternMatch key=",net.minecraft.,Minecraft,com.mojang.,com.sk89q.,ru.tehkode.,Minecraft.AWE"
+                                   pattern="%highlightError{[%d{HH:mm:ss} %level]: %msg%n%xEx{full}}" />
++                    <!-- SourbyCraft - paint the [SourbyCraft] engine prefix yellow on the console
++                         only (the message + everything else keep their normal colours; the File
++                         and ServerGuiConsole appenders below stay uncoloured). -->
++                    <PatternMatch key="SourbyCraft"
++                                  pattern="%highlightError{[%d{HH:mm:ss} %level]: %style{[%logger]}{yellow} %msg%n%xEx{full}}" />
+                 </LoggerNamePatternSelector>
+             </PatternLayout>
+         </TerminalConsole>

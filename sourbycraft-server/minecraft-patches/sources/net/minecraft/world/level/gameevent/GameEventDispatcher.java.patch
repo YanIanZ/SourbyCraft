@@ -1,0 +1,14 @@
+--- a/net/minecraft/world/level/gameevent/GameEventDispatcher.java
++++ b/net/minecraft/world/level/gameevent/GameEventDispatcher.java
+@@ -49,6 +_,11 @@
+ 
+         for (int chunkX = sectionMinX; chunkX <= sectionMaxX; chunkX++) {
+             for (int chunkZ = sectionMinZ; chunkZ <= sectionMaxZ; chunkZ++) {
++                // Folia start - thread check game events
++                if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.level, chunkX, chunkZ, 1)) {
++                    continue;
++                }
++                // Folia end - thread check game events
+                 ChunkAccess chunk = this.level.getChunkIfLoadedImmediately(chunkX, chunkZ); // Paper - Use getChunkIfLoadedImmediately
+                 if (chunk != null) {
+                     for (int section = sectionMinY; section <= sectionMaxY; section++) {

@@ -1,0 +1,10 @@
+--- a/net/minecraft/advancements/triggers/KilledTrigger.java
++++ b/net/minecraft/advancements/triggers/KilledTrigger.java
+@@ -20,6 +_,7 @@
+     }
+ 
+     public void trigger(final ServerPlayer player, final Entity entity, final DamageSource killingBlow) {
++        if (player.level().canvasConfig().disableCriterionTrigger) return; // Canvas - disable criterion trigger config
+         LootContext entityContext = EntityPredicate.createContext(player, entity);
+         this.trigger(player, t -> t.matches(player, entityContext, killingBlow));
+     }

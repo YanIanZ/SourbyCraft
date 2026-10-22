@@ -1,0 +1,10 @@
+--- a/net/minecraft/advancements/triggers/ChanneledLightningTrigger.java
++++ b/net/minecraft/advancements/triggers/ChanneledLightningTrigger.java
+@@ -21,6 +_,7 @@
+     }
+ 
+     public void trigger(final ServerPlayer player, final Collection<? extends Entity> victims) {
++        if (player.level().canvasConfig().disableCriterionTrigger) return; // Canvas - disable criterion trigger config
+         List<LootContext> victimsContexts = victims.stream().map(v -> EntityPredicate.createContext(player, v)).collect(Collectors.toList());
+         this.trigger(player, t -> t.matches(victimsContexts));
+     }

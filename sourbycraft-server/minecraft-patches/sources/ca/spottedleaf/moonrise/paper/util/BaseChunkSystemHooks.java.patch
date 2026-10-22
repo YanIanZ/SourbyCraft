@@ -1,0 +1,64 @@
+--- a/ca/spottedleaf/moonrise/paper/util/BaseChunkSystemHooks.java
++++ b/ca/spottedleaf/moonrise/paper/util/BaseChunkSystemHooks.java
+@@ -75,12 +_,12 @@
+ 
+     @Override
+     public void onChunkHolderCreate(final ServerLevel level, final ChunkHolder holder) {
+-
++        level.regioniser.addChunk(holder.getPos().x(), holder.getPos().z()); // Folia - region threading
+     }
+ 
+     @Override
+     public void onChunkHolderDelete(final ServerLevel level, final ChunkHolder holder) {
+-
++        level.regioniser.removeChunk(holder.getPos().x(), holder.getPos().z()); // Folia - region threading
+     }
+ 
+     @Override
+@@ -91,13 +_,13 @@
+ 
+     @Override
+     public void onChunkBorder(final LevelChunk chunk, final ChunkHolder holder) {
+-        ((ChunkSystemServerLevel)((ServerLevel)chunk.getLevel())).moonrise$getLoadedChunks().add(chunk);
++        chunk.getLevel().getCurrentWorldData().addChunk(chunk); // Folia - region threading
+         chunk.loadCallback();
+     }
+ 
+     @Override
+     public void onChunkNotBorder(final LevelChunk chunk, final ChunkHolder holder) {
+-        ((ChunkSystemServerLevel)((ServerLevel)chunk.getLevel())).moonrise$getLoadedChunks().remove(chunk);
++        chunk.getLevel().getCurrentWorldData().removeChunk(chunk); // Folia - region threading
+         chunk.unloadCallback();
+     }
+ 
+@@ -109,7 +_,7 @@
+ 
+     @Override
+     public void onChunkTicking(final LevelChunk chunk, final ChunkHolder holder) {
+-        ((ChunkSystemServerLevel)((ServerLevel)chunk.getLevel())).moonrise$getTickingChunks().add(chunk);
++        chunk.getLevel().getCurrentWorldData().addTickingChunk(chunk); // Folia - region threading
+         if (!((ChunkSystemLevelChunk)chunk).moonrise$isPostProcessingDone()) {
+             chunk.postProcessGeneration((ServerLevel)chunk.getLevel());
+         }
+@@ -118,18 +_,18 @@
+ 
+     @Override
+     public void onChunkNotTicking(final LevelChunk chunk, final ChunkHolder holder) {
+-        ((ChunkSystemServerLevel)((ServerLevel)chunk.getLevel())).moonrise$getTickingChunks().remove(chunk);
++        chunk.getLevel().getCurrentWorldData().removeTickingChunk(chunk); // Folia - region threading
+     }
+ 
+     @Override
+     public void onChunkEntityTicking(final LevelChunk chunk, final ChunkHolder holder) {
+-        ((ChunkSystemServerLevel)((ServerLevel)chunk.getLevel())).moonrise$getEntityTickingChunks().add(chunk);
++        chunk.getLevel().getCurrentWorldData().addEntityTickingChunk(chunk); // Folia - region threading
+         ((ChunkTickServerLevel)(ServerLevel)chunk.getLevel()).moonrise$markChunkForPlayerTicking(chunk); // Moonrise - chunk tick iteration
+     }
+ 
+     @Override
+     public void onChunkNotEntityTicking(final LevelChunk chunk, final ChunkHolder holder) {
+-        ((ChunkSystemServerLevel)((ServerLevel)chunk.getLevel())).moonrise$getEntityTickingChunks().remove(chunk);
++        chunk.getLevel().getCurrentWorldData().removeEntityTickingChunk(chunk); // Folia - region threading
+         ((ChunkTickServerLevel)(ServerLevel)chunk.getLevel()).moonrise$removeChunkForPlayerTicking(chunk); // Moonrise - chunk tick iteration
+     }
+ 

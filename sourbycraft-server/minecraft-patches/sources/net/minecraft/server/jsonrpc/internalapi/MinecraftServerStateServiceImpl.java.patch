@@ -1,0 +1,20 @@
+--- a/net/minecraft/server/jsonrpc/internalapi/MinecraftServerStateServiceImpl.java
++++ b/net/minecraft/server/jsonrpc/internalapi/MinecraftServerStateServiceImpl.java
+@@ -34,7 +_,16 @@
+     @Override
+     public boolean saveEverything(final boolean suppressLogs, final boolean flush, final boolean force, final ClientInfo clientInfo) {
+         this.jsonrpcLogger.log(clientInfo, "Save everything. SuppressLogs: {}, flush: {}, force: {}", suppressLogs, flush, force);
+-        return this.server().saveEverything(suppressLogs, flush, force);
++        // Canvas start - region threading
++        net.minecraft.server.commands.SaveAllCommand.triggerSaveEverything(
++            MinecraftServer.getServer().createCommandSourceStack(),
++            MinecraftServer.getServer(),
++            flush
++        );
++        // just assume success, the trigger is run on multiple different thread contexts
++        // so the actual result is unpredictable, so just assume we didn't fail
++        return true;
++        // Canvas end - region threading
+     }
+ 
+     @Override

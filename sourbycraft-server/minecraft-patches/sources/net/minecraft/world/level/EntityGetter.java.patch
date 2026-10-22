@@ -1,0 +1,150 @@
+--- a/net/minecraft/world/level/EntityGetter.java
++++ b/net/minecraft/world/level/EntityGetter.java
+@@ -24,6 +_,12 @@
+         return this.getEntities(EntityTypeTest.forClass(baseClass), bb, selector);
+     }
+ 
++    // Folia start - region threading
++    default List<? extends Player> getLocalPlayers() {
++        return java.util.Collections.emptyList();
++    }
++
++    // Folia end - region threading
+     List<? extends Player> players();
+ 
+     default List<Entity> getEntities(final @Nullable Entity except, final AABB bb) {
+@@ -122,7 +_,7 @@
+         double best = -1.0;
+         Player result = null;
+ 
+-        for (Player player : this.players()) {
++        for (Player player : this.getLocalPlayers()) { // Folia - region threading
+             if (predicate == null || predicate.test(player)) {
+                 double dist = player.distanceToSqr(x, y, z);
+                 if ((range < 0.0 || dist < range * range) && (best == -1.0 || dist < best)) {
+@@ -139,7 +_,7 @@
+     default List<org.bukkit.entity.HumanEntity> findNearbyBukkitPlayers(double x, double y, double z, double range, @Nullable Predicate<Entity> predicate) {
+         ImmutableList.Builder<org.bukkit.entity.HumanEntity> players = ImmutableList.builder();
+ 
+-        for (Player player : this.players()) {
++        for (Player player : this.getLocalPlayers()) { // Folia - region threading
+             if (predicate == null || predicate.test(player)) {
+                 double dist = player.distanceToSqr(x, y, z);
+ 
+@@ -169,7 +_,7 @@
+     }
+ 
+     default boolean hasNearbyAlivePlayerThatAffectsSpawning(double x, double y, double z, double range) {
+-        for (Player player : this.players()) {
++        for (Player player : this.getLocalPlayers()) { // Folia - region threading
+             if (EntitySelector.PLAYER_AFFECTS_SPAWNING.test(player)) { // combines NO_SPECTATORS and LIVING_ENTITY_STILL_ALIVE with an "affects spawning" check
+                 double playerDist = player.distanceToSqr(x, y, z);
+                 if (range < 0.0 || playerDist < range * range) {
+@@ -180,9 +_,96 @@
+         return false;
+     }
+     // Paper end - Affects Spawning API
++    // Canvas start - optimize spawner
++    // patch originally from Leaf, modified to work with region
++    // threading and to be more optimized by reducing the distance
++    // of the nearby players map to be dynamic with the range
++
++    default boolean canvas$hasNearbyAlivePlayerThatAffectsSpawningForSpawner(double x, double y, double z, double range) {
++        if (range > 33) {
++            return canvas$hasNearbyAlivePlayerThatAffectsSpawningForLargerRangeSpawner(x, y, z, range);
++        }
++
++        final net.minecraft.core.BlockPos.MutableBlockPos mutablePos = new net.minecraft.core.BlockPos.MutableBlockPos();
++
++        mutablePos.set(x, y, z);
++
++        final ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.server.level.ServerPlayer> players = ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel) this).moonrise$getNearbyPlayers().getPlayers(
++            mutablePos,
++            range <= 16 ? ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.GENERAL_REALLY_REALLY_SMALL : ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.GENERAL_REALLY_SMALL // NearbyPlayers.GENERAL_AREA_VIEW_DISTANCE: 33
++        );
++
++        if (players == null) {
++            return false;
++        }
++
++        final net.minecraft.server.level.ServerPlayer[] raw = players.getRawDataUnchecked();
++        final int len = players.size();
++
++        java.util.Objects.checkFromIndexSize(0, len, raw.length);
++
++        for (int i = 0; i < len; ++i) {
++            final net.minecraft.server.level.ServerPlayer player = raw[i];
++            final double distanceSqr = player.distanceToSqr(x, y, z);
++
++            if (range < 0.0D || distanceSqr < range * range) {
++                if (!player.isSpectator() && player.isAlive() && player.affectsSpawning) {
++                    return true;
++                }
++            }
++        }
++
++        return false;
++    }
++
++    default boolean canvas$hasNearbyAlivePlayerThatAffectsSpawningForLargerRangeSpawner(double x, double y, double z, double range) {
++        for (Player player : this.getLocalPlayers()) {
++            double distanceSqr = player.distanceToSqr(x, y, z);
++            if (range < 0.0D || distanceSqr < range * range) {
++                if (!player.isSpectator() && player.isAlive() && player.affectsSpawning) {
++                    return true;
++                }
++            }
++        }
++
++        return false;
++    }
++
++    default boolean canvas$hasNearbyAlivePlayerThatAffectsSpawningForZombie(int x, int y, int z, double range) {
++        final net.minecraft.core.BlockPos.MutableBlockPos mutablePos = new net.minecraft.core.BlockPos.MutableBlockPos();
++
++        mutablePos.set(x, y, z);
++
++        final ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.server.level.ServerPlayer> players = ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel) this).moonrise$getNearbyPlayers().getPlayers(
++            mutablePos, ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.GENERAL_REALLY_REALLY_SMALL
++        );
++
++        if (players == null) {
++            return false;
++        }
++
++        final net.minecraft.server.level.ServerPlayer[] raw = players.getRawDataUnchecked();
++        final int len = players.size();
++
++        java.util.Objects.checkFromIndexSize(0, len, raw.length);
++
++        for (int i = 0; i < len; ++i) {
++            final net.minecraft.server.level.ServerPlayer player = raw[i];
++            final double distanceSqr = player.distanceToSqr(x, y, z);
++
++            if (range < 0.0D || distanceSqr < range * range) {
++                if (!player.isSpectator() && player.isAlive() && player.affectsSpawning) {
++                    return true;
++                }
++            }
++        }
++
++        return false;
++    }
++    // Canvas end - optimize spawner
+ 
+     default boolean hasNearbyAlivePlayer(final double x, final double y, final double z, final double range) {
+-        for (Player player : this.players()) {
++        for (Player player : this.getLocalPlayers()) { // Folia - region threading
+             if (EntitySelector.NO_SPECTATORS.test(player) && EntitySelector.LIVING_ENTITY_STILL_ALIVE.test(player)) {
+                 double playerDist = player.distanceToSqr(x, y, z);
+                 if (range < 0.0 || playerDist < range * range) {
+@@ -195,8 +_,7 @@
+     }
+ 
+     default @Nullable Player getPlayerByUUID(final UUID uuid) {
+-        for (int i = 0; i < this.players().size(); i++) {
+-            Player player = this.players().get(i);
++        for (Player player : this.getLocalPlayers()) { // Folia - region threading - note: overridden by ServerLevel to fetch from all players in the server
+             if (uuid.equals(player.getUUID())) {
+                 return player;
+             }

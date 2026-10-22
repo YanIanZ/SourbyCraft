@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Wed, 14 Oct 2026 01:41:58 +0700
+Subject: [PATCH] SourbyCraft - always complete a world unload's callback
+
+
+diff --git a/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java b/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java
+index a02c2e7563ee1b102873452613d446c3d83b448b..ac9669706b5ba1e62fe98d8e69af1c17e54574db 100644
+--- a/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java
++++ b/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java
+@@ -57,6 +57,12 @@ public class WorldShutdownThread extends RegionShutdownThread {
+ 
+     @Override
+     public void run() {
++        // SourbyCraft start - always complete the unload callback, also when the unload throws
++        WorldUnloadCompletion.run(this.level.canvas$unloadTicket::get, this::unload);
++    }
++
++    private void unload() {
++        // SourbyCraft end - always complete the unload callback, also when the unload throws
+         LOGGER.info("Awaiting termination of {} regions", getWorldName());
+         final List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>>
+             regions = theWaiter.get();
+@@ -198,8 +204,7 @@ public class WorldShutdownThread extends RegionShutdownThread {
+         MinecraftServer.getServer().server.worlds.remove(this.level.getWorld().getName().toLowerCase(java.util.Locale.ROOT));
+ 
+         LOGGER.info("Completed {} unload", getWorldName());
+-
+-        this.level.canvas$unloadTicket.getOrThrow().callback().accept(WorldUnloadResult.SUCCESS);
++        // SourbyCraft - the SUCCESS callback is invoked by WorldUnloadCompletion in run()
+     }
+ 
+     private static void teleportPlayer(final ServerPlayer entityPlayer, final ServerLocation target) {

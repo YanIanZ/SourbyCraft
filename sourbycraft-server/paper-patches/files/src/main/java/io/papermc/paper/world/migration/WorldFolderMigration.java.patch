@@ -1,0 +1,10 @@
+--- a/src/main/java/io/papermc/paper/world/migration/WorldFolderMigration.java
++++ b/src/main/java/io/papermc/paper/world/migration/WorldFolderMigration.java
+@@ -54,6 +_,7 @@
+             case VANILLA_MIGRATION -> VanillaWorldMigration.migrate(context);
+             case NO_OP -> {}
+         }
++        dev.iyanz.aurora.engine.util.migration.AuroraFileMigration.initMigration(context); // Canvas - 26.1+ file migration // Aurora - renamed
+     }
+ 
+     public static void migrateApiWorld(

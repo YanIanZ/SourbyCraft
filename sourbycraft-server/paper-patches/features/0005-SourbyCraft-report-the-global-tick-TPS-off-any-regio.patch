@@ -1,0 +1,23 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Tue, 6 Oct 2026 16:36:29 +0700
+Subject: [PATCH] SourbyCraft - report the global tick TPS off any region
+
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+index fb67571b9bee5e8812dd374dcfa7469174589011..b4c71419c4c30e8e372156bd3c8d469f9ee2aa12 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -2943,6 +2943,12 @@ public final class CraftServer implements Server {
+                 task = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegion().getData().getRegionSchedulingHandle();
+             }
+         }
++        // SourbyCraft start - off any region (an async task, a bridged legacy plugin's profiler), report
++        // the global tick's TPS instead of throwing: reading a rate needs no region ownership.
++        if (task == null) {
++            task = io.papermc.paper.threadedregions.RegionizedServer.getGlobalTickData();
++        }
++        // SourbyCraft end
+         if (!(task instanceof io.papermc.paper.threadedregions.TickRegionScheduler.RegionScheduleHandle tickHandle)) {
+             throw new UnsupportedOperationException("Not on any region");
+         }
