@@ -78,4 +78,22 @@ class PluginDescriptorTest {
         assertEquals(d, PluginDescriptor.decode(d.encode()));
         assertNull(PluginDescriptor.decode("garbage"));
     }
+
+    @Test
+    void providesIsReadFromBothDescriptorKinds() throws IOException {
+        assertEquals(java.util.List.of("WorldEdit"),
+            legacy("name: FastAsyncWorldEdit\nprovides: [WorldEdit]\n").provides());
+        assertEquals(java.util.List.of("WorldEdit"), paper("name: P\nprovides: [WorldEdit]\n").provides());
+        assertEquals(java.util.List.of(), legacy("name: A\n").provides());
+    }
+
+    @Test
+    void providesRoundTripsAndAPayloadWithoutItIsNotTrusted() throws IOException {
+        final PluginDescriptor d = legacy("name: FastAsyncWorldEdit\nprovides: [WorldEdit]\n");
+        assertEquals(d, PluginDescriptor.decode(d.encode()));
+        // A cache line written before "provides" existed has one field fewer; it is re-read, not
+        // decoded as a descriptor that provides nothing (which would bring the false warning back).
+        final String old = d.encode().substring(0, d.encode().lastIndexOf('\n'));
+        assertNull(PluginDescriptor.decode(old));
+    }
 }

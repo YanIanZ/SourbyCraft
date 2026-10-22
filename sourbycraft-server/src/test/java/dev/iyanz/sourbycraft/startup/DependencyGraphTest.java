@@ -60,4 +60,30 @@ class DependencyGraphTest {
         assertTrue(r.clean());
         assertEquals("P0", r.order().get(0));
     }
+
+    @Test
+    void aProvidedNameSatisfiesAHardDependency() {
+        // FastAsyncWorldEdit declares provides: [WorldEdit]; Paper loads WorldGuard after it.
+        final PluginDescriptor fawe = new PluginDescriptor("FastAsyncWorldEdit", "1", "m", false, false,
+            List.of(), List.of(), List.of(), List.of("WorldEdit"));
+        final DependencyGraph.Report r = DependencyGraph.analyse(List.of(
+            p("WorldGuard", List.of("WorldEdit"), List.of(), List.of()),
+            p("Soft", List.of(), List.of("WorldEdit"), List.of()),
+            p("CommandNPC", List.of("Citizens"), List.of(), List.of()),
+            fawe));
+        assertEquals(Map.of("CommandNPC", List.of("Citizens")), r.missing());
+        assertTrue(r.order().indexOf("FastAsyncWorldEdit") < r.order().indexOf("WorldGuard"));
+        assertTrue(r.order().indexOf("FastAsyncWorldEdit") < r.order().indexOf("Soft"));
+    }
+
+    @Test
+    void aRealPluginWinsOverAProvider() {
+        final PluginDescriptor fawe = new PluginDescriptor("FastAsyncWorldEdit", "1", "m", false, false,
+            List.of(), List.of(), List.of(), List.of("WorldEdit"));
+        final DependencyGraph.Report r = DependencyGraph.analyse(List.of(
+            p("WorldGuard", List.of("WorldEdit"), List.of(), List.of()),
+            p("WorldEdit", List.of(), List.of(), List.of()), fawe));
+        assertTrue(r.clean());
+        assertTrue(r.order().indexOf("WorldEdit") < r.order().indexOf("WorldGuard"));
+    }
 }

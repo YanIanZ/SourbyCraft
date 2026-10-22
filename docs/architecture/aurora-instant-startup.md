@@ -27,19 +27,21 @@ Do not automatically parallelize plugin onLoad/onEnable, service registration, e
 
 `dev.iyanz.sourbycraft.startup`:
 
-- `CacheEnvironment`: Minecraft version, SourbyCraft ABI, Aurora Bridge ABI, format version (2),
+- `CacheEnvironment`: Minecraft version, SourbyCraft ABI, Aurora Bridge ABI, format version (3; 3 added `provides` to the cached descriptor),
   Java major. Any mismatch discards the file.
 - `SourceFingerprint`: SHA-256 plus size/mtime. Size and mtime can only rule reuse out.
 - `StartupCache`: string payloads only, so no live objects by construction. Each entry has a source
   hash, an output hash and a line hash. Writes go to a temp file, are forced, and are moved
   atomically.
 - `PluginStartupIndex`: runs on a bounded `STARTUP` lane and caches, per jar:
-  - the descriptor, including `depend`/`softdepend`/`loadbefore` and `paper-plugin.yml`
+  - the descriptor, including `depend`/`softdepend`/`loadbefore`, `provides` and `paper-plugin.yml`
     `dependencies.server`;
   - a `CompatibilityScan`: class and package counts, plus references to the legacy Bukkit
     scheduler, the Folia schedulers and server internals, read from class constant pools by
     `BytecodeScanner` without loading classes.
-- `DependencyGraph`: missing hard dependencies, cycles (Tarjan), and a consistent order.
+- `DependencyGraph`: missing hard dependencies, cycles (Tarjan), and a consistent order. A name
+  another plugin `provides` satisfies a dependency on it, as in Paper's loader (FastAsyncWorldEdit
+  `provides: [WorldEdit]` satisfies WorldGuard's `depend: [WorldEdit]`); a real plugin of that name wins.
   Diagnostic only; the plugin manager's order is unchanged.
 - `StartupTimeline`/`StartupProfile`: boot-stage and index phase timings, and JVM start to
   `ServerLoadEvent(STARTUP)`. The profile is compared with the previous boot only when both have
