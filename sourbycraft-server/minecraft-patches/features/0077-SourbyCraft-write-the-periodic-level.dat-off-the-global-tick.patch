@@ -1,0 +1,19 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Thu, 22 Oct 2026 14:15:01 +0700
+Subject: [PATCH] SourbyCraft - write the periodic level.dat off the global
+ tick
+
+
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index 7327ca578a57c7425c505d204e4ac7694ce52900..5c892f1d27898eb9ae085f33c8428d690e27f14a 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -1028,6 +1028,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         this.scoreboard.storeToSaveDataIfDirty(this.getDataStorage().computeIfAbsent(ScoreboardSaveData.TYPE));
+ 
+         GameProfile singleplayerProfile = this.getSingleplayerProfile();
++        dev.iyanz.sourbycraft.world.WorldMetadataAutosave.awaitLevelDatWrites(); // SourbyCraft - a scheduled autosave level.dat write finishes before this one
+         this.storageSource.saveDataTag(this.worldData, singleplayerProfile == null ? null : singleplayerProfile.id());
+         if (flush) {
+             this.savedDataStorage.saveAndJoin();

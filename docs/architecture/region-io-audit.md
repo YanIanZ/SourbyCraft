@@ -169,3 +169,21 @@ region only through an existing synchronous chunk wait; (3) the item is still op
 question: a Redis-down or Redis-slow test with a structure search on a region thread and a sync
 chunk load on a region thread has not been run (`needs-server`), and plugin-driven
 `World#getChunkAt` on a region thread is the same R1 wait and was not separately traced.
+
+## Runtime sampling under plugins and a disk stall (2026-10-22)
+
+Evidence: [region-io-blocking-2026-10-22.md](../development/region-io-blocking-2026-10-22.md) (agent test
+server, macOS, no players). Across 1218 `jcmd Thread.print` dumps (9744 region-scheduler thread stacks), with
+the world directory on a disk image whose serving process was SIGSTOPped for 60 s:
+
+- **R2 confirmed at runtime**: `/locate` from a command block (region thread) read region files inline
+  (`StructureCheck.tryLoadFromStorage` -> `RegionFileStorage.scanChunk` -> `FileChannelImpl.read`) and held
+  its region for 51-60 s of the stall (203 stacks per stall run). Not fixed; proposal in the evidence doc.
+- **Global tick (0056)**: the periodic `level.dat` write held the global tick in `write0` for the stall
+  (92-113 stacks). Fixed by feature patch 0077 / `WorldMetadataAutosave.scheduleLevelDat`: after the fix the
+  global tick shows 0 I/O stacks during the stall and the write waits on its own thread.
+- Chunk loads/saves ran on the `Paper I/O Worker` pool. The one region-thread wait on that pool was
+  `/locate`'s `ChunkTaskScheduler.syncLoadNonFull` (R1 shape, 9 stacks, unstalled run only).
+- Not exercised (no players): per-player saves on the owning region (`PlayerList.saveAll` ->
+  `PlayerDataStorage.save`, stats, advancements) and the join-time read in `PrepareSpawnTask.spawn`; both are
+  synchronous file I/O on a region thread by source reading.
