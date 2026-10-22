@@ -85,6 +85,8 @@ class RegionOwnershipContractTest {
         }
         @Override public boolean isGlobalTickThread() { return owned; }
         @Override public boolean isTickThread() { return owned; }
+        @Override public boolean regionsTicking() { return true; }
+        @Override public boolean isShutdownThread() { return false; }
         @Override public void executeOnGlobalTick(Runnable task) {
             queued.add(task);
         }

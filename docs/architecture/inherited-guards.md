@@ -47,7 +47,7 @@ Every number below is generated; the test fails when it drifts from the manifest
 | scanned input | count |
 | --- | --- |
 | engine baseline patches | 720 (472 `sourbycraft-server/minecraft-patches/sources` + 232 `sourbycraft-server/paper-patches/files` + 16 `sourbyapi/paper-patches/files`), 720 Java files |
-| SourbyCraft feature patches | 110, touching 121 Java files |
+| SourbyCraft feature patches | 111, touching 121 Java files |
 | engine source files (sourbycraft-server/src/main/java/dev/iyanz/aurora/engine) | 89 |
 | guards found by the scan | 115 (manifest has 115; both scan modes agree, see RepositoryTest) |
 
@@ -72,10 +72,10 @@ Every number below is generated; the test fails when it drifts from the manifest
 | --- | --- |
 | `F-TICKTHREAD-ENSURE` | 201 |
 | `F-TICKTHREAD-IS` | 46 |
-| `F-GLOBAL-TICK` | 29 |
+| `F-GLOBAL-TICK` | 17 |
 | `F-TICKGUARD` | 17 |
 | `F-ASYNCCATCHER` | 0 |
-| **total** | **293** |
+| **total** | **281** |
 
 <!-- summary:end -->
 
@@ -159,7 +159,7 @@ and are not counted. The counts are pinned by the manifest; a change is a review
 | --- | --- | --- | --- |
 | `F-TICKTHREAD-ENSURE` | 201 | `TickThread.ensureTickThread`: throws `IllegalStateException` off the owning thread; not configurable | count only; per-site tests missing |
 | `F-TICKTHREAD-IS` | 46 | `TickThread.isTickThreadFor`: picks a region-safe branch | count only |
-| `F-GLOBAL-TICK` | 29 | `RegionizedServer.ensureGlobalTickThread`: global state (scoreboards, world list, status, time) | `AuroraWorldsService` tests for SourbyCraft's own callers |
+| `F-GLOBAL-TICK` | 17 | `RegionizedServer.ensureGlobalTickThread`: global state (scoreboards, world list, status, time). The 12 `CraftWorld` world-settings setters (time, weather, game rules, hardcore, spawn limits, ticks-per-spawn) moved to `guards/WorldSettingsOwner` (paper 0025, 2026-10-22): the startup thread owns them until the region scheduler starts, as on Paper; after that the global tick only, unchanged | `AuroraWorldsService` tests for SourbyCraft's own callers; `WorldSettingsOwnerTest` |
 | `F-TICKGUARD` | 17 | Canvas's configurable guards: `region-scheduler.guard-severity` (SourbyCraft default `LOG`, Canvas shipped `THROW`); with `LOG` a hit inside a bridged plugin's task counts toward its quarantine | `scripts/test_patch_policy.py` (LOG default), `ViolationClassifierTest`, bridge `GuardViolations` tests |
 | `F-ASYNCCATCHER` | 0 | Paper `AsyncCatcher` sites re-marked by the engine: the two marked calls are commented out, so the engine's own checks replaced them entirely; pinned at 0 so a re-marked site is noticed | count only |
 
@@ -439,7 +439,7 @@ origin is SourbyCraft or the note names a feature patch.
 | --- | --- | --- | --- |
 | `F-TICKTHREAD-ENSURE` | 201 | KEEP-OWNED | TickThread.ensureTickThread: throws IllegalStateException off the owning region thread |
 | `F-TICKTHREAD-IS` | 46 | KEEP-OWNED | TickThread.isTickThreadFor: ownership test that picks a region-safe branch |
-| `F-GLOBAL-TICK` | 29 | KEEP-OWNED | RegionizedServer.ensureGlobalTickThread: global-tick-only operations |
+| `F-GLOBAL-TICK` | 17 | KEEP-OWNED | RegionizedServer.ensureGlobalTickThread: global-tick-only operations |
 | `F-TICKGUARD` | 17 | KEEP-OWNED | TickGuard: Canvas's configurable guards (region-scheduler.guard-severity) |
 | `F-ASYNCCATCHER` | 0 | KEEP-OWNED | AsyncCatcher.catchOp re-marked by the region engine |
 
@@ -447,6 +447,6 @@ origin is SourbyCraft or the note names a feature patch.
 | --- | --- | --- | --- |
 | `F-TICKTHREAD-ENSURE` | 201 | KEEP-OWNED | TickThread.ensureTickThread: throws IllegalStateException off the owning region thread |
 | `F-TICKTHREAD-IS` | 46 | KEEP-OWNED | TickThread.isTickThreadFor: ownership test that picks a region-safe branch |
-| `F-GLOBAL-TICK` | 29 | KEEP-OWNED | RegionizedServer.ensureGlobalTickThread: global-tick-only operations |
+| `F-GLOBAL-TICK` | 17 | KEEP-OWNED | RegionizedServer.ensureGlobalTickThread: global-tick-only operations |
 | `F-TICKGUARD` | 17 | KEEP-OWNED | TickGuard: Canvas's configurable guards (region-scheduler.guard-severity) |
 | `F-ASYNCCATCHER` | 0 | KEEP-OWNED | AsyncCatcher.catchOp re-marked by the region engine |

@@ -136,6 +136,22 @@ public interface RegionOwnership {
      * @param task the work to run on the global tick
      */
     void executeOnGlobalTick(Runnable task);
+
+    /**
+     * Whether the region scheduler has started. Before it starts (worlds loading, plugins enabling)
+     * nothing ticks and the server's running thread owns all world state, as on a single-threaded
+     * server; from then on ownership is per region and the global tick.
+     *
+     * @return whether regions and the global tick are being scheduled
+     */
+    boolean regionsTicking();
+
+    /**
+     * Whether the calling thread is the shutdown thread, which owns everything once regions stop.
+     *
+     * @return whether the calling thread is the shutdown thread
+     */
+    boolean isShutdownThread();
 }
 
 final class RegionOwnershipHolder {

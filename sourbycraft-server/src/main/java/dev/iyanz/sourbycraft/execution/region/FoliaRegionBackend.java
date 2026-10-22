@@ -3,6 +3,7 @@ package dev.iyanz.sourbycraft.execution.region;
 import dev.iyanz.sourbycraft.perf.RegionTickMetrics;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.TickRegionScheduler;
+import io.papermc.paper.threadedregions.TickRegions;
 
 /**
  * {@link RegionBackend}, {@link CurrentRegion}, {@link RegionPopulation} and {@link EnginePools} over
@@ -65,6 +66,11 @@ public final class FoliaRegionBackend implements RegionBackend, CurrentRegion, R
     /** Backs {@link RegionOwnership#isGlobalTickThread}: the engine's non-throwing global-tick test. */
     static boolean isGlobalTickThread() {
         return RegionizedServer.isGlobalTickThread();
+    }
+
+    /** Backs {@link RegionOwnership#regionsTicking}: whether the region scheduler has started. */
+    static boolean regionsStarted() {
+        return TickRegions.hasStarted();
     }
 
     /** Backs {@link RegionOwnership#executeOnGlobalTick}: inline on the global tick thread, else queued for it. */
