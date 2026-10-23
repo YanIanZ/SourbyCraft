@@ -29,7 +29,44 @@ library and not reported; the record is a bounded recent history (16 jars); a pl
 after it ran) is not reported.
 
 ## Safety
-Default mode is OFF. Operators can enable SAFE on a test server; unknown/unsafe world mutation is rejected and diagnosed rather than run on an arbitrary thread.
+Default mode is OFF. Operators can enable SAFE on a test server; unknown/unsafe world mutation is rejected and diagnosed rather than run on an arbitrary thread -- **unless** `aurora.bridge.thread-checks` relaxes the region-ownership checks (owner decision 2026-10-22, the default since then; see *Thread checks* below). With relaxed checks a bridged plugin's cross-region access runs on the wrong thread and is only counted.
+
+## Thread checks (owner decision 2026-10-22)
+
+Owner decision 2026-10-22, recorded verbatim after the risks (data races, chunk corruption persisted to disk, item
+dupes, deadlocks) were stated: **"Tiru penuh LightingLuminol"** -- make the bridge behave like LightingLuminol:
+legacy (non-folia-supported) plugins work because thread-ownership checks are relaxed, as LightingLuminol does. It
+overrides `DEVELOPMENT.md` 2.3 ("never weaken region ownership") for this feature only; the truthfulness policy
+still applies, so this section states plainly that a relaxed server is **unsafe and unqualified**.
+
+`aurora.bridge.thread-checks` (`sourbycraft_config/aurora.toml`, RESTART_REQUIRED, read once when the checks first
+run; `-Daurora.bridge.thread-checks=` overrides the file):
+
+| value | what a failed region-ownership check does | scope |
+| --- | --- | --- |
+| `relaxed` (**default**, the owner's choice) | counts and logs, never throws | every caller, as LightingLuminol (paper patch 0002 and minecraft patch 0001 "Base Dirty Patches" at revision 72d51c4d comment the throws out unconditionally) |
+| `bridged` | throws, except while a bridged plugin's task body is running on the calling thread | the cheap narrower scope: a legacy plugin's scheduler tasks (DeluxeMenus menu opens, ClearLag sweeps, SSB2 chunk preparation on the bridge I/O lane, Essentials spawn teleports from tasks) are relaxed; its event handlers and commands, and every native plugin and the server itself, stay enforced |
+| `enforced` | throws, as the region-threading base does | SourbyCraft's behaviour before 2026-10-22 |
+
+Whatever is configured only takes effect while `aurora.bridge.mode = safe`: with the bridge off nothing is admitted
+that the relaxation is for, so the checks stay enforced and the boot log says so (INFO). When relaxed, the boot
+log carries one WARN (`Aurora Bridge: region-ownership checks are RELAXED ... This server is NOT qualified`), `/ver`
+shows `Thread checks: relaxed (region-ownership safety off; unqualified)`, `/sourbycraft config` shows the configured
+and effective value, and `/perf plugins` shows the relaxed-hit counters (total, and outside bridged bodies).
+
+What relaxing changes, each site owned by SourbyCraft and asking `guards/ThreadChecks.refuse(reason)` instead of
+being commented out as upstream did:
+
+- `TickThread.ensureTickThread` (all overloads, Paper feature patch "relaxed thread checks"), `RegionizedServer.ensureGlobalTickThread` and the six `RegionizedWorldData` "is not under this region's control" checks (MC feature patch "relaxed region-ownership checks"), `TickGuard`'s off-tick-thread refusal and startup/hard-throw helpers. The access then proceeds on the wrong thread.
+- Bridge accounting: a guard hit inside a bridged body is counted as a **relaxed ownership hit** (per plugin, `/plugins <name>`, `/perf plugins`) and logged once per (plugin, reason) per 60 s; it is **not** a fatal violation and never quarantines (`BridgeRuntime.relaxedViolation`). Hits outside any bridged body log once per reason per 60 s on the hitting thread (`-Daurora.bridge.thread-checks.trace=true` adds a stack trace). `quarantine-after` still applies to exceptions a body throws.
+- Supporting pieces LightingLuminol needs so a relaxed server does not fail at once, all gated on the `static final` `ThreadChecks.RELAXED_SCOPE` (folded away on an enforced server): the cross-region world-data pool (`compat/luminol/RegionizedWorldDataPool`, LightingLuminol's `ReferenceCountedRegionizedWorldDataPool`; `WorldDataAccess` leases at ~50 Minecraft sites route an off-thread entity/chunk/block-event/neighbour/scheduled-tick write to the region that owns the chunk, holding a ticket while it runs), Moonrise's entity-section reentrancy guard skipped and entity slices locked during add/remove, `NearbyPlayers`, `ReferenceList` and `IteratorSafeOrderedReferenceSet` locked, the `RegionizedWorldData` block-entity ticker hand-off, block events, broadcast set and explosion cache locked at their cross-thread touch points (LightingLuminol swapped the containers for synchronized or concurrent ones; the upstream containers stay, so the policy that pins upstream defaults is satisfied and the capture maps keep the insertion order Paper's replay needs -- they are **not** locked: a foreign thread writing into another region's capture map while that region captures is one of the accepted races), the global tick allowed to load a chunk synchronously while pumping global chunk tasks (a non-owning *region* thread is still refused, as in LightingLuminol: its wait could need its own tick, Folia#280).
+- `Entity#teleport` on the `ASYNC` route waits for the move (LightingLuminol's `teleportAsync(location, cause).join()`), bounded (30 s on a tick thread, 60 s elsewhere): threads that tick nothing always wait; the global tick waits too (stalling the global tick, as upstream); a region thread waits only when it owns the entity and the destination is loaded in a region it does not own -- an unloaded destination is scheduled and returns `false` as before, because its region may be merged into the blocked one (`TeleportRoute.joinsWhenRelaxed`, unit-tested).
+
+Independent of the setting (safe techniques, all modes): `Bukkit.getCurrentTick()`/`MinecraftServer.getTickCount()` return the global tick counter off every region instead of throwing; `Entity#teleportAsync` fires `PlayerTeleportEvent` for players (cancel aborts, `getTo()` is honoured, never twice for one call) and the portal route fires `PlayerPortalEvent` once the exit is known (cancel places the player back where it stood) -- `entity/teleport/AsyncTeleportEvents`, escape hatch `-Daurora.compat.async-teleport-events=false`.
+
+Not ported, deliberately: running every Bukkit sync task on the global tick (the bridge routes by owner instead), redirecting a legacy plugin's Folia region/entity scheduler calls to Bukkit, admitting every plugin (`mode = off` stays the default), `AsyncCatcher.catchOp` (LightingLuminol leaves it too), the `CraftScoreboard` changes.
+
+**Honesty.** Nothing here makes a legacy plugin region-safe; it removes the refusal. The owner accepted: data races on chunk sections, entity lists and player containers (item duplication); writes that reach disk corrupted; a write into a region's data that is merged into another region before it ticks is lost; deadlocks where a blocked thread's wait needs its own tick. A relaxed server is **not qualified** and must not be called stable. Evidence so far is unit tests and agent test-server boots listed in the coordination entry `fable-lightingluminol-compat`; the owner runs real-player testing.
 
 ## Routing
 Entity-owned -> entity owner. Location-owned -> region owner. Global-safe -> global region. I/O -> plugin/I/O lane. Unknown unsafe -> reject.
@@ -356,7 +393,9 @@ the target plugin, and the plugin manager closes admission before disable callba
 The upstream redirects of named region/entity requests are omitted so their native
 ownership and entity retirement contract remain in place. SAFE stays opt-in and
 RESTART_REQUIRED; no executor or configuration surface is added. Direct world API
-access remains subject to the runtime's thread guards.
+access remains subject to the runtime's thread guards -- until 2026-10-22, when the
+owner chose LightingLuminol's relaxed thread checks as the default (*Thread checks* above;
+the second LightingLuminol port, from its "Base Dirty Patches").
 
 Credit: **Luminol**, **LightingLuminol**, **Bacteriawa**, and contributors. The derived
 adapter and patch retain upstream GPL v3 licensing. Exact source revision, imported

@@ -47,26 +47,26 @@ Every number below is generated; the test fails when it drifts from the manifest
 | scanned input | count |
 | --- | --- |
 | engine baseline patches | 720 (472 `sourbycraft-server/minecraft-patches/sources` + 232 `sourbycraft-server/paper-patches/files` + 16 `sourbyapi/paper-patches/files`), 720 Java files |
-| SourbyCraft feature patches | 114, touching 124 Java files |
+| SourbyCraft feature patches | 118, touching 139 Java files |
 | engine source files (sourbycraft-server/src/main/java/dev/iyanz/aurora/engine) | 89 |
-| guards found by the scan | 115 (manifest has 115; both scan modes agree, see RepositoryTest) |
+| guards found by the scan | 114 (manifest has 114; both scan modes agree, see RepositoryTest) |
 
 | detector | A | B | C | D | E |
 | --- | --- | --- | --- | --- | --- |
-| entries | 64 | 30 | 2 | 14 | 5 |
+| entries | 64 | 29 | 2 | 14 | 5 |
 
 | kind \ decision | KEEP-OWNED | REPLACE | REMOVE | UNDECIDED | total |
 | --- | --- | --- | --- | --- | --- |
 | FEATURE-DISABLED | 6 | 2 | 1 | 0 | 9 |
-| API-REFUSED | 59 | 9 | 2 | 0 | 70 |
+| API-REFUSED | 58 | 9 | 2 | 0 | 69 |
 | OWNERSHIP-CHECK | 6 | 0 | 0 | 0 | 6 |
 | DEGRADED | 4 | 1 | 0 | 0 | 5 |
 | REROUTED | 25 | 0 | 0 | 0 | 25 |
-| **guards** | **100** | **12** | **3** | **0** | **115** |
+| **guards** | **99** | **12** | **3** | **0** | **114** |
 
 | origin | Folia | Canvas | SourbyCraft |
 | --- | --- | --- | --- |
-| entries | 77 | 31 | 7 |
+| entries | 76 | 31 | 7 |
 
 | family | sites |
 | --- | --- |
@@ -76,6 +76,12 @@ Every number below is generated; the test fails when it drifts from the manifest
 | `F-TICKGUARD` | 17 |
 | `F-ASYNCCATCHER` | 0 |
 | **total** | **281** |
+
+<!-- summary:end -->
+
+<!-- summary:end -->
+
+<!-- summary:end -->
 
 <!-- summary:end -->
 
@@ -157,10 +163,10 @@ and are not counted. The counts are pinned by the manifest; a change is a review
 
 | family | sites | what it is | owned test |
 | --- | --- | --- | --- |
-| `F-TICKTHREAD-ENSURE` | 201 | `TickThread.ensureTickThread`: throws `IllegalStateException` off the owning thread; not configurable. One site narrowed for threads that tick nothing (paper 0028, 2026-10-22): `CraftWorld#getChunkAt(x, z)` from a non-`TickThread` waits for the chunk as on Paper (`guards/OffThreadChunkLoad`, bounded 30 s); the site and its refusal stay for every tick thread, so the count is unchanged | count only; per-site tests missing; `OffThreadChunkLoadTest` for the getChunkAt site |
+| `F-TICKTHREAD-ENSURE` | 201 | `TickThread.ensureTickThread`: throws `IllegalStateException` off the owning thread. Since 2026-10-22 every overload first asks `guards/ThreadChecks.refuse` (Paper feature "relaxed thread checks"): `aurora.bridge.thread-checks` relaxed (the owner's default while `aurora.bridge.mode = safe`) lets the access proceed and counts it; enforced throws as before. The check itself is unchanged; what it does on failure is the owner's setting (section 9) | count only; `ThreadChecksTest` pins the decision; Paper 0028 retains the non-tick-thread chunk wait (`OffThreadChunkLoadTest`) |
 | `F-TICKTHREAD-IS` | 46 | `TickThread.isTickThreadFor`: picks a region-safe branch | count only |
-| `F-GLOBAL-TICK` | 17 | `RegionizedServer.ensureGlobalTickThread`: global state (scoreboards, world list, status, time). The 12 `CraftWorld` world-settings setters (time, weather, game rules, hardcore, spawn limits, ticks-per-spawn) moved to `guards/WorldSettingsOwner` (paper 0025, 2026-10-22): the startup thread owns them until the region scheduler starts, as on Paper; after that the global tick only, unchanged | `AuroraWorldsService` tests for SourbyCraft's own callers; `WorldSettingsOwnerTest` |
-| `F-TICKGUARD` | 17 | Canvas's configurable guards: `region-scheduler.guard-severity` (SourbyCraft default `LOG`, Canvas shipped `THROW`); with `LOG` a hit inside a bridged plugin's task counts toward its quarantine | `scripts/test_patch_policy.py` (LOG default), `ViolationClassifierTest`, bridge `GuardViolations` tests |
+| `F-GLOBAL-TICK` | 17 | `RegionizedServer.ensureGlobalTickThread`: global state (scoreboards, world list, status, time). The 12 `CraftWorld` world-settings setters (time, weather, game rules, hardcore, spawn limits, ticks-per-spawn) moved to `guards/WorldSettingsOwner` (paper 0025, 2026-10-22): the startup thread owns them until the region scheduler starts, as on Paper; after that the global tick only. Since MC 0084 the refusal asks `guards/ThreadChecks.refuse` first (section 9) | `AuroraWorldsService` tests for SourbyCraft's own callers; `WorldSettingsOwnerTest` |
+| `F-TICKGUARD` | 17 | Canvas's configurable guards: `region-scheduler.guard-severity` (SourbyCraft default `LOG`, Canvas shipped `THROW`); with `LOG` a hit inside a bridged plugin's task counts toward its quarantine -- unless thread checks are relaxed (section 9): then it is a counted "relaxed ownership hit" and never quarantines, and the off-tick-thread refusal asks `ThreadChecks.refuse` | `scripts/test_patch_policy.py` (LOG default), `ViolationClassifierTest`, bridge `GuardViolations` tests, `BridgeRuntimeTest` (relaxed accounting) |
 | `F-ASYNCCATCHER` | 0 | Paper `AsyncCatcher` sites re-marked by the engine: the two marked calls are commented out, so the engine's own checks replaced them entirely; pinned at 0 so a re-marked site is noticed | count only |
 
 `TickGuard` is `@Deprecated(forRemoval)` pending Paper#13924; when that lands the 17 sites move to the
@@ -170,8 +176,9 @@ throwing.
 
 ## 5. KEEP-OWNED guards, grouped (the invariant in our words)
 
-- **No main thread** — `MinecraftServer#1`–`#5`, `#28`–`#33`, `#35`, `#36` (submit/execute/pollTask/
-  doRunTask/wrapRunnable/executeIfPossible/getTickCount), `ServerChunkCache#1`, `#3`–`#9`,
+- **No main thread** — `MinecraftServer#1`–`#5`, `#28`–`#33`, `#36` (submit/execute/pollTask/
+  doRunTask/wrapRunnable/executeIfPossible; `#35` getTickCount retired 2026-10-22: MC 0084 answers with the
+  global tick counter, as `RegionizedServer.getCurrentTick` now does off every region), `ServerChunkCache#1`, `#3`–`#9`,
   `ChunkTaskScheduler#1`–`#3`, `MCUtil#3` `#4`: work belongs to a region or the global tick.
   `MinecraftServer.processQueue` is **never drained**: its two drains are the `if (false) while
   (...)` loop (`MinecraftServer#21`, line 1878) and the poll at 1644 inside the dead pause-when-empty
@@ -302,6 +309,31 @@ Retired 2026-10-22 (claude-hookscheduler, Build 50 CraftScheduler hook concentra
 and `CraftScheduler#4` (re-keyed as `CraftScheduler#5`: same refusal, the line above it is now one
 `AuroraBridge.submitIfBridged` call).
 
+Retired 2026-10-22 (fable-lightingluminol-compat; MC 0084): `MinecraftServer#35` (`getTickCount` answers with the
+global tick counter instead of refusing, the LightingLuminol technique the gap analysis rated safe). MC 0085 opens its
+`sendBlockUpdated` lease *after* `ServerLevel#6` and leaves the inherited line above the guard in place, so that key is
+unchanged (the first attempt re-keyed it and reused the retired id `ServerLevel#9`; the policy test caught it).
+
+## 9. Relaxed thread checks (owner decision 2026-10-22, MC 0084–0086, Paper "relaxed thread checks")
+
+Owner decision 2026-10-22, verbatim after the risks were stated (data races, chunk corruption persisted to disk, item
+dupes, deadlocks): **"Tiru penuh LightingLuminol"**. The ownership-check families in section 4 are still present and
+still counted (201 / 46 / 17 / 17 / 0, unchanged), but what a failed check *does* is now a setting,
+`aurora.bridge.thread-checks` (`guards/ThreadChecks`; relaxed by default, effective only while
+`aurora.bridge.mode = safe`; `bridged` relaxes only inside a bridged plugin's task body; `enforced` is the behaviour
+this ledger described until 2026-10-22). This is a deliberate owner-decided weakening, recorded here so the policy
+script's unchanged counts are not read as "the invariant still holds": with relaxed checks the invariant is
+**advisory** -- the access proceeds on the wrong thread and is counted (`/perf plugins`, `/plugins <name>`), the
+bridge never quarantines for it, and the server is unsafe and unqualified (boot WARN, `/ver`). The checks that keep
+refusing whatever the setting: `ServerChunkCache#syncLoad` on a non-owning *region* thread (its wait could need its own
+tick, Folia#280; LightingLuminol kept it too) and everything outside the four families (owned refusals in section 5,
+`AsyncCatcher`, the `@Unsupported` API). Supporting changes gated on the same setting (`ThreadChecks.RELAXED_SCOPE`,
+a `static final`): the cross-region world-data pool (MC 0085), Moonrise's entity-section reentrancy guard skipped,
+`NearbyPlayers` / `ReferenceList` / `IteratorSafeOrderedReferenceSet` locked and the `RegionizedWorldData` hand-off
+points locked (upstream containers kept), the global tick allowed to load chunks synchronously (MC 0084). Not detected as guards and so not in the manifest: these are
+plain conditionals, not constant refusals. Decision and scope: [aurora-plugin-bridge.md, *Thread checks*](aurora-plugin-bridge.md#thread-checks-owner-decision-2026-10-22);
+rule override: [DEVELOPMENT.md 2.3, *Owner decisions*](../DEVELOPMENT.md#owner-decisions-that-override-this-rule).
+
 ## Wandering trader route ownership (0068)
 
 `WanderingTraderSpawner#1` is **KEEP-OWNED**: its region-local `tick` returns
@@ -361,57 +393,56 @@ origin is SourbyCraft or the note names a feature patch.
 | `Connection#4` | Folia | REROUTED | KEEP-OWNED | `net/minecraft/network/Connection.java:564` | `if (false && this.isConnected()) { // Folia - region threading - connection fixes` |
 | `Connection#5` | Folia | DEGRADED | KEEP-OWNED | `net/minecraft/network/Connection.java:681` | `if (true) { // Folia - region threading` |
 | `PacketUtils#1` | Folia | OWNERSHIP-CHECK | KEEP-OWNED | `net/minecraft/network/protocol/PacketUtils.java:29` | `throw new UnsupportedOperationException("Unknown listener: " + listener);` |
-| `MinecraftServer#1` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:485` | `if (true) {` |
-| `MinecraftServer#2` | SourbyCraft | API-REFUSED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:493` | `if (true) {` |
-| `MinecraftServer#3` | SourbyCraft | API-REFUSED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:501` | `if (true) {` |
-| `MinecraftServer#4` | SourbyCraft | API-REFUSED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:509` | `if (true) {` |
-| `MinecraftServer#5` | SourbyCraft | API-REFUSED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:517` | `if (true) {` |
-| `MinecraftServer#6` | Folia | FEATURE-DISABLED | REPLACE | `net/minecraft/server/MinecraftServer.java:925` | `if (false && spawnBonusChest) { // Folia - region threading - too lazy to hack around t...` |
-| `MinecraftServer#7` | Folia | REROUTED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:1115` | `if (true) {` |
-| `MinecraftServer#8` | Folia | REROUTED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:1344` | `if (true) {` |
-| `MinecraftServer#9` | Canvas | REROUTED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:1443` | `} if (false) { // Canvas - region threading` |
-| `MinecraftServer#28` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:1541` | `throw dev.iyanz.sourbycraft.guards.RegionRefusal.SERVER_QUEUE.error(); // Folia - regio...` |
-| `MinecraftServer#29` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:1546` | `throw dev.iyanz.sourbycraft.guards.RegionRefusal.SERVER_QUEUE.error(); // Folia - regio...` |
-| `MinecraftServer#30` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:1551` | `throw dev.iyanz.sourbycraft.guards.RegionRefusal.SERVER_QUEUE.error(); // Folia - regio...` |
-| `MinecraftServer#31` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:1555` | `if (true) throw dev.iyanz.sourbycraft.guards.RegionRefusal.SERVER_QUEUE.error(); // Fol...` |
-| `MinecraftServer#32` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:1575` | `throw dev.iyanz.sourbycraft.guards.RegionRefusal.SERVER_QUEUE.error(); // Folia - regio...` |
-| `MinecraftServer#15` | Folia | FEATURE-DISABLED | REPLACE | `net/minecraft/server/MinecraftServer.java:1628` | `if (false && emptyTickThreshold > 0) { // Folia - region threading - this is complicate...` |
-| `MinecraftServer#16` | Folia | REROUTED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:1717` | `if (false && nano - this.lastServerStatus >= STATUS_EXPIRE_TIME_NANOS) { // Folia - reg...` |
-| `MinecraftServer#17` | Folia | DEGRADED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:1734` | `if (false && fullSave) { // Folia - region threading - don't auto save level data` |
-| `MinecraftServer#33` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:1761` | `if (true) throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_LOOP.error(); // Folia ...` |
-| `MinecraftServer#19` | Folia | REROUTED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:1861` | `if (false && this.tickRateManager.runsNormally()) { // Folia - region threading - move ...` |
-| `MinecraftServer#20` | Folia | REROUTED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:1873` | `if (true) { // Folia - region threading` |
-| `MinecraftServer#21` | Folia | FEATURE-DISABLED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:1879` | `if (false) while (!this.processQueue.isEmpty()) { // Folia - region threading` |
-| `MinecraftServer#22` | Folia | REROUTED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:1904` | `if (true) { ServerLevel level = region.world;` |
-| `MinecraftServer#34` | Canvas | API-REFUSED | REMOVE | `net/minecraft/server/MinecraftServer.java:1976` | `throw dev.iyanz.sourbycraft.guards.RegionRefusal.ADD_TICKABLE.error(); // Canvas - regi...` |
-| `MinecraftServer#35` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:2279` | `throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_COUNT.error(); // Folia - region ...` |
-| `MinecraftServer#25` | Folia | REROUTED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:2316` | `if (true) {` |
-| `MinecraftServer#36` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:2338` | `if (true) throw dev.iyanz.sourbycraft.guards.RegionRefusal.SERVER_QUEUE.error(); // Fol...` |
-| `MinecraftServer#27` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:3163` | `return false; // Folia - region threading` |
+| `MinecraftServer#1` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:486` | `if (true) {` |
+| `MinecraftServer#2` | SourbyCraft | API-REFUSED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:494` | `if (true) {` |
+| `MinecraftServer#3` | SourbyCraft | API-REFUSED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:502` | `if (true) {` |
+| `MinecraftServer#4` | SourbyCraft | API-REFUSED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:510` | `if (true) {` |
+| `MinecraftServer#5` | SourbyCraft | API-REFUSED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:518` | `if (true) {` |
+| `MinecraftServer#6` | Folia | FEATURE-DISABLED | REPLACE | `net/minecraft/server/MinecraftServer.java:927` | `if (false && spawnBonusChest) { // Folia - region threading - too lazy to hack around t...` |
+| `MinecraftServer#7` | Folia | REROUTED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:1121` | `if (true) {` |
+| `MinecraftServer#8` | Folia | REROUTED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:1357` | `if (true) {` |
+| `MinecraftServer#9` | Canvas | REROUTED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:1457` | `} if (false) { // Canvas - region threading` |
+| `MinecraftServer#28` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:1555` | `throw dev.iyanz.sourbycraft.guards.RegionRefusal.SERVER_QUEUE.error(); // Folia - regio...` |
+| `MinecraftServer#29` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:1560` | `throw dev.iyanz.sourbycraft.guards.RegionRefusal.SERVER_QUEUE.error(); // Folia - regio...` |
+| `MinecraftServer#30` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:1565` | `throw dev.iyanz.sourbycraft.guards.RegionRefusal.SERVER_QUEUE.error(); // Folia - regio...` |
+| `MinecraftServer#31` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:1569` | `if (true) throw dev.iyanz.sourbycraft.guards.RegionRefusal.SERVER_QUEUE.error(); // Fol...` |
+| `MinecraftServer#32` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:1589` | `throw dev.iyanz.sourbycraft.guards.RegionRefusal.SERVER_QUEUE.error(); // Folia - regio...` |
+| `MinecraftServer#15` | Folia | FEATURE-DISABLED | REPLACE | `net/minecraft/server/MinecraftServer.java:1642` | `if (false && emptyTickThreshold > 0) { // Folia - region threading - this is complicate...` |
+| `MinecraftServer#16` | Folia | REROUTED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:1731` | `if (false && nano - this.lastServerStatus >= STATUS_EXPIRE_TIME_NANOS) { // Folia - reg...` |
+| `MinecraftServer#17` | Folia | DEGRADED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:1748` | `if (false && fullSave) { // Folia - region threading - don't auto save level data` |
+| `MinecraftServer#33` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:1775` | `if (true) throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_LOOP.error(); // Folia ...` |
+| `MinecraftServer#19` | Folia | REROUTED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:1875` | `if (false && this.tickRateManager.runsNormally()) { // Folia - region threading - move ...` |
+| `MinecraftServer#20` | Folia | REROUTED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:1887` | `if (true) { // Folia - region threading` |
+| `MinecraftServer#21` | Folia | FEATURE-DISABLED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:1893` | `if (false) while (!this.processQueue.isEmpty()) { // Folia - region threading` |
+| `MinecraftServer#22` | Folia | REROUTED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:1918` | `if (true) { ServerLevel level = region.world;` |
+| `MinecraftServer#34` | Canvas | API-REFUSED | REMOVE | `net/minecraft/server/MinecraftServer.java:1990` | `throw dev.iyanz.sourbycraft.guards.RegionRefusal.ADD_TICKABLE.error(); // Canvas - regi...` |
+| `MinecraftServer#25` | Folia | REROUTED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:2330` | `if (true) {` |
+| `MinecraftServer#36` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:2352` | `if (true) throw dev.iyanz.sourbycraft.guards.RegionRefusal.SERVER_QUEUE.error(); // Fol...` |
+| `MinecraftServer#27` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/MinecraftServer.java:3177` | `return false; // Folia - region threading` |
 | `CloneCommands#1` | Canvas | REROUTED | KEEP-OWNED | `net/minecraft/server/commands/CloneCommands.java:272` | `if (true) {` |
 | `ScoreboardCommand#1` | Canvas | API-REFUSED | REPLACE | `net/minecraft/server/commands/ScoreboardCommand.java:895` | `throw new UnsupportedOperationException("Score holder must be an entity");` |
 | `SummonCommand#1` | Folia | REROUTED | KEEP-OWNED | `net/minecraft/server/commands/SummonCommand.java:108` | `if (false) { // CraftBukkit - pass a spawn reason of "COMMAND" // Folia - region threading` |
 | `TeleportCommand#1` | Folia | REROUTED | KEEP-OWNED | `net/minecraft/server/commands/TeleportCommand.java:251` | `if (true) {` |
 | `ChunkMap#1` | Folia | REROUTED | KEEP-OWNED | `net/minecraft/server/level/ChunkMap.java:907` | `if (true) { // Folia - region threading` |
 | `ChunkMap#2` | Folia | REROUTED | KEEP-OWNED | `net/minecraft/server/level/ChunkMap.java:929` | `if (true) { // Folia - region threading` |
-| `ChunkMap#3` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ChunkMap.java:1131` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - ...` |
-| `ServerChunkCache#1` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerChunkCache.java:353` | `if (true) throw new UnsupportedOperationException("Unsupported in region threading"); /...` |
-| `ServerChunkCache#2` | Folia | OWNERSHIP-CHECK | KEEP-OWNED | `net/minecraft/server/level/ServerChunkCache.java:808` | `throw new UnsupportedOperationException("Unsupported in region threadin"); // Folia - r...` |
-| `ServerChunkCache#3` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerChunkCache.java:840` | `if (true) {` |
-| `ServerChunkCache#4` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerChunkCache.java:848` | `if (true) {` |
-| `ServerChunkCache#5` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerChunkCache.java:856` | `if (true) {` |
-| `ServerChunkCache#6` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerChunkCache.java:864` | `if (true) {` |
-| `ServerChunkCache#7` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerChunkCache.java:872` | `if (true) {` |
-| `ServerChunkCache#8` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerChunkCache.java:880` | `if (true) {` |
-| `ServerChunkCache#9` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerChunkCache.java:889` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - ...` |
-| `ServerLevel#1` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerLevel.java:512` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - ...` |
-| `ServerLevel#2` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerLevel.java:517` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - ...` |
-| `ServerLevel#3` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerLevel.java:522` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - ...` |
-| `ServerLevel#4` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerLevel.java:552` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - ...` |
-| `ServerLevel#5` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerLevel.java:1525` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - ...` |
-| `ServerLevel#6` | Folia | DEGRADED | KEEP-OWNED | `net/minecraft/server/level/ServerLevel.java:2038` | `if (false && this.isUpdatingNavigations) { // Folia - region threading` |
-| `ServerLevel#7` | Folia | DEGRADED | KEEP-OWNED | `net/minecraft/server/level/ServerLevel.java:2736` | `if (false) { TickingBlockEntity ticker = null; // Folia - region threading` |
-| `ServerLevel#8` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerLevel.java:3204` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - ...` |
+| `ChunkMap#3` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ChunkMap.java:1138` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - ...` |
+| `ServerChunkCache#1` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerChunkCache.java:362` | `if (true) throw new UnsupportedOperationException("Unsupported in region threading"); /...` |
+| `ServerChunkCache#2` | Folia | OWNERSHIP-CHECK | KEEP-OWNED | `net/minecraft/server/level/ServerChunkCache.java:817` | `throw new UnsupportedOperationException("Unsupported in region threadin"); // Folia - r...` |
+| `ServerChunkCache#3` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerChunkCache.java:849` | `if (true) {` |
+| `ServerChunkCache#4` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerChunkCache.java:857` | `if (true) {` |
+| `ServerChunkCache#5` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerChunkCache.java:865` | `if (true) {` |
+| `ServerChunkCache#6` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerChunkCache.java:873` | `if (true) {` |
+| `ServerChunkCache#7` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerChunkCache.java:881` | `if (true) {` |
+| `ServerChunkCache#8` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerChunkCache.java:889` | `if (true) {` |
+| `ServerChunkCache#9` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerChunkCache.java:898` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - ...` |
+| `ServerLevel#1` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerLevel.java:511` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - ...` |
+| `ServerLevel#2` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerLevel.java:516` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - ...` |
+| `ServerLevel#3` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerLevel.java:521` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - ...` |
+| `ServerLevel#4` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerLevel.java:551` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - ...` |
+| `ServerLevel#5` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerLevel.java:1528` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - ...` |
+| `ServerLevel#6` | Folia | DEGRADED | KEEP-OWNED | `net/minecraft/server/level/ServerLevel.java:2044` | `if (false && this.isUpdatingNavigations) { // Folia - region threading` |
+| `ServerLevel#7` | Folia | DEGRADED | KEEP-OWNED | `net/minecraft/server/level/ServerLevel.java:2757` | `if (false) { TickingBlockEntity ticker = null; // Folia - region threading` |
+| `ServerLevel#8` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerLevel.java:3237` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - ...` |
 | `ServerPlayer#1` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerPlayer.java:688` | `if (true) {` |
 | `ServerPlayer#2` | Canvas | REROUTED | KEEP-OWNED | `net/minecraft/server/level/ServerPlayer.java:825` | `if (true) return; // Canvas - region threading` |
 | `ServerPlayer#3` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerPlayer.java:2220` | `if (true) {` |
@@ -420,12 +451,12 @@ origin is SourbyCraft or the note names a feature patch.
 | `PrepareSpawnTask#1` | Folia | FEATURE-DISABLED | KEEP-OWNED | `net/minecraft/server/network/config/PrepareSpawnTask.java:257` | `if (false && this.eventFuture == null && org.spigotmc.event.player.PlayerSpawnLocationE...` |
 | `PlayerList#3` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/players/PlayerList.java:656` | `if (true) {` |
 | `ServerWaypointManager#1` | Canvas | API-REFUSED | KEEP-OWNED | `net/minecraft/server/waypoints/ServerWaypointManager.java:66` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas -...` |
-| `Entity#7` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/world/entity/Entity.java:5560` | `if (true) {` |
+| `Entity#7` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/world/entity/Entity.java:5588` | `if (true) {` |
 | `LivingEntity#1` | Canvas | REROUTED | KEEP-OWNED | `net/minecraft/world/entity/LivingEntity.java:606` | `if (true) { // Canvas - check frozen ticks before landing block` |
 | `WanderingTraderSpawner#1` | SourbyCraft | FEATURE-DISABLED | KEEP-OWNED | `net/minecraft/world/entity/npc/wanderingtrader/WanderingTraderSpawner.java:44` | `return; // SourbyCraft - global coordinator owns trader ticking` |
 | `ThrownEnderpearl#1` | Folia | DEGRADED | REPLACE | `net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java:103` | `if (true) {` |
 | `BaseCommandBlock#2` | SourbyCraft | OWNERSHIP-CHECK | KEEP-OWNED | `net/minecraft/world/level/BaseCommandBlock.java:187` | `return false;` |
-| `Level#1` | Canvas | OWNERSHIP-CHECK | KEEP-OWNED | `net/minecraft/world/level/Level.java:1376` | `if (!(this instanceof ServerLevel serverLevel)) throw new UnsupportedOperationException();` |
+| `Level#1` | Canvas | OWNERSHIP-CHECK | KEEP-OWNED | `net/minecraft/world/level/Level.java:1380` | `if (!(this instanceof ServerLevel serverLevel)) throw new UnsupportedOperationException();` |
 | `NaturalSpawner#1` | Canvas | REROUTED | KEEP-OWNED | `net/minecraft/world/level/NaturalSpawner.java:300` | `throw new UnsupportedOperationException(); // Canvas - optimize natural spawning` |
 | `ServerLevelAccessor#1` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/world/level/ServerLevelAccessor.java:13` | `throw new UnsupportedOperationException("Must be overridden");` |
 | `EndPortalBlock#1` | Folia | REROUTED | KEEP-OWNED | `net/minecraft/world/level/block/EndPortalBlock.java:78` | `if (false && !level.isClientSide() && level.dimension() == Level.END && entity instance...` |
@@ -434,14 +465,6 @@ origin is SourbyCraft or the note names a feature patch.
 | `StructureStart#2` | Folia | OWNERSHIP-CHECK | KEEP-OWNED | `net/minecraft/world/level/levelgen/structure/StructureStart.java:168` | `throw new UnsupportedOperationException("Use tryReference()"); // Folia - region threading` |
 | `Scoreboard#1` | Canvas | API-REFUSED | REMOVE | `net/minecraft/world/scores/Scoreboard.java:515` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas -...` |
 | `CpuInfoReport#1` | Folia | API-REFUSED | KEEP-OWNED | `dev/iyanz/aurora/engine/util/CpuInfoReport.java:31` | `throw new UnsupportedOperationException("not supported in non-linux environments");` |
-
-| family | sites | decision | description |
-| --- | --- | --- | --- |
-| `F-TICKTHREAD-ENSURE` | 201 | KEEP-OWNED | TickThread.ensureTickThread: throws IllegalStateException off the owning region thread |
-| `F-TICKTHREAD-IS` | 46 | KEEP-OWNED | TickThread.isTickThreadFor: ownership test that picks a region-safe branch |
-| `F-GLOBAL-TICK` | 17 | KEEP-OWNED | RegionizedServer.ensureGlobalTickThread: global-tick-only operations |
-| `F-TICKGUARD` | 17 | KEEP-OWNED | TickGuard: Canvas's configurable guards (region-scheduler.guard-severity) |
-| `F-ASYNCCATCHER` | 0 | KEEP-OWNED | AsyncCatcher.catchOp re-marked by the region engine |
 
 | family | sites | decision | description |
 | --- | --- | --- | --- |

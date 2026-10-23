@@ -138,6 +138,16 @@ Paper 0017–0019, pemindahan namespace API, ledger guard; CI 39622745507 hijau)
 dan gate yang masih terbuka tetap wajib.
 
 ### Keputusan owner
+- [x] **Thread checks bridge = LightingLuminol** (keputusan owner 2026-10-22, verbatim setelah risiko
+  disebutkan -- data race, korupsi chunk tersimpan ke disk, dupe item, deadlock: **"Tiru penuh LightingLuminol"**):
+  plugin legacy (non-folia-supported) jalan karena cek kepemilikan thread dilonggarkan, seperti LightingLuminol.
+  Diterapkan: `aurora.bridge.thread-checks` = `relaxed` (default owner) | `bridged` | `enforced`
+  (RESTART_REQUIRED, hanya berlaku saat `aurora.bridge.mode = safe`), port `ReferenceCountedRegionizedWorldDataPool`,
+  koleksi tersinkronisasi, teleport join, `getCurrentTick` fallback, event teleport legacy di rute async
+  (`docs/architecture/aurora-plugin-bridge.md` *Thread checks*, `docs/DEVELOPMENT.md` 2.3 *Owner decisions*).
+  Mengesampingkan aturan "never weaken region ownership" untuk fitur ini saja; kebijakan kejujuran tetap:
+  server relaxed **tidak aman dan tidak qualified**, dinyatakan di log boot, `/ver`, `/sourbycraft config`.
+  Bukti: unit test + boot agent test server (entri koordinasi `fable-lightingluminol-compat`); uji pemain nyata milik owner.
 - [x] Keputusan owner: `io.canvasmc` dihapus total tanpa shim (2026-10-21);
   diterapkan di `e0198582`, API kini `dev.iyanz.sourbycraft.api` (lihat `sourbyapi/README.md`).
 - [x] **Rencana rilis 4 tahap** (keputusan owner 2026-10-21): **Build 47** rilis saat ini (Aurora
@@ -447,6 +457,10 @@ dan gate yang masih terbuka tetap wajib.
   `BridgeTargetRoutingTest` v39 lulus (2026-10-07), SPEC V39; callback tanpa `EntityTask` tetap tidak
   dirutekan ke entity. Marker CI `LEGACY_ENTITY_*` lulus sejak run 37515867230
 - [-] Plugin legacy representatif dengan alur pemain dan soak
+- [-] Relaxed thread checks (LightingLuminol parity, keputusan owner 2026-10-22): kode + unit test + boot
+  agent test server dalam mode relaxed/enforced dengan set plugin Epic Skyblock; sisa: alur pemain nyata
+  (DeluxeMenus buka menu + klik, Essentials spawn/home/back, SSB2 `/is create`, ClearLag sweep) dan soak oleh owner;
+  tidak pernah boleh disebut qualified selama relaxed.
 
 ### Rilis
 - [ ] Label STABLE (Build 49) hanya setelah semua gate di atas lulus; Build 47 dirilis penuh (`release=true`) tanpa label STABLE atas keputusan owner 2026-10-21

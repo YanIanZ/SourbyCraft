@@ -103,7 +103,9 @@ class UpstreamDefaultTest(unittest.TestCase):
     reviewable, and makes a new one fail until somebody writes down the reason.
     """
 
-    # Upstream defaults the SourbyCraft feature patches change. None at the moment.
+    # Upstream defaults the SourbyCraft feature patches change. None at the moment: the relaxed-thread-checks
+    # port (MC 0084, 2026-10-22) locks the RegionizedWorldData hand-off points instead of swapping the containers
+    # LightingLuminol swapped, so that nothing here is redefined.
     APPROVED = {}
 
     def test_the_shipped_default_changes_are_exactly_the_approved_ones(self):

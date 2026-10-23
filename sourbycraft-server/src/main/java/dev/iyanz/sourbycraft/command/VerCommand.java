@@ -84,6 +84,7 @@ public class VerCommand extends Command {
         // Read-only: runtimeMode() would create the bridge runtime as a side effect of /ver.
         final var bridgeMode = dev.iyanz.sourbycraft.bridge.AuroraBridge.modeIfStarted();
         s.sendMessage(line("Aurora Bridge", bridgeMode == null ? "not-started" : bridgeMode.name().toLowerCase(java.util.Locale.ROOT)));
+        s.sendMessage(line("Thread checks", dev.iyanz.sourbycraft.guards.ThreadChecks.describe()));
         s.sendMessage(line("Bukkit API", Bukkit.getBukkitVersion()));
         s.sendMessage(line("Java", Runtime.version().toString()));
         final String configuredChannel = dev.iyanz.sourbycraft.update.AutoUpdateSettings.channel;

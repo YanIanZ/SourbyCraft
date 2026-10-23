@@ -25,7 +25,16 @@ public final class BridgeTelemetry {
     public record PluginStats(String plugin, long schedulerRedirects, long ownerHandoffs,
                               long rejectedOperations, long fatalViolations, boolean quarantined,
                               String lastFailure, long enableMillis, String startupCacheState,
-                              BodyTimes bodyTimes, long skippedRuns) {}
+                              BodyTimes bodyTimes, long skippedRuns, long relaxedOwnershipHits) {
+        /** Existing callers without the relaxed-check counter. */
+        public PluginStats(final String plugin, final long schedulerRedirects, final long ownerHandoffs,
+                           final long rejectedOperations, final long fatalViolations, final boolean quarantined,
+                           final String lastFailure, final long enableMillis, final String startupCacheState,
+                           final BodyTimes bodyTimes, final long skippedRuns) {
+            this(plugin, schedulerRedirects, ownerHandoffs, rejectedOperations, fatalViolations, quarantined, lastFailure,
+                enableMillis, startupCacheState, bodyTimes, skippedRuns, 0L);
+        }
+    }
 
     /** Recent-window size for body-time percentiles, per plugin and lane. */
     static final int BODY_WINDOW = 256;
@@ -103,6 +112,11 @@ public final class BridgeTelemetry {
         final AtomicLong fatal = new AtomicLong();
         /** Runs of a repeating async task skipped because the BRIDGE_IO lane was full; the task stays scheduled. */
         final AtomicLong skipped = new AtomicLong();
+        /**
+         * Region-ownership checks that failed inside this plugin's bridged bodies and did not throw because
+         * {@code aurora.bridge.thread-checks} relaxed them (no quarantine; guards/ThreadChecks).
+         */
+        final AtomicLong relaxed = new AtomicLong();
         final AtomicBoolean quarantined = new AtomicBoolean();
         final AtomicReference<String> lastFailure = new AtomicReference<>();
         final AtomicLong enableMillis = new AtomicLong(-1L);
@@ -135,6 +149,13 @@ public final class BridgeTelemetry {
         return c.fatal.incrementAndGet();
     }
 
+    /** Records an ownership check relaxed inside this plugin's body and returns the new total. */
+    long relaxed(final String plugin, final String description) {
+        final Counters c = of(plugin);
+        c.lastFailure.set(description);
+        return c.relaxed.incrementAndGet();
+    }
+
     /** Marks the plugin quarantined; returns true only for the call that changed it. */
     boolean quarantine(final String plugin) {
         return of(plugin).quarantined.compareAndSet(false, true);
@@ -155,7 +176,7 @@ public final class BridgeTelemetry {
         return new PluginStats(plugin, c.redirects.get(), c.handoffs.get(), c.rejected.get(), c.fatal.get(),
             c.quarantined.get(), c.lastFailure.get(), c.enableMillis.get(), c.cacheState.get(),
             new BodyTimes(c.bodies[BodyLane.REGION.ordinal()].snapshot(), c.bodies[BodyLane.GLOBAL.ordinal()].snapshot(),
-                c.bodies[BodyLane.ASYNC.ordinal()].snapshot()), c.skipped.get());
+                c.bodies[BodyLane.ASYNC.ordinal()].snapshot()), c.skipped.get(), c.relaxed.get());
     }
 
     public List<PluginStats> snapshot() {

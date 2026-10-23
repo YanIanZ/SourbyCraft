@@ -10,16 +10,52 @@ Credits: LightingLuminol and Luminol contributors, and their Folia/Paper upstrea
 Derived source:
   lightingluminol-server/src/main/java/meow/bacteriawa/lightingluminol/core/FoliaSchedulerCompatibility.java
   lightingluminol-server/paper-patches/features/0003-Folia-scheduler-compatibility.patch
+  (second port, 2026-10-22, owner decision "Tiru penuh LightingLuminol"; same revision and author, patch dates
+  2026-06-06 (paper 0002) and 2026-06-22 (minecraft 0001)):
+  lightingluminol-server/src/main/java/meow/bacteriawa/lightingluminol/core/ReferenceCountedRegionizedWorldDataPool.java
+  lightingluminol-server/paper-patches/features/0002-Base-Dirty-Patches.patch
+    (TickThread ensureTickThread bodies, CraftServer#getCurrentTick, CraftPlayer#teleport0 join,
+     ReferenceList / IteratorSafeOrderedReferenceSet synchronized, CraftWorld/CraftBlock worldDataPool uses)
+  lightingluminol-server/minecraft-patches/features/0001-Base-Dirty-Patches.patch
+    (RegionizedServer#ensureGlobalTickThread, RegionizedWorldData checks and synchronized collections,
+     EntityLookup section-status guard and synchronized slices, NearbyPlayers synchronized,
+     ServerChunkCache#syncLoad and MainThreadExecutor#pollTask global-tick paths, ChunkMap/ServerChunkCache
+     null tolerance, TickRegions.RegionStats, MinecraftServer#getTickCount, worldDataPool call sites in
+     BaseChunkSystemHooks, ServerEntityLookup, EntityLookup, ChunkMap, DistanceManager, ServerLevel,
+     ServerPlayerGameMode, Entity, LivingEntity, Level, ScheduledTickAccess/LevelAccessor, ServerExplosion,
+     Block, RedStoneWireBlock, LevelChunk; Entity#teleportAsync PlayerTeleportEvent and portal
+     PlayerPortalEvent hunks marked "// LightingLuminol Start")
 
 SourbyCraft adaptation locations:
   dev.iyanz.sourbycraft.bridge.FoliaSchedulerCompatibility
   sourbycraft-server/paper-patches/features/0007-SourbyCraft-adapt-LightingLuminol-global-scheduler-bridge.patch
+  (second port:)
+  dev.iyanz.sourbycraft.guards.ThreadChecks
+  dev.iyanz.sourbycraft.compat.luminol.RegionizedWorldDataPool, dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess
+  dev.iyanz.sourbycraft.entity.teleport.AsyncTeleportEvents, dev.iyanz.sourbycraft.entity.teleport.OwnedTeleport (joinAsync)
+  dev.iyanz.aurora.engine.util.TickGuard (relaxed branch)
+  sourbycraft-server/minecraft-patches/features/*-SourbyCraft-relaxed-region-ownership-checks-*.patch
+  sourbycraft-server/minecraft-patches/features/*-SourbyCraft-cross-region-world-data-for-relaxed-thread-checks-*.patch
+  sourbycraft-server/minecraft-patches/features/*-SourbyCraft-legacy-PlayerTeleportEvent-and-PlayerPortalEvent-*.patch
+  sourbycraft-server/paper-patches/features/*-SourbyCraft-relaxed-thread-checks-*.patch
+  Each ported site carries a "LightingLuminol" comment naming the upstream patch.
 
 Adaptations: route only explicitly global scheduler requests through the existing
 SAFE bridge; keep region/entity scheduling native; share the bridge's per-plugin
 indexes, exception classification and quarantine; notify the ScheduledTask adapter
 of bridge cancellation; use native global backend entry points to avoid recursion;
 close admission before plugin-disable callbacks and restore Bukkit task cleanup.
+
+Second-port adaptations: every commented-out throw became a check that asks
+dev.iyanz.sourbycraft.guards.ThreadChecks (setting aurora.bridge.thread-checks, default
+relaxed, effective only while the bridge admits plugins); the extra locking and the
+world-data pool are gated on a static final so an enforced server keeps the base's code
+paths; the RegionizedWorldData containers stay upstream's (their cross-thread touch points
+are locked instead of the containers being swapped), so the capture maps stay
+insertion-ordered; the pool never returns null; the teleport
+join is bounded and skipped where it could wait for its own tick; the portal event's
+cancel places the player back instead of dropping it; the ServerChunkCache refusal for a
+non-owning region thread is kept, as upstream kept it.
 
 The imported/derived code retains GNU General Public License version 3 as stated
 by the upstream project. Bacteriawa is not listed among upstream's MIT-exempt

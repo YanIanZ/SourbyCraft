@@ -106,4 +106,31 @@ class AuroraBridgeConfigTest {
         final AuroraConfig after = parse(Map.of(AuroraConfig.BRIDGE_SYNC_ROUTE_KEY, "global")).config();
         assertTrue(after.reloadSummary(before).startsWith("Aurora: 1 live change(s) applied; restart required: none"));
     }
+
+    // aurora.bridge.thread-checks (owner decision 2026-10-22 "Tiru penuh LightingLuminol")
+
+    @Test
+    void threadChecksDefaultToTheOwnersRelaxed() {
+        assertEquals(AuroraConfig.ThreadChecks.RELAXED, AuroraConfig.DEFAULT.bridge().threadChecks());
+        assertEquals(AuroraConfig.ThreadChecks.RELAXED, parse(Map.of()).config().bridge().threadChecks());
+    }
+
+    @Test
+    void threadChecksAcceptTheThreeValuesAndKeepTheDefaultOnATypo() {
+        assertEquals(AuroraConfig.ThreadChecks.ENFORCED,
+            parse(Map.of(AuroraConfig.BRIDGE_THREAD_CHECKS_KEY, "Enforced")).config().bridge().threadChecks());
+        assertEquals(AuroraConfig.ThreadChecks.BRIDGED,
+            parse(Map.of(AuroraConfig.BRIDGE_THREAD_CHECKS_KEY, "bridged")).config().bridge().threadChecks());
+        final AuroraConfig.Parsed typo = parse(Map.of(AuroraConfig.BRIDGE_THREAD_CHECKS_KEY, "lenient"));
+        assertEquals(AuroraConfig.ThreadChecks.RELAXED, typo.config().bridge().threadChecks());
+        assertTrue(typo.invalidKeys().contains(AuroraConfig.BRIDGE_THREAD_CHECKS_KEY));
+        final AuroraConfig.Parsed wrongType = parse(Map.of(AuroraConfig.BRIDGE_THREAD_CHECKS_KEY, true));
+        assertTrue(wrongType.invalidKeys().contains(AuroraConfig.BRIDGE_THREAD_CHECKS_KEY));
+    }
+
+    @Test
+    void threadChecksAreRestartRequired() {
+        assertEquals(AuroraConfig.Lifecycle.RESTART_REQUIRED, AuroraConfig.BRIDGE_THREAD_CHECKS.lifecycle());
+        // The reload report naming it is pinned by ThreadChecksRestartKeyTest (package-private restartChanges).
+    }
 }

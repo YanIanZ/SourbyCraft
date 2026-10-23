@@ -179,6 +179,11 @@ public final class BridgeRuntime {
     private final Map<String, LogWindow> logWindows = new ConcurrentHashMap<>();
     /** Test seam for the log rate limit and the body-time measurement. */
     java.util.function.LongSupplier nanoClock = System::nanoTime;
+    /**
+     * Whether failed ownership checks are relaxed this run ({@code guards/ThreadChecks}); then a guard hit
+     * inside a bridged body is counted and logged but never quarantines. Replaceable for tests.
+     */
+    java.util.function.BooleanSupplier relaxedChecks = () -> dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE;
 
     /** Unanchored sync tasks use the global region: no caller-region lookup. */
     public BridgeRuntime(final BridgeMode mode, final IntSupplier quarantineAfter, final Executor executor,
@@ -605,7 +610,44 @@ public final class BridgeRuntime {
         return true;
     }
 
+    /**
+     * Called by {@code guards/ThreadChecks.refuse} on the thread where an ownership check failed and the
+     * configured mode may let it proceed.
+     *
+     * @return whether a bridged body is running on this thread (the hit was charged to its plugin); {@code false}
+     *     leaves the decision and the logging to the caller
+     */
+    public static boolean reportRelaxedViolation(final String reason) {
+        final Invocation invocation = CURRENT.get();
+        if (invocation == null) return false;
+        invocation.runtime.relaxedViolation(invocation, reason == null ? "unknown" : reason);
+        return true;
+    }
+
+    /** Whether a bridged plugin's task body is running on the calling thread. */
+    public static boolean bridgedBodyOnThread() {
+        return CURRENT.get() != null;
+    }
+
+    /** Owner decision 2026-10-22 (LightingLuminol parity): count and log, never quarantine for ownership. */
+    private void relaxedViolation(final Invocation invocation, final String reason) {
+        final String plugin = invocation.plugin;
+        final long hits = this.telemetry.relaxed(plugin, "region-ownership check relaxed (aurora.bridge.thread-checks): " + reason);
+        final long suppressed = admitLog(plugin, "relaxed|" + reason);
+        if (suppressed >= 0) {
+            this.warn.accept("Bridged plugin " + plugin + " accessed state owned by another thread in task "
+                + invocation.taskId + " and was allowed to (" + reason + "; aurora.bridge.thread-checks relaxed; "
+                + hits + " such hit(s); not qualified)" + suppressedNote(suppressed), null);
+        }
+    }
+
     private void guardViolation(final Invocation invocation, final String reason) {
+        if (this.relaxedChecks.getAsBoolean()) {
+            // The engine's LOG-mode guard let the access through; with relaxed checks that is the configured
+            // behaviour, not a violation to quarantine for.
+            relaxedViolation(invocation, reason);
+            return;
+        }
         final String plugin = invocation.plugin;
         if (invocation.violationCounted) {
             // A loop touching a hundred foreign blocks is one bad body run, not a hundred.

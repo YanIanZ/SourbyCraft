@@ -1,0 +1,107 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Fri, 23 Oct 2026 00:15:52 +0700
+Subject: [PATCH] SourbyCraft - legacy PlayerTeleportEvent and
+ PlayerPortalEvent on the async teleport routes
+
+Adapted from LightingLuminol (GPL-3.0, Bacteriawa, revision 72d51c4d, minecraft patch 0001 Entity#teleportAsync and portal waiter hunks marked "// LightingLuminol Start"). The region-threading base fires only its own EntityTeleportAsyncEvent / EntityPortalAsyncEvent on these routes, so pre-Folia plugins never hear a /tp, a plugin teleportAsync, the owned ASYNC route of Entity#teleport or a nether/end portal. Entity#teleportAsync now fires PlayerTeleportEvent for players on the owning thread (cancel aborts and clears the transfer state, getTo() moves the destination and is re-validated, never twice for one call: OwnedTeleport suppresses it when Paper's synchronous body already ran the event); the portal waiter fires PlayerPortalEvent once the exit is known (a moved getTo() replaces the exit; cancel places the player back in the origin world where it stood, since it is already detached). Decisions in entity/teleport/AsyncTeleportEvents; all modes; escape hatch -Daurora.compat.async-teleport-events=false.
+
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+index 603f868b5f1b0e3bc4422846966d1a5030fad45a..e94a73eb1951d0e10d636a15a21fbdf2d03a208b 100644
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -4836,6 +4836,28 @@ public abstract class Entity
+             canvas$ensureCanTeleportAsync(destination, pos, teleportFlags);
+         }
+ 
++        // SourbyCraft start - legacy PlayerTeleportEvent on the async route; adapted from LightingLuminol MC 0001 Entity#teleportAsync ("// LightingLuminol Start"), fired here on the owning thread, honouring cancel and getTo(), never twice for one call (AsyncTeleportEvents)
++        if (this instanceof ServerPlayer sourbyPlayer && dev.iyanz.sourbycraft.entity.teleport.AsyncTeleportEvents.firesPlayerTeleport(callEvents)) {
++            final org.bukkit.Location sourbyTo = dev.iyanz.sourbycraft.entity.teleport.AsyncTeleportEvents.playerTeleport(sourbyPlayer, originWorld, currPos, destination, pos, yaw, pitch, cause);
++            if (sourbyTo == null) {
++                // cancelled by a listener: the same cleanup as a cancelled EntityTeleportAsyncEvent
++                final dev.iyanz.aurora.engine.threadedregions.entities.EntityRegionTransferState sourbyTransferState = getRegionTransferState();
++                if (sourbyTransferState instanceof dev.iyanz.aurora.engine.threadedregions.entities.EntityRegionTransferState.PluginTeleportAsyncState) {
++                    clearRegionTransferState();
++                } else if (sourbyTransferState != null) {
++                    throw new IllegalStateException("Teleport event was cancelled, but transfer state was present? Currently: " + sourbyTransferState);
++                }
++                return false;
++            }
++            pos = new Vec3(sourbyTo.getX(), sourbyTo.getY(), sourbyTo.getZ());
++            destination = ((org.bukkit.craftbukkit.CraftWorld) sourbyTo.getWorld()).getHandle();
++            yaw = sourbyTo.getYaw();
++            pitch = sourbyTo.getPitch();
++            // if plugin did something funky, kill
++            canvas$ensureCanTeleportAsync(destination, pos, teleportFlags);
++        }
++        // SourbyCraft end - legacy PlayerTeleportEvent on the async route
++
+         // verify and set the transfer state
+         final dev.iyanz.aurora.engine.threadedregions.entities.EntityRegionTransferState previousTransferState = getRegionTransferState();
+         if (previousTransferState == null) {
+@@ -4869,8 +4891,12 @@ public abstract class Entity
+         }
+     // Canvas end - region threading
+ 
++        // SourbyCraft - events can change the world or region after the initial classification.
++        final boolean sourbySameRegionAfterEvents = destination == this.level()
++            && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(destination, ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkX(pos), ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkZ(pos), 8)
++            && (((teleportFlags & TELEPORT_FLAG_LOAD_CHUNK) == 0L) || destination.areChunksLoadedForMove(this.getBoundingBoxAt(pos.x, pos.y, pos.z)));
+         // check for same region
+-        if (isSameRegion) { // Canvas - region threading
++        if (sourbySameRegionAfterEvents) { // Canvas - region threading // SourbyCraft - classify the final event destination
+             boolean hasPassengers = !this.passengers.isEmpty();
+             EntityTreeNode passengerTree = this.detachPassengers();
+ 
+@@ -5398,12 +5424,17 @@ public abstract class Entity
+         ca.spottedleaf.concurrentutil.completable.CallbackCompletable<TeleportTransition> portalInfoCompletable
+             = new ca.spottedleaf.concurrentutil.completable.CallbackCompletable<>();
+ 
+-        portalInfoCompletable.addWaiter((TeleportTransition info, Throwable throwable) -> {
++        portalInfoCompletable.addWaiter((TeleportTransition foundInfo, Throwable throwable) -> { // SourbyCraft - legacy PlayerPortalEvent: the found exit may be moved or refused below
+             if (!originWorld.removePendingTeleport(beforeFindDestination)) {
+                 // the shutdown thread has placed us back into the origin world at the original position
+                 // we just have to abandon this teleport to prevent duplication
+                 return;
+             }
++            // SourbyCraft start - legacy PlayerPortalEvent once the exit is known; adapted from LightingLuminol MC 0001 portal waiter hunk ("// LightingLuminol Start"), with cancel placing the player back where it stood instead of dropping it
++            final dev.iyanz.sourbycraft.entity.teleport.AsyncTeleportEvents.PortalOutcome sourbyOutcome = dev.iyanz.sourbycraft.entity.teleport.AsyncTeleportEvents.portalOutcome(this, originWorld, initialPosition, finalDestination, foundInfo, type.name());
++            final TeleportTransition info = sourbyOutcome.transition();
++            final ServerLevel placeLevel = sourbyOutcome.level();
++            // SourbyCraft end - legacy PlayerPortalEvent
+             originWorld.moonrise$getChunkTaskScheduler().chunkHolderManager.removeTicketAtLevel(
+                 TicketType.TELEPORT_HOLD_TICKET, initialPositionChunk,
+                 ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkHolderManager.MAX_TICKET_LEVEL,
+@@ -5420,7 +5451,7 @@ public abstract class Entity
+ 
+             // try to advance the state
+             advancePortalTransferState(new dev.iyanz.aurora.engine.util.ServerLocation(
+-                finalDestination,
++                placeLevel,
+                 info.position(),
+                 info.yRot(),
+                 info.xRot()
+@@ -5429,12 +5460,13 @@ public abstract class Entity
+             // Canvas end - region threading
+             // adjust passenger tree to final pos/rot/speed
+             for (EntityTreeNode node : fullPassengerTree) {
++                dev.iyanz.sourbycraft.entity.teleport.AsyncTeleportEvents.retargetPortalEntity(node.root, placeLevel); // SourbyCraft - cancellation/redirect restores each detached entity's level
+                 node.root.transform(info);
+             }
+ 
+             // place
+             passengerTree.root.placeInAsync(
+-                originWorld, finalDestination, Entity.TELEPORT_FLAG_LOAD_CHUNK | (takePassengers ? Entity.TELEPORT_FLAG_TELEPORT_PASSENGERS : 0L), // Canvas - region threading
++                originWorld, placeLevel, Entity.TELEPORT_FLAG_LOAD_CHUNK | (takePassengers ? Entity.TELEPORT_FLAG_TELEPORT_PASSENGERS : 0L), // Canvas - region threading
+                 passengerTree,
+                 (Entity teleported) -> {
+                     if (info.postTeleportTransition() != null) {
+@@ -5455,7 +5487,7 @@ public abstract class Entity
+                         EntityPostPortalAsyncEvent.getHandlerList().getRegisteredListeners().length > 0
+                     ) {
+                         new EntityPostPortalAsyncEvent(
+-                            this.getBukkitEntity(), originWorld.getWorld(), finalDestination.getWorld(),
++                            this.getBukkitEntity(), originWorld.getWorld(), placeLevel.getWorld(),
+                             switch (type) {
+                                 case END -> org.bukkit.PortalType.ENDER;
+                                 case NETHER -> org.bukkit.PortalType.NETHER;
