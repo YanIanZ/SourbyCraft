@@ -43,6 +43,12 @@ quarantine-after = 3
 # LIVE. caller-region = the region that was ticking when the task was scheduled, else global;
 # global = always the global region, where world access is refused.
 sync-route = "caller-region"
+# RESTART_REQUIRED, read early. What a failed region-ownership check does while mode = "safe" (with the bridge
+# off the checks are always enforced). relaxed = never throws, every caller (LightingLuminol parity; owner
+# decision 2026-10-22 "Tiru penuh LightingLuminol"); bridged = relaxed only inside a bridged plugin's task body;
+# enforced = throws, as before. relaxed/bridged are UNSAFE (data races, chunk corruption, item dupes, deadlocks
+# possible) and the server is not qualified; the boot log, /ver and /sourbycraft config say so.
+thread-checks = "relaxed"
 # LIVE. 0 = unlimited, otherwise 1..100000. Over-limit submissions are cancelled and diagnosed.
 max-pending-tasks-per-plugin = 0
 max-running-async-tasks-per-plugin = 0

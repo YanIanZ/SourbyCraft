@@ -85,6 +85,14 @@ public final class AuroraKeys {
         "Where a bridged plugin's Bukkit sync task runs. caller-region = on the region that was ticking when it was "
             + "scheduled (from a command or event), else the global region. global = always the global region, where "
             + "world access is refused. Ownership checks apply either way.");
+    public static final ConfigKey BRIDGE_THREAD_CHECKS = restart(AuroraConfig.BRIDGE_THREAD_CHECKS_KEY,
+        AuroraConfig.Bridge.DEFAULT.threadChecks().configValue(),
+        "What a failed region-ownership check does while mode = safe (with the bridge off the checks are always "
+            + "enforced). relaxed = never throws, for every caller (LightingLuminol parity; owner decision 2026-10-22 "
+            + "\"Tiru penuh LightingLuminol\"); bridged = relaxed only inside a bridged plugin's task body; enforced = "
+            + "throws, as before. relaxed and bridged are UNSAFE: data races, chunk corruption persisted to disk, item "
+            + "duplication and deadlocks are possible, and the server is not qualified. Read once when the checks first "
+            + "run; -Daurora.bridge.thread-checks= overrides this file.");
     public static final ConfigKey BRIDGE_MAX_PENDING = live(AuroraConfig.BRIDGE_MAX_PENDING_KEY,
         AuroraConfig.Bridge.DEFAULT.maxPendingTasksPerPlugin(),
         "Maximum pending bridged tasks per plugin. 0 = unlimited, otherwise 1..100000. New submissions above the limit "
@@ -172,7 +180,7 @@ public final class AuroraKeys {
         LANE_SAMPLING, CHUNK_GENERATION_METRICS,
         STALL_RECORDER_ENABLED, STALL_RECORDER_AFTER, STALL_RECORDER_REPEAT, STALL_RECORDER_MAX_DUMPS, STALL_RECORDER_KEEP_FILES,
         CPU_CORES,
-        BRIDGE_MODE, BRIDGE_QUARANTINE, BRIDGE_SYNC_ROUTE, BRIDGE_MAX_PENDING, BRIDGE_MAX_RUNNING_ASYNC,
+        BRIDGE_MODE, BRIDGE_QUARANTINE, BRIDGE_SYNC_ROUTE, BRIDGE_THREAD_CHECKS, BRIDGE_MAX_PENDING, BRIDGE_MAX_RUNNING_ASYNC,
         BRIDGE_IO_THREADS, BRIDGE_IO_QUEUE, STORAGE_THREADS, STORAGE_QUEUE,
         NETWORK_COUNTERS,
         COMMAND_BLOCKS, TICK_FUNCTIONS,

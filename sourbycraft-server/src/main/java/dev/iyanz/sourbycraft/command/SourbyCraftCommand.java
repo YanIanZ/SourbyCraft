@@ -95,6 +95,8 @@ public class SourbyCraftCommand extends Command {
         sender.sendMessage(UiPanel.section("RESTART_REQUIRED · configured values"));
         sender.sendMessage(UiPanel.row("Aurora CPU budget", config.cpu().cores() == 0 ? "auto (JVM-visible processors)" : Integer.toString(config.cpu().cores())));
         sender.sendMessage(UiPanel.row("Bridge configured / active", config.bridge().mode().name() + " / " + AuroraBridge.runtimeMode().name()));
+        sender.sendMessage(UiPanel.row("Bridge thread checks configured / effective", config.bridge().threadChecks().configValue() + " / "
+            + dev.iyanz.sourbycraft.guards.ThreadChecks.describe()));
         sender.sendMessage(UiPanel.row("Console style", SourbyCraftConfig.cfgGet(dev.iyanz.sourbycraft.config.UtilityKeys.CONSOLE_STYLE.path(), "auto") + " (JVM property may override)"));
         sender.sendMessage(UiPanel.hint("Scheduler budgets, AWF, startup provisioning, MOTD and updater interval also require restart."));
         sender.sendMessage(UiPanel.row("Pending tracked changes", SourbyCraftConfig.pendingRestartKeys().isEmpty() ? "none" : String.join(", ", SourbyCraftConfig.pendingRestartKeys())));
