@@ -27,9 +27,11 @@ Aurora optimizes in this order: correctness, reliability, stability, predictable
 efficiency, scalability, observability, then peak throughput. A faster result that weakens region
 ownership, persistence, shutdown or plugin semantics is not accepted.
 
-**Status.** [Build 48 — Aurora Nexus](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.2-r48)
-is the latest release (full, signed, not STABLE; [release notes](docs/releases/26.2-build-48-aurora-nexus.md),
-open gates in [docs/releases/26.2-build-48.md](docs/releases/26.2-build-48.md)). STABLE is planned for Build 49
+**Status.** [Build 49 — Aurora Nexus](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.2-r49)
+is the latest release (full, signed, not STABLE; [release notes](docs/releases/26.2-build-49-release.md),
+open gates in [docs/releases/26.2-build-49.md](docs/releases/26.2-build-49.md)). It brings YAML
+configuration with the one-time TOML conversion, AbyssLink (disabled by default) and the 48.4 shutdown
+fixes. STABLE still waits on the gate list; the 26.3 line starts at Build 100, codename Aurora Forge
 ([roadmap](docs/releases/ROADMAP-47-50.md)).
 
 ## Features
