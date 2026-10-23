@@ -957,8 +957,10 @@ jobs:
           set -- $reads
           test "${1:-0}" -gt "${2:-0}" || { echo "the second boot read no chunk back from AWF"; exit 1; }
 
-          # Third boot: export the world back to region files.
-          printf '[aurora.awf]\nworlds = []\nexport = ["world"]\n' > sourbycraft_config/aurora.toml
+          # Third boot: export the world back to region files. The first boot converted the
+          # fixture TOML to aurora.yml, so the change goes into the YAML file (a new .toml beside
+          # it would be ignored: *.yml always wins).
+          printf 'aurora:\n  awf:\n    worlds: []\n    export: ["world"]\n' > sourbycraft_config/aurora.yml
           boot third.log ''
           echo "----- AWF export boot -----"
           grep -E 'Aurora World Fabric' third.log || true
