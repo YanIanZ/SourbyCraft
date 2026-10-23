@@ -166,6 +166,13 @@ public final class BridgeRuntime {
     private final Executor executor;
     private final BridgeTelemetry telemetry;
     private final BiConsumer<String, Throwable> warn;
+    /**
+     * Test seam: whether the governed BRIDGE_IO lane has stopped. Package-private; production checks the
+     * Resource Governor, tests override it with a fixed answer because shutting the real lane down is
+     * process-wide.
+     */
+    static java.util.function.BooleanSupplier laneStopping = () -> dev.iyanz.sourbycraft.execution.ResourceGovernor.GLOBAL
+        .lane(dev.iyanz.sourbycraft.execution.ResourceGovernor.Lane.BRIDGE_IO).isShutdown();
     private final Map<String, PluginTasks> admitted = new ConcurrentHashMap<>();
     private final Map<Integer, Scheduled> scheduled = new ConcurrentHashMap<>();
     /** Active invocations per task; repeating async tasks may have overlapping bodies. */
@@ -548,19 +555,22 @@ public final class BridgeRuntime {
      * The BRIDGE_IO lane refused a timed run. A one-shot task has no later run, so it is cancelled.
      * A repeating task only loses this run: it stays scheduled, the run is counted as skipped, and
      * the log line is rate-limited -- one plugin filling the lane must not cancel another plugin's
-     * timer for good.
+     * timer for good. While the server stops the lane is shut down on purpose, so that is one quiet
+     * line per plugin instead of a WARN with a stack trace per skipped run.
      */
     private void rejectedIo(final Scheduled entry, final boolean repeating) {
         final String reason = "BRIDGE_IO lane is full or stopping";
         if (repeating) {
             if (this.scheduled.get(entry.task().id()) != entry || entry.task().cancelled()) return;
             this.telemetry.skipped(entry.plugin());
-            this.telemetry.failure(entry.plugin(), "run of repeating task " + entry.task().id() + " skipped: " + reason);
-            final long suppressed = admitLog(entry.plugin(), reason);
+            final boolean stopping = laneStopping.getAsBoolean();
+            final String acceptedReason = stopping ? "BRIDGE_IO lane is stopping" : reason;
+            this.telemetry.failure(entry.plugin(), "run of repeating task " + entry.task().id() + " skipped: " + acceptedReason);
+            final long suppressed = admitLog(entry.plugin(), acceptedReason);
             if (suppressed >= 0) {
                 this.warn.accept("Aurora Bridge skipped a run of repeating async task " + entry.task().id() + " for "
-                    + entry.plugin() + ": " + reason + "; the task stays scheduled" + suppressedNote(suppressed),
-                    new java.util.concurrent.RejectedExecutionException(reason));
+                    + entry.plugin() + ": " + acceptedReason + "; the task stays scheduled" + suppressedNote(suppressed),
+                    null);
             }
             return;
         }
