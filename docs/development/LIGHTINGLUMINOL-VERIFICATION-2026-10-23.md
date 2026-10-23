@@ -91,3 +91,11 @@ flows, sustained soak and broader AWF concurrency remain open. The regression te
 client-dimension correction, rotation/metadata, joined motion flags and early-settings deadlock provide structural
 or unit evidence; they do not replace those gates. Bridge mode defaults to OFF. SAFE's RELAXED/BRIDGED ownership
 modes remain unsafe and unqualified; settings and the teleport-event escape hatch require restart.
+
+## Publication preflight follow-up
+
+On 2026-10-23 a fresh hotfix `python3 -m unittest discover -s scripts -p 'test_*.py'` ran
+648 tests in 192.152s, OK with no skips (`hotfix-release-python.log`). Patch/baseline/guard/surface policies
+and the frozen candidate's identity/API/licences were rechecked successfully. A read-only source review of
+`fccb8ead` against `v26.2-r48.2` identified no concrete blocker in the scoped port; it ran no independent builds
+and does not certify concurrency or real-player behavior. Later pre-publication changes are release notes/comments only.
