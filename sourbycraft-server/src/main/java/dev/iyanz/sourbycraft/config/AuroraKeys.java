@@ -5,7 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Every key of {@code sourbycraft_config/aurora.toml}: path, default, lifecycle and the comment the
+ * Every key of {@code sourbycraft_config/aurora.yml}: path, default, lifecycle and the comment the
  * seeder writes beside it. The paths did not change in Build 49 (they were already grouped under
  * {@code [aurora.<service>]}); what changed is that the file gets a header and section comments, and
  * that Aurora keys an older deployment still kept in the utility TOML are moved here once
@@ -20,7 +20,7 @@ public final class AuroraKeys {
     private AuroraKeys() {}
 
     /** The file this table describes, relative to the server directory. */
-    public static final String FILE = "sourbycraft_config/aurora.toml";
+    public static final String FILE = "sourbycraft_config/aurora.yml";
 
     private static ConfigKey live(final String path, final Object defaultValue, final String comment, final String... legacy) {
         return ConfigKey.of(path, defaultValue, AuroraConfig.Lifecycle.LIVE, comment, legacy);
@@ -174,8 +174,29 @@ public final class AuroraKeys {
             + "connections are cut, and the shutdown is logged as AWF-SHUTDOWN-INCOMPLETE with every unconfirmed "
             + "storage (exit status 70), never as saved. 1-2147483647.");
 
-    /** Every key, in file order. */
-    public static final List<ConfigKey> KEYS = List.of(
+    /** AbyssLink's keys; part of {@link #KEYS} so the YAML seeder writes them, comments included. */
+    public static final List<ConfigKey> ABYSSLINK_KEYS = List.of(
+        restart("aurora.abysslink.enabled", false, "Optional native Leviathan control client; failure never blocks startup."),
+        restart("aurora.abysslink.host", "localhost", "Leviathan TCP listener host."),
+        restart("aurora.abysslink.port", 25580, "Leviathan TCP listener port."),
+        restart("aurora.abysslink.node-id", "sourbycraft", "Unique backend node bound to the client certificate by Leviathan."),
+        restart("aurora.abysslink.tls", true, "Verified TLS is mandatory; false is rejected."),
+        restart("aurora.abysslink.authenticated-identity", "localhost", "Expected DNS/IP certificate SAN; HTTPS endpoint identification is enforced."),
+        restart("aurora.abysslink.trust-certificate", "", "PEM CA path, or empty for JVM trust roots."),
+        restart("aurora.abysslink.client-certificate", "", "Backend PEM certificate chain, required when enabled."),
+        restart("aurora.abysslink.client-key", "", "Backend PEM private-key path; protect with filesystem permissions."),
+        restart("aurora.abysslink.reconnect-min-ms", 500, "Minimum retry delay, with bounded exponential jitter."),
+        restart("aurora.abysslink.reconnect-max-ms", 30000, "Maximum retry delay."),
+        restart("aurora.abysslink.heartbeat-ms", 5000, "Expected proxy heartbeat interval; backend echoes only. Match the proxy cadence; liveness expires after three intervals plus timeout."),
+        restart("aurora.abysslink.timeout-ms", 750, "Bounded handshake and ping timeout, 100-2000 milliseconds."),
+        restart("aurora.abysslink.ping-cache-ms", 250, "Short ping/miss cache; zero disables caching."),
+        restart("aurora.abysslink.max-pending-requests", 32, "Hard cap for ping requests and cache entries, 1-256."),
+        restart("aurora.abysslink.telemetry-ms", 10000, "Health sampling interval; unchanged reports suppressed, load reduces cadence."),
+        restart("aurora.abysslink.threat-reporting", true, "Bounded aggregate guard signals; no player addresses or arbitrary commands."),
+        restart("aurora.abysslink.max-sample-age-ms", 2000, "Reject older/future proxy samples; clocks must be synchronized."));
+
+    /** Every key, in file order, without AbyssLink. */
+    private static final List<ConfigKey> BASE_KEYS = List.of(
         ASYNC_PATHFINDING,
         LANE_SAMPLING, CHUNK_GENERATION_METRICS,
         STALL_RECORDER_ENABLED, STALL_RECORDER_AFTER, STALL_RECORDER_REPEAT, STALL_RECORDER_MAX_DUMPS, STALL_RECORDER_KEEP_FILES,
@@ -187,9 +208,13 @@ public final class AuroraKeys {
         AWF_WORLDS, AWF_EXPORT, AWF_BACKEND, AWF_PERSISTENCE, AWF_COMMIT_INTERVAL, AWF_RESIDENT_CHUNKS,
         AWF_RETAINED_GENERATIONS, AWF_COMMIT_ATTEMPTS, AWF_DELTA_GENERATIONS, AWF_COMMIT_DIRTY_BYTES, AWF_SHUTDOWN_DEADLINE);
 
+    /** Every key, in file order: AbyssLink's service keys follow the Aurora services it belongs to. */
+    public static final List<ConfigKey> KEYS =
+        java.util.stream.Stream.concat(BASE_KEYS.stream(), ABYSSLINK_KEYS.stream()).toList();
+
     /** The file header, written as the comment of the {@code [aurora]} table. */
     public static final String HEADER = String.join("\n",
-        "Aurora services (sourbycraft_config/aurora.toml) - Build 49 layout.",
+        "Aurora services (sourbycraft_config/aurora.yml) - Build 49 layout.",
         "",
         "Settings of the services SourbyCraft runs around the region engine: entity work, diagnostics, the CPU",
         "budget, the plugin compatibility bridge, Resource Governor lane budgets, network counters, world",
@@ -198,10 +223,10 @@ public final class AuroraKeys {
         "from this file before the configuration loads (cpu, bridge mode, AWF, chunk-generation metrics).",
         "",
         "Not in this file: the region engine (config/aurora-server.yml, config/aurora-worlds.yml), console,",
-        "players, messages, plugin provisioning and the updater (sourbycraft_config/sourbycraft_global_config.toml),",
+        "players, messages, plugin provisioning and the updater (sourbycraft_config/sourbycraft_global_config.yml),",
         "network limits (sourbycraft-security.yml). Reference: docs/AURORA-CONFIG.md.",
         "",
-        "Build 49 moved any Aurora key still kept in sourbycraft_global_config.toml into this file once.",
+        "Build 49 moved any Aurora key still kept in sourbycraft_global_config.yml into this file once.",
         "");
 
     /** Table comments, in file order. */

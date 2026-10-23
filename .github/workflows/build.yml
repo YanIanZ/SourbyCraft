@@ -858,6 +858,18 @@ jobs:
             || { echo "a global task submitted from onDisable was not refused"; exit 1; }
           grep -q 'LEGACY_DISABLE_BUKKIT_SUBMIT_OK' server.log \
             || { echo "a Bukkit task submitted from onDisable was not refused"; exit 1; }
+          grep -q 'LEGACY_DISABLE_UNLOADED_BLOCK_WRITE_REFUSED' server.log \
+            || { echo "a block write to an unloaded chunk from onDisable was not refused cleanly"; grep 'LEGACY_DISABLE_UNLOADED' server.log; exit 1; }
+          if grep -q 'LEGACY_DISABLE_UNLOADED_BLOCK_WRITE_ACCEPTED' server.log; then
+            echo "a block write to an unloaded chunk from onDisable was accepted after the scheduler halted"; exit 1
+          fi
+          grep -q 'region scheduler has halted' server.log \
+            || { echo "the onDisable chunk-load refusal did not name the halted scheduler"; exit 1; }
+          if grep -q 'Polling tasks from non-owned region' server.log; then
+            grep -B2 -A6 'Polling tasks from non-owned region' server.log
+            echo "the shutdown thread pumped the main-thread queue (feature patch 0087 regressed)"
+            exit 1
+          fi
           if grep -q '_WRONG' server.log; then
             grep '_WRONG' server.log; echo "a bridged scheduler call ended in the wrong state"; exit 1
           fi

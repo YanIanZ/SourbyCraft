@@ -106,3 +106,5 @@ docs (for example `SPEC.md` V/B numbers or `AURORA-TASKS.md` lines) point there.
 
 Dated plans and specs from the v6–v12, UniverseSpigot and Folia-base eras (May–September 2026,
 formerly `docs/superpowers/`) were removed on 2026-10-13; recover them from git history if needed.
+
+- [AbyssLink native backend](abysslink/README.md) — optional mTLS control connection, YAML setup, Folia-safe ping fallback and verification scope.

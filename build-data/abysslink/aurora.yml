@@ -1,0 +1,22 @@
+# AbyssLink section of sourbycraft_config/aurora.yml; seeded with the other Aurora keys.
+# Every option below is RESTART_REQUIRED. See docs/abysslink/INTEGRATION.md.
+aurora:
+  abysslink:
+    enabled: false
+    host: localhost
+    port: 25580
+    node-id: sourbycraft
+    tls: true
+    authenticated-identity: localhost
+    trust-certificate: ''
+    client-certificate: ''
+    client-key: ''
+    reconnect-min-ms: 500
+    reconnect-max-ms: 30000
+    heartbeat-ms: 5000
+    timeout-ms: 750
+    ping-cache-ms: 250
+    max-pending-requests: 32
+    telemetry-ms: 10000
+    threat-reporting: true
+    max-sample-age-ms: 2000

@@ -14,7 +14,7 @@ outputs): patch 0027 is applied as materialized commit `0569a90` (on top of 0026
 still untracked in the root repository) and was compiled into the demo jars (2026-10-07 00:00 and 00:36 at the
 latest, because the EDF patch `ade3b24` (then 0028, now parked) was stacked on it; the 22:40 build on 2026-10-06 likely too, not inspected). The
 metrics were never enabled on the demo, so `/perf chunks` stage samples do not exist. Nothing here is
-measured by 0027. A TOML switch (`aurora.diagnostics.chunk-generation-metrics` in `sourbycraft_config/aurora.toml`)
+measured by 0027. A TOML switch (`aurora.diagnostics.chunk-generation-metrics` in `sourbycraft_config/aurora.yml`)
 is **in progress** by another agent (log, owner instruction 2026-10-07 ~02:00, agent "codex-items"); the working
 tree already references the key in `SourbyCraftConfig`, `AuroraConfig` and `PerfChunksView` (the `/perf chunks` view, formerly inside `PerfCommand`), but no test or boot of it
 is recorded. The "Enable" section below still describes only the JVM property, which is the 0027 contract until
@@ -30,7 +30,7 @@ sources are not committed to the root repository. The owned recorder is
 
 Enable (either way; both are **RESTART_REQUIRED**, default false):
 
-1. In `sourbycraft_config/aurora.toml` (works on hosted panels that cannot pass JVM flags):
+1. In `sourbycraft_config/aurora.yml` (works on hosted panels that cannot pass JVM flags):
 
    ```toml
    [aurora.diagnostics]

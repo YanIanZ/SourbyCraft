@@ -188,3 +188,7 @@ the world directory on a disk image whose serving process was SIGSTOPped for 60 
 - Not exercised (no players): per-player saves on the owning region (`PlayerList.saveAll` ->
   `PlayerDataStorage.save`, stats, advancements) and the join-time read in `PrepareSpawnTask.spawn`; both are
   synchronous file I/O on a region thread by source reading.
+
+## AbyssLink control connection (2026-10-24)
+
+`abysslink/AbyssLinkConnectionManager` resolves DNS, loads PEM trust/client keys and generates the cryptographic nonce inside the existing bounded `VirtualExecutor`. Its dedicated single Netty event loop performs asynchronous connect, verified TLS and bounded frame I/O only. Startup never waits for the endpoint. Shutdown cancels retries/preparation and closes the channel/group without a synchronous network wait. `AbyssLinkSettings` reads YAML once at bootstrap, outside event loops. `PingCommand` captures `InetSocketAddress` on the target entity owner before invoking `GeoUtil.lookup(address)` on bounded I/O; no production GeoIP worker reads a Player. Control counters remain separate from gameplay wire counters.

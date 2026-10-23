@@ -46,10 +46,10 @@ index c6b9c0467f5098bb9e65c8d170f5dd7661cfb50c..2483551fbaebefd46e48be376ca4e644
              this.ticks.remove(tick);
          }
 diff --git a/io/papermc/paper/threadedregions/TickRegionScheduler.java b/io/papermc/paper/threadedregions/TickRegionScheduler.java
-index c6fc3f6b882c9fce3cf79d53a8b961fbac7a6d8d..d9b53333108add6e6d873e1472e1dedb52beaf99 100644
+index 53001fa54d4aadf406714f591472378a7aaecce2..f0760e0548f30a622d0d0db1f8e6340d43357717 100644
 --- a/io/papermc/paper/threadedregions/TickRegionScheduler.java
 +++ b/io/papermc/paper/threadedregions/TickRegionScheduler.java
-@@ -91,7 +91,9 @@ public final class TickRegionScheduler {
+@@ -90,7 +90,9 @@ public final class TickRegionScheduler {
      // Folia start - watchdog
      public static final FoliaWatchdogThread WATCHDOG_THREAD = new FoliaWatchdogThread();
      static {
@@ -60,7 +60,7 @@ index c6fc3f6b882c9fce3cf79d53a8b961fbac7a6d8d..d9b53333108add6e6d873e1472e1dedb
      }
      // Folia end - watchdog
  
-@@ -510,7 +512,8 @@ public final class TickRegionScheduler {
+@@ -509,7 +511,8 @@ public final class TickRegionScheduler {
                  this.currentTickingThread = Thread.currentThread();
              }
  
@@ -70,7 +70,7 @@ index c6fc3f6b882c9fce3cf79d53a8b961fbac7a6d8d..d9b53333108add6e6d873e1472e1dedb
              WATCHDOG_THREAD.addTick(runningTick); // Folia - watchdog
              try {
                  this.runRegionTasks(() -> {
-@@ -599,7 +602,8 @@ public final class TickRegionScheduler {
+@@ -598,7 +601,8 @@ public final class TickRegionScheduler {
                  this.currentTickingThread = Thread.currentThread();
              }
  

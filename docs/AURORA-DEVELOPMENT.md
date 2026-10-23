@@ -73,7 +73,7 @@ The next development phase must stop adding SourbyCraft-specific behavior to ups
 Continue using:
 
 ```text
-sourbycraft_config/sourbycraft_global_config.toml
+sourbycraft_config/sourbycraft_global_config.yml
 ```
 
 but add explicit logical namespaces:

@@ -20,8 +20,8 @@ stage of `SourbyCraftBootstrap`, so neither a reload nor the migration of that b
 
 | File | Owns | Format / loader | Build 49 change |
 | --- | --- | --- | --- |
-| `sourbycraft_config/sourbycraft_global_config.toml` | console, players, messages, plugin provisioning, updater | TOML (nightconfig), `SourbyCraftConfig` + `UtilityKeys` | **relaid**: `[console]`, `[players]`, `[messages]`, `[plugins.viaversion]`, `[plugins.protocollib]`, `[updater]`; old names migrated once, read until Build 50 |
-| `sourbycraft_config/aurora.toml` | Aurora services: entity, diagnostics, CPU budget, bridge, scheduler budgets, network, world, AWF | TOML (nightconfig), `SourbyCraftConfig` + `AuroraKeys`; early readers parse it directly | keys unchanged; header and section comments on a fresh file; Aurora keys left in the global TOML are moved here once |
+| `sourbycraft_config/sourbycraft_global_config.yml` | console, players, messages, plugin provisioning, updater | YAML (nightconfig + SnakeYAML comments), `SourbyCraftConfig` + `UtilityKeys` | **relaid**: `[console]`, `[players]`, `[messages]`, `[plugins.viaversion]`, `[plugins.protocollib]`, `[updater]`; old names migrated once, read until Build 50 |
+| `sourbycraft_config/aurora.yml` | Aurora services: entity, diagnostics, CPU budget, bridge, scheduler budgets, network, world, AWF | YAML (nightconfig + SnakeYAML comments), `SourbyCraftConfig` + `AuroraKeys`; early readers parse it directly | keys unchanged; header and section comments on a fresh file; Aurora keys left in the global file are moved here once |
 | `config/aurora-server.yml` | region engine, server-wide (`GlobalConfiguration`) | YAML (engine `ConfigurationProvider`) | **renamed** from `config/canvas-server.yml`, migrated once |
 | `config/aurora-worlds.yml` | region engine, world defaults (`WorldConfig`) | YAML (engine `ConfigurationProvider`) | **renamed** from `config/canvas-worlds.yml`, migrated once |
 | `<dimension storage dir>/canvas-patch.yml` | per-world override of `aurora-worlds.yml` | YAML | not renamed (separate plan; see the rename plan §1) |
@@ -29,13 +29,31 @@ stage of `SourbyCraftBootstrap`, so neither a reload nor the migration of that b
 | `config/paper-global.yml` `threaded-regions` | region scheduler sizing (`threads`, `grid-exponent`, `scheduler`) | Paper | unchanged; `threads: -1` resolves to `aurora.cpu.cores` or every processor |
 
 `/sourbycraft config` prints these locations and the loaded values; `/sourbycraft reload` re-reads
-the TOMLs, the security file and both engine files (never rewriting any of them).
+the YAML files, the security file and both engine files (never rewriting any of them).
 
-## 2. `sourbycraft_config/sourbycraft_global_config.toml`
+
+### YAML files and the one-time conversion
+
+The two `sourbycraft_config` files are YAML. On the first boot after the upgrade:
+
+1. A `*.yml` file is read as-is; a leftover `*.toml` beside it is ignored (one WARN names it).
+2. If only the `*.toml` exists it is parsed once and written as `*.yml` with every value and comment,
+   then renamed `<name>.toml.migrated` (`.migrated.2`, ... when a backup already exists). A failed
+   write deletes the partial YAML and leaves the TOML in place.
+3. An unparseable `*.toml` is never touched: the boot log names the file and the near-line
+   (`file (near line N: \`snippet\`): parser message`), the file keeps being read, and the values
+   that cannot be parsed fall back to their defaults. Fix the line, or delete the file to have the
+   defaults seeded on the next boot.
+
+The format is chosen by extension, so a read-only directory keeps reading the TOML file and nothing
+is renamed. Strings are always written double-quoted: YAML 1.1 words such as `off`, `on` and `yes`
+stay strings, so `aurora.bridge.mode` cannot silently become `false`.
+
+## 2. `sourbycraft_config/sourbycraft_global_config.yml`
 
 Table of record: `config/UtilityKeys.java`. A fresh server writes the file with a header, section
 comments and one comment per key stating lifecycle and default
-([example](config-examples/sourbycraft_global_config.toml)).
+([example](config-examples/sourbycraft_global_config.yml)).
 
 | Key (Build 49) | Was (until Build 48) | Type / default | Lifecycle | Consumer |
 | --- | --- | --- | --- | --- |
@@ -67,10 +85,10 @@ Restart tracking: `/sourbycraft reload` compares `console.style`, `console.gc-ad
 `updater.check-interval-minutes` and the Aurora restart keys against the **boot** snapshot, so a
 pending restart is reported until a new process starts, not until the next reload.
 
-## 3. `sourbycraft_config/aurora.toml`
+## 3. `sourbycraft_config/aurora.yml`
 
 Table of record: `config/AuroraKeys.java`; typed runtime snapshot `AuroraConfig`, AWF `AwfSettings`.
-The paths are unchanged since Build 48 ([example](config-examples/aurora.toml)).
+The paths are unchanged since Build 48 ([example](config-examples/aurora.yml)).
 
 | Key | Type / default | Lifecycle | Consumer |
 | --- | --- | --- | --- |
@@ -182,7 +200,7 @@ deleted and every rewritten or renamed file keeps a copy of what it was.
 | `sourbycraft_global_config.toml` old key names | any `ui.*`, `branding.*`, `sourbycraft.*`, `viaversion.*`, `protocollib.*`, `misc.auto_update.*` key present | the file is copied to `sourbycraft_global_config.toml.migrated`, each key moves to its Build 49 name with its value and the current comment, emptied tables disappear, the header and section comments and any missing key are written | INFO `Migrated the configuration files to the Build 49 layout: N key(s) renamed; ... values unchanged. Previous file kept as ...` | yes |
 | same, stale duplicate | old and new name both set | the old one is dropped from the file (the new one already decided) | listed in the same INFO (`stale duplicate(s) dropped`) | yes |
 | same, retired keys | `perf.smart-swap.*`, `swap.auto-create.*` | removed (nothing reads them) | listed in the same INFO | yes |
-| Aurora keys in the global TOML | `aurora.*` or `perf.ai.async-pathfinding` present | moved into `aurora.toml` (copied to `aurora.toml.migrated` first) under the current name with its comment; if `aurora.toml` already sets the key, the global copy is dropped (`aurora.toml` always won) | same INFO (`Aurora key(s) moved to sourbycraft_config/aurora.toml`) | yes |
+| Aurora keys in the global TOML | `aurora.*` or `perf.ai.async-pathfinding` present | moved into `aurora.toml` (copied to `aurora.toml.migrated` first) under the current name with its comment; if `aurora.toml` already sets the key, the global copy is dropped (`aurora.toml` always won) | same INFO (`Aurora key(s) moved to sourbycraft_config/aurora.yml`) | yes |
 | `perf.ai.async-pathfinding` inside `aurora.toml` | present without `aurora.entity.async-pathfinding` | renamed in place | same INFO | yes |
 | `sourbycraft-security.yml` | — | no key changed; nothing is rewritten | — | — |
 
@@ -239,3 +257,7 @@ Owner decision 2026-10-21. The new name wins when both are present; the old one 
 
 The engine configuration **file names** were renamed in Build 49 with the migration of §7 (they
 were kept in Build 48). The per-world `canvas-patch.yml` is not renamed.
+
+## AbyssLink YAML (new native service)
+
+The optional AbyssLink client uses `sourbycraft_config/aurora.yml`, under `aurora.abysslink`, default disabled; all keys require restart. `AuroraKeys.ABYSSLINK_KEYS` is part of the YAML key table, so the seeder writes those keys and their comments. See [AbyssLink setup](abysslink/INTEGRATION.md).

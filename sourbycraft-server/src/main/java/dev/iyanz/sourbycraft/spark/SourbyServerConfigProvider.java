@@ -232,15 +232,14 @@ public final class SourbyServerConfigProvider extends ServerConfigProvider {
         public JsonElement load(final String ignored, final ExcludedConfigFilter filter) throws IOException {
             final JsonObject root = new JsonObject();
 
-            add(root, "global.toml", this.directory.resolve("sourbycraft_config/sourbycraft_global_config.toml"),
-                TomlConfigParser.INSTANCE, filter);
+            addChosen(root, "global.yml", this.directory.resolve("sourbycraft_config/sourbycraft_global_config.yml"),
+                filter);
             // Aurora's own file. Splitting the engine's settings out of the unified file made
             // them invisible here: a Spark report showed SourbyCraft's messages and updater while
             // the settings that decide how the engine runs -- the CPU budget, async pathfinding,
             // lane sampling -- were absent from the one place an operator looks to find out what
             // a server was configured like when it was slow.
-            add(root, "aurora.toml", this.directory.resolve("sourbycraft_config/aurora.toml"),
-                TomlConfigParser.INSTANCE, filter);
+            addChosen(root, "aurora.yml", this.directory.resolve("sourbycraft_config/aurora.yml"), filter);
             add(root, "security.yml", this.directory.resolve("sourbycraft-security.yml"),
                 YamlConfigParser.INSTANCE, filter);
 
@@ -250,6 +249,17 @@ public final class SourbyServerConfigProvider extends ServerConfigProvider {
         @Override
         public Map<String, Object> parse(final BufferedReader reader) {
             throw new UnsupportedOperationException("SourbyCraft config group is composed from multiple files");
+        }
+
+        /** The YAML file, or the old TOML until it has been converted, with the parser its extension names. */
+        private static void addChosen(final JsonObject root, final String name, final Path yaml,
+                                      final ExcludedConfigFilter filter) throws IOException {
+            final Path file = dev.iyanz.sourbycraft.config.ConfigSources.existing(yaml);
+            if (file == null) return;
+            final ConfigParser parser = file.getFileName().toString().endsWith(".yml")
+                ? YamlConfigParser.INSTANCE
+                : TomlConfigParser.INSTANCE;
+            add(root, name, file, parser, filter);
         }
 
         private static void add(

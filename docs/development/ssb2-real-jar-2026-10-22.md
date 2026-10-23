@@ -56,7 +56,7 @@ finds nothing; naming the suite plus the package filter works.) BUILD SUCCESSFUL
 
 Jar: `slimServerJar` from this worktree, SHA-256 `dbefd9d05d1c4c9315631fbfbd8d7636a696d6b5be4b2ec7de76f6ef3b0c0b25`
 (`run.json`: git head `6176d517`, dirty false, `older_than_head_commit` false). `/ver` banner: `SourbyCraft Build 48`.
-`aurora.toml` = `docs/config-examples/aurora.toml` with only `[aurora.bridge] mode = "safe"` (RESTART_REQUIRED);
+`aurora.toml` = `docs/config-examples/aurora.yml` with only `[aurora.bridge] mode = "safe"` (RESTART_REQUIRED);
 every other harness default unchanged (`minecraft:normal`, seed 440044, view 4 / sim 5, 2048 MiB, no clients).
 
 ```sh
@@ -191,7 +191,7 @@ source `6176d517` clean); harness defaults otherwise (`minecraft:normal`, seed 4
 | `ssb/jars/SuperiorSkyblock2-2026.3.jar` (unported, local build of `868bebf`) | `plugins/SuperiorSkyblock2-2026.3.jar` (`--config-file`) | `007bee17a589ba2ee74b603a9bc0cc2d900182997b71ca4657b08b84c64ff597` |
 | `SSB-AuroraWorlds/build/libs/SSB-AuroraWorlds.jar` (existing local build 2026-10-13 23:54:22, newer than every source file; the repo has no commits, so no commit id) | `plugins/SuperiorSkyblock2/modules/SSB-AuroraWorlds.jar` (`--plugin-file`) | `d0b26b47f63df6f7eca05fc1e59c51c439b8e1c523fb1388d79306b9ed6d4721` |
 | SSB2's own `config.yml` from the jar, one line changed: `spawn.location: world, -17.5, 100, 40.25, 0, 0` (non-origin, negative X) | `plugins/SuperiorSkyblock2/config.yml` (`--plugin-file`) | `1991e9ef1dc33a9a57bebc2024aeb3d1f1d499600be0f2a49c8198a5c3b7968c` |
-| `aurora.toml` = `docs/config-examples/aurora.toml` with `[aurora.bridge] mode = "safe"` (run 1) | `sourbycraft_config/aurora.toml` | `f8fa3e8b0b1f082925aa617d8d06968b487a8714cf142a31f84fbe0edfd175dc` |
+| `aurora.toml` = `docs/config-examples/aurora.yml` with `[aurora.bridge] mode = "safe"` (run 1) | `sourbycraft_config/aurora.toml` | `f8fa3e8b0b1f082925aa617d8d06968b487a8714cf142a31f84fbe0edfd175dc` |
 | same, plus `sync-route = "global"` (run 2) | `sourbycraft_config/aurora.toml` | `b37546f93b610cba9ac9da7c5d68a34af690812011bc90325f412e7cb375eaf8` |
 
 ### Run `opus-harness-modules-1` (bridge safe, sync-route caller-region)

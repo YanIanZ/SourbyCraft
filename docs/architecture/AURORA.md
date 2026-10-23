@@ -113,7 +113,7 @@ sentence was corrected or annotated on 2026-10-07; everything else is open.
 16. AURORA-ENGINE-SYSTEM.md §23 Step 1 ("AuroraScheduler → Folia/Canvas adapter") versus AURORA-FULL-TRANSITION.md T4 ("No AuroraScheduler wrapper", deliberately not built).
 17. AURORA-INDEPENDENT-ENGINE.md §31 ("Canvas remains a valuable upstream source during migration"), README.md ("Canvas remains an upstream implementation source where required") and this file's §2 diagram ("Canvas retained internals") versus AGENTS.md and `gradle.properties` (Paper is the only upstream since 2026-10-05). — settled 2026-10-07: code decides: `gradle.properties` (lines 23-25) pins Paper as SourbyCraft's only upstream; the quoted Canvas-upstream sentences remain in their documents at the time of this check.
 18. independence.md §9 B2 ("the active Canvas-based 26.2 build") versus the same migration. — settled 2026-10-07: same migration as 17; `independence.md` §9 B2 still says "Canvas-based" at the time of this check.
-19. AURORA-DEVELOPMENT.md §3.1 (add Aurora namespaces to `sourbycraft_global_config.toml`) and this file's §3 (`sourbycraft_config/aurora/*.toml` split) versus the implemented `sourbycraft_config/aurora.toml` layered over the unified file (AURORA-CONFIG.md, FULL-TRANSITION T2). — settled 2026-10-07: code decides: `SourbyCraftConfig.java` (`AURORA_PATH = sourbycraft_config/aurora.toml`) layers that one file over the unified TOML; the `aurora/*.toml` split and the namespaces-in-the-unified-file plan are not what the code does. The two stale documents were not corrected by this pass.
+19. AURORA-DEVELOPMENT.md §3.1 (add Aurora namespaces to `sourbycraft_global_config.toml`) and this file's §3 (`sourbycraft_config/aurora/*.toml` split) versus the implemented `sourbycraft_config/aurora.yml` layered over the unified file (AURORA-CONFIG.md, FULL-TRANSITION T2). — settled 2026-10-07: code decides: `SourbyCraftConfig.java` (`AURORA_PATH = sourbycraft_config/aurora.yml`) layers that one file over the unified TOML; the `aurora/*.toml` split and the namespaces-in-the-unified-file plan are not what the code does. The two stale documents were not corrected by this pass.
 20. AURORA-UX.md ("its 13 bootstrap service stages") versus `core/SourbyCraftBootstrap.java` (`TOTAL_STAGES = 14`). **Fixed.**
 21. aurora-task-d-validation.md and AURORA-TASKS.md ("collision candidate 0019") versus the feature-patch directory, where the collision patch is now `0018-SourbyCraft-translate-block-collision-boxes-without-.patch` (staged rename). **Annotated.**
 22. `qualification-readiness.md` §3 ("storage backlog ✘") and README ("no vanilla save-queue metrics") versus `perf/StorageBacklog.java`/`RegionIoQueue` and `/perf storage` (per-world chunk-system I/O tasks accepted and not finished). Whether that satisfies the T7/T10 "storage backlog" metric is a decision, not settled here.
@@ -232,8 +232,8 @@ Aurora must deepen SourbyCraft configuration ownership instead of continuing to 
 Existing files remain supported:
 
 ```text
-sourbycraft_config/sourbycraft_global_config.toml   (Build 49 layout; older layouts migrated once)
-sourbycraft_config/aurora.toml
+sourbycraft_config/sourbycraft_global_config.yml   (Build 49 layout; older layouts migrated once)
+sourbycraft_config/aurora.yml
 sourbycraft-security.yml
 config/aurora-server.yml                             (was config/canvas-server.yml; migrated once)
 config/aurora-worlds.yml                             (was config/canvas-worlds.yml; migrated once)

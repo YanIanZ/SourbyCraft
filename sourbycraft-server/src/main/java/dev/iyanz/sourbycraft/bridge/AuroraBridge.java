@@ -29,8 +29,8 @@ import org.bukkit.plugin.Plugin;
  */
 public final class AuroraBridge {
 
-    private static final Path AURORA_FILE = Path.of("sourbycraft_config", "aurora.toml");
-    private static final Path UNIFIED_FILE = Path.of("sourbycraft_config", "sourbycraft_global_config.toml");
+    private static final Path AURORA_FILE = Path.of("sourbycraft_config", "aurora.yml");
+    private static final Path UNIFIED_FILE = Path.of("sourbycraft_config", "sourbycraft_global_config.yml");
     private static volatile BridgeRuntime runtime;
     private static volatile int earlyQuarantineAfter = AuroraConfig.Bridge.DEFAULT.quarantineAfter();
     private static volatile AuroraConfig.SyncRoute earlySyncRoute = AuroraConfig.Bridge.DEFAULT.syncRoute();
@@ -148,9 +148,10 @@ public final class AuroraBridge {
     static AuroraConfig.Bridge readEarly(final Path auroraFile, final Path unifiedFile) {
         final Map<String, Object> values = new HashMap<>();
         for (final Path file : List.of(unifiedFile, auroraFile)) {
-            if (!Files.isRegularFile(file)) continue;
-            try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-                final var config = new com.electronwill.nightconfig.toml.TomlParser().parse(reader);
+            final Path source = dev.iyanz.sourbycraft.config.ConfigSources.existing(file);
+            if (source == null) continue;
+            try (Reader reader = Files.newBufferedReader(source, StandardCharsets.UTF_8)) {
+                final var config = dev.iyanz.sourbycraft.config.ConfigSources.parse(source, reader);
                 for (final String key : List.of(AuroraConfig.BRIDGE_MODE_KEY, AuroraConfig.BRIDGE_QUARANTINE_KEY,
                     AuroraConfig.BRIDGE_SYNC_ROUTE_KEY, AuroraConfig.BRIDGE_MAX_PENDING_KEY,
                     AuroraConfig.BRIDGE_MAX_RUNNING_ASYNC_KEY, AuroraConfig.BRIDGE_THREAD_CHECKS_KEY)) {
@@ -158,8 +159,8 @@ public final class AuroraBridge {
                     if (value != null) values.put(key, value);
                 }
             } catch (final Exception unreadable) {
-                bootWarn("Aurora Bridge could not read " + file + " (" + unreadable.getMessage()
-                    + "); the bridge stays off for this run");
+                bootWarn("Aurora Bridge could not read " + dev.iyanz.sourbycraft.config.ConfigParseErrors.describe(source, unreadable)
+                    + "; fix that line or delete the file to reseed the defaults, because the bridge stays off this run");
                 return AuroraConfig.Bridge.DEFAULT;
             }
         }
@@ -261,7 +262,7 @@ public final class AuroraBridge {
     }
 
     static final String REFUSAL_REASON = "not marked folia-supported or canvas-supported; aurora.bridge.mode = off"
-        + " (set \"safe\" in sourbycraft_config/aurora.toml and restart to load it through the Aurora Bridge)";
+        + " (set \"safe\" in sourbycraft_config/aurora.yml and restart to load it through the Aurora Bridge)";
 
     static String refusalMessage(final String displayName, final String jarName) {
         return "Not loading " + displayName + " (" + jarName + "): it does not declare folia-supported or"

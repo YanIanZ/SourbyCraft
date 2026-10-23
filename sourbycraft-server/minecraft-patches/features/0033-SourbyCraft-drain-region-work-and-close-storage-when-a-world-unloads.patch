@@ -20,7 +20,7 @@ server stopped. Without a region the storage is now flushed and closed
 directly.
 
 diff --git a/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java b/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java
-index ac9669706b5ba1e62fe98d8e69af1c17e54574db..61312defc0c33fdbffa31a310d336aeb4448c285 100644
+index b6be665b27fbd0a7bce198b52c9793a164a6a07a..b325336584a632ab4ffffb82bb4fc58c47cac941 100644
 --- a/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java
 +++ b/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java
 @@ -58,7 +58,8 @@ public class WorldShutdownThread extends RegionShutdownThread {

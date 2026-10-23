@@ -18,8 +18,8 @@ import java.util.function.LongSupplier;
  */
 public final class AwfEngine {
 
-    private static final Path AURORA_FILE = Path.of("sourbycraft_config", "aurora.toml");
-    private static final Path UNIFIED_FILE = Path.of("sourbycraft_config", "sourbycraft_global_config.toml");
+    private static final Path AURORA_FILE = Path.of("sourbycraft_config", "aurora.yml");
+    private static final Path UNIFIED_FILE = Path.of("sourbycraft_config", "sourbycraft_global_config.yml");
 
     /** The process's instance, created on the first attach so the settings are read then. */
     private static volatile AwfEngine global;

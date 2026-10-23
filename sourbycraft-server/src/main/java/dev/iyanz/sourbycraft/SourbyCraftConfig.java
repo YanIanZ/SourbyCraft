@@ -5,9 +5,12 @@ import com.electronwill.nightconfig.core.file.FileNotFoundAction;
 import dev.iyanz.sourbycraft.util.SourbyLogger;
 import dev.iyanz.sourbycraft.config.AuroraConfig;
 import dev.iyanz.sourbycraft.config.AuroraKeys;
+import dev.iyanz.sourbycraft.config.ConfigFormatMigration;
 import dev.iyanz.sourbycraft.config.ConfigKey;
 import dev.iyanz.sourbycraft.config.ConfigMigration;
+import dev.iyanz.sourbycraft.config.ConfigParseErrors;
 import dev.iyanz.sourbycraft.config.ConfigSnapshot;
+import dev.iyanz.sourbycraft.config.ConfigSources;
 import dev.iyanz.sourbycraft.config.UtilityKeys;
 
 import java.nio.file.Files;
@@ -20,22 +23,25 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>Operator-facing settings live in two files, not one. SourbyCraft's own -- the console, player
  * slots, varied messages, plugin provisioning and the auto-updater -- are in
- * {@code sourbycraft_config/sourbycraft_global_config.toml} ({@link UtilityKeys} is the table of
+ * {@code sourbycraft_config/sourbycraft_global_config.yml} ({@link UtilityKeys} is the table of
  * every key), read through the typed {@link #cfgBool}/{@link #cfgInt}/{@link #cfgGet}/{@link #cfgStringList}
- * accessors below. Aurora's are in {@code sourbycraft_config/aurora.toml} ({@link AuroraKeys}): the
+ * accessors below. Aurora's are in {@code sourbycraft_config/aurora.yml} ({@link AuroraKeys}): the
  * engine and the server are different things, and an operator tuning the engine should not have to
  * read past join messages to find it.</p>
  *
- * <p>Build 49 relaid the utility file ({@code [console]}, {@code [players]}, {@code [messages]},
- * {@code [plugins.*]}, {@code [updater]}). {@link ConfigMigration} rewrites an older file once at
+ * <p>The files are YAML ({@code config.yaml.YamlFormat}: SnakeYAML values, comments kept). An
+ * existing {@code *.toml} is converted once at boot by {@link ConfigFormatMigration} and renamed
+ * {@code *.toml.migrated}; a {@code *.yml} always wins, and an unparseable old file is left alone and
+ * named with file + near-line. Build 49 relaid the utility file ({@code console}, {@code players},
+ * {@code messages}, {@code plugins.*}, {@code updater}). {@link ConfigMigration} rewrites an older file once at
  * boot, after copying it to {@code *.migrated}, and resolves old key names on every read until Build
  * 50 (one WARN per old key per load). The Aurora file is still layered <em>over</em> the unified one
  * for Aurora keys, so a deployment whose migration could not run (read-only directory) keeps the
- * value it had; where both files set the same Aurora key, aurora.toml wins and
+ * value it had; where both files set the same Aurora key, aurora.yml wins and
  * {@link #shadowedAuroraKeys} reports the copy that decides nothing.</p>
  *
- * <p>Both files use their own {@code nightconfig} {@link CommentedFileConfig}, resolved here
- * directly, with no upstream config-manager dependency.</p>
+ * <p>Both files use their own {@code nightconfig} {@link CommentedFileConfig} with a format chosen by
+ * extension, resolved here directly, with no upstream config-manager dependency.</p>
  *
  * <p><b>History.</b> An earlier version of this class was roughly a thousand lines, because it
  * also seeded and bridged a self-tuning performance engine, an anti-xray reveal layer, and a
@@ -46,7 +52,9 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class SourbyCraftConfig {
 
-    private static final Path CONFIG_PATH = Path.of("sourbycraft_config", "sourbycraft_global_config.toml");
+    private static final Path CONFIG_PATH = Path.of("sourbycraft_config", "sourbycraft_global_config.yml");
+    /** The pre-YAML file, converted once at boot and kept as {@code *.toml.migrated}. */
+    private static final Path LEGACY_CONFIG_PATH = Path.of("sourbycraft_config", "sourbycraft_global_config.toml");
     /**
      * The file {@link #file()} opens. Always {@link #CONFIG_PATH} in production; only the test seam
      * ({@link #installForTesting}) ever points it elsewhere.
@@ -58,7 +66,11 @@ public final class SourbyCraftConfig {
      * read past join messages to find it. The unified file is still read underneath, so a
      * deployment that predates this keeps working.
      */
-    private static final Path AURORA_PATH = Path.of("sourbycraft_config", "aurora.toml");
+    private static final Path AURORA_PATH = Path.of("sourbycraft_config", "aurora.yml");
+    private static final Path LEGACY_AURORA_PATH = Path.of("sourbycraft_config", "aurora.toml");
+    /** What {@link #file()} and {@link #auroraFile()} actually opened (the legacy TOML in a read-only directory). */
+    private static volatile Path activeUtilityPath = CONFIG_PATH;
+    private static volatile Path activeAuroraPath = AURORA_PATH;
 
     private static volatile CommentedFileConfig FILE;
     private static volatile CommentedFileConfig AURORA_FILE;
@@ -253,7 +265,7 @@ public final class SourbyCraftConfig {
         if (newFile) return;
         final ConfigMigration.Plan plan = ConfigMigration.plan(f, aurora);
         if (plan.isEmpty()) return;
-        final ConfigMigration.Report report = ConfigMigration.apply(plan, f, utilityPath, aurora, AURORA_PATH);
+        final ConfigMigration.Report report = ConfigMigration.apply(plan, f, activeUtilityPath, aurora, activeAuroraPath);
         migratedUtilityFile = plan.touchesUtility();
         SourbyLogger.info(report.summary());
     }
@@ -274,7 +286,7 @@ public final class SourbyCraftConfig {
         try {
             f.load();
         } catch (Throwable t) {
-            return new ReloadReport(false, List.of("Could not read " + CONFIG_PATH + ": " + t.getMessage()));
+            return new ReloadReport(false, List.of("Could not read " + ConfigParseErrors.describe(CONFIG_PATH, t)));
         }
         // A reload never writes defaults back to an existing file, including after a failed initial save.
         newFile = false;
@@ -284,7 +296,7 @@ public final class SourbyCraftConfig {
         else try {
             engineFile.load();
         } catch (Throwable t) {
-            return new ReloadReport(false, List.of("Could not read " + AURORA_PATH + ": " + t.getMessage(),
+            return new ReloadReport(false, List.of("Could not read " + ConfigParseErrors.describe(AURORA_PATH, t),
                 "No new config snapshot published; runtime retains its previously loaded settings."));
         }
         // Missing utility defaults are seeded in memory exactly as at boot; existing disk bytes stay unchanged.
@@ -376,43 +388,49 @@ public final class SourbyCraftConfig {
 
     private static synchronized CommentedFileConfig auroraFile() {
         if (AURORA_FILE != null) return AURORA_FILE;
+        final Path path = ConfigFormatMigration.choose(AURORA_PATH, LEGACY_AURORA_PATH);
         try {
-            if (AURORA_PATH.getParent() != null) {
-                Files.createDirectories(AURORA_PATH.getParent());
+            if (path.getParent() != null) {
+                Files.createDirectories(path.getParent());
             }
-            newAuroraFile = !Files.exists(AURORA_PATH);
-            final CommentedFileConfig f = CommentedFileConfig.builder(AURORA_PATH)
+            newAuroraFile = !ConfigSources.anyExists(AURORA_PATH);
+            final CommentedFileConfig f = CommentedFileConfig.builder(path, ConfigSources.formatFor(path))
                 .sync() // save() completes before reporting persistence or allowing reload
                 .preserveInsertionOrder() // the file keeps the operator's (or the seeder's) order
                 .onFileNotFound(FileNotFoundAction.CREATE_EMPTY)
                 .build();
             f.load();
+            activeAuroraPath = path;
             AURORA_FILE = f;
         } catch (Throwable t) {
-            SourbyLogger.error("could not open sourbycraft_config/aurora.toml; Aurora settings "
-                + "will be read from the unified file and its defaults", t);
+            SourbyLogger.error("could not open " + ConfigParseErrors.describe(path, t)
+                + "; Aurora settings are read from the unified file and its defaults", t);
         }
         return AURORA_FILE;
     }
 
     private static synchronized CommentedFileConfig file() {
         if (FILE != null) return FILE;
-        final Path path = utilityPath;
+        // The test seam may point anywhere; production converts the old TOML once, then opens the YAML.
+        final Path path = utilityPath.equals(CONFIG_PATH)
+            ? ConfigFormatMigration.choose(CONFIG_PATH, LEGACY_CONFIG_PATH)
+            : utilityPath;
         try {
             if (path.getParent() != null) {
                 Files.createDirectories(path.getParent());
             }
-            newFile = !Files.exists(path);
-            CommentedFileConfig f = CommentedFileConfig.builder(path)
+            newFile = !ConfigSources.anyExists(path);
+            CommentedFileConfig f = CommentedFileConfig.builder(path, ConfigSources.formatFor(path))
                 .sync() // save() completes before reporting persistence or allowing reload
                 .preserveInsertionOrder() // the file keeps the operator's (or the seeder's) order
                 .onFileNotFound(FileNotFoundAction.CREATE_EMPTY)
                 .build();
             f.load();
+            activeUtilityPath = path;
             FILE = f;
         } catch (Throwable t) {
-            SourbyLogger.error("could not open sourbycraft_config/sourbycraft_global_config.toml; "
-                + "every read will fall back to its default", t);
+            SourbyLogger.error("could not open " + ConfigParseErrors.describe(path, t)
+                + "; every read falls back to its default", t);
         }
         return FILE;
     }

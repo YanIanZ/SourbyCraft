@@ -6,7 +6,7 @@ Subject: [PATCH] SourbyCraft - console section rules before plugin load, world
 
 
 diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
-index 087a7a5b92199925f34110b7ca97795f86363cab..2b1f40371ffb11555eea5de5cf82bb9de70fc83c 100644
+index 7c2f049ff2c6adadf3e2f2702206fed963ac182a..a0b7305f5e51b1392ed8abc210aac1271a2525d7 100644
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
 @@ -656,6 +656,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
@@ -18,7 +18,7 @@ index 087a7a5b92199925f34110b7ca97795f86363cab..2b1f40371ffb11555eea5de5cf82bb9d
          this.server.spark.registerCommandBeforePlugins(this.server); // Paper - spark
          this.server.spark.enableAfterPlugins(this.server); // Paper - spark
 diff --git a/net/minecraft/server/dedicated/DedicatedServer.java b/net/minecraft/server/dedicated/DedicatedServer.java
-index b2b161cc561fc871f253aea09f91010c07b9516a..1ec29418ca6b8aee029d2ccbd463d7f9ebf7b19b 100644
+index afde7a601783ba1206973090e802a78b51e50a31..22fc9fe2d196f78374ba4bb7c7bf0343fc944473 100644
 --- a/net/minecraft/server/dedicated/DedicatedServer.java
 +++ b/net/minecraft/server/dedicated/DedicatedServer.java
 @@ -315,6 +315,7 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface

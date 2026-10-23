@@ -25,7 +25,7 @@ request, the held stop still runs. Stops from any other thread keep the
 old behaviour; a normal startup is unchanged.
 
 diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
-index 087a7a5b92199925f34110b7ca97795f86363cab..7327ca578a57c7425c505d204e4ac7694ce52900 100644
+index a32d4c59630f8c0b22201c6d9d831249a1ce82ba..25d702c1f2c4d049f66730ffdbde7d4066aa89fc 100644
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
 @@ -1076,7 +1076,10 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
@@ -39,7 +39,7 @@ index 087a7a5b92199925f34110b7ca97795f86363cab..7327ca578a57c7425c505d204e4ac769
          // halt scheduler
          // don't wait, we may be on a scheduler thread
          io.papermc.paper.threadedregions.TickRegions.getScheduler().halt(false, 0L);
-@@ -1333,6 +1336,13 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1332,6 +1335,13 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
              if (!this.initServer()) {
                  throw new IllegalStateException("Failed to initialize server");
              }
@@ -53,7 +53,7 @@ index 087a7a5b92199925f34110b7ca97795f86363cab..7327ca578a57c7425c505d204e4ac769
  
              this.nextTickTimeNanos = Util.getNanos();
              this.initTickSchedule(); // Paper - improve tick loop
-@@ -1440,6 +1450,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1439,6 +1449,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
              }
  
              this.onServerCrash(report);

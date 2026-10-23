@@ -25,7 +25,7 @@ public final class PluginProvisioner {
     private PluginProvisioner() {}
 
     private static final Path UNIFIED_CONFIG =
-        Paths.get("sourbycraft_config", "sourbycraft_global_config.toml");
+        Paths.get("sourbycraft_config", "sourbycraft_global_config.yml");
     private static volatile Path configuredPluginsDirectory = Paths.get("plugins");
 
     /**

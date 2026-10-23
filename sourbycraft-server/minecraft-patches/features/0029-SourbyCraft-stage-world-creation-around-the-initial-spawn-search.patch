@@ -48,7 +48,7 @@ index 2b02cf932cbac18c58ac7cbc98c2f0196d34843b..ac2fd37a30574d616626bb887e10c1de
      // one main thread. On Folia, it is required that the non-full load can occur completely asynchronously to avoid deadlock
      // between regions
 diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
-index a63312e01cc7875423e8850441522cf5a37d74a0..65a83fd0a0b765106e64744de0370290ae64eebd 100644
+index 3850c22bf2fb8697fde34f099c490e371d00a51c..6fcda40db695b91263463312ef90bb5da8c833fa 100644
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
 @@ -757,9 +757,14 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa

@@ -3,6 +3,7 @@ package dev.iyanz.sourbycraft.bridge;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.iyanz.sourbycraft.config.AuroraConfig.BridgeMode;
@@ -376,8 +377,7 @@ class BridgeRuntimeTest {
     }
 
     @Test
-    void ioSaturationCancelsTheTaskAndItsLateTimerHandle() {
-        final AtomicBoolean timerCancelled = new AtomicBoolean();
+    void ioSaturationCancelsTheTaskAndItsLateTimerHandle() {        final AtomicBoolean timerCancelled = new AtomicBoolean();
         final BridgeRuntime.Executor saturated = new BridgeRuntime.Executor() {
             @Override public BridgeRuntime.Handle global(Object o, Runnable b, long d, long p) { throw new AssertionError(); }
             @Override public BridgeRuntime.Handle async(Object o, Runnable b, long d, long p) { throw new AssertionError(); }
@@ -739,6 +739,47 @@ class BridgeRuntimeTest {
         bridge.cancel(31);
         rejections.get(0).run();
         assertEquals(2, bridge.telemetry().stats("A").skippedRuns(), "a cancelled timer's late rejection is ignored");
+    }
+
+    // r48.3: a stopped BRIDGE_IO lane names the real reason and logs no stack trace. The lane is
+    // shut down on purpose while the server stops, so a skipped run must not read as lane saturation
+    // nor carry a throwable produced at the rejection site.
+
+    @Test
+    void stoppingLaneLogsTheSkippedRunQuietlyWithoutAStackTrace() {
+        final List<Runnable> rejections = new ArrayList<>();
+        final List<Throwable> thrown = new ArrayList<>();
+        final BridgeRuntime.Executor stopped = new BridgeRuntime.Executor() {
+            @Override public BridgeRuntime.Handle global(Object o, Runnable b, long d, long p) { throw new AssertionError(); }
+            @Override public BridgeRuntime.Handle async(Object o, Runnable b, long d, long p) { throw new AssertionError(); }
+            @Override public BridgeRuntime.Handle async(Object o, Runnable b, long d, long p, Runnable rejected) {
+                rejections.add(rejected);
+                return () -> {};
+            }
+            @Override public BridgeRuntime.Handle region(Object o, dev.iyanz.sourbycraft.execution.region.RegionAnchor a,
+                                                         Runnable b, long d, long p) { throw new AssertionError(); }
+            @Override public BridgeRuntime.Handle entity(Object o, Object e, Runnable b, long d, long p,
+                                                         Runnable r) { throw new AssertionError(); }
+        };
+        final BridgeRuntime bridge = new BridgeRuntime(BridgeMode.SAFE, () -> 3, stopped, new BridgeTelemetry(),
+            (message, failure) -> { this.warnings.add(message); thrown.add(failure); });
+        final java.util.function.BooleanSupplier previous = BridgeRuntime.laneStopping;
+        BridgeRuntime.laneStopping = () -> true;
+        try {
+            bridge.admit("A");
+            assertTrue(bridge.submit("A", null, new FakeTask(41, false, 20, () -> {}), 0));
+            rejections.get(0).run();
+        } finally {
+            BridgeRuntime.laneStopping = previous;
+        }
+        assertEquals(1, this.warnings.size(), "one rate-limited line for the stop");
+        assertTrue(this.warnings.get(0).contains("BRIDGE_IO lane is stopping"), this.warnings.get(0));
+        assertNull(thrown.get(0), "a stopping lane logs no stack trace");
+        final BridgeTelemetry.PluginStats stats = bridge.telemetry().stats("A");
+        assertEquals(1, stats.skippedRuns());
+        assertEquals(0, stats.rejectedOperations());
+        assertEquals("run of repeating task 41 skipped: BRIDGE_IO lane is stopping", stats.lastFailure(),
+            "the recorded reason names the stop, not saturation");
     }
 
     // ENG-12: re-admitting a quarantined plugin says so once.

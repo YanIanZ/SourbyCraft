@@ -199,7 +199,7 @@ operator must edit**, not *when* a value takes effect.
 
 | Current | Proposed | Rationale |
 |---|---|---|
-| `config/canvas-server.yml` | `config/aurora-server.yml` | Matches the engine's public identity (`dev.iyanz.aurora.engine`, logger `Aurora`, `sourbycraft_config/aurora.toml`). Minimal rename, stays in the flat `config/` directory that Paper and Spark already scan. |
+| `config/canvas-server.yml` | `config/aurora-server.yml` | Matches the engine's public identity (`dev.iyanz.aurora.engine`, logger `Aurora`, `sourbycraft_config/aurora.yml`). Minimal rename, stays in the flat `config/` directory that Paper and Spark already scan. |
 | `config/canvas-worlds.yml` | `config/aurora-worlds.yml` | Same; keeps the `-worlds` suffix that the Spark key already renders as `world-defaults.yml`. |
 
 Alternatives considered:

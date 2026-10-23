@@ -1039,7 +1039,9 @@ class WorldReuseAndKillTest(HarnessCase):
         for dest in ("../escape.yml", "/abs.yml", "server.properties", "eula.txt", "run.json",
                      "outputs/x.yml", "world/level.dat", "tmp/x.yml", "config/../x.yml",
                      "sourbycraft_config/aurora.toml",
+                     "sourbycraft_config/aurora.yml",
                      "sourbycraft_config/sourbycraft_global_config.toml",
+                     "sourbycraft_config/sourbycraft_global_config.yml",
                      "C:/x.yml", "config\\..\\x.yml", ".", "config/"):
             with self.assertRaisesRegex(ats.HarnessError, "config file destination"):
                 self.start("b", config_files={dest: spigot})
