@@ -12,6 +12,11 @@ stable, 50 pengoptimalan".
 | 49 — codename TBD (owner) | full stable | STABLE (`release=true`) | [26.2-build-49.md](26.2-build-49.md) |
 | 50 — codename TBD (owner) | optimization (*pengoptimalan*) | per its gates | [26.2-build-50.md](26.2-build-50.md) |
 
+Owner decision 2026-10-24: the next Minecraft line (**26.3**) starts at **Build 100** with
+codename **Aurora Forge** (`aurora-forge`); builds 50–99 are therefore reserved for 26.2.
+`scripts/release_version.py` refuses a 26.3 build below 100, a 26.2 build at 100 or above, and a
+26.3 release whose codename is not `aurora-forge`.
+
 Rules that apply to every build:
 
 - Status words, evidence and performance claims follow

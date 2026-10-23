@@ -89,3 +89,29 @@ class HotfixReleaseVersionTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class VersionLineRuleTest(unittest.TestCase):
+    """Owner decision 2026-10-24: 26.3 starts at Build 100, codename Aurora Forge."""
+
+    def test_26_2_stays_below_100(self):
+        props = "releaseVersion=26.2\nsourbyBuild=99\ncodename=aurora-nexus"
+        self.assertEqual(("v26.2-r99", 99), resolve(props, "v26.2-r98"))
+        with self.assertRaises(ValueError):
+            resolve("releaseVersion=26.2\nsourbyBuild=100\ncodename=aurora-nexus", "")
+
+    def test_26_3_starts_at_100_and_uses_aurora_forge(self):
+        props = "releaseVersion=26.3\nsourbyBuild=100\ncodename=aurora-forge"
+        self.assertEqual(("v26.3-r100", 100), resolve(props, ""))
+        with self.assertRaises(ValueError):
+            resolve("releaseVersion=26.3\nsourbyBuild=99\ncodename=aurora-forge", "")
+        with self.assertRaises(ValueError):
+            resolve("releaseVersion=26.3\nsourbyBuild=100\ncodename=aurora-nexus", "")
+
+    def test_26_3_hotfix_uses_the_same_floor(self):
+        props = "releaseVersion=26.3\nsourbyBuild=100.1\ncodename=aurora-forge"
+        self.assertEqual(("v26.3-r100.1", "100.1", "v26.3-r100"),
+                         resolve_hotfix(props, "v26.3-r100", "hotfix/26.3-r100.1"))
+        with self.assertRaises(ValueError):
+            resolve_hotfix("releaseVersion=26.3\nsourbyBuild=99.1\ncodename=aurora-forge",
+                           "v26.3-r99", "hotfix/26.3-r99.1")
