@@ -48,7 +48,8 @@ port; none is an accepted consequence of relaxed ownership, and the fixes apply 
 `AsyncTeleportIntegrationTest` checks the compiled patch call order without initializing Minecraft's registries;
 all four integration regressions failed before the fixes. `AsyncTeleportEventsTest` additionally checks transition
 rotation and metadata. These checks are structural/unit evidence, not player portal gameplay or soak evidence.
-Final integrated build/boot evidence is recorded separately; no publication or plugin qualification is implied here.
+Final integrated tests and local boot evidence: [2026-10-23 verification](LIGHTINGLUMINOL-VERIFICATION-2026-10-23.md).
+No publication or plugin qualification is implied here.
 
 ## Status update 2026-10-22b (remaining local cases, agent `claude-luminol2`)
 

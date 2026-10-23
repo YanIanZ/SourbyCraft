@@ -458,8 +458,10 @@ dan gate yang masih terbuka tetap wajib.
   dirutekan ke entity. Marker CI `LEGACY_ENTITY_*` lulus sejak run 37515867230
 - [-] Plugin legacy representatif dengan alur pemain dan soak
 - [-] Relaxed thread checks (LightingLuminol parity, keputusan owner 2026-10-22): kode + unit test + boot
-  agent test server dalam mode relaxed/enforced dengan set plugin Epic Skyblock; sisa: alur pemain nyata
-  (DeluxeMenus buka menu + klik, Essentials spawn/home/back, SSB2 `/is create`, ClearLag sweep) dan soak oleh owner;
+  terisolasi relaxed/enforced memakai fixture LegacyBridgeTest (31 marker per mode), shutdown bersih dan
+  satu blok AWF FILE terbaca setelah buka ulang (2026-10-23; [bukti](development/LIGHTINGLUMINOL-VERIFICATION-2026-10-23.md)).
+  Ini bukan pengujian set plugin Epic Skyblock. Sisa: alur pemain nyata (DeluxeMenus buka menu + klik,
+  Essentials spawn/home/back, SSB2 `/is create`, ClearLag sweep) dan soak oleh owner;
   tidak pernah boleh disebut qualified selama relaxed.
 
 ### Rilis
