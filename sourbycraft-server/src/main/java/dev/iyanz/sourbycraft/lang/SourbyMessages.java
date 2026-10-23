@@ -17,7 +17,7 @@ import java.util.concurrent.ThreadLocalRandom;
  * MOTD, join/leave, …) were inline {@code Component.text(...)} or vanilla defaults. This
  * class replaces that with a single, extensible layer where every message KEY maps to a
  * <b>list of variant strings</b> in the one unified operator config
- * ({@code sourbycraft_config/sourbycraft_global_config.toml}, under {@code messages.<key>}).
+ * ({@code sourbycraft_config/sourbycraft_global_config.yml}, under {@code messages.<key>}).
  * {@link #get(String, TagResolver...)} returns <b>one variant chosen at random</b> — that is the
  * "lebih bervariasi" (more varied) requirement: the same touchpoint shows a different
  * SourbyCraft-flavored, hex-colored line each time.

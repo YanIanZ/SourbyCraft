@@ -1,78 +1,50 @@
 package dev.iyanz.sourbycraft.bootstrap;
 
-import java.io.IOException;
+import com.electronwill.nightconfig.core.Config;
+import dev.iyanz.sourbycraft.config.ConfigSources;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
- * Reads only the bootstrap boolean switches, before the full TOML configuration is loaded (and so
- * before the Build 49 layout migration has run on a first boot).
+ * Reads only the bootstrap boolean switches, before the full configuration is loaded (and so before
+ * the Build 49 layout migration has run on a first boot).
  *
  * <p>Accepted spellings for {@code <group>} = {@code viaversion} / {@code protocollib}, in order of
  * precedence when more than one is present:</p>
  * <ol>
- *   <li>Build 49: {@code [plugins.<group>] auto-provision}, {@code [plugins] <group>.auto-provision},
- *       or the root key {@code plugins.<group>.auto-provision};</li>
- *   <li>pre-Build-49 (read until Build 50): {@code [<group>] auto-provision} or the root key
- *       {@code <group>.auto-provision}.</li>
+ *   <li>Build 49: {@code plugins.<group>.auto-provision} (table, inline table or dotted root key);</li>
+ *   <li>pre-Build-49 (read until Build 50): {@code <group>.auto-provision} (table or root key).</li>
  * </ol>
- * <p>Within one spelling the first line wins (unchanged from Build 48).</p>
+ *
+ * <p>The file is read with the format its extension names ({@code .yml} now, the old {@code .toml}
+ * until it has been converted). A value that is neither a boolean nor {@code "true"}/{@code "false"}
+ * disables installation for this boot, as the previous line parser did.</p>
  */
 final class BootstrapPluginSettings {
     private BootstrapPluginSettings() {}
 
-    static boolean enabled(Path config, String group, boolean fallback) {
-        if (!Files.exists(config)) return fallback;
-        String table = "";
-        Boolean current = null;
-        Boolean legacy = null;
-        try {
-            boolean first = true;
-            for (String raw : Files.readAllLines(config)) {
-                // readAllLines keeps a UTF-8 byte order mark ("UTF-8 with BOM" editors) on line one.
-                if (first && raw.startsWith("﻿")) raw = raw.substring(1);
-                first = false;
-                String line = raw.split("#", 2)[0].trim();
-                if (line.startsWith("[") && line.endsWith("]")) {
-                    table = unquote(line.substring(1, line.length() - 1).trim());
-                    continue;
-                }
-                int separator = line.indexOf('=');
-                if (separator < 0) continue;
-                String key = unquote(line.substring(0, separator).trim());
-                final boolean currentSpelling =
-                    (table.equals("plugins." + group) && key.equals("auto-provision"))
-                        || (table.equals("plugins") && key.equals(group + ".auto-provision"))
-                        || (table.isEmpty() && key.equals("plugins." + group + ".auto-provision"));
-                final boolean legacySpelling =
-                    (table.equals(group) && key.equals("auto-provision"))
-                        || (table.isEmpty() && key.equals(group + ".auto-provision"));
-                if (!currentSpelling && !legacySpelling) continue;
-                String value = line.substring(separator + 1).trim();
-                final Boolean parsed;
-                if (value.equals("true")) parsed = Boolean.TRUE;
-                else if (value.equals("false")) parsed = Boolean.FALSE;
-                else {
-                    System.err.println("[SourbyCraft] Invalid " + (currentSpelling ? "plugins." : "") + group
-                        + ".auto-provision; installation disabled this boot.");
-                    return false;
-                }
-                if (currentSpelling) { if (current == null) current = parsed; }
-                else if (legacy == null) legacy = parsed;
-            }
-            if (current != null) return current;
-            if (legacy != null) return legacy;
-            return fallback;
-        } catch (IOException failure) {
+    static boolean enabled(final Path config, final String group, final boolean fallback) {
+        if (Files.exists(config) && !Files.isRegularFile(config)) {
             System.err.println("[SourbyCraft] Cannot read plugin provisioning settings: " + config
+                + ": not a regular file; installation disabled this boot.");
+            return false;
+        }
+        final Path file = ConfigSources.existing(config);
+        if (file == null) return fallback;
+        try {
+            final Config parsed = ConfigSources.read(file);
+            final Object current = parsed.get("plugins." + group + ".auto-provision");
+            final Object legacy = current != null ? null : parsed.get(group + ".auto-provision");
+            final Object value = current != null ? current : legacy;
+            if (value == null) return fallback;
+            if (value instanceof Boolean enabled) return enabled;
+            System.err.println("[SourbyCraft] Invalid " + (current != null ? "plugins." + group : group)
+                + ".auto-provision; installation disabled this boot.");
+            return false;
+        } catch (final Exception failure) {
+            System.err.println("[SourbyCraft] Cannot read plugin provisioning settings: " + file
                 + ": " + failure.getMessage() + "; installation disabled this boot.");
             return false;
         }
-    }
-
-    private static String unquote(String value) {
-        if (value.length() >= 2 && ((value.startsWith("\"") && value.endsWith("\""))
-            || (value.startsWith("'") && value.endsWith("'")))) return value.substring(1, value.length() - 1);
-        return value;
     }
 }

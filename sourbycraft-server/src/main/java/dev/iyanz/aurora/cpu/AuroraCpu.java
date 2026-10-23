@@ -3,8 +3,6 @@ package dev.iyanz.aurora.cpu;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * How much of the machine Aurora may use, read early enough to size the region scheduler.
@@ -25,7 +23,7 @@ import java.util.regex.Pattern;
  * <ol>
  *   <li>{@code threaded-regions.threads: N} in {@code paper-global.yml} — an operator naming the
  *       region thread count directly. Never overridden here.</li>
- *   <li>{@code aurora.cpu.cores} in {@code sourbycraft_config/aurora.toml} — how many processors
+ *   <li>{@code aurora.cpu.cores} in {@code sourbycraft_config/aurora.yml} — how many processors
  *       Aurora may use in total.</li>
  *   <li>Neither set: every available processor.</li>
  * </ol>
@@ -37,12 +35,7 @@ public final class AuroraCpu {
     /** Value meaning "decide from the machine". */
     public static final int AUTO = 0;
 
-    private static final Path AURORA_CONFIG = Path.of("sourbycraft_config", "aurora.toml");
-
-    /** {@code cores = N} inside the {@code [aurora.cpu]} table, tolerating leading whitespace. */
-    private static final Pattern CORES = Pattern.compile(
-        "^\\s*\\[aurora\\.cpu\\]\\s*$(?:(?!^\\s*\\[).)*?^\\s*cores\\s*=\\s*(\\d+)\\s*$",
-        Pattern.MULTILINE | Pattern.DOTALL);
+    private static final Path AURORA_CONFIG = Path.of("sourbycraft_config", "aurora.yml");
 
     private static volatile int cached = Integer.MIN_VALUE;
 
@@ -66,20 +59,23 @@ public final class AuroraCpu {
     }
 
     private static int read() {
+        final Path file = dev.iyanz.sourbycraft.config.ConfigSources.existing(AURORA_CONFIG);
+        if (file == null) {
+            return AUTO;                       // First boot; the file is seeded later.
+        }
         try {
-            if (!Files.isRegularFile(AURORA_CONFIG)) {
-                return AUTO;                       // First boot; the file is seeded later.
-            }
-            final Matcher matcher = CORES.matcher(Files.readString(AURORA_CONFIG));
-            if (!matcher.find()) {
+            final Object value = dev.iyanz.sourbycraft.config.ConfigSources.parse(file,
+                java.nio.file.Files.newBufferedReader(file, java.nio.charset.StandardCharsets.UTF_8))
+                .get(dev.iyanz.sourbycraft.config.AuroraConfig.CPU_CORES_KEY);
+            if (!(value instanceof Number number)) {
                 return AUTO;
             }
-            final int configured = Integer.parseInt(matcher.group(1));
+            final int configured = number.intValue();
             if (configured <= 0) {
                 return AUTO;
             }
             return Math.min(configured, Runtime.getRuntime().availableProcessors());
-        } catch (final IOException | NumberFormatException unreadable) {
+        } catch (final IOException | RuntimeException unreadable) {
             // A malformed budget must not stop a server booting. Auto is the documented
             // default, and the configuration layer reports the bad value once it loads.
             return AUTO;

@@ -230,16 +230,17 @@ public record AwfSettings(Set<String> worlds, Set<String> export, String backend
     public static AwfSettings readEarly(final Path auroraFile, final Path unifiedFile) {
         final Map<String, Object> values = new HashMap<>();
         for (final Path file : List.of(unifiedFile, auroraFile)) {
-            if (!Files.isRegularFile(file)) continue;
-            try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-                final var config = new com.electronwill.nightconfig.toml.TomlParser().parse(reader);
+            final Path source = dev.iyanz.sourbycraft.config.ConfigSources.existing(file);
+            if (source == null) continue;
+            try (Reader reader = Files.newBufferedReader(source, StandardCharsets.UTF_8)) {
+                final var config = dev.iyanz.sourbycraft.config.ConfigSources.parse(source, reader);
                 for (final String key : KEYS) {
                     final Object value = config.get(key);
                     if (value != null) values.put(key, value);
                 }
             } catch (final Exception unreadable) {
                 SourbyLogger.warn("Aurora World Fabric could not read "
-                    + dev.iyanz.sourbycraft.config.ConfigParseErrors.describe(file, unreadable)
+                    + dev.iyanz.sourbycraft.config.ConfigParseErrors.describe(source, unreadable)
                     + "; no world is opened through AWF this run");
                 return DEFAULT;
             }

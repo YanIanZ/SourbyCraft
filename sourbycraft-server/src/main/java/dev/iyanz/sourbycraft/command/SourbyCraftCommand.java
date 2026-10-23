@@ -82,8 +82,8 @@ public class SourbyCraftCommand extends Command {
     private static void config(CommandSender sender) {
         sender.sendMessage(UiPanel.header("Configuration"));
         sender.sendMessage(UiPanel.section("Files"));
-        sender.sendMessage(UiPanel.row("Console, players, messages, plugins, updater", "sourbycraft_config/sourbycraft_global_config.toml"));
-        sender.sendMessage(UiPanel.row("Aurora services", "sourbycraft_config/aurora.toml (wins over Aurora keys left in the global TOML)"));
+        sender.sendMessage(UiPanel.row("Console, players, messages, plugins, updater", "sourbycraft_config/sourbycraft_global_config.yml"));
+        sender.sendMessage(UiPanel.row("Aurora services", "sourbycraft_config/aurora.yml (wins over Aurora keys left in the global file)"));
         sender.sendMessage(UiPanel.row("Region engine", "config/aurora-server.yml + config/aurora-worlds.yml (Build 49 names; canvas-*.yml migrated once)"));
         sender.sendMessage(UiPanel.row("Security limits", "sourbycraft-security.yml"));
         var config = SourbyCraftConfig.aurora();

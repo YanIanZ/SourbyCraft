@@ -120,9 +120,10 @@ class BootstrapPluginSettingsTest {
     }
 
     @Test
-    void onlyTheFirstLinesByteOrderMarkIsStripped() throws IOException {
-        // U+FEFF later in the file is not a BOM; the key stays unrecognised and the fallback applies.
-        assertTrue(on("[protocollib]\n\uFEFFauto-provision = false\n", "protocollib", true));
+    void aByteOrderMarkLaterInTheFileMakesItUnparseable() throws IOException {
+        // U+FEFF later in the file is not a BOM; a real TOML parser refuses the key, and provisioning
+        // fails closed rather than guessing what the line meant.
+        assertFalse(on("[protocollib]\n\uFEFFauto-provision = false\n", "protocollib", true));
     }
 
     @Test
@@ -131,7 +132,7 @@ class BootstrapPluginSettingsTest {
         boolean[] result = new boolean[1];
         String err = captureErr(() -> result[0] = BootstrapPluginSettings.enabled(cfg, "protocollib", true));
         assertFalse(result[0], "an unparseable value must not silently install");
-        assertTrue(err.contains("Invalid protocollib.auto-provision"), err);
+        assertTrue(err.contains("Cannot read plugin provisioning settings"), err);
     }
 
     @Test
@@ -202,7 +203,7 @@ class BootstrapPluginSettingsTest {
     }
 
     @Test
-    void anInvalidBuild49ValueDisablesInstallationAndNamesTheKey() throws IOException {
+    void anUnparseableBuild49ValueDisablesInstallationAndNamesTheFile() throws IOException {
         Path cfg = toml("[plugins.protocollib]\nauto-provision = maybe\n");
         java.io.PrintStream previous = System.err;
         java.io.ByteArrayOutputStream captured = new java.io.ByteArrayOutputStream();
@@ -212,6 +213,7 @@ class BootstrapPluginSettingsTest {
         } finally {
             System.setErr(previous);
         }
-        assertTrue(captured.toString().contains("Invalid plugins.protocollib.auto-provision"), captured.toString());
+        assertTrue(captured.toString().contains("Cannot read plugin provisioning settings"), captured.toString());
+        assertTrue(captured.toString().contains("g.toml"), captured.toString());
     }
 }
