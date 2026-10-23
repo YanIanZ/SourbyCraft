@@ -80,7 +80,9 @@ Documentation-only descendants do not change that artifact's embedded revision. 
 that tested revision, rather than pretending it was built from a later documentation commit.
 The candidate, checksum and concise manifest are retained locally under `release/candidates/48.3/` in the hotfix
 worktree. They are not a published release. Pushing `hotfix/26.2-r48.3` can trigger automatic publication through
-`.github/workflows/build.yml`; that branch has not been pushed as part of this preparation.
+`.github/workflows/build.yml`; that branch was not pushed during the initial candidate preparation. On 2026-10-23 the owner subsequently
+authorized publication after review; the release workflow must pass its build, boot and independent rebuild gates.
+This document records the local candidate, not the checksum or result of a later CI artifact.
 
 ## Remaining owner acceptance
 
