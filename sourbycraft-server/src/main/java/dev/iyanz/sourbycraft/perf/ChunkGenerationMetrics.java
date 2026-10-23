@@ -17,8 +17,8 @@ import java.util.concurrent.atomic.LongAdder;
 public final class ChunkGenerationMetrics {
 
     static final String PROPERTY = "sourbycraft.chunk-generation-metrics.enabled";
-    private static final Path AURORA_FILE = Path.of("sourbycraft_config", "aurora.toml");
-    private static final Path UNIFIED_FILE = Path.of("sourbycraft_config", "sourbycraft_global_config.toml");
+    private static final Path AURORA_FILE = Path.of("sourbycraft_config", "aurora.yml");
+    private static final Path UNIFIED_FILE = Path.of("sourbycraft_config", "sourbycraft_global_config.yml");
 
     /**
      * RESTART_REQUIRED: on when the JVM property or {@code aurora.diagnostics.chunk-generation-metrics}
@@ -109,14 +109,15 @@ public final class ChunkGenerationMetrics {
     static boolean readEarly(final Path auroraFile, final Path unifiedFile) {
         final Map<String, Object> values = new HashMap<>();
         for (final Path file : List.of(unifiedFile, auroraFile)) {
-            if (!Files.isRegularFile(file)) continue;
-            try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-                final Object value = new com.electronwill.nightconfig.toml.TomlParser().parse(reader)
+            final Path source = dev.iyanz.sourbycraft.config.ConfigSources.existing(file);
+            if (source == null) continue;
+            try (Reader reader = Files.newBufferedReader(source, StandardCharsets.UTF_8)) {
+                final Object value = dev.iyanz.sourbycraft.config.ConfigSources.parse(source, reader)
                     .get(AuroraConfig.CHUNK_GENERATION_METRICS_KEY);
                 if (value != null) values.put(AuroraConfig.CHUNK_GENERATION_METRICS_KEY, value);
             } catch (final Exception | LinkageError unreadable) {
                 dev.iyanz.sourbycraft.util.SourbyLogger.warn("chunk-generation metrics could not read "
-                    + dev.iyanz.sourbycraft.config.ConfigParseErrors.describe(file, unreadable)
+                    + dev.iyanz.sourbycraft.config.ConfigParseErrors.describe(source, unreadable)
                     + "; the measurement stays off this run");
                 return false;
             }

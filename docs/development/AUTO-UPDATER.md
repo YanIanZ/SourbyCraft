@@ -1,4 +1,4 @@
-# Auto-updater (`[updater]` in `sourbycraft_config/sourbycraft_global_config.toml`)
+# Auto-updater (`[updater]` in `sourbycraft_config/sourbycraft_global_config.yml`)
 
 Key names below are the Build 49 ones (`updater.*`, kebab-case). The pre-49 names (`misc.auto_update.enabled`,
 `repo`, `apply_mode`, `check_times`, `check_interval_minutes`, `restart_mode`, `restart_delay_seconds`,

@@ -5,8 +5,8 @@ SourbyCraft uses the upstream Spark engine through its existing Canvas integrati
 `SourbyServerConfigProvider`. This is an adapter, not a separate profiler fork.
 
 The `sourbycraft/` report group contains `global.toml` from
-`sourbycraft_config/sourbycraft_global_config.toml`, `aurora.toml` from
-`sourbycraft_config/aurora.toml` (every Aurora setting, including the Build 47 bridge, scheduler
+`sourbycraft_config/sourbycraft_global_config.yml`, `aurora.toml` from
+`sourbycraft_config/aurora.yml` (every Aurora setting, including the Build 47 bridge, scheduler
 and network keys), and `security.yml` from `sourbycraft-security.yml`. Missing files are omitted. Collection reads files and
 builds report JSON; it does not seed defaults, migrate files, or save configuration.
 

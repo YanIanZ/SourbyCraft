@@ -36,7 +36,7 @@ public final class ConfigParseErrors {
     /**
      * {@code file} followed by the line the failure points at (when it can be found) and the parser's
      * own message, e.g.
-     * {@code sourbycraft_config/aurora.toml (near line 12: `worlds = sourby`): Invalid integer value: sourby}.
+     * {@code sourbycraft_config/aurora.yml (near line 12: `worlds: sourby`): Invalid integer value: sourby}.
      */
     public static String describe(final Path file, final Throwable failure) {
         Objects.requireNonNull(file, "file");

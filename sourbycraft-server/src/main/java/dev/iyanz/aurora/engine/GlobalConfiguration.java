@@ -67,8 +67,8 @@ public class GlobalConfiguration extends Part {
             "and renamed to canvas-server.yml.migrated; it is not read any more.").endLine()
         .blank()
         .wordWrap("World defaults: config/aurora-worlds.yml. Aurora services (CPU budget, bridge, AWF, diagnostics):",
-            "sourbycraft_config/aurora.toml. Console, players, messages, plugins, updater:",
-            "sourbycraft_config/sourbycraft_global_config.toml. Security limits: sourbycraft-security.yml.").endLine()
+            "sourbycraft_config/aurora.yml. Console, players, messages, plugins, updater:",
+            "sourbycraft_config/sourbycraft_global_config.yml. Security limits: sourbycraft-security.yml.").endLine()
         .compile(60);
 
     public static final Logger LOGGER = LoggerFactory.getLogger("Aurora"); // SourbyCraft - engine config speaks as the engine: [CanvasMC] -> [Aurora]

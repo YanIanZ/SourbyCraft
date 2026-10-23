@@ -47,8 +47,8 @@ reading aids, not findings: no cause is established until a real dump exists.
 
 ## Settings (all RESTART_REQUIRED)
 
-Keys under `[aurora.diagnostics.stall-recorder]` in `sourbycraft_config/aurora.toml`; see
-[AURORA-CONFIG.md](../AURORA-CONFIG.md) and [config-examples/aurora.toml](../config-examples/aurora.toml).
+Keys under `[aurora.diagnostics.stall-recorder]` in `sourbycraft_config/aurora.yml`; see
+[AURORA-CONFIG.md](../AURORA-CONFIG.md) and [config-examples/aurora.yml](../config-examples/aurora.yml).
 
 | Key | Default | Range |
 | --- | --- | --- |

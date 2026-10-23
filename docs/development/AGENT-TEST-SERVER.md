@@ -42,7 +42,7 @@ python3 $S start --name perf-1 --exclusive   # waits for both slots, blocks new 
 python3 $S stop --name my-check             # console stop; kill after --timeout (180 s)
 python3 $S kill --name my-check             # crash test: SIGKILL, no console stop, no save
 python3 $S start --name my-check-2 --world-from my-check   # boot again over my-check's world
-python3 $S start --name awf-1 --aurora-toml awf.toml       # sourbycraft_config/aurora.toml (e.g. AWF worlds)
+python3 $S start --name awf-1 --aurora-toml awf.toml       # sourbycraft_config/aurora.yml (e.g. AWF worlds)
 python3 $S start --name tp-1 --config-file plugins/SourbyCraft-Test-Plugin.jar=test-plugin/build/libs/test-plugin-1.0.0.jar \
     --jvm-property sourby.testplugin.probes=true    # plugin jar (bytes, <= 8 MiB, run.json keeps its sha256) + test-plugin probes
 python3 $S start --name ssb-1 --config-file plugins/SuperiorSkyblock2.jar=/path/SuperiorSkyblock2-2026.3.jar \
@@ -86,7 +86,7 @@ test-only (`UpdateOverrides`, `ReleaseSignatureVerifier.resolve`), unset by defa
 the `level-name` directory and its `_nether`/`_the_end` siblings, nothing else — into the new run,
 so a restart-persistence or post-crash boot reads that run's saves; the source is never modified
 and `run.json` `world_from` records its name, exit code, stop reason, git head and jar hash. The
-source's `sourbycraft_config/aurora.toml` is carried over unless `--aurora-toml` is given, so a
+source's `sourbycraft_config/aurora.yml` is carried over unless `--aurora-toml` is given, so a
 world stored through AWF comes back through AWF. `kill` exits 0 when the server was SIGKILLed on
 request (`stop_reason` "killed on request") and the lock was released.
 

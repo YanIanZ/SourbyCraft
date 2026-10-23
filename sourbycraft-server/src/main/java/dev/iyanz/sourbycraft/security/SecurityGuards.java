@@ -140,7 +140,7 @@ public final class SecurityGuards {
         "Lifecycle: LIVE - every limit, mode and ipv6-prefix-length applies on /sourbycraft reload. The proxy detection of",
         "connection-guard (BungeeCord, Velocity, PROXY protocol) is read when the TCP listener starts: RESTART_REQUIRED.",
         "The defaults are stated beside each group; deleting this file restores all of them at the next boot.",
-        "These limits are separate from the Aurora services (sourbycraft_config/aurora.toml) and the region engine",
+        "These limits are separate from the Aurora services (sourbycraft_config/aurora.yml) and the region engine",
         "(config/aurora-server.yml). Reference: docs/development/SECURITY-GUARDS.md, docs/AURORA-CONFIG.md.");
 
     /** Comments above each group, in file order. */

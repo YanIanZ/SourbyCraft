@@ -41,7 +41,7 @@ final class PerfChunksView implements PerfView {
         lines.add(UiPanel.section("World generation stages"));
         if (!dev.iyanz.sourbycraft.perf.ChunkGenerationMetrics.ENABLED) {
             add(lines, "Generation timing", "disabled; set aurora.diagnostics.chunk-generation-metrics = true in "
-                + "sourbycraft_config/aurora.toml (or -Dsourbycraft.chunk-generation-metrics.enabled=true) and restart");
+                + "sourbycraft_config/aurora.yml (or -Dsourbycraft.chunk-generation-metrics.enabled=true) and restart");
             return;
         }
         final var stages = dev.iyanz.sourbycraft.perf.ChunkGenerationMetrics.GLOBAL.snapshot();

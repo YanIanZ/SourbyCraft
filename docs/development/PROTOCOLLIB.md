@@ -14,7 +14,7 @@ ini belum pernah diterapkan, sehingga **setiap jar yang dibangun sebelum 01:35 t
 dengan jar yang dibangun sesudah 01:35 maupun provisioning ProtocolLib yang benar-benar berjalan; klaim "jalur aktif" di atas
 berarti hook ada di source ter-materialisasi, bukan bukti unduhan atau load.
 
-Konfigurasi di `sourbycraft_config/sourbycraft_global_config.toml`:
+Konfigurasi di `sourbycraft_config/sourbycraft_global_config.yml`:
 
 ```toml
 [plugins.protocollib]

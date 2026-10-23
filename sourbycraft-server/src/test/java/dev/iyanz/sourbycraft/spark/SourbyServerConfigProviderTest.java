@@ -83,7 +83,7 @@ class SourbyServerConfigProviderTest {
         final JsonObject out = new SourbyServerConfigProvider.SourbyCraftSplitParser(directory)
             .load("sourbycraft/", filter()).getAsJsonObject();
         assertEquals(2, out.size());
-        assertTrue(out.has("global.toml"));
+        assertTrue(out.has("global.yml"));
         assertTrue(out.has("security.yml"));
         assertFalse(out.toString().contains("synthetic-"));
         assertEquals(original, Files.readString(config));
@@ -107,7 +107,7 @@ class SourbyServerConfigProviderTest {
         final JsonObject out = new SourbyServerConfigProvider.SourbyCraftSplitParser(directory)
             .load("sourbycraft/", filter()).getAsJsonObject();
 
-        assertTrue(out.has("aurora.toml"), "Aurora's own file must appear in the report");
+        assertTrue(out.has("aurora.yml"), "Aurora's own file must appear in the report");
         assertTrue(out.toString().contains("cores"), "the CPU budget is what a slow report needs");
         assertFalse(out.toString().contains("synthetic-"), "secrets stay redacted in the new file too");
         assertEquals(original, Files.readString(aurora), "the profiler never rewrites operator config");
@@ -130,7 +130,7 @@ class SourbyServerConfigProviderTest {
             .load("sourbycraft/", filter()).getAsJsonObject();
 
         assertEquals(1, out.size());
-        final JsonObject aurora = out.getAsJsonObject("global.toml").getAsJsonObject("aurora");
+        final JsonObject aurora = out.getAsJsonObject("global.yml").getAsJsonObject("aurora");
         assertFalse(aurora.getAsJsonObject("entity").get("async-pathfinding").getAsBoolean());
 
         final JsonObject diagnostics = aurora.getAsJsonObject("diagnostics");
@@ -145,7 +145,7 @@ class SourbyServerConfigProviderTest {
 
         // The legacy key is still reported verbatim: the report shows what the operator wrote,
         // it does not resolve aurora-over-legacy precedence for them.
-        assertTrue(out.getAsJsonObject("global.toml").getAsJsonObject("perf")
+        assertTrue(out.getAsJsonObject("global.yml").getAsJsonObject("perf")
             .getAsJsonObject("ai").get("async-pathfinding").getAsBoolean());
 
         assertArrayEquals(before, Files.readAllBytes(config));
@@ -173,7 +173,7 @@ class SourbyServerConfigProviderTest {
         final String report = out.toString();
         assertFalse(report.contains("synthetic-redis-password"), report);
         assertFalse(report.contains("app:"), "the user name goes with the password: " + report);
-        final JsonObject redis = out.getAsJsonObject("aurora.toml").getAsJsonObject("aurora")
+        final JsonObject redis = out.getAsJsonObject("aurora.yml").getAsJsonObject("aurora")
             .getAsJsonObject("awf").getAsJsonObject("redis");
         assertFalse(redis.has("uri"), "the key itself is hidden, not only its password");
         assertEquals("sourbycraft:awf:", redis.get("key-prefix").getAsString(), "the other Redis keys stay reported");

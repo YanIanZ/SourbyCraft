@@ -39,7 +39,7 @@ legacy (non-folia-supported) plugins work because thread-ownership checks are re
 overrides `DEVELOPMENT.md` 2.3 ("never weaken region ownership") for this feature only; the truthfulness policy
 still applies, so this section states plainly that a relaxed server is **unsafe and unqualified**.
 
-`aurora.bridge.thread-checks` (`sourbycraft_config/aurora.toml`, RESTART_REQUIRED, read once when the checks first
+`aurora.bridge.thread-checks` (`sourbycraft_config/aurora.yml`, RESTART_REQUIRED, read once when the checks first
 run; `-Daurora.bridge.thread-checks=` overrides the file):
 
 | value | what a failed region-ownership check does | scope |

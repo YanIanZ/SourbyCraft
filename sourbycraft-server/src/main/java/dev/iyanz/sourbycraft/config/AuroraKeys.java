@@ -5,7 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Every key of {@code sourbycraft_config/aurora.toml}: path, default, lifecycle and the comment the
+ * Every key of {@code sourbycraft_config/aurora.yml}: path, default, lifecycle and the comment the
  * seeder writes beside it. The paths did not change in Build 49 (they were already grouped under
  * {@code [aurora.<service>]}); what changed is that the file gets a header and section comments, and
  * that Aurora keys an older deployment still kept in the utility TOML are moved here once
@@ -20,7 +20,7 @@ public final class AuroraKeys {
     private AuroraKeys() {}
 
     /** The file this table describes, relative to the server directory. */
-    public static final String FILE = "sourbycraft_config/aurora.toml";
+    public static final String FILE = "sourbycraft_config/aurora.yml";
 
     private static ConfigKey live(final String path, final Object defaultValue, final String comment, final String... legacy) {
         return ConfigKey.of(path, defaultValue, AuroraConfig.Lifecycle.LIVE, comment, legacy);
@@ -189,7 +189,7 @@ public final class AuroraKeys {
 
     /** The file header, written as the comment of the {@code [aurora]} table. */
     public static final String HEADER = String.join("\n",
-        "Aurora services (sourbycraft_config/aurora.toml) - Build 49 layout.",
+        "Aurora services (sourbycraft_config/aurora.yml) - Build 49 layout.",
         "",
         "Settings of the services SourbyCraft runs around the region engine: entity work, diagnostics, the CPU",
         "budget, the plugin compatibility bridge, Resource Governor lane budgets, network counters, world",
@@ -198,10 +198,10 @@ public final class AuroraKeys {
         "from this file before the configuration loads (cpu, bridge mode, AWF, chunk-generation metrics).",
         "",
         "Not in this file: the region engine (config/aurora-server.yml, config/aurora-worlds.yml), console,",
-        "players, messages, plugin provisioning and the updater (sourbycraft_config/sourbycraft_global_config.toml),",
+        "players, messages, plugin provisioning and the updater (sourbycraft_config/sourbycraft_global_config.yml),",
         "network limits (sourbycraft-security.yml). Reference: docs/AURORA-CONFIG.md.",
         "",
-        "Build 49 moved any Aurora key still kept in sourbycraft_global_config.toml into this file once.",
+        "Build 49 moved any Aurora key still kept in sourbycraft_global_config.yml into this file once.",
         "");
 
     /** Table comments, in file order. */

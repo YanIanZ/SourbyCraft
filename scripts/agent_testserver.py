@@ -1491,8 +1491,9 @@ class Harness:
 
         Only server config locations are accepted: a top-level ``*.yml``/``*.yaml`` (bukkit.yml,
         spigot.yml, ...) or a file under ``config/``, ``plugins/`` or ``sourbycraft_config/``.
-        The two TOMLs the harness writes stay reserved (``--aurora-toml`` sets aurora.toml), so a
-        copy can neither re-enable downloads nor leave ``run.json`` describing a replaced file.
+        The harness's own config files stay reserved (``--aurora-toml`` writes the TOML, which the
+        server converts to YAML on first boot), so a copy can neither re-enable downloads nor leave
+        ``run.json`` describing a replaced file.
         """
         configs = []
         for dest, source in (mapping or {}).items():
@@ -1909,7 +1910,9 @@ PLUGIN_JAR_MAX_BYTES = 8 * 1024 * 1024
 # this, for real plugins such as FastAsyncWorldEdit (~15 MiB). Still read once, capped, hashed.
 LARGE_PLUGIN_JAR_MAX_BYTES = 32 * 1024 * 1024
 RESERVED_CONFIG_FILES = ("sourbycraft_config/aurora.toml",
-                         "sourbycraft_config/sourbycraft_global_config.toml")
+                         "sourbycraft_config/aurora.yml",
+                         "sourbycraft_config/sourbycraft_global_config.toml",
+                         "sourbycraft_config/sourbycraft_global_config.yml")
 SETTINGS_KEYS = {"view_distance": int, "simulation_distance": int, "heap_mib": int,
                  "max_lifetime_s": int, "level_type": str, "startup_timeout_s": int,
                  "properties": dict, "jvm_properties": list,

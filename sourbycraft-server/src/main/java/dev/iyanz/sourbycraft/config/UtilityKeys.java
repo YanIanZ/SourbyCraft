@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Every key of {@code sourbycraft_config/sourbycraft_global_config.toml} in its Build 49 layout:
+ * Every key of {@code sourbycraft_config/sourbycraft_global_config.yml} in its Build 49 layout:
  * path, default, lifecycle, the comment written beside it, and the names it had before.
  *
  * <p>This is the single table the seeder, the one-time file migration ({@link ConfigMigration})
@@ -26,7 +26,7 @@ public final class UtilityKeys {
     private UtilityKeys() {}
 
     /** The file this table describes, relative to the server directory. */
-    public static final String FILE = "sourbycraft_config/sourbycraft_global_config.toml";
+    public static final String FILE = "sourbycraft_config/sourbycraft_global_config.yml";
 
     /** A table header comment. */
     public record Section(String path, String comment) {}
@@ -127,7 +127,7 @@ public final class UtilityKeys {
 
     /** The file header, written as the comment of the first table. */
     public static final String HEADER = String.join("\n",
-        "SourbyCraft server settings (sourbycraft_config/sourbycraft_global_config.toml) - Build 49 layout.",
+        "SourbyCraft server settings (sourbycraft_config/sourbycraft_global_config.yml) - Build 49 layout.",
         "",
         "Sections: [console] startup console and command presentation; [players] slots and full-server bypass;",
         "[messages] varied MiniMessage lines; [plugins.*] verified plugin provisioning; [updater] the auto-updater.",
@@ -135,7 +135,7 @@ public final class UtilityKeys {
         "RESTART_REQUIRED = read once at startup (or, for the updater, when its schedule is built).",
         "",
         "Not in this file: Aurora services (CPU budget, bridge, scheduler budgets, AWF, diagnostics) live in",
-        "sourbycraft_config/aurora.toml; the region engine in config/aurora-server.yml and config/aurora-worlds.yml;",
+        "sourbycraft_config/aurora.yml; the region engine in config/aurora-server.yml and config/aurora-worlds.yml;",
         "network limits in sourbycraft-security.yml. Reference: docs/AURORA-CONFIG.md.",
         "",
         "Build 49 migrated the previous layout ([ui], [branding], [sourbycraft], [viaversion], [protocollib],",

@@ -287,7 +287,7 @@ with a SIGSTOPped loopback Redis; Redis over a network still not exercised.**
 **Setup.** Jar `rc-cbef3fb9.jar` (sha256 `975d3bda…`, head `cbef3fb9` tree), Apple M2, 16 GiB, macOS
 27.0.1, JDK 25.0.2, `-Xms2G -Xmx2G -XX:+UseG1GC`; `redis-server` 8.10.2 started for the run on
 127.0.0.1:6391 (`appendonly yes`, `appendfsync everysec`, `noeviction`); no players; view distance 4.
-`sourbycraft_config/aurora.toml`: `[aurora.awf] worlds = ["world"]`, `backend = "redis"`,
+`sourbycraft_config/aurora.yml`: `[aurora.awf] worlds = ["world"]`, `backend = "redis"`,
 `commit-interval-seconds = 5`, `resident-chunks = 1` (forces reads of committed chunks back from
 Redis), `commit-attempts = 3`; `[aurora.awf.redis] uri = "redis://127.0.0.1:6391/0"`,
 `lease-seconds = 15` (shortened so expiry happens in the run), `timeout-ms` default 5000. Global TOML

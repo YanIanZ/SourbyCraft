@@ -17,7 +17,7 @@ import static net.kyori.adventure.text.Component.text;
  * positive integer argument it {@link org.bukkit.Server#setMaxPlayers(int) sets
  * the live cap} AND persists the value into the unified SourbyCraft config
  * ({@code sourbycraft.max-players} in
- * {@code sourbycraft_config/sourbycraft_global_config.toml}) so it survives a
+ * {@code sourbycraft_config/sourbycraft_global_config.yml}) so it survives a
  * restart — {@link MaxPlayersConfig#applyAtBoot()} re-applies the persisted
  * value at every boot so it wins over {@code server.properties}.
  *

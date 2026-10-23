@@ -250,7 +250,7 @@ Performance command consumers retain the immutable-snapshot and freshness contra
 ## Configuration and verification
 
 See [Aurora configuration](AURORA-CONFIG.md) and the annotated
-[UI section](config-examples/utility-ui.toml) / [Aurora defaults](config-examples/aurora.toml).
+[UI section](config-examples/utility-ui.yml) / [Aurora defaults](config-examples/aurora.yml).
 Boot/reload preserves existing utility and Aurora TOML files. New defaults and comments are written only for
 new files; message variants are not replaced in existing deployments.
 
