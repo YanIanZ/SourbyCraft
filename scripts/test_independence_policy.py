@@ -65,6 +65,9 @@ class CanvasSourceCouplingTest(unittest.TestCase):
     # io.canvasmc plugin API was removed (owner decision 2026-10-21) and Paper feature 0014 names
     # dev.iyanz.sourbycraft.api.world.WorldUnloadResult by its simple name.
     PATCH_APPROVED = [
+        # Capture the existing NMS portal loading-screen setting before detaching. The callback
+        # passes its value to the owned helper; no new core-to-engine configuration doorway.
+        "dev.iyanz.aurora.engine.GlobalConfiguration.getInstance",
         # MC feature 0080 (legacy PlayerTeleportEvent on the async teleport route, 2026-10-22): the
         # cancelled-event cleanup mirrors the baseline's EntityTeleportAsyncEvent branch two lines
         # above it, which clears the engine's plugin transfer state. The state is the engine's own;
