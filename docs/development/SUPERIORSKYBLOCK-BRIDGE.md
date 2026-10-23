@@ -4,6 +4,27 @@ Status: source fix written, testing assigned to Claude; no Codex build, tests or
 The user's Build 47 log demonstrates a region-ownership violation. It does not
 demonstrate the behavior of this new source patch or qualify the whole plugin.
 
+## Status update 2026-10-22: island chunk preparation on the async lane (paper 0028)
+
+Sourby Demo (r48.2, SSB2 2026.3 + SSB-AuroraWorlds, bridge `safe`), `/is create`: many
+`Thread failed main thread check: Async chunk retrieval ... thread=SourbyCraft-BridgeIO-1 ... chunk_pos=[-1, 2]`
+followed by `[SuperiorSkyblock2] An unexpected error occurred while interacting with unloaded chunk`. Path (source of
+the jar's commit `868bebf`): on create, the callers that fit the stack are `IslandUtils.resetChunksExcludedFromList` and `setBiome`, which run
+`NMSUtils.runActionOnChunks` 10 ticks after the post-create teleport (inferred from source, not traced on the panel); chunks not loaded at that moment go to an async task (`BukkitExecutor.runAsync`, the bridge
+I/O lane) that reads each chunk from disk; a chunk never saved (new island world) calls `onChunkNotExist` ->
+`ChunksProvider.loadChunk` -> `ChunkPosition.getLoadedChunk`, which calls `World#getChunkAt` **only when `isChunkLoaded`
+is already true** (the player's chunk loader loaded it meanwhile). The base refused that call on any non-owning thread,
+SSB2 caught it, and the chunk was skipped for that reset/biome operation. Nothing was counted toward quarantine (SSB2
+catches the exception). After the lookup SSB2 hands the chunk back with `BukkitExecutor.ensureMain` (a bridged sync task,
+global region or caller region per `sync-route`), unchanged by this fix.
+
+Fix: engine-wide owned rule for threads that tick nothing, not an SSB2 adapter (an adapter would cover one plugin
+callback, while Paper semantics are what every legacy plugin's async `getChunkAt` expects); see
+[patches.md](../architecture/patches.md) (paper 0028). Headless evidence: the legacy-test-plugin probe reproduces the
+exact refused call (a loaded, ticketed chunk from `SourbyCraft-BridgeIO-2`) and is served after the fix; a headless
+client `/is create isle normal` with SSB2 + module creates the island with no refusal both before and after (the race
+needs a chunk loaded between SSB2's two checks, which the local client did not hit). Owner check on the panel remains.
+
 ## Status update 2026-10-07
 
 Sources: [AGENT-COORDINATION.md](../../AGENT-COORDINATION.md) (entries "SSB2 SpawnIsland violation, 2026-10-06 ~22:00",

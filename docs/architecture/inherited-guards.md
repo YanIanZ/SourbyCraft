@@ -47,7 +47,7 @@ Every number below is generated; the test fails when it drifts from the manifest
 | scanned input | count |
 | --- | --- |
 | engine baseline patches | 720 (472 `sourbycraft-server/minecraft-patches/sources` + 232 `sourbycraft-server/paper-patches/files` + 16 `sourbyapi/paper-patches/files`), 720 Java files |
-| SourbyCraft feature patches | 113, touching 124 Java files |
+| SourbyCraft feature patches | 114, touching 124 Java files |
 | engine source files (sourbycraft-server/src/main/java/dev/iyanz/aurora/engine) | 89 |
 | guards found by the scan | 115 (manifest has 115; both scan modes agree, see RepositoryTest) |
 
@@ -157,7 +157,7 @@ and are not counted. The counts are pinned by the manifest; a change is a review
 
 | family | sites | what it is | owned test |
 | --- | --- | --- | --- |
-| `F-TICKTHREAD-ENSURE` | 201 | `TickThread.ensureTickThread`: throws `IllegalStateException` off the owning thread; not configurable | count only; per-site tests missing |
+| `F-TICKTHREAD-ENSURE` | 201 | `TickThread.ensureTickThread`: throws `IllegalStateException` off the owning thread; not configurable. One site narrowed for threads that tick nothing (paper 0028, 2026-10-22): `CraftWorld#getChunkAt(x, z)` from a non-`TickThread` waits for the chunk as on Paper (`guards/OffThreadChunkLoad`, bounded 30 s); the site and its refusal stay for every tick thread, so the count is unchanged | count only; per-site tests missing; `OffThreadChunkLoadTest` for the getChunkAt site |
 | `F-TICKTHREAD-IS` | 46 | `TickThread.isTickThreadFor`: picks a region-safe branch | count only |
 | `F-GLOBAL-TICK` | 17 | `RegionizedServer.ensureGlobalTickThread`: global state (scoreboards, world list, status, time). The 12 `CraftWorld` world-settings setters (time, weather, game rules, hardcore, spawn limits, ticks-per-spawn) moved to `guards/WorldSettingsOwner` (paper 0025, 2026-10-22): the startup thread owns them until the region scheduler starts, as on Paper; after that the global tick only, unchanged | `AuroraWorldsService` tests for SourbyCraft's own callers; `WorldSettingsOwnerTest` |
 | `F-TICKGUARD` | 17 | Canvas's configurable guards: `region-scheduler.guard-severity` (SourbyCraft default `LOG`, Canvas shipped `THROW`); with `LOG` a hit inside a bridged plugin's task counts toward its quarantine | `scripts/test_patch_policy.py` (LOG default), `ViolationClassifierTest`, bridge `GuardViolations` tests |
