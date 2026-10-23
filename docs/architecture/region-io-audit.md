@@ -18,6 +18,7 @@ connections fails the build until it is added here with its thread context.
 | `security/SecurityGuards.java` | Reads the numeric bytes of a peer/forwarded `InetSocketAddress` for connection-guard admission limits (SEC-11); opens no connection and never resolves a name (unresolved addresses bypass). Listed only because it matches the scan pattern | Netty event loop (`ServerConnectionListener` `initChannel`, `ServerLoginPacketListenerImpl.handleHello` / Velocity forwarding) |
 | `update/UpdateOverrides.java` | Validates the test-only `sourbycraft.update.api-base` JVM property (loopback `http(s)` URL only) with `java.net.URI`; opens no connection and never resolves a name. Listed only because it matches the scan pattern | Async scheduler, inside `SourbyUpdater.check` |
 | `awf/redis/RedisClient.java` | The `redis` AWF backend (`aurora.awf.backend = "redis"`) | Store opening: the I/O lane (`AwfEngine.prepare`) for runtime worlds, the main thread at boot. Commits: the storage lane, refused on a region thread like FILE commits. Chunk reads: wherever the engine reads a region file for that chunk — the same exposure the FILE backend's reads have. Lease renewal: its own daemon thread. Every socket read is bounded by `timeout-ms`. |
+| `mod/ModLoader.java` | SourbyMod (ML1) jar loading through `URLClassLoader` over `file:` URLs; opens no connection and never resolves a name. Listed only because it matches the scan pattern | `sourby mods` boot stage on the main thread, before worlds and plugins |
 
 ## File I/O
 

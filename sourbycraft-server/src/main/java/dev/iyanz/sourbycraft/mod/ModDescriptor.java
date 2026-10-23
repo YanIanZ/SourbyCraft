@@ -62,7 +62,8 @@ public final class ModDescriptor {
             String name = str(map, "name");
             if (name == null || name.isBlank()) name = id;
 
-            final String version = str(map, "version");
+            // Version is an arbitrary string, but YAML parses "1.0" as a number; accept both.
+            final String version = scalar(map, "version");
             if (version == null || version.isBlank()) {
                 SourbyLogger.warn("mods/" + jarName + ": missing 'version'");
                 return null;
@@ -95,5 +96,13 @@ public final class ModDescriptor {
     private static String str(final Map<String, Object> map, final String key) {
         final Object value = map.get(key);
         return value instanceof String text ? text : null;
+    }
+
+    /** A string field that also accepts a YAML scalar (for example {@code version: 1.0}). */
+    private static String scalar(final Map<String, Object> map, final String key) {
+        final Object value = map.get(key);
+        if (value instanceof String text) return text;
+        if (value instanceof Number number) return number.toString();
+        return null;
     }
 }
