@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Sat, 24 Oct 2026 00:22:31 +0700
+Subject: [PATCH] SourbyCraft - shutdown thread waits instead of pumping the
+ chunk queue
+
+
+diff --git a/net/minecraft/server/level/ServerChunkCache.java b/net/minecraft/server/level/ServerChunkCache.java
+index 1b884e6da5fa046a2af87e9e9ef3adc445876702..6f162822c2459cdd0a6c481c878ed88113e46c16 100644
+--- a/net/minecraft/server/level/ServerChunkCache.java
++++ b/net/minecraft/server/level/ServerChunkCache.java
+@@ -122,11 +122,19 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+             );
+         }
+ 
+-        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.level, chunkX, chunkZ) || (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED && io.papermc.paper.threadedregions.RegionizedServer.isGlobalTickThread())) { // SourbyCraft - relaxed thread checks: the global tick blocks here too (LightingLuminol MC 0001)
++        // SourbyCraft start - shutdown thread must not pump the main-thread queue: TickThread.isTickThreadFor
++        // answers true for any RegionShutdownThread (its no-region fallback treats it as the owner of every
++        // chunk), but that thread has no current region world data, so the managedBlock pump below would hit
++        // MainThreadExecutor.pollTask's "Polling tasks from non-owned region" guard (a plugin's onDisable block
++        // write, r48.3). The load is already scheduled at BLOCKING priority and the chunk system still runs while
++        // plugins disable, so the shutdown thread waits on the completable below instead of pumping.
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isShutdownThread()
++            && (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.level, chunkX, chunkZ) || (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED && io.papermc.paper.threadedregions.RegionizedServer.isGlobalTickThread()))) { // SourbyCraft - relaxed thread checks: the global tick blocks here too (LightingLuminol MC 0001)
+             ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkTaskScheduler.pushChunkWait(this.level, chunkX, chunkZ);
+             this.mainThreadProcessor.managedBlock(completable::isDone);
+             ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkTaskScheduler.popChunkWait();
+         }
++        // SourbyCraft end
+ 
+         final ChunkAccess ret = completable.join();
+         if (ret == null) {
