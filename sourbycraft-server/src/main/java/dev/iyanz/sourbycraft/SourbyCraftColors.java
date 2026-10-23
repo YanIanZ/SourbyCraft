@@ -48,6 +48,17 @@ public final class SourbyCraftColors {
 
     /** Build 47 Aurora Nexus plugin compatibility palette. */
     public static final TextColor PLUGIN_NATIVE   = TextColor.fromHexString("#4DA3FF");
+
+    /**
+     * Release-stage colour: red for a GitHub prerelease, green for a normal release, amber for a
+     * development/experimental build. The display identity itself carries the stage marker
+     * ({@code @<commit>PR!}) so colour is never the only signal.
+     */
+    public static TextColor releaseStage(final dev.iyanz.sourbycraft.brand.BuildInfo info) {
+        if (info == null) return WARNING;
+        if (info.prerelease()) return DANGER;
+        return "REL".equals(info.channel()) ? SUCCESS : WARNING;
+    }
     public static final TextColor PLUGIN_BRIDGED  = TextColor.fromHexString("#57D68D");
     public static final TextColor PLUGIN_FAILED   = TextColor.fromHexString("#FF5C70");
     public static final TextColor PLUGIN_DISABLED = TextColor.fromHexString("#8B949E");

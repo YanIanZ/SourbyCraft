@@ -130,6 +130,9 @@ Wait for `Done (` in console. Build 47+ `/ver` reports a SourbyCraft-owned ident
 - `docs/architecture/AURORA.md` — entry point for all Aurora architecture docs, current state verified against code, and known contradictions between docs.
 - `docs/DEVELOPMENT.md` — governing rules (truthfulness policy, performance evidence requirements, stability budget, testing matrix).
 - `docs/TODO.md` — the single prioritized to-do list; `docs/releases/` — per-build release gates and evidence.
+- `docs/awf/multiprofile/` — AWF MultiProfile and Aurora Redis Fabric: architecture, lifecycle, isolation,
+  distributed ownership, configuration, API, security, operations, testing, benchmarks. Both features
+  ship disabled by default; distributed mode is documented as experimental and unqualified.
 - Repository root follows PaperMC/Paper's layout: Docker files in `docker/`, the README image in `.github/assets/`, the security-limits sample in `build-data/`. `CLAUDE.md`, `opencode.json`, `.run/` and the `*.settings.gradle.kts` opt-in files are local and git-ignored; a local `CLAUDE.md` should import this file (`@AGENTS.md`) rather than copy it.
 
 ## Concurrent agents

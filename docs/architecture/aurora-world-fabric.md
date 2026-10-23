@@ -2,6 +2,10 @@
 
 Aurora World Fabric (AWF) is SourbyCraft's native region-aware virtual-world, template, instance, storage and persistence runtime.
 
+> **Related:** AWF MultiProfile builds durable player profiles on this API and keeps every AWF
+> invariant (template immutability, copy-on-write, save-before-unload, per-world leases) unchanged.
+> It is disabled by default; see [`docs/awf/multiprofile/ARCHITECTURE.md`](../awf/multiprofile/ARCHITECTURE.md).
+
 ## Identity and compatibility
 AWF is not branded as ASP/SWM. AdvancedSlimePaper `dev/26.2` remains an upstream technical reference and API compatibility target. Directly reused upstream source must retain license/attribution required by its license.
 

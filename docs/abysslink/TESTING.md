@@ -31,3 +31,18 @@ A raw `--tests '*AbyssLink*'` filter also selects unrelated suite containers and
 The repeatable real-peer harness is `scripts/abysslink/run_interop.py --help`. Pass the actual Leviathan Git root, a file containing the current server test runtime classpath, the Temurin 25 bin directory, and an output report path. It creates temporary test certificates, compiles the actual peer control classes, and runs the real client/server over mTLS. The injected native ping provider and entitlement supplier are test doubles; this does not qualify either production proxy distribution or real gameplay forwarding.
 
 Actual verification and remaining gates are recorded below after final checks. Unit/build/boot results establish neither performance nor production qualification.
+
+## Latest evidence
+
+- **2026-10-24** — real-peer mTLS interoperability, SourbyCraft client at commit
+  `97d2026e` against Leviathan AbyssLink source digest `a24002ac5139…`:
+  **16/16 checks PASS** (certificates/pin, HELLO/auth, heartbeat RTT, ping
+  found/absent/stale, reconnect, negative wrong-hostname/wrong-pin, cleanup).
+  JDK 25.0.2; harness `scripts/abysslink/run_interop.py`. Report:
+  Leviathan `build/verification/abysslink-interop.json`.
+- Harness fix in the same change: the absent/stale expectations used
+  `Optional.filter(predicate -> false)`, a condition that can never pass; they
+  now assert `Optional.empty()` explicitly.
+- Scope limit: entitlement and native ping are test doubles. This run does not
+  qualify a production proxy distribution, gameplay forwarding or real player
+  latency.

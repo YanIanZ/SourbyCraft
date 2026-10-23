@@ -27,8 +27,10 @@ public record ReadySummary(String release, String minecraft, long readyMillis, S
 
     public String render(final ConsoleStyle style) {
         final String identity = style.unicode() ? this.release : this.release.replace('—', '-');
+        final String shown = ConsoleStyle.singleLine(identity);
+        final String painted = style.color() ? style.paint(shown, stageColor(shown)) : shown;
         final StringBuilder line = new StringBuilder(200)
-            .append("SourbyCraft ").append(ConsoleStyle.singleLine(identity))
+            .append("SourbyCraft ").append(painted)
             .append(" | Minecraft ").append(ConsoleStyle.singleLine(this.minecraft))
             .append(" | ready ").append(seconds(this.readyMillis)).append(" after JVM start");
         if (this.comparison != null && !this.comparison.isBlank()) {
@@ -48,6 +50,15 @@ public record ReadySummary(String release, String minecraft, long readyMillis, S
 
     static String seconds(final long millis) {
         return String.format(Locale.ROOT, "%.1f s", Math.max(0L, millis) / 1000.0);
+    }
+
+    /** Red for a prerelease identity, amber for a dev/experimental one, green for a release. */
+    static net.kyori.adventure.text.format.TextColor stageColor(final String identity) {
+        if (identity.endsWith("PR!")) return dev.iyanz.sourbycraft.SourbyCraftColors.DANGER;
+        if (identity.contains("(DEV") || identity.contains("(EXP") || identity.contains("(UNKNOWN")) {
+            return dev.iyanz.sourbycraft.SourbyCraftColors.WARNING;
+        }
+        return dev.iyanz.sourbycraft.SourbyCraftColors.SUCCESS;
     }
 
     private static String count(final int n, final String one, final String many) {

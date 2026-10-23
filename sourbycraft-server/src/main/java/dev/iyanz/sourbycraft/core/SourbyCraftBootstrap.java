@@ -84,6 +84,10 @@ public final class SourbyCraftBootstrap {
         catch (Throwable failure) { SourbyLogger.error("AbyssLink shutdown failed", failure); }
         try { VirtualExecutor.shutdown(); }
         catch (Throwable failure) { SourbyLogger.error("I/O shutdown failed", failure); }
+        // Profile I/O runs on the storage lane; it may use the Redis fabric, whose pools stay open
+        // until AwfEngine.closeAll() has committed the last world (see AwfEngine.closeAll).
+        try { dev.iyanz.sourbycraft.awf.multiprofile.ProfileRuntime.stop(10_000L); }
+        catch (Throwable failure) { SourbyLogger.error("AWF MultiProfile shutdown failed", failure); }
         try { dev.iyanz.sourbycraft.execution.ResourceGovernor.GLOBAL.shutdown(10_000L); }
         catch (Throwable failure) { SourbyLogger.error("Resource Governor shutdown failed", failure); }
         AuroraRuntime.transition(AuroraRuntime.State.STOPPED);
@@ -130,6 +134,9 @@ public final class SourbyCraftBootstrap {
                 SourbyCraftConfig.aurora().diagnostics().stallRecorder());
         });
 
+        // The fabric's pools, before any AWF Redis backend can register and share the STORAGE pool.
+        stage("aurora redis fabric", dev.iyanz.sourbycraft.awf.redis.fabric.FabricRuntime::start);
+
         // AuroraWorlds API: before plugins enable, so they can look it up in onEnable.
         stage("aurora worlds", () -> {
             try {
@@ -138,6 +145,10 @@ public final class SourbyCraftBootstrap {
                 throw new java.io.UncheckedIOException(failed);
             }
         });
+
+        // AWF MultiProfile: after AuroraWorlds (it binds worlds through that API), before plugins enable
+        // so AuroraProfiles is in the services manager when a consumer looks it up.
+        stage("awf multiprofile", () -> dev.iyanz.sourbycraft.awf.multiprofile.ProfileRuntime.start(owner));
 
         // ORDERING: must precede CraftServer#enablePlugins, where Via reads its config in
         // onEnable. Writes the shipped default ViaVersion/ViaBackwards config only when absent.
@@ -265,7 +276,7 @@ public final class SourbyCraftBootstrap {
     static synchronized int failureCountForTesting() { return failureCount; }
 
     /** Stages the engine brings up, in order; the denominator of the boot bar. */
-    private static final int TOTAL_STAGES = 16;
+    private static final int TOTAL_STAGES = 18;
     private static int stageCount;
     private static int failureCount;
     private static final java.util.List<dev.iyanz.sourbycraft.brand.AuroraBoot.Stage> progress = new java.util.ArrayList<>();

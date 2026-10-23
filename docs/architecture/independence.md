@@ -154,7 +154,7 @@ public build identity carries no Canvas suffix from Build 47 (`BuildInfo` only m
 comments and strips it from legacy values); Canvas is no longer an upstream or toolchain input (section 2).
 
 Renamed in Build 48 (owner decision 2026-10-21, "replace every remaining user/plugin-visible Canvas
-identifier"; old names still read until Build 50, see `docs/releases/26.2-build-50.md`):
+identifier"; old names still read until Build 50, see `docs/releases/26.2-build-50-aurora-nexus.md`):
 
 | Was | Now | Old name |
 | --- | --- | --- |

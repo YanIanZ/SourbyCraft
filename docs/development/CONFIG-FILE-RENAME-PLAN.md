@@ -29,7 +29,7 @@
 > - Out of this change: the per-world `canvas-patch.yml` (Q3), Spark path mismatch (Q10), engine
 >   pending-key tracking (Q11), making every ordinary load atomic (Q9). Deprecation end (Q4): the
 >   old-name migration stays until the owner schedules its removal
->   ([26.2-build-50.md](../releases/26.2-build-50.md)).
+>   ([26.2-build-50-aurora-nexus.md](../releases/26.2-build-50-aurora-nexus.md)).
 >
 > Original header: "PLANNED / PROPOSED — nothing in this document is implemented. Per
 > [docs/DEVELOPMENT.md](../DEVELOPMENT.md#development-truthfulness-and-non-misleading-policy), every

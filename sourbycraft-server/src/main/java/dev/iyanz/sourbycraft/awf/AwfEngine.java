@@ -117,9 +117,18 @@ public final class AwfEngine {
     private static void registerRedis() {
         final dev.iyanz.sourbycraft.awf.redis.RedisBackend redis;
         try {
-            redis = new dev.iyanz.sourbycraft.awf.redis.RedisBackend(
-                dev.iyanz.sourbycraft.awf.redis.RedisSettings.readEarly(AURORA_FILE, UNIFIED_FILE));
-        } catch (final IllegalArgumentException invalid) {
+            final dev.iyanz.sourbycraft.awf.redis.RedisSettings settings =
+                dev.iyanz.sourbycraft.awf.redis.RedisSettings.readEarly(AURORA_FILE, UNIFIED_FILE);
+            final dev.iyanz.sourbycraft.awf.redis.fabric.RedisFabric fabric =
+                dev.iyanz.sourbycraft.awf.redis.fabric.RedisFabric.running();
+            if (fabric != null && fabric.settings().enabled()) {
+                // One bounded pool (aurora.awf.redis.fabric.pools.storage) shared with the fabric,
+                // so an event consumer can never exhaust the world store's connections.
+                redis = dev.iyanz.sourbycraft.awf.redis.RedisBackend.sharing(settings, fabric.storageClient());
+            } else {
+                redis = new dev.iyanz.sourbycraft.awf.redis.RedisBackend(settings);
+            }
+        } catch (final RuntimeException invalid) {
             SourbyLogger.error("Aurora World Fabric: the Redis backend is misconfigured: " + invalid.getMessage());
             return;
         }
@@ -572,8 +581,20 @@ public final class AwfEngine {
      */
     public static int closeAll() {
         final AwfEngine current = global;
-        if (current == null) return 0;
-        return current.shutdownAll();
+        int unconfirmed = 0;
+        try {
+            if (current != null) unconfirmed = current.shutdownAll();
+        } finally {
+            // The Aurora Redis Fabric owns the STORAGE pool an AWF Redis backend commits through.
+            // Bootstrap#close runs before the region saves and this method, so the fabric is only
+            // stopped here, after the last commit and lease release, never earlier.
+            try {
+                dev.iyanz.sourbycraft.awf.redis.fabric.FabricRuntime.stop(5_000L);
+            } catch (final RuntimeException failed) {
+                SourbyLogger.warn("Aurora Redis Fabric shutdown failed: " + failed.getMessage());
+            }
+        }
+        return unconfirmed;
     }
 
     /** {@link #closeAll()} for this engine: close the rest, release the backend, report. */

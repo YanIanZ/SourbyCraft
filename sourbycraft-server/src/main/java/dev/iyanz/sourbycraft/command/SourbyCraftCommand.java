@@ -31,7 +31,8 @@ public class SourbyCraftCommand extends Command {
             case "version", "ver" -> {
                 sender.sendMessage(UiPanel.header("Build identity"));
                 BuildInfo info = BuildInfo.load();
-                sender.sendMessage(UiPanel.row("Release", info.releaseIdentity()));
+                sender.sendMessage(UiPanel.row("Release", info.releaseIdentity(),
+                    SourbyCraftColors.releaseStage(info)));
                 sender.sendMessage(UiPanel.row("Minecraft / channel", info.mcVersion() + " / " + info.version()));
                 sender.sendMessage(UiPanel.actions(List.of("/ver", "/aurora")));
                 sender.sendMessage(UiPanel.footer());
@@ -49,7 +50,9 @@ public class SourbyCraftCommand extends Command {
             }
             case "help" -> {
                 sender.sendMessage(UiPanel.header("Operator hub"));
-                sender.sendMessage(UiPanel.row("Release", BuildInfo.load().releaseIdentity()));
+                final BuildInfo identity = BuildInfo.load();
+                sender.sendMessage(UiPanel.row("Release", identity.releaseIdentity(),
+                    SourbyCraftColors.releaseStage(identity)));
                 sender.sendMessage(UiPanel.section("Inspect"));
                 sender.sendMessage(UiPanel.hint("/sys — system summary · /spec — hardware & JVM"));
                 sender.sendMessage(UiPanel.hint("/perf — measurements · /tps and /mspt — region tick health"));

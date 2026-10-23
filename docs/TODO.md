@@ -792,3 +792,47 @@ belum direncanakan, kecuali yang ditandai; hanya butir yang bertanda [x] sudah d
 - [ ] Observability: lane housekeeping dengan marker kesegarannya sendiri (commit AWF, sampling, histori)
 - [x] Observability: manifest provenance build (tree hash, flag dirty, hash direktori patch) dicetak `/ver`
   — selesai 2026-10-20 (build-opus): hash direktori patch MC/Paper/API, manifest baseline, lock + pin toolchain, JDK toolchain di `sourbycraft-build.properties` (`provenance.*`) dan manifest (`Provenance-*`) dari satu provider; `/ver` bagian "Provenance" (`brand/BuildProvenance`); `verify_build_identity.py` cek kesesuaian + `--source-root` (CI); test_build_identity 23, BuildProvenanceTest 4, VerCommandTest 4; `docs/development/BUILD-PROVENANCE.md`
+
+## AWF MultiProfile + Aurora Redis Fabric (2026-10-24, uncommitted)
+
+- [x] Build 50 prerelease identity: `sourbyBuild=50`, `release=pre`, display `Build 50@<short>PR!`
+  (merah) dan `Build 50` (hijau) saat rilis; formatter tunggal di `BuildInfo`/`SourbyCraftColors.releaseStage`.
+  Test case ditambahkan, belum dijalankan agen.
+
+Fondasi ada dan diuji oleh agen implementasi (bukan kualifikasi owner), kedua fitur **default mati**.
+Rincian: `docs/awf/multiprofile/`. Build 50 juga memperbaiki (belum diverifikasi owner):
+
+- [x] Klaim sesi tidak lagi bocor setelah switch: engine menyimpan klaim aktif per pemain,
+      melepasnya saat quit/shutdown, dan pemilik lokal menerima token baru pada node yang sama
+      (sebelumnya pemain di-kick "active on this node" bila reconnect dalam 60 s).
+- [x] `save` tidak lagi bisa menulis state profil tujuan ke profil lama: save ditolak selama switch,
+      dicek ulang setelah capture, dan revision ditulis di bawah satu lock.
+- [x] `switching.timeout-ms` ditegakkan (cek deadline per fase + timeout pada world-ready); hasilnya
+      `TIMEOUT` dan rollback.
+- [x] Recovery tidak lagi menabrak switch yang sedang berjalan; NPE metrik saat fabric mati hilang.
+- [x] Layanan `AuroraProfiles` dilepas saat shutdown; adapter plugin dilepas saat plugin disable;
+      kegagalan start dilaporkan sebagai stage gagal, bukan "running".
+- [x] Fabric berhenti **setelah** `AwfEngine.closeAll()`: pool STORAGE bersama tidak lagi ditutup
+      sebelum commit terakhir (sebelumnya stop bersih bisa exit 70).
+- [x] Registry fabric tunggal; `events` default mati (tidak ada consumer di build ini); counter
+      operasi/timeout benar-benar diukur; registrasi node atomik; URI Redis rusak tidak membatalkan
+      world load.
+- [x] AWF menolak load instance bila template-nya hilang (dulu menjadi dunia kosong), dan registry
+      yang diedit tangan dengan nama tidak valid dilewati dengan WARN.
+- [x] Perintah admin baru agar owner bisa menguji tanpa plugin:
+      `/awf multiprofile create <player> [type]` dan `/awf multiprofile switch <player> <profile-uuid>`.
+- [ ] Owner menjalankan `docs/testing/owner/` (semua status masih READY FOR OWNER TEST/BLOCKED).
+
+Yang belum:
+- [ ] Binding dunia publik: `ProfileWorldBinding` masih internal (belum ada API untuk memasang template
+  ke profil). Konsumen harus lewat kode server sampai API itu ada; karena itu MP-007 (`worlds.idle-unload-seconds`)
+  BLOCKED untuk owner.
+- [ ] Distributed: kualifikasi multi-node (pemilik basi ditolak, takeover setelah node mati, Redis mati
+  = tulis ditolak). Mode tetap **eksperimental**; MP-010 BLOCKED.
+- [ ] Benchmark 100/1.000/10.000 profil, switch bersamaan, latensi Redis, memori
+  (`docs/awf/multiprofile/BENCHMARKS.md` — belum ada angka).
+- [ ] Adaptor isolasi untuk advancements/statistics/recipe-book dan inventory plugin.
+- [ ] Portal/proxy handoff memakai `RoutingFabric` (antarmuka ada, transport belum).
+- [ ] `/awf save` masih kembali saat save dijadwalkan, bukan saat semua chunk mencapai store (AWF-006);
+      `/awf unload` masih bisa melaporkan sukses saat commit akhir gagal (FR-005). Keduanya perlu
+      perbaikan engine sebelum dapat diklaim aman.

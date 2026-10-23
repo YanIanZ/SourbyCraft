@@ -125,6 +125,7 @@ public class RedisClient implements AutoCloseable {
     private final Semaphore permits;
     /** Idle connections; never more than the pool size, since only that many are ever out. */
     private final ArrayBlockingQueue<Connection> idle;
+    private volatile Observer observer;
     private volatile boolean closed;
     /** Connections handed to a caller right now, so a deadline or {@link #close()} can abort them. */
     private final java.util.Set<Connection> checkedOut = java.util.concurrent.ConcurrentHashMap.newKeySet();
@@ -145,6 +146,35 @@ public class RedisClient implements AutoCloseable {
 
     public Endpoint endpoint() {
         return this.endpoint;
+    }
+
+    /** The configured socket timeout, before any shutdown deadline cuts it. */
+    public int timeoutMillis() {
+        return this.timeoutMillis;
+    }
+
+    /** Optional per-call instrumentation; the fabric attaches one to its pools. */
+    public void observer(final Observer observer) {
+        this.observer = observer;
+    }
+
+    /** Receives one event per finished call and, separately, per timeout or saturated pool. */
+    public interface Observer {
+        void call(long nanos, boolean ok);
+
+        default void timeout() {}
+
+        default void poolSaturation() {}
+    }
+
+    /** Connections this pool may open at once. */
+    public int poolSize() {
+        return this.idle.size() + this.idle.remainingCapacity();
+    }
+
+    /** Connections currently checked out by callers. */
+    public int inUse() {
+        return this.checkedOut.size();
     }
 
     /**
@@ -237,11 +267,31 @@ public class RedisClient implements AutoCloseable {
      * a {@link RedisError} in the list, so one failed command does not hide the others' results.
      */
     public List<Object> pipeline(final List<Object[]> commands) throws IOException {
+        final Observer observer = this.observer;
+        final long began = System.nanoTime();
+        boolean ok = false;
+        try {
+            final List<Object> replies = pipelineOnce(commands);
+            ok = true;
+            return replies;
+        } catch (final IOException failed) {
+            if (observer != null && (failed instanceof dev.iyanz.sourbycraft.awf.AwfDeadlineExceeded
+                || failed instanceof java.net.SocketTimeoutException)) {
+                observer.timeout();
+            }
+            throw failed;
+        } finally {
+            if (observer != null) observer.call(System.nanoTime() - began, ok);
+        }
+    }
+
+    private List<Object> pipelineOnce(final List<Object[]> commands) throws IOException {
         if (this.closed) throw new IOException("Redis client is closed");
         final int waitMillis = stepTimeoutMillis(false);
         try {
             if (!this.permits.tryAcquire(waitMillis, TimeUnit.MILLISECONDS)) {
                 if (pastDeadline()) throw deadlinePassed(false, null);
+                if (this.observer != null) this.observer.poolSaturation();
                 throw new IOException("no free Redis connection within " + waitMillis + " ms");
             }
         } catch (final InterruptedException interrupted) {
@@ -251,6 +301,9 @@ public class RedisClient implements AutoCloseable {
         Connection connection = null;
         boolean sent = false;
         try {
+            // close()/deadline() may have run while this thread waited for a permit; never open a
+            // socket after that, or it would be offered to a pool nobody owns any more.
+            if (this.closed || this.expired) throw new IOException("Redis client is closed");
             connection = this.idle.poll();
             if (connection == null) connection = connect(stepTimeoutMillis(false));
             this.checkedOut.add(connection);
@@ -280,7 +333,12 @@ public class RedisClient implements AutoCloseable {
                 throw failed;
             }
             this.checkedOut.remove(connection);
-            if (this.idle.offer(connection)) connection = null;      // else closed below
+            if (this.closed || this.expired || !this.idle.offer(connection)) {
+                connection.close();
+            }
+            // Pooled or closed either way: the finally block must not close it a second time, and a
+            // pooled connection must not be closed there at all.
+            connection = null;
             if (this.expired) abortAll();                              // offered after the abort swept the pool
             return replies;
         } catch (final IOException failed) {

@@ -174,6 +174,104 @@ public final class AuroraKeys {
             + "connections are cut, and the shutdown is logged as AWF-SHUTDOWN-INCOMPLETE with every unconfirmed "
             + "storage (exit status 70), never as saved. 1-2147483647.");
 
+    // [aurora.awf.multiprofile] — AWF MultiProfile (docs/awf/multiprofile/CONFIGURATION.md)
+    public static final List<ConfigKey> AWF_MULTIPROFILE_KEYS = List.of(
+        restart("aurora.awf.multiprofile.enabled", false,
+            "AWF MultiProfile. false = no profile directory, thread, listener or service registration; a plugin looking up "
+                + "AuroraProfiles gets null, as on a server without the feature. Read early, before the configuration loads."),
+        restart("aurora.awf.multiprofile.mode", "standalone",
+            "standalone = one server, local ownership, no Redis. distributed = cross-node ownership through the Aurora Redis "
+                + "Fabric; refused at startup unless the fabric and a reachable Redis are configured. Distributed is "
+                + "EXPERIMENTAL: every durable profile write checks the ownership fence before it commits."),
+        restart("aurora.awf.multiprofile.default-slots", 3,
+            "Profiles a new account may own. 1-64, at most max-slots. Existing accounts keep the slot limit stored with them."),
+        restart("aurora.awf.multiprofile.max-slots", 8,
+            "Hard ceiling for any account, including one whose stored limit is higher. 1-64."),
+        restart("aurora.awf.multiprofile.switching.enabled", true,
+            "Allow /profile-style switches. false leaves creation, listing and saving available but refuses every switch."),
+        restart("aurora.awf.multiprofile.switching.timeout-ms", 15000,
+            "One switch's budget. Past it the switch fails and rolls the player back to the previous profile snapshot. 1000-600000."),
+        restart("aurora.awf.multiprofile.switching.require-durable-save", true,
+            "true = a switch aborts when the previous profile's snapshot cannot be written durably (so a rollback point exists). "
+                + "false = continue without one; recovery then cannot restore the old state exactly."),
+        restart("aurora.awf.multiprofile.isolation.inventory", true,
+            "Inventory slots belong to the profile (item components preserved through Paper's byte serialisation)."),
+        restart("aurora.awf.multiprofile.isolation.armor", true,
+            "Armor and off-hand belong to the profile."),
+        restart("aurora.awf.multiprofile.isolation.ender-chest", true,
+            "Ender chest contents belong to the profile."),
+        restart("aurora.awf.multiprofile.isolation.experience", true,
+            "Level and experience progress belong to the profile."),
+        restart("aurora.awf.multiprofile.isolation.health", true,
+            "Health belongs to the profile; applied as min(stored, current max health)."),
+        restart("aurora.awf.multiprofile.isolation.food", true,
+            "Food level and saturation belong to the profile."),
+        restart("aurora.awf.multiprofile.isolation.potion-effects", true,
+            "Active potion effects belong to the profile; an unknown effect key is skipped, never fatal."),
+        restart("aurora.awf.multiprofile.isolation.location", true,
+            "Spawn and last location belong to the profile and are used as the switch destination. Only AWF world names "
+                + "(lower-case [a-z0-9_-]) can be destinations."),
+        restart("aurora.awf.multiprofile.worlds.idle-unload-seconds", 300,
+            "Save and unload a profile world after this long with no use (checked every 30 s, only when no player is inside). "
+                + "0 disables idle unloading."),
+        restart("aurora.awf.multiprofile.coordination.provider", "local",
+            "local = process-local ownership; redis = the Aurora Redis Fabric session fabric. redis is required by mode: distributed."),
+        restart("aurora.awf.multiprofile.coordination.fencing-enabled", true,
+            "Validate the ownership fence immediately before a durable profile commit. false is UNSAFE across nodes and is "
+                + "rejected in distributed mode."),
+        restart("aurora.awf.multiprofile.coordination.single-active-session", true,
+            "Refuse a second live session for a profile owned elsewhere (the joining player is rejected, not the holder)."),
+        restart("aurora.awf.multiprofile.directory", "awf/profiles",
+            "Relative directory for accounts, profiles, snapshots and transition journals. Created only when enabled."));
+
+    // [aurora.awf.redis.fabric] — Aurora Redis Fabric (docs/awf/multiprofile/REDIS-FABRIC.md)
+    public static final List<ConfigKey> AWF_REDIS_FABRIC_KEYS = List.of(
+        restart("aurora.awf.redis.fabric.enabled", false,
+            "Aurora Redis Fabric: workload-isolated Redis pools and services beyond world storage. false = no socket, no "
+                + "thread, no key. Reuses aurora.awf.redis.uri, key-prefix, timeout-ms and TLS/ACL credentials; no secret is "
+                + "duplicated here. Read early."),
+        restart("aurora.awf.redis.fabric.services.sessions", true,
+            "Profile session ownership with a never-resetting epoch (the fence)."),
+        restart("aurora.awf.redis.fabric.services.coordination", true,
+            "Fenced ownership claims for profiles and worlds; the durable write path validates the fence."),
+        restart("aurora.awf.redis.fabric.services.events", false,
+            "Redis Streams internal events: consumer groups, acks, pending recovery, retry budget, dead-letter stream. "
+                + "Off by default because this build ships no consumer: an unconsumed stream reaches its retention "
+                + "limit and then refuses every publish. Enable only together with a consumer."),
+        restart("aurora.awf.redis.fabric.services.cache", false,
+            "Bounded metadata cache with TTL and version-based invalidation; never a source of truth. Off by default: "
+                + "this build ships no consumer that would populate it."),
+        restart("aurora.awf.redis.fabric.services.routing", true,
+            "Node directory and ownership lookup for proxies and game plugins. No transport is opened."),
+        restart("aurora.awf.redis.fabric.services.telemetry", true,
+            "Aggregate counters behind /awf redis status; no per-player or per-profile labels."),
+        restart("aurora.awf.redis.fabric.pools.storage", 8,
+            "Connections for the AWF world store. When the fabric runs, the redis backend shares this pool instead of opening "
+                + "its own; aurora.awf.redis.pool-size applies only when the fabric is off. 1-64."),
+        restart("aurora.awf.redis.fabric.pools.coordination", 4,
+            "Connections for session and ownership scripts. 1-64."),
+        restart("aurora.awf.redis.fabric.pools.events", 2,
+            "Connections for stream producers and blocking consumers. 1-64."),
+        restart("aurora.awf.redis.fabric.pools.control", 2,
+            "Connections for health probes, node directory and cache version reads. 1-64."),
+        restart("aurora.awf.redis.fabric.cache.max-entries", 10000, "Cache entries per node. 1-1000000."),
+        restart("aurora.awf.redis.fabric.cache.ttl-seconds", 60,
+            "Cache TTL; bounds how long a missed invalidation can be served. 1-86400."),
+        restart("aurora.awf.redis.fabric.sessions.heartbeat-seconds", 10,
+            "How often a node renews a session claim. 1-3600; must be below sessions.ttl-seconds."),
+        restart("aurora.awf.redis.fabric.sessions.ttl-seconds", 45,
+            "Claim lifetime without a heartbeat. Expiry is not permission to write: a takeover increments the epoch and a "
+                + "stale writer fails validation. 5-86400."),
+        restart("aurora.awf.redis.fabric.events.retention", 10000,
+            "Approximate stream length (MAXLEN ~). Reaching it refuses new publishes instead of growing without bound. 100-10000000."),
+        restart("aurora.awf.redis.fabric.events.batch-size", 32, "Events per read; 1-500."),
+        restart("aurora.awf.redis.fabric.events.max-deliveries", 5,
+            "Deliveries before an unacknowledged event is copied to the dead-letter stream and acknowledged. 1-100."),
+        restart("aurora.awf.redis.fabric.events.read-block-ms", 500,
+            "Server-side block for one consumer read; bounds how long a consumer worker parks. 1-5000."),
+        restart("aurora.awf.redis.fabric.coordination.claim-seconds", 45,
+            "Lease for a coordination claim (profiles, worlds). Another node may take over after it; the fence still rises. 5-86400."));
+
     /** AbyssLink's keys; part of {@link #KEYS} so the YAML seeder writes them, comments included. */
     public static final List<ConfigKey> ABYSSLINK_KEYS = List.of(
         restart("aurora.abysslink.enabled", false, "Optional native Leviathan control client; failure never blocks startup."),
@@ -210,7 +308,9 @@ public final class AuroraKeys {
 
     /** Every key, in file order: AbyssLink's service keys follow the Aurora services it belongs to. */
     public static final List<ConfigKey> KEYS =
-        java.util.stream.Stream.concat(BASE_KEYS.stream(), ABYSSLINK_KEYS.stream()).toList();
+        java.util.stream.Stream.concat(BASE_KEYS.stream(),
+            java.util.stream.Stream.concat(AWF_MULTIPROFILE_KEYS.stream(),
+                java.util.stream.Stream.concat(AWF_REDIS_FABRIC_KEYS.stream(), ABYSSLINK_KEYS.stream()))).toList();
 
     /** The file header, written as the comment of the {@code [aurora]} table. */
     public static final String HEADER = String.join("\n",
@@ -240,7 +340,9 @@ public final class AuroraKeys {
         new UtilityKeys.Section("aurora.scheduler", "Resource Governor lane budgets (docs/architecture/aurora-resource-governor.md). 0 threads = the lane's documented default."),
         new UtilityKeys.Section("aurora.network", "Network measurement."),
         new UtilityKeys.Section("aurora.world", "World behaviour SourbyCraft owns instead of inheriting from the region-threading base."),
-        new UtilityKeys.Section("aurora.awf", "Aurora World Fabric (docs/architecture/aurora-world-fabric.md). All keys RESTART_REQUIRED; empty lists leave worlds on region files."));
+        new UtilityKeys.Section("aurora.awf", "Aurora World Fabric (docs/architecture/aurora-world-fabric.md). All keys RESTART_REQUIRED; empty lists leave worlds on region files."),
+        new UtilityKeys.Section("aurora.awf.multiprofile", "AWF MultiProfile: durable, isolated player profiles (docs/awf/multiprofile/ARCHITECTURE.md). Off by default."),
+        new UtilityKeys.Section("aurora.awf.redis.fabric", "Aurora Redis Fabric: sessions, coordination, events, cache, routing (docs/awf/multiprofile/REDIS-FABRIC.md). Off by default."));
 
     /** The current paths, in file order. */
     public static List<String> paths() {

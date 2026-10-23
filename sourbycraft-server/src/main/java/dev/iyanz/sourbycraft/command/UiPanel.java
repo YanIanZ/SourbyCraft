@@ -26,8 +26,13 @@ public final class UiPanel {
     }
 
     public static Component row(String label, String value) {
+        return row(label, value, SourbyCraftColors.VALUE);
+    }
+
+    /** A row whose value carries its own semantic colour (for example a release stage). */
+    public static Component row(String label, String value, net.kyori.adventure.text.format.TextColor color) {
         return text("  " + label + ": ", SourbyCraftColors.LABEL)
-            .append(text(ConsoleStyle.singleLine(value), SourbyCraftColors.VALUE));
+            .append(text(ConsoleStyle.singleLine(value), color));
     }
 
     public static Component hint(String value) {

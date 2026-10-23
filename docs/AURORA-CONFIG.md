@@ -212,7 +212,7 @@ So a read-only `sourbycraft_config/` keeps working (the INFO becomes an ERROR
 `configuration layout migration failed; the files were not changed and the old key names are still
 read`), and CI directories written with the old layout boot unchanged. Build 50 removes the
 old-name reads; the migration of the engine file names stays until the owner decides otherwise
-([26.2-build-50.md](releases/26.2-build-50.md)).
+([26.2-build-50-aurora-nexus.md](releases/26.2-build-50-aurora-nexus.md)).
 
 **Downgrade.** A pre-49 jar reads `config/canvas-*.yml` and the old TOML names. Before starting
 it: stop the server, then `cp -p config/aurora-server.yml config/canvas-server.yml`,
@@ -261,3 +261,18 @@ were kept in Build 48). The per-world `canvas-patch.yml` is not renamed.
 ## AbyssLink YAML (new native service)
 
 The optional AbyssLink client uses `sourbycraft_config/aurora.yml`, under `aurora.abysslink`, default disabled; all keys require restart. `AuroraKeys.ABYSSLINK_KEYS` is part of the YAML key table, so the seeder writes those keys and their comments. See [AbyssLink setup](abysslink/INTEGRATION.md).
+
+## AWF MultiProfile and Aurora Redis Fabric (new, default off)
+
+Two namespaces in `aurora.yml`, both RESTART_REQUIRED and read early:
+`aurora.awf.multiprofile.*` (20 keys) and `aurora.awf.redis.fabric.*` (20 keys). `ProfileSettings` /
+`FabricSettings` parse them; `AuroraKeys` seeds them and `docs/config-examples/aurora.yml` is the
+golden copy. The fabric reuses `aurora.awf.redis.uri`, `key-prefix`, `timeout-ms`, TLS/ACL and
+`SOURBYCRAFT_AWF_REDIS_URI`, so no credential is duplicated.
+
+Notable defaults: both features off; `mode: standalone`; ownership `local`; 3 default / 8 maximum
+profile slots; every isolation category on; `services.events` and `services.cache` off until a consumer
+ships; four bounded pools (8/4/2/2). Full table, lifecycle and rollback:
+[awf/multiprofile/CONFIGURATION.md](awf/multiprofile/CONFIGURATION.md). Distributed mode is
+experimental and requires the fabric, `coordination.provider: redis`, fencing on, and a shared
+`awf/profiles` directory.

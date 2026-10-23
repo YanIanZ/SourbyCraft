@@ -415,6 +415,10 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
         if (this.registry.contains(name) || Bukkit.getWorld(name) != null || Files.exists(folder(name))) {
             return CompletableFuture.failedFuture(new IllegalStateException("a world named " + name + " already exists"));
         }
+        if (entry.template() != null && !this.templates.exists(entry.template())) {
+            return CompletableFuture.failedFuture(new IllegalStateException("AWF world " + name
+                + " is an instance of template '" + entry.template() + "', which is missing"));
+        }
         final WorldCreator creator;
         try {
             if (AwfEngine.storesExist(folder(name))) {
@@ -505,6 +509,13 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
         if (entry == null) return CompletableFuture.failedFuture(new IllegalArgumentException("no AWF world named " + name));
         final World loaded = Bukkit.getWorld(name);
         if (loaded != null) return CompletableFuture.completedFuture(loaded);
+        if (entry.template() != null && !this.templates.exists(entry.template())) {
+            // Without its template an instance would open empty stores and later commit a void/terrain
+            // world over a real one. Refuse instead of silently replacing its content.
+            return CompletableFuture.failedFuture(new IllegalStateException("AWF world " + name
+                + " is an instance of template '" + entry.template() + "', which is missing; refusing to load"
+                + " it as a fresh world (restore the template or delete the world)"));
+        }
         final WorldCreator creator;
         try {
             creator = creator(entry);

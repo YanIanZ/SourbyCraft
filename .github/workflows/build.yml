@@ -1289,9 +1289,13 @@ jobs:
           if [ -n "$RELEASE_BASE" ] && [ "$mode" = true ] && [ "${RELEASE_NUMBER%%.*}" -lt "${last:-0}" ]; then
             publish_flags="--latest=false"
           fi
-          title="$(TZ=Asia/Jakarta date '+%A, %d %B %Y, %H:%M') (GMT+7) — 26.2-r$next $codename [$(git log -1 --format=%s | cut -c1-80)]"
+          # Display identity: a prerelease is Build 50@<short-commit>PR! (shown red in-game), a normal
+          # release is Build 50 (green). Keep the two in lockstep with BuildInfo#formatReleaseIdentity.
+          short=$(git rev-parse --short=7 HEAD)
+          if [ "$mode" = pre ]; then identity="Build $next@${short}PR!"; else identity="Build $next"; fi
+          title="$(TZ=Asia/Jakarta date '+%A, %d %B %Y, %H:%M') (GMT+7) — 26.2-r$next $codename [$identity] [$(git log -1 --format=%s | cut -c1-80)]"
           {
-            echo "**SourbyCraft 26.2 Build ${next}** — \`$(basename "$jar")\` (sha256 \`$sha\`)"
+            echo "**SourbyCraft 26.2 ${identity}** — \`$(basename "$jar")\` (sha256 \`$sha\`)"
             echo
             echo "Auto-published from \`$GITHUB_REF_NAME\` after a green build + boot test."
             echo

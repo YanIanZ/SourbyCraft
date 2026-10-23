@@ -99,6 +99,13 @@ public final class AuroraWorldRegistry {
                     new TypeToken<List<Entry>>() { }.getType());
                 if (stored != null) {
                     for (final Entry entry : stored) {
+                        if (entry == null) continue;
+                        final Optional<String> invalid = invalidName(entry.name());
+                        if (invalid.isPresent()) {
+                            dev.iyanz.sourbycraft.util.SourbyLogger.warn("Aurora World Fabric: ignoring the"
+                                + " registry entry '" + entry.name() + "': " + invalid.get());
+                            continue;
+                        }
                         this.entries.put(entry.name(), entry);
                     }
                 }

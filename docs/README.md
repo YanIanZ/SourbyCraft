@@ -46,6 +46,7 @@ disagree, the code wins ([DEVELOPMENT.md](DEVELOPMENT.md), truthfulness policy).
 | Document | About |
 |---|---|
 | [DEVELOPMENT.md](DEVELOPMENT.md) | Active development contract, governing rules, testing matrix |
+| [testing/owner/00-TESTING-INDEX.md](testing/owner/00-TESTING-INDEX.md) | Owner-run testing handbook: AWF, MultiProfile, Redis Fabric, async pathfinding, bridge, governor, benchmarks, failure recovery |
 | [AURORA-ROADMAP.md](AURORA-ROADMAP.md) · [AURORA-DEVELOPMENT.md](AURORA-DEVELOPMENT.md) | Aurora plans (plan role: checkboxes are snapshots) |
 
 ### Architecture (`architecture/`)
@@ -55,6 +56,7 @@ disagree, the code wins ([DEVELOPMENT.md](DEVELOPMENT.md), truthfulness policy).
 | Execution & threading | [execution-contract.md](architecture/execution-contract.md), [aurora-resource-governor.md](architecture/aurora-resource-governor.md), [executors.md](architecture/executors.md), [executor-inventory.md](architecture/executor-inventory.md), [threading.md](architecture/threading.md), [region-parallelism.md](architecture/region-parallelism.md), [chunk-workers.md](architecture/chunk-workers.md), [region-io-audit.md](architecture/region-io-audit.md) |
 | Engine ownership | [engine-chunk-world.md](architecture/engine-chunk-world.md), [engine-entity-ai.md](architecture/engine-entity-ai.md), [engine-network.md](architecture/engine-network.md), [network-allocation-copy-audit.md](architecture/network-allocation-copy-audit.md), [engine-storage.md](architecture/engine-storage.md) |
 | World storage (AWF) | [aurora-world-fabric.md](architecture/aurora-world-fabric.md) |
+| AWF MultiProfile / Redis Fabric | [awf/multiprofile/ARCHITECTURE.md](awf/multiprofile/ARCHITECTURE.md), [PROFILE-LIFECYCLE.md](awf/multiprofile/PROFILE-LIFECYCLE.md), [PROFILE-ISOLATION.md](awf/multiprofile/PROFILE-ISOLATION.md), [DISTRIBUTED-OWNERSHIP.md](awf/multiprofile/DISTRIBUTED-OWNERSHIP.md), [REDIS-FABRIC.md](awf/multiprofile/REDIS-FABRIC.md), [CONFIGURATION.md](awf/multiprofile/CONFIGURATION.md), [API.md](awf/multiprofile/API.md), [SECURITY.md](awf/multiprofile/SECURITY.md), [OPERATIONS.md](awf/multiprofile/OPERATIONS.md), [TESTING.md](awf/multiprofile/TESTING.md), [BENCHMARKS.md](awf/multiprofile/BENCHMARKS.md) |
 | Plugin compatibility | [aurora-plugin-bridge.md](architecture/aurora-plugin-bridge.md), [compat-boundary.md](architecture/compat-boundary.md), [compat-vs-performance.md](architecture/compat-vs-performance.md) |
 | Startup & bootstrap | [aurora-instant-startup.md](architecture/aurora-instant-startup.md), [bootstrap-download-audit.md](architecture/bootstrap-download-audit.md), [slim-jar-bootstrap-failure.md](architecture/slim-jar-bootstrap-failure.md), [BOOTSTRAP.md](BOOTSTRAP.md), [CDS.md](CDS.md) |
 | Independence & patches | [independence.md](architecture/independence.md), [dependency-ledger.md](architecture/dependency-ledger.md), [patch-classification.md](architecture/patch-classification.md), [patches.md](architecture/patches.md), [rebase-log.md](architecture/rebase-log.md) |
@@ -98,7 +100,7 @@ audits) are kept by the maintainers outside this repository; references to them 
 docs (for example `SPEC.md` V/B numbers or `AURORA-TASKS.md` lines) point there.
 
 ### Releases (`releases/`)
-[Release roadmap 47–50](releases/ROADMAP-47-50.md) (owner plan 2026-10-21: 47 ship, 48 refinement, 49 full stable, 50 optimization; gates in [48](releases/26.2-build-48.md), [49](releases/26.2-build-49.md), [50](releases/26.2-build-50.md)) ·
+[Release roadmap 47–50](releases/ROADMAP-47-50.md) (owner plan 2026-10-21: 47 ship, 48 refinement, 49 full stable, 50 optimization; gates in [48](releases/26.2-build-48.md), [49](releases/26.2-build-49.md), [50](releases/26.2-build-50-aurora-nexus.md)) ·
 [Build 47 — Aurora Nexus](releases/26.2-build-47-aurora-nexus.md) (published release and its gates) ·
 [Build 48](releases/26.2-build-48.md) (current development build) ·
 [Build 49 real-test runbook](releases/runbooks/build-49-real-test.md) (human tester and operator handover) ·

@@ -95,6 +95,62 @@ aurora:
     # vanilla chunk save). When it passes, no further commit is attempted, Redis connections are cut, every
     # unconfirmed storage is logged and the stop ends with AWF-SHUTDOWN-INCOMPLETE and exit status 70.
     shutdown-deadline-ms: 30000
+    multiprofile:
+      # AWF MultiProfile. Default false: no directory, thread, listener or service registration.
+      enabled: false
+      # standalone | distributed. Distributed is EXPERIMENTAL and requires the Redis fabric.
+      mode: "standalone"
+      default-slots: 3
+      max-slots: 8
+      switching:
+        enabled: true
+        timeout-ms: 15000
+        require-durable-save: true
+      isolation:
+        inventory: true
+        armor: true
+        ender-chest: true
+        experience: true
+        health: true
+        food: true
+        potion-effects: true
+        location: true
+      worlds:
+        idle-unload-seconds: 300
+      coordination:
+        provider: "local"
+        fencing-enabled: true
+        single-active-session: true
+      directory: "awf/profiles"
+    redis:
+      fabric:
+        # Aurora Redis Fabric. Default false: no socket, no thread, no key.
+        enabled: false
+        services:
+          sessions: true
+          coordination: true
+          events: false    # off until a consumer is deployed; see docs/awf/multiprofile/REDIS-FABRIC.md
+          cache: false    # off until a consumer uses it
+          routing: true
+          telemetry: true
+        pools:
+          storage: 8
+          coordination: 4
+          events: 2
+          control: 2
+        cache:
+          max-entries: 10000
+          ttl-seconds: 60
+        sessions:
+          heartbeat-seconds: 10
+          ttl-seconds: 45
+        events:
+          retention: 10000
+          batch-size: 32
+          max-deliveries: 5
+          read-block-ms: 500
+        coordination:
+          claim-seconds: 45
   abysslink:
     # RESTART_REQUIRED. Default false. Optional native Leviathan control client; failure never blocks startup.
     enabled: false

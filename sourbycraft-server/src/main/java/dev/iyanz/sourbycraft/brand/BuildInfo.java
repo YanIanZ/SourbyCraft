@@ -20,6 +20,8 @@ import java.util.Properties;
  * @param buildTimestamp ISO-8601 instant the jar was built, or empty if unknown
  * @param gitBranch      source branch, from the same provider as the manifest's Git-Branch
  * @param gitCommit      full source commit, matching the manifest's Git-Commit
+ * @param prerelease     whether this jar was built for a GitHub prerelease ({@code release=pre});
+ *                       its display identity ends with {@code @<commit>PR!} and is shown in red
  */
 public record BuildInfo(
     String version,
@@ -30,13 +32,20 @@ public record BuildInfo(
     String tagline,
     String buildTimestamp,
     String gitBranch,
-    String gitCommit
+    String gitCommit,
+    boolean prerelease
 ) {
 
     /** Compatibility constructor for callers without source metadata. */
     public BuildInfo(String version, String build, String buildNumber, String mcVersion,
                      String codename, String tagline, String buildTimestamp) {
-        this(version, build, buildNumber, mcVersion, codename, tagline, buildTimestamp, "", "");
+        this(version, build, buildNumber, mcVersion, codename, tagline, buildTimestamp, "", "", false);
+    }
+
+    /** Compatibility constructor for callers with source metadata but no release-stage flag. */
+    public BuildInfo(String version, String build, String buildNumber, String mcVersion,
+                     String codename, String tagline, String buildTimestamp, String gitBranch, String gitCommit) {
+        this(version, build, buildNumber, mcVersion, codename, tagline, buildTimestamp, gitBranch, gitCommit, false);
     }
 
     /**
@@ -151,7 +160,8 @@ public record BuildInfo(
             p.getProperty("tagline", "Lightning Fast Performance · Feature Rich"),
             p.getProperty("buildTimestamp", ""),
             p.getProperty("gitBranch", ""),
-            p.getProperty("gitCommit", "")
+            p.getProperty("gitCommit", ""),
+            Boolean.parseBoolean(p.getProperty("prerelease", "false").trim())
         );
     }
 
@@ -176,13 +186,26 @@ public record BuildInfo(
     public String releaseIdentity() {
         final String commit = sourceOrUnknown(gitCommit);
         return formatReleaseIdentity(build, codename, channel(), gitBranch,
-            commit.substring(0, Math.min(7, commit.length())));
+            commit.substring(0, Math.min(7, commit.length())), this.prerelease);
     }
 
     /** Pure release formatter. The codename is the raw build codename; commit is already short. */
     public static String formatReleaseIdentity(String buildNumber, String codename, String channel,
                                                String branch, String shortCommit) {
+        return formatReleaseIdentity(buildNumber, codename, channel, branch, shortCommit, false);
+    }
+
+    /**
+     * Pure release formatter with the publication stage. A prerelease renders
+     * {@code Build 50@abc1234PR!} (the GitHub prerelease marker at the end); a normal release keeps
+     * {@code Build 50 — Aurora Nexus}; a development build keeps the branch/commit suffix.
+     */
+    public static String formatReleaseIdentity(String buildNumber, String codename, String channel,
+                                               String branch, String shortCommit, boolean prerelease) {
         final String release = "Build " + stripPlatformSuffix(sourceOrUnknown(buildNumber));
+        if (prerelease) {
+            return release + "@" + sourceOrUnknown(shortCommit) + "PR!";
+        }
         final String name = codenameDisplay(codename);
         final String identity = "Development".equals(name) ? release : release + " — " + name;
         final String actualChannel = normalizeChannel(channel);

@@ -117,8 +117,8 @@ public final class AbyssLinkInteropHarness {
             pingCheck("ping-found", client, server, FOUND_PLAYER,
                 sample -> sample.player().equals(FOUND_PLAYER)
                     && sample.latencyMillis() == FOUND_LATENCY_MS, "expectedLatency=42");
-            pingCheck("ping-absent", client, server, ABSENT_PLAYER, sample -> false, "expected=empty");
-            pingCheck("ping-stale", client, server, STALE_PLAYER, sample -> false,
+            pingCheck("ping-absent", client, server, ABSENT_PLAYER, null, "expected=empty");
+            pingCheck("ping-stale", client, server, STALE_PLAYER, null,
                 "staleAgeMs=" + STALE_SAMPLE_AGE_MS + " maxSampleAgeMs="
                     + client.settingsForDiagnostics().maxSampleAgeMillis());
             final AbyssLinkClient reconnectClient = client;
@@ -224,7 +224,8 @@ public final class AbyssLinkInteropHarness {
         long before = client.metrics.timeouts.sum();
         Optional<AbyssLinkClient.Sample> result = resolve(client, player);
         long after = client.metrics.timeouts.sum();
-        check(name, client.connected() && after == before && result.filter(expected).isPresent(),
+        boolean matched = expected == null ? result.isEmpty() : result.filter(expected).isPresent();
+        check(name, client.connected() && after == before && matched,
             "result=" + result.map(s -> "latency=" + s.latencyMillis()).orElse("empty")
                 + "; timeoutsDelta=" + (after - before) + "; " + extra + "; " + status(client));
     }

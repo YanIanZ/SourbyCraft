@@ -91,6 +91,15 @@ public final class RedisBackend implements AwfBackend {
             settings.timeoutMillis()));
     }
 
+    /**
+     * A backend over a caller-owned, independently bounded client, for example the Aurora Redis
+     * Fabric's STORAGE workload. The fabric keeps ownership of the client's lifetime; closing this
+     * backend closes it too, which is safe to repeat.
+     */
+    public static RedisBackend sharing(final RedisSettings settings, final RedisClient client) {
+        return new RedisBackend(settings, client);
+    }
+
     RedisBackend(final RedisSettings settings, final RedisClient client) {
         this(settings, client, serverId());
     }

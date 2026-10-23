@@ -33,8 +33,11 @@ public class ConsolePresentationTest {
     }
 
     @Test void launchLinesKeepTheDashOnlyWhenUnicodeIsOnAndDegradeEveryMissingField() {
-        assertTrue(LaunchLines.render("SourbyCraft", DEV, "26.2", "25", "vm", "1", "v", "vv", "os", "1", "x", 1, 1, "G1", RICH)
-            .get(0).startsWith("SourbyCraft Build 48 — Aurora Nexus"));
+        final String rich = LaunchLines.render("SourbyCraft", DEV, "26.2", "25", "vm", "1", "v", "vv", "os", "1", "x", 1, 1, "G1", RICH)
+            .get(0);
+        assertTrue(rich.contains("SourbyCraft "), rich);
+        assertTrue(rich.contains("Build 48 — Aurora Nexus"), rich);
+        assertTrue(rich.contains("\u001b["), "a coloured console must paint the release stage");
         final List<String> bare = LaunchLines.render(null, null, null, null, null, null, null, "null", null, null, null, 0, -5, "", PLAIN);
         assertEquals("SourbyCraft Build ? for Minecraft ?", bare.get(0));
         assertEquals("Java ? (? ?) on ? ? ? | 0 processors | 0 MiB max heap", bare.get(1));

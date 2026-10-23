@@ -30,6 +30,25 @@ class ReleaseIdentityTest {
     }
 
     @Test
+    void prereleaseIdentityCarriesTheCommitAndMarker() {
+        assertEquals("Build 50@abc1234PR!",
+            BuildInfo.formatReleaseIdentity("50", "aurora-nexus", "REL", "26.2", "abc1234", true));
+        assertEquals("Build 50@?PR!",
+            BuildInfo.formatReleaseIdentity("50", "aurora-nexus", "DEV", "26.2", "", true));
+        final BuildInfo info = BuildInfo.loadFrom(new ByteArrayInputStream("""
+            version=26.2-REL
+            build=50
+            buildNumber=50
+            prerelease=true
+            codename=aurora-nexus
+            gitBranch=26.2
+            gitCommit=abc123456789abcdef
+            """.getBytes(StandardCharsets.UTF_8)));
+        assertEquals("Build 50@abc1234PR!", info.releaseIdentity());
+        assertEquals(Boolean.TRUE, info.prerelease());
+    }
+
+    @Test
     void propertiesSupplyChannelAndSourceWithoutChangingParsedFields() {
         BuildInfo info = BuildInfo.loadFrom(new ByteArrayInputStream("""
             version=26.2-DEV
