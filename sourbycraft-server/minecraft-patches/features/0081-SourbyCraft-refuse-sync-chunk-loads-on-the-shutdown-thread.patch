@@ -1,0 +1,29 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Sat, 24 Oct 2026 02:24:00 +0700
+Subject: [PATCH] SourbyCraft - shutdown thread refuses a chunk load instead of
+ pumping the queue
+
+
+diff --git a/net/minecraft/server/level/ServerChunkCache.java b/net/minecraft/server/level/ServerChunkCache.java
+index 1b884e6da5fa046a2af87e9e9ef3adc445876702..108aa8546a9c753409d46071df50db90a7e5d878 100644
+--- a/net/minecraft/server/level/ServerChunkCache.java
++++ b/net/minecraft/server/level/ServerChunkCache.java
+@@ -108,6 +108,17 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+             // SourbyCraft end - relaxed thread checks
+         }
+         // Folia end - region threading
++        // SourbyCraft start - a synchronous load on the region shutdown thread can never complete: the
++        // scheduler halts before plugins disable (RegionShutdownThread "Scheduler halted"), so no thread runs
++        // the scheduled load, and the shutdown thread has no region world data for the managedBlock pump, whose
++        // pollTask then threw "Polling tasks from non-owned region" from a plugin's onDisable block write
++        // (r48.3). Refuse it with an owned message instead of scheduling work nobody can run; a chunk that is
++        // already loaded still serves the same call without reaching syncLoad.
++        if (ca.spottedleaf.moonrise.common.util.TickThread.isShutdownThread()) {
++            throw new IllegalStateException("Chunk load refused on the region shutdown thread: the region scheduler has halted, so the load cannot complete, world="
++                + ca.spottedleaf.moonrise.common.util.WorldUtil.getWorldName(this.level) + ", chunk_pos=" + new ChunkPos(chunkX, chunkZ));
++        }
++        // SourbyCraft end
+         final ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkTaskScheduler chunkTaskScheduler = ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getChunkTaskScheduler();
+         final CompletableFuture<ChunkAccess> completable = new CompletableFuture<>();
+         chunkTaskScheduler.scheduleChunkLoad(

@@ -18,7 +18,7 @@ index 5c6ede7ea4e77063cf6c9fc0696bfa24fe75cb6d..6b4a5851bd4160198f5fc812d495eabe
              this.server.globalTick(tickCount);
              dev.iyanz.sourbycraft.guards.ServerTickControl.get().globalTickEnd(); // SourbyCraft - sprint time accounting (vanilla endTickWork), after the global tick's work
 diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
-index a6185bcbce53adb5cf581203005e2301ad7bf085..1d63c3cef4c5bb4eb59cdf0ee21a2a7bf2940b8d 100644
+index 7327ca578a57c7425c505d204e4ac7694ce52900..270af2496de30ac8d280ef90429039219cf5f484 100644
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
 @@ -300,6 +300,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa

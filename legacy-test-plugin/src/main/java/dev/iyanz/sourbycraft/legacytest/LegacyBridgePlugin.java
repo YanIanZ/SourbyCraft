@@ -420,17 +420,16 @@ public final class LegacyBridgePlugin extends JavaPlugin {
         } catch (final RuntimeException refused) {
             this.getLogger().info("LEGACY_DISABLE_BUKKIT_SUBMIT_OK refused=" + refused.getClass().getSimpleName());
         }
-        // r48.3: a plugin writing a block from onDisable runs on the shutdown thread, and ServerChunkCache
-        // must wait for the load instead of pumping the main-thread queue (feature patch 0087). The far
-        // chunk is not loaded, so this goes through syncLoad; a regression logs
-        // "Polling tasks from non-owned region" and the FAILED marker instead of the OK one.
+        // r48.3: a plugin's onDisable runs on the region shutdown thread after the scheduler halted. Writing to
+        // an unloaded chunk must be refused with the owned message and must neither hang nor surface
+        // "Polling tasks from non-owned region" (feature patch 0087); the write itself cannot be applied.
         try {
             final org.bukkit.World world = this.getServer().getWorlds().get(0);
             world.getBlockAt(512, 64, 512).setType(org.bukkit.Material.STONE);
-            this.getLogger().info("LEGACY_DISABLE_BLOCK_WRITE_OK");
-        } catch (final RuntimeException failed) {
-            this.getLogger().severe("LEGACY_DISABLE_BLOCK_WRITE_FAILED " + failed.getClass().getSimpleName()
-                + ": " + failed.getMessage());
+            this.getLogger().severe("LEGACY_DISABLE_UNLOADED_BLOCK_WRITE_ACCEPTED");
+        } catch (final RuntimeException refused) {
+            this.getLogger().info("LEGACY_DISABLE_UNLOADED_BLOCK_WRITE_REFUSED " + refused.getClass().getSimpleName()
+                + ": " + refused.getMessage());
         }
     }
 }
