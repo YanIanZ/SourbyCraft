@@ -104,3 +104,6 @@ world*/
 AGENT-COORDINATION.md
 .board-queue.json*
 *.hprof
+
+# SourbyMod runtime directory (operator-provided jars + per-mod data)
+/mods/
