@@ -90,6 +90,11 @@ REFUSED_COMMANDS = ("stop", "restart", "end")
 # (Bukkit HelpCommand logs "No help for <marker>" synchronously on the console thread).
 CAPTURE_MARKER = "sc-capture-"
 FINAL_STATES = ("exited", "failed")
+# run.json fields that describe ONE boot; `restart` clears them for the next boot.
+PER_BOOT_FIELDS = ("status", "supervisor_pid", "jvm_pid", "jvm_started_at", "boot_seconds", "done_line",
+                   "ready_at", "boot_summary", "boot_verdict", "startup_failure", "stop_requested_at",
+                   "stop_reason", "exit_code", "ended_at", "killed", "lifetime_expired", "log_tail",
+                   "failure", "bootstrap_cache_saved", "lock_released", "console_ready_seconds_after_done")
 
 
 class HarnessError(RuntimeError):
@@ -699,9 +704,64 @@ def render_properties(props):
     return "".join(f"{key}={value.replace(':', chr(92) + ':')}\n" for key, value in props.items())
 
 
-GLOBAL_TOML = ("# Agent test server: no plugin downloads, no auto-update.\n"
-               "[viaversion]\nauto-provision=false\n[protocollib]\nauto-provision=false\n"
-               "[misc.auto_update]\nenabled=false\n")
+GLOBAL_TOML = ("# Agent test server: no plugin downloads, no auto-update (Build 49 layout).\n"
+               "[plugins.viaversion]\nauto-provision=false\n[plugins.protocollib]\nauto-provision=false\n"
+               "[updater]\nenabled=false\n")
+
+# `start --auto-update KEY=VALUE` turns the auto-updater on for the updater rollback fixture
+# (scripts/updater_rollback_fixture.py). It is only allowed together with the two test-only JVM
+# properties that keep the updater off the real GitHub and keep signature checks on: a loopback
+# release endpoint and a release public key file (UpdateOverrides / ReleaseSignatureVerifier).
+UPDATER_API_PROPERTY = "sourbycraft.update.api-base"
+UPDATER_KEY_PROPERTY = "sourbycraft.update.release-key-file"
+AUTO_UPDATE_KEYS = {"apply_mode": str, "restart_mode": str, "restart_delay_seconds": int,
+                    "repo": str, "channel": str, "check_interval_minutes": int,
+                    "allow_prerelease": bool}
+UPDATER_KEY_NAMES = {"repo": "repository"}     # Option key -> Build 49 [updater] key, else _ -> -.
+LOOPBACK_API = re.compile(r"^http://(127\.0\.0\.1|localhost|\[::1\]):\d{1,5}/?$")
+
+
+def toml_value(value):
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    return json.dumps(str(value))        # A JSON string is a valid TOML basic string.
+
+
+def auto_update_toml(settings, jvm_properties):
+    """The ``[updater]`` table (Build 49 layout) for an updater run, or HarnessError.
+
+    The option keys keep their pre-49 spelling (``apply_mode`` ...); each is written under its
+    Build 49 name (``apply-mode``; ``repo`` -> ``repository``).
+
+    Refused unless the JVM properties name a loopback http release endpoint AND an existing
+    release public key file, so the updater can neither reach the real GitHub nor run without
+    signature/manifest enforcement.
+    """
+    props = {}
+    for entry in jvm_properties:
+        key, _eq, value = str(entry).partition("=")
+        props[key] = value
+    api, key_file = props.get(UPDATER_API_PROPERTY), props.get(UPDATER_KEY_PROPERTY)
+    if not api or not LOOPBACK_API.match(api):
+        raise HarnessError(f"--auto-update needs --jvm-property {UPDATER_API_PROPERTY}="
+                           "http://127.0.0.1:PORT (a loopback fake release server); the harness "
+                           "never lets a test server reach the real GitHub")
+    if not key_file or not Path(key_file).is_file():
+        raise HarnessError(f"--auto-update needs --jvm-property {UPDATER_KEY_PROPERTY}=PUBLIC_KEY_FILE "
+                           "(an existing file): signature verification stays on")
+    lines = ["[updater]", "enabled=true", "via-auto-update=false"]
+    for name, value in settings.items():
+        if name not in AUTO_UPDATE_KEYS:
+            raise HarnessError(f"auto-update key {name!r} is not allowed (allowed: "
+                               f"{', '.join(sorted(AUTO_UPDATE_KEYS))})")
+        kind = AUTO_UPDATE_KEYS[name]
+        if kind is bool and not isinstance(value, bool) or kind is int and (
+                isinstance(value, bool) or not isinstance(value, int)) or kind is str and not isinstance(value, str):
+            raise HarnessError(f"auto-update key {name!r} must be {kind.__name__}, got {value!r}")
+        lines.append(f"{UPDATER_KEY_NAMES.get(name, name.replace('_', '-'))}={toml_value(value)}")
+    return "\n".join(lines) + "\n"
 
 
 # ------------------------------------------------------------------- startup-cache seeding
@@ -1150,8 +1210,9 @@ class Harness:
               properties=None, jvm_properties=(), startup_timeout_s=STARTUP_TIMEOUT_S,
               rebuild_jar=False, seed_cache=True, console_probe=True, command=None,
               lifetime_grace_s=LIFETIME_GRACE_S, world_from=None, aurora_toml=None,
-              exclusive=False, exclusive_wait_s=EXCLUSIVE_WAIT_S, config_files=None,
-              startup_cache_from=None, startup_cache_corrupt=None, plugin_files=None):
+              global_toml=None, exclusive=False, exclusive_wait_s=EXCLUSIVE_WAIT_S, config_files=None,
+              startup_cache_from=None, startup_cache_corrupt=None, plugin_files=None, auto_update=None,
+              large_plugin_jars=None):
         """Create the run, start the supervisor, wait for ``Done (``. Returns run.json.
 
         ``world_from`` names an earlier, finished run whose world directories are copied in
@@ -1164,6 +1225,8 @@ class Harness:
         ``plugins/SuperiorSkyblock2/modules/``). ``startup_cache_from`` names an earlier run whose startup-index
         cache (and plugin jars, mtimes kept so the entries still match) are installed first;
         ``startup_cache_corrupt`` damages that cache in one named way (STARTUP_CACHE_SHAPES).
+        ``auto_update`` (dict of AUTO_UPDATE_KEYS) enables the auto-updater, only together with
+        the loopback-endpoint and key-file JVM properties (``auto_update_toml``).
         """
         if not (60 <= max_lifetime_s <= MAX_LIFETIME_CEILING_S) and command is None:
             raise HarnessError(f"max lifetime must be 60..{MAX_LIFETIME_CEILING_S}s")
@@ -1178,10 +1241,14 @@ class Harness:
                                f"refusing below {self.min_free / 1024 ** 3:.0f} GiB")
         world_source = self.world_source(world_from) if world_from else None
         aurora = self.aurora_config(aurora_toml, world_source)
-        configs = self.config_files(config_files)
+        global_config = self.global_config(global_toml)
+        configs = self.config_files(config_files, bool(large_plugin_jars))
         data_files = self.plugin_files(plugin_files)
         check_destination_collisions([dest for dest, _s, _t in configs],
                                      [dest for dest, _s, _d in data_files])
+        updater_toml = auto_update_toml(auto_update, jvm_properties) if auto_update is not None else None
+        if updater_toml is not None and global_toml is not None:
+            raise HarnessError("--auto-update and --global-toml cannot be combined (put the [updater] table in the file)")
         startup_seed = self.startup_cache_seed(startup_cache_from, startup_cache_corrupt)
         jar = ensure_jar(self.jar, rebuild_jar, self._gradle)
         java, java_version = self._java()
@@ -1211,7 +1278,8 @@ class Harness:
                                 properties, jvm_properties, startup_timeout_s, seed_cache,
                                 command, lifetime_grace_s, token, world_source, aurora,
                                 port=port, slot=slot, resources=resources, configs=configs,
-                                startup_seed=startup_seed, data_files=data_files)
+                                startup_seed=startup_seed, data_files=data_files, global_config=global_config,
+                                updater_toml=updater_toml, large_plugin_jars=bool(large_plugin_jars))
             self._spawn_supervisor(workdir, token, paths)
         except BaseException:
             for path in reversed(paths):
@@ -1235,7 +1303,8 @@ class Harness:
                  simulation_distance, heap_mib, max_lifetime_s, level_type, properties,
                  jvm_properties, startup_timeout_s, seed_cache, command, lifetime_grace_s,
                  token, world_source=None, aurora=None, port=None, slot=None, resources=None,
-                 configs=(), startup_seed=None, data_files=()):
+                 configs=(), startup_seed=None, data_files=(), global_config=None, updater_toml=None,
+                 large_plugin_jars=False):
         workdir.mkdir(parents=True)
         (workdir / MARKER).write_text("created by scripts/agent_testserver.py\n")
         (workdir / "tmp").mkdir()
@@ -1245,7 +1314,17 @@ class Harness:
                                   properties)
         (workdir / "server.properties").write_text(render_properties(props))
         (workdir / "sourbycraft_config").mkdir()
-        (workdir / "sourbycraft_config" / "sourbycraft_global_config.toml").write_text(GLOBAL_TOML)
+        global_toml = None
+        if global_config is not None:
+            text, origin = global_config
+            (workdir / "sourbycraft_config" / "sourbycraft_global_config.toml").write_text(text)
+            global_toml = {"source": origin, "text": text}
+        else:
+            text = GLOBAL_TOML
+            if updater_toml is not None:
+                # Replaces the disabled table of the default; the same file holds everything else.
+                text = GLOBAL_TOML.replace("[updater]\nenabled=false\n", updater_toml)
+            (workdir / "sourbycraft_config" / "sourbycraft_global_config.toml").write_text(text)
         aurora_toml = None
         if aurora is not None:
             text, origin = aurora
@@ -1308,10 +1387,12 @@ class Harness:
                "slot": slot,
                "resources_at_start": resources,
                "world_from": world_from,
-               "aurora_toml": aurora_toml,
+               "aurora_toml": aurora_toml, "global_toml": global_toml,
                "config_files": installed,
                "plugin_files": plugin_data,
+               "large_plugin_jars": bool(large_plugin_jars),
                "startup_cache": startup_cache,
+               "auto_update": {"toml": updater_toml} if updater_toml is not None else None,
                "other_server_jars_running": run_baseline.competing_servers(jar, -1),
                "hardware": hardware}
         write_json(workdir / "run.json", run)
@@ -1390,7 +1471,22 @@ class Harness:
         return None
 
     @staticmethod
-    def config_files(mapping):
+    def global_config(path):
+        """(text, origin) for sourbycraft_config/sourbycraft_global_config.toml, or None for GLOBAL_TOML.
+
+        An explicit file replaces the harness TOML (``--global-toml``), e.g. a pre-Build-49 layout to
+        exercise the configuration migration. The caller is responsible for keeping downloads and the
+        updater off in it; ``run.json`` records the file so a run that re-enabled them is visible.
+        """
+        if path is None:
+            return None
+        path = Path(path)
+        if not path.is_file() or path.stat().st_size > 64 * 1024:
+            raise HarnessError(f"global TOML {path} is not a file under 64 KiB")
+        return path.read_text(), str(path)
+
+    @staticmethod
+    def config_files(mapping, large_plugin_jars=False):
         """[(dest, source, text)] for extra config files (e.g. spigot.yml), validated up front.
 
         Only server config locations are accepted: a top-level ``*.yml``/``*.yaml`` (bukkit.yml,
@@ -1419,7 +1515,8 @@ class Harness:
                     raise HarnessError(f"config file destination {dest!r}: a jar may only go "
                                        "directly into plugins/ (use --plugin-file for a jar "
                                        "inside a plugin's data folder)")
-                configs.append((rel.as_posix(), str(path), read_capped_bytes(path, "plugin jar")))
+                cap = LARGE_PLUGIN_JAR_MAX_BYTES if large_plugin_jars else PLUGIN_JAR_MAX_BYTES
+                configs.append((rel.as_posix(), str(path), read_capped_bytes(path, "plugin jar", cap)))
                 continue
             if not path.is_file() or path.stat().st_size > 64 * 1024:
                 raise HarnessError(f"config file {path} is not a file under 64 KiB")
@@ -1482,6 +1579,80 @@ class Harness:
                               "--token", token], cwd=workdir, stdin=subprocess.DEVNULL,
                              stdout=out, stderr=subprocess.STDOUT, start_new_session=True,
                              close_fds=True)
+
+    def restart(self, name, startup_timeout_s=None, command=None, wait_s=None):
+        """Boot a finished run again in its OWN directory (jar, config, world and ``auto_update/``
+        kept), for fixtures that must see a jar swapped by the updater come up. Returns run.json
+        once the boot is ``ready`` or has ended (the caller judges; a boot that dies is data here).
+
+        The previous boot is archived under ``boots/NN/`` (run.json, server.log, supervisor.log)
+        and summarised in ``previous_boots``; the launch command and the server port are kept, the
+        jar provenance is recomputed from the directory's jar (the updater may have replaced it).
+        Refused while the run is still live. ``command`` replaces the launch command (unit tests).
+        """
+        workdir = self.existing(name)
+        previous = read_json(workdir / "run.json") or {}
+        if previous.get("status") not in FINAL_STATES or "lock_released" not in previous:
+            raise HarnessError(f"run {name!r} is still running (status {previous.get('status')}); "
+                               "wait for it to exit or stop it first")
+        boot = int(previous.get("boot", 1))
+        port = int(previous["server"]["port"])
+        with socket.socket() as probe:
+            try:
+                probe.bind(("127.0.0.1", port))
+            except OSError as problem:
+                raise HarnessError(f"port {port} of run {name!r} is not free: {problem}") from problem
+        local_jar = Path(previous["jar"]["copied_to"])
+        if not local_jar.is_file():
+            raise HarnessError(f"{local_jar} is missing")
+        slots = self.slot_locks()
+        lock_life = previous["limits"]["max_lifetime_s"] + previous["limits"]["lifetime_grace_s"] + STOP_TIMEOUT_S
+        number, token, paths = slots.acquire_one(name=name, workdir=str(workdir), role="client",
+                                                 max_lifetime_s=lock_life)
+        try:
+            resources = self.check_resources()
+            slot = {"number": number, "exclusive": False, "slots_held": 1,
+                    "redis_port": redis_port(number), "lock_paths": [str(p) for p in paths]}
+            for path in paths:
+                MachineLock(path).update(token, port=port, redis_port=slot["redis_port"])
+            archive = workdir / "boots" / f"{boot:02d}"
+            archive.mkdir(parents=True)
+            for entry in ("run.json", "server.log", "supervisor.log"):
+                if (workdir / entry).exists():
+                    shutil.copy2(workdir / entry, archive / entry) if entry == "run.json" \
+                        else os.replace(workdir / entry, archive / entry)
+            summary = {"boot": boot, "status": previous.get("status"),
+                       "exit_code": previous.get("exit_code"),
+                       "stop_reason": previous.get("stop_reason"),
+                       "reached_ready": bool(previous.get("done_line")),
+                       "jar_sha256": (previous.get("jar") or {}).get("sha256"),
+                       "archived": str(archive)}
+            run = {k: v for k, v in previous.items() if k not in PER_BOOT_FIELDS}
+            run.update(boot=boot + 1, status="starting", slot=slot, resources_at_start=resources,
+                       created_at=now_iso(), created=time.time(),
+                       previous_boots=list(previous.get("previous_boots") or []) + [summary],
+                       jar=dict(jar_provenance(local_jar, (previous.get("git") or {}).get("head_commit_time")),
+                                copied_to=str(local_jar)),
+                       lock={"path": str(paths[0]), "paths": [str(p) for p in paths], "token": token})
+            if command is not None:
+                run["launch"] = dict(run["launch"], command=[str(part) for part in command])
+            write_json(workdir / "run.json", run)
+            self._spawn_supervisor(workdir, token, paths)
+        except BaseException:
+            for path in reversed(paths):
+                MachineLock(path).release(token)
+            raise
+        return self.await_settled(workdir, wait_s or ((startup_timeout_s or STARTUP_TIMEOUT_S) + 30))
+
+    def await_settled(self, workdir, timeout):
+        """run.json once the boot is ``ready`` or finished (lock released); HarnessError on timeout."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            run = read_json(Path(workdir) / "run.json") or {}
+            if run.get("status") == "ready" or (run.get("status") in FINAL_STATES and "lock_released" in run):
+                return run
+            time.sleep(0.3)
+        raise HarnessError(f"boot neither ready nor finished within {timeout}s")
 
     def await_ready(self, workdir, timeout):
         deadline = time.monotonic() + timeout
@@ -1734,6 +1905,9 @@ CONFIG_FILE_DIRS = ("config", "plugins", "sourbycraft_config")
 # A plugin jar installed with --config-file plugins/<name>.jar=FILE, or a file inside a plugin's
 # data folder installed with --plugin-file plugins/<Plugin>/<path>=FILE (both copied as bytes).
 PLUGIN_JAR_MAX_BYTES = 8 * 1024 * 1024
+# --large-plugin-jar raises the cap for jars installed directly into plugins/ (and only those) to
+# this, for real plugins such as FastAsyncWorldEdit (~15 MiB). Still read once, capped, hashed.
+LARGE_PLUGIN_JAR_MAX_BYTES = 32 * 1024 * 1024
 RESERVED_CONFIG_FILES = ("sourbycraft_config/aurora.toml",
                          "sourbycraft_config/sourbycraft_global_config.toml")
 SETTINGS_KEYS = {"view_distance": int, "simulation_distance": int, "heap_mib": int,
@@ -1744,20 +1918,20 @@ SAFE_FILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 PERF_VIEW = re.compile(r"^[a-z]*( [A-Za-z0-9_:./-]+)?$")
 
 
-def read_capped_bytes(path, what):
-    """The bytes of ``path`` (a regular file, not a symlink, <= PLUGIN_JAR_MAX_BYTES).
+def read_capped_bytes(path, what, cap=PLUGIN_JAR_MAX_BYTES):
+    """The bytes of ``path`` (a regular file, not a symlink, <= ``cap``, PLUGIN_JAR_MAX_BYTES by default).
 
     One open, at most cap + 1 bytes read: the cap holds even if the file grows after a check.
     """
     path = Path(path)
     if path.is_symlink():
         raise HarnessError(f"{what} {path} is a symlink; pass the real file")
-    limit = f"{PLUGIN_JAR_MAX_BYTES // (1024 * 1024)} MiB"
+    limit = f"{cap // (1024 * 1024)} MiB"
     if not path.is_file():
         raise HarnessError(f"{what} {path} is not a file under {limit}")
     with open(path, "rb") as handle:
-        data = handle.read(PLUGIN_JAR_MAX_BYTES + 1)
-    if len(data) > PLUGIN_JAR_MAX_BYTES:
+        data = handle.read(cap + 1)
+    if len(data) > cap:
         raise HarnessError(f"{what} {path} is not a file under {limit}")
     return data
 
@@ -2001,9 +2175,15 @@ def build_parser():
                        help="copy this finished run's world dirs in first (restart/crash checks)")
         p.add_argument("--aurora-toml", metavar="FILE",
                        help="install FILE as sourbycraft_config/aurora.toml (e.g. AWF worlds)")
+        p.add_argument("--global-toml", metavar="FILE",
+                       help="install FILE as sourbycraft_config/sourbycraft_global_config.toml instead of "
+                            "the harness default (keep downloads and the updater off in it)")
         p.add_argument("--config-file", action="append", type=_kv, default=[],
                        metavar="DEST=FILE",
                        help="copy FILE to DEST in the run dir before boot (e.g. spigot.yml=...)")
+        p.add_argument("--large-plugin-jar", action="store_true",
+                       help="allow --config-file plugins/<name>.jar up to 32 MiB instead of 8 MiB "
+                            "(real plugins such as FastAsyncWorldEdit); recorded in run.json")
         p.add_argument("--plugin-file", action="append", type=_kv, default=[],
                        metavar="plugins/<Plugin>/PATH=FILE",
                        help="copy FILE (bytes, <= 8 MiB, no symlink) into a plugin's data folder "
@@ -2013,6 +2193,11 @@ def build_parser():
         p.add_argument("--startup-cache-corrupt", metavar="SHAPE", choices=list(STARTUP_CACHE_SHAPES),
                        help="damage the seeded startup cache: " + ", ".join(STARTUP_CACHE_SHAPES)
                        + " (empty/garbage need no --startup-cache-from)")
+        p.add_argument("--auto-update", action="append", type=_kv, default=[], metavar="KEY=VALUE",
+                       help="enable the auto-updater (apply_mode, restart_mode, restart_delay_seconds, "
+                            "repo, channel, check_interval_minutes, allow_prerelease); needs "
+                            "--jvm-property sourbycraft.update.api-base=http://127.0.0.1:PORT and "
+                            "sourbycraft.update.release-key-file=FILE")
         p.add_argument("--no-seed-cache", action="store_true",
                        help=f"do not copy {CACHE_NAME}/ (bootstrap downloads) into the run")
         p.add_argument("--exclusive", action="store_true",
@@ -2044,6 +2229,10 @@ def build_parser():
     p = sub.add_parser("stop", help="console stop; kill after --timeout")
     p.add_argument("--name", required=True)
     p.add_argument("--timeout", type=float, default=STOP_TIMEOUT_S)
+    p = sub.add_parser("restart", help="boot a finished run again in its own directory (keeps the jar "
+                                       "and auto_update/); prints the boot's outcome as JSON")
+    p.add_argument("--name", required=True)
+    p.add_argument("--startup-timeout", dest="startup_timeout_s", type=int, default=STARTUP_TIMEOUT_S)
     p = sub.add_parser("kill", help="SIGKILL the server (crash test): no console stop, no save")
     p.add_argument("--name", required=True)
     p.add_argument("--timeout", type=float, default=60)
@@ -2069,13 +2258,29 @@ def _start_kwargs(args):
               "heap_mib": args.heap_mib, "max_lifetime_s": args.max_lifetime_s,
               "level_type": args.level_type, "startup_timeout_s": args.startup_timeout_s,
               "properties": dict(args.property) or None, "world_from": args.world_from,
-              "aurora_toml": args.aurora_toml, "exclusive": args.exclusive or None,
+              "aurora_toml": args.aurora_toml, "global_toml": args.global_toml,
+              "exclusive": args.exclusive or None,
               "exclusive_wait_s": args.exclusive_wait_s,
               "config_files": dict(args.config_file) or None,
               "plugin_files": dict(args.plugin_file) or None,
               "startup_cache_from": args.startup_cache_from,
-              "startup_cache_corrupt": args.startup_cache_corrupt}
+              "startup_cache_corrupt": args.startup_cache_corrupt,
+              "auto_update": _auto_update_arg(args.auto_update),
+              "large_plugin_jars": getattr(args, "large_plugin_jar", False) or None}
     return kwargs
+
+
+def _auto_update_arg(pairs):
+    """--auto-update KEY=VALUE pairs -> dict (None when absent); values are JSON when they parse."""
+    if not pairs:
+        return None
+    settings = {}
+    for key, value in pairs:
+        try:
+            settings[key] = json.loads(value)
+        except ValueError:
+            settings[key] = value
+    return settings
 
 
 def main(argv=None):
@@ -2092,6 +2297,12 @@ def main(argv=None):
             print(json.dumps({k: run.get(k) for k in ("workdir", "status", "boot_seconds",
                                                       "done_line", "boot_verdict", "slot")}
                              | {"port": run["server"]["port"]}, indent=2))
+        elif args.action == "restart":
+            run = harness.restart(args.name, startup_timeout_s=args.startup_timeout_s)
+            print(json.dumps({k: run.get(k) for k in ("boot", "status", "exit_code", "boot_seconds",
+                                                      "done_line", "stop_reason", "slot")}
+                             | {"jar_sha256": (run.get("jar") or {}).get("sha256")}, indent=2))
+            return 0 if run.get("status") == "ready" else 1
         elif args.action == "run":
             if args.rebuild_jar:
                 ensure_jar(JAR, True)

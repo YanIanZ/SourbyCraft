@@ -316,7 +316,7 @@ on the lock/gen keys. Block checks in game via `fill X Y Z X Y Z minecraft:iron_
 
 **Defects found 2026-10-13 (root cause as found; fixes in *Fixes* below).**
 - **D1 — data loss.** `AwfRegionStorage.read` (`AwfRegionStorage.java:117`) lets the backend's
-  `IOException` escape from `RegionFileStorage.read` (feature patch, `RegionFileStorage.java:214` in the
+  `IOException` escape from `RegionFileStorage.read` (feature patch, `RegionFileStorage.java:387` in the
   materialized tree). Moonrise treats a failed read as "no data"
   (`ChunkLoadTask.java:333-334`: logs "chunk data will be lost", returns `null`), so the chunk is
   generated from scratch, saved through `AwfRegionStorage.write`, and committed over the stored chunk
@@ -381,7 +381,7 @@ on the lock/gen keys. Block checks in game via `fill X Y Z X Y Z minecraft:iron_
   reconfiguration, that DENYs only records whose throwable (or a cause) is a `RepeatedReadFailure` and
   whose logger is not SourbyCraft's (the cause search goes at most 8 levels deep); the first failure of a window still logs in full, and the summary counts the repeats but does not list their positions. Harness
   `patch-w4-redisflood-1`, same scenario: Moonrise ERRORs 1458 → 4, all ERRORs 1461 → 7, lines
-  3099 → 190, bytes 1.23 MB → 24.9 KB. The recovery INFO "read … again" is still one line per position. The POI read path was not exercised live (unit/code-path only).) Not covered: a POI or entity store whose
+  3099 → 190, bytes 1.23 MB → 24.9 KB. Since 2026-10-22 (working tree, opus-49-backend) the recovery INFO "read … again" and the WARN of a failed periodic commit use the same per-storage windowing (`ReadFailureLog.recoveryLog`, 10 s; `commitFailureLog`, 60 s, first with its stack, summary when the window ends or a commit succeeds): agent test server, 529 recovery lines in one second and 28 commit WARN records (603 lines) in a 60 s outage before; after the change one record with its stack and one summary per storage per 60 s window (S5: 129 lines in 75 s). Logging only; evidence [awf-backend-failure-2026-10-22.md](../development/awf-backend-failure-2026-10-22.md). The POI read path was not exercised live (unit/code-path only).) Not covered: a POI or entity store whose
   read succeeded while the chunk store's failed keeps committing (derived from its own stored data).
 - **D2** (`RedisStore.COMMIT_SCRIPT` :54, `RedisBackend.RENEW_SCRIPT` :59): every commit writes its
   lease token to `<prefix>{id}:writer`; a free lease is taken back when the generation is unchanged

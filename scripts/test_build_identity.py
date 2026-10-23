@@ -7,7 +7,8 @@ from build_identity import PROVENANCE_KEYS, directory_hash, identity, provenance
 from pathlib import Path
 import unittest
 import zipfile
-from verify_build_identity import verify, verify_api_version
+from verify_build_identity import (GPL3_SHA256, LICENCE_SOURCE_DIR, verify, verify_api_version,
+                                   verify_licences)
 
 
 def provenance_lines(values=None, jdk='Eclipse Adoptium 25.0.1+8-LTS'):
@@ -303,6 +304,122 @@ class BuildIdentityTest(unittest.TestCase):
                        {"version": "26.2-DEV", "currentApiVersion": "26.2"})
             with self.assertRaisesRegex(ValueError, "plugin-compatible"):
                 verify(path, 47, "DEV", "26.2")
+
+
+REPO = Path(__file__).resolve().parent.parent
+
+
+class LicenceFilesTest(unittest.TestCase):
+    """SEC-13: the published jar carries the GPL text and source notice itself."""
+
+    def gpl(self):
+        return (REPO / LICENCE_SOURCE_DIR / 'LICENSE_SOURBYCRAFT').read_bytes()
+
+    def notice(self):
+        return (REPO / LICENCE_SOURCE_DIR / 'NOTICE_SOURBYCRAFT').read_bytes()
+
+    def jar(self, directory, files):
+        path = Path(directory) / 'slim.jar'
+        with zipfile.ZipFile(path, 'w') as archive:
+            archive.writestr('META-INF/MANIFEST.MF', 'Main-Class: x\r\n')
+            archive.writestr('LICENSE.txt', 'MIT\n')
+            for name, content in files.items():
+                archive.writestr('META-INF/licenses/' + name, content)
+        return path
+
+    def test_checked_in_gpl_text_has_the_pinned_hash(self):
+        import hashlib
+        self.assertEqual(GPL3_SHA256, hashlib.sha256(self.gpl()).hexdigest())
+
+    def test_jar_with_both_files_passes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.jar(directory, {'LICENSE_SOURBYCRAFT': self.gpl(), 'NOTICE_SOURBYCRAFT': self.notice()})
+            self.assertEqual(['META-INF/licenses/LICENSE_SOURBYCRAFT', 'META-INF/licenses/NOTICE_SOURBYCRAFT'],
+                             verify_licences(path))
+
+    def test_missing_or_altered_files_fail(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, 'Missing licence file .*LICENSE_SOURBYCRAFT'):
+                verify_licences(self.jar(directory, {'NOTICE_SOURBYCRAFT': self.notice()}))
+            with self.assertRaisesRegex(ValueError, 'Missing licence file .*NOTICE_SOURBYCRAFT'):
+                verify_licences(self.jar(directory, {'LICENSE_SOURBYCRAFT': self.gpl()}))
+            with self.assertRaisesRegex(ValueError, 'not the GPL version 3 text'):
+                verify_licences(self.jar(directory, {'LICENSE_SOURBYCRAFT': self.gpl()[:-10],
+                                                     'NOTICE_SOURBYCRAFT': self.notice()}))
+            with self.assertRaisesRegex(ValueError, 'lacks GPL-3.0-only'):
+                verify_licences(self.jar(directory, {'LICENSE_SOURBYCRAFT': self.gpl(),
+                                                     'NOTICE_SOURBYCRAFT': b'MIT licensed, see LICENSE_SOURBYCRAFT '
+                                                                           b'https://github.com/YanIanZ/SourbyCraft'}))
+
+    def test_source_root_requires_the_whole_licence_directory_byte_identical(self):
+        source = {path.name: path.read_bytes() for path in (REPO / LICENCE_SOURCE_DIR).iterdir() if path.is_file()}
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertEqual(len(source), len(verify_licences(self.jar(directory, source), REPO)))
+            partial = {k: v for k, v in source.items() if k != 'LICENSE_PURPUR'}
+            with self.assertRaisesRegex(ValueError, 'LICENSE_PURPUR'):
+                verify_licences(self.jar(directory, partial), REPO)
+            edited = dict(source, NOTICE_SOURBYCRAFT=source['NOTICE_SOURBYCRAFT'] + b'\n')
+            with self.assertRaisesRegex(ValueError, 'differs from'):
+                verify_licences(self.jar(directory, edited), REPO)
+            with self.assertRaisesRegex(ValueError, 'not in the source tree'):
+                verify_licences(self.jar(directory, dict(source, LICENSE_EXTRA=b'x')), REPO)
+
+    def test_notice_describes_launcher_and_patched_jar_truthfully(self):
+        text = self.notice().decode()
+        self.assertNotIn('This jar does not contain the Minecraft server', text)
+        self.assertIn('contains no\n  Minecraft server', text)
+        self.assertIn("remains under Mojang's terms", text)
+
+
+class HotfixBuildIdentityTest(unittest.TestCase):
+    """A hotfix (hotfix/26.2-r48.1, tag v26.2-r48.1) stamps 48.1 into the build properties and
+    Implementation-Version, which /ver and the auto-updater read; the manifest Build-Number stays
+    the integer 48 because Paper parses it as an int (ServerBuildInfo.buildNumber())."""
+
+    def make(self, directory, number='48.1', build_number='48'):
+        return jar(directory, f'buildNumber={number}\nbuild={number}\nversion=26.2-REL\n',
+                   f'Implementation-Version: Build {number}\r\nBuild-Number: {build_number}\r\n')
+
+    def test_hotfix_identity_verifies(self):
+        with tempfile.TemporaryDirectory() as directory:
+            info = verify(self.make(directory), '48.1', 'REL')
+            self.assertEqual('48.1', info['buildNumber'])
+
+    def test_hotfix_requires_the_integer_manifest_build_number(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for build_number in ('48.1', '49', ''):
+                with self.subTest(build_number=build_number):
+                    with self.assertRaises(ValueError):
+                        verify(self.make(directory, build_number=build_number), '48.1')
+            path = jar(directory, 'buildNumber=48.1\nbuild=48.1\n', 'Implementation-Version: Build 48.1\r\n')
+            with self.assertRaises(ValueError):
+                verify(path, '48.1')
+
+    def test_hotfix_number_must_match_the_jar(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for expected in ('48', '48.2', 48):
+                with self.subTest(expected=expected):
+                    with self.assertRaises(ValueError):
+                        verify(self.make(directory), expected)
+
+    def test_malformed_release_numbers_are_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = jar(directory, 'buildNumber=48.0\nbuild=48.0\n',
+                       'Implementation-Version: Build 48.0\r\nBuild-Number: 48\r\n')
+            for number in ('48.0', '48.1.2', '48-hotfix', '0', 'x'):
+                with self.subTest(number=number):
+                    with self.assertRaises(ValueError):
+                        verify(path, number)
+
+    def test_a_present_build_number_must_match_a_normal_build(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ok = jar(directory, 'buildNumber=48\nbuild=48\n',
+                     'Implementation-Version: Build 48\r\nBuild-Number: 48\r\n')
+            self.assertEqual('48', verify(ok, 48)['buildNumber'])
+            bad = jar(directory, 'buildNumber=48\nbuild=48\n',
+                      'Implementation-Version: Build 48\r\nBuild-Number: 47\r\n')
+            with self.assertRaises(ValueError):
+                verify(bad, 48)
 
 
 if __name__ == "__main__":

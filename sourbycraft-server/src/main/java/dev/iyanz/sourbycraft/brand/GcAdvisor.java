@@ -13,7 +13,7 @@ import java.util.List;
  * <p>Inspects the running JVM at startup and warns operators about GC choices and
  * flag combinations known to cause unpredictable server latency.
  *
- * <p>Gated by baked key {@code branding.gc-advisor.enabled} (default {@code true}).
+ * <p>Gated by key {@code console.gc-advisor} (default {@code true}).
  * When disabled the advisor short-circuits and returns an "acceptable" result with no
  * warnings so callers need no changes.
  *
@@ -31,12 +31,12 @@ public final class GcAdvisor {
     public record Result(boolean acceptable, List<String> warnings) {}
 
     /**
-     * Read from the unified TOML key {@code branding.gc-advisor.enabled} (default {@code true}).
+     * Read from the unified TOML key {@code console.gc-advisor} (default {@code true}).
      */
     // Read lazily, NOT in a static final: class-init can precede unified-config load, which
     // would latch the operator's setting to the default for the whole boot.
     private static boolean enabled() {
-        return dev.iyanz.sourbycraft.SourbyCraftConfig.cfgBool("branding.gc-advisor.enabled", true);
+        return dev.iyanz.sourbycraft.SourbyCraftConfig.cfgBool(dev.iyanz.sourbycraft.config.UtilityKeys.GC_ADVISOR.path(), true);
     }
 
     private GcAdvisor() {}
@@ -44,13 +44,13 @@ public final class GcAdvisor {
     /**
      * Inspects the running JVM's GC beans and input arguments and evaluates them via
      * {@link #evaluate(List, List, long, long)}. Returns an "acceptable" empty-warnings result
-     * without inspecting anything when {@code branding.gc-advisor.enabled} is {@code false}.
+     * without inspecting anything when {@code console.gc-advisor} is {@code false}.
      */
     public static Result run() {
         // gate — if operator disabled gc-advisor in baked yml, skip.
         if (!enabled()) {
             dev.iyanz.sourbycraft.util.SourbyLogger.info(
-                "gc-advisor disabled via branding.gc-advisor.enabled=false");
+                "gc-advisor disabled via console.gc-advisor=false");
             return new Result(true, List.of());
         }
         List<String> gcNames = ManagementFactory.getGarbageCollectorMXBeans().stream()

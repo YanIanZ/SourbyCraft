@@ -39,7 +39,7 @@ open gates in [docs/releases/26.2-build-48.md](docs/releases/26.2-build-48.md)).
 | Region-threaded ticking (SourbyCraft-owned engine) | Implemented |
 | Metrics runtime behind `/tps`, `/mspt`, `/perf`, HUD bars and Spark | Implemented; cross-surface consistency is an open Build 48 gate |
 | Auto-updater (`apply_mode=notify` by default; releases signed from Build 48) | Implemented |
-| Aurora Compatibility Bridge for non-region-aware plugins | Implemented, off by default, not qualified |
+| Aurora Compatibility Bridge for non-region-aware plugins | Implemented, off by default, not qualified; with `mode = safe` the region-ownership checks are **relaxed** by default (owner decision 2026-10-22, LightingLuminol parity) -- unsafe, set `aurora.bridge.thread-checks = "enforced"` to keep them |
 | Aurora World Fabric (region storage, templates, instances) | Experimental, off by default |
 | Async pathfinding | Experimental, off by default |
 | Cherry server-side mixins (`-Dcherry.enable.mixin=true`) | Off by default |
@@ -74,9 +74,9 @@ Run both from the repository root. Compose stores server data in `data/`.
 
 | File | Purpose |
 |---|---|
-| `sourbycraft_config/sourbycraft_global_config.toml` | Messages, max players, auto-updater, ViaVersion/ProtocolLib provisioning |
+| `sourbycraft_config/sourbycraft_global_config.toml` | Console, players, messages, plugin provisioning, auto-updater (Build 49 layout; older layouts are migrated once at boot, copy kept as `*.migrated`) |
 | `sourbycraft_config/aurora.toml` | Aurora engine options (CPU budget, bridge, AWF, async pathfinding) |
-| `config/canvas-server.yml`, `config/canvas-worlds.yml` | Region scheduler options (file names kept for existing servers) |
+| `config/aurora-server.yml`, `config/aurora-worlds.yml` | Region engine options (Build 49 names; `config/canvas-*.yml` are migrated once and renamed `*.migrated`) |
 | `config/paper-global.yml` → `threaded-regions` | Region thread count and grid size |
 | `sourbycraft-security.yml` | Crash-prevention and packet-guard limits (all default to `LOG`) |
 
@@ -116,10 +116,11 @@ SourbyCraft uses and derives work from **[Paper](https://github.com/PaperMC/Pape
 region-threading work and **[CanvasMC](https://github.com/CraftCanvasMC/Canvas)**. Upstream
 attribution, copyright notices and license obligations are preserved.
 
-The plugin bridge includes an adaptation of **Luminol /
-[LightingLuminol](https://github.com/LuminolCustomArchive/LightingLuminol)** scheduler compatibility
-work by **Bacteriawa** and contributors; original attribution and GPL v3 license texts are retained
-([port scope and provenance](docs/development/LIGHTINGLUMINOL-BRIDGE-PORT.md)).
+The plugin bridge includes adaptations of **Luminol /
+[LightingLuminol](https://github.com/LuminolCustomArchive/LightingLuminol)** work by **Bacteriawa** and
+contributors: the scheduler compatibility port and, since 2026-10-22, its relaxed thread checks, cross-region
+world-data pool, teleport join semantics and legacy teleport events; original attribution and GPL v3 license
+texts are retained ([port scope and provenance](docs/development/LIGHTINGLUMINOL-BRIDGE-PORT.md)).
 
 Cherry incorporates work inspired by or derived from **[LeavesMC](https://github.com/LeavesMC)** and
 **[CraftCanvasMC/Horizon](https://github.com/CraftCanvasMC/Horizon)** where applicable

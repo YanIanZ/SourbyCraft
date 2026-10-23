@@ -27,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * OBS-14 engine util/migration (config side): what an upgrade does to an existing
- * {@code config/canvas-server.yml} / {@code canvas-worlds.yml}. The key set of those files is
+ * {@code config/aurora-server.yml} / {@code aurora-worlds.yml}. The key set of those files is
  * migrated by {@link ConfigurationProvider#buildSolidConfiguration}: keys the class gained are added
  * (with their documentation), keys the class no longer has are <b>removed</b>, the values the operator
  * set on surviving keys are kept, and a second run changes nothing.
@@ -323,8 +323,8 @@ class ConfigurationUpgradeTest {
     // ------------------------------------------------------------------ the real key sets
 
     @Test
-    void theRealCanvasServerYmlKeySetUpgradesLosslesslyAndIdempotently(@TempDir final Path dir) throws IOException {
-        final Path file = dir.resolve("canvas-server.yml");
+    void theRealAuroraServerYmlKeySetUpgradesLosslesslyAndIdempotently(@TempDir final Path dir) throws IOException {
+        final Path file = dir.resolve("aurora-server.yml");
         final RealRecorder<GlobalConfiguration> fresh = new RealRecorder<>();
         ConfigurationProvider.buildSolidConfiguration(file, GlobalConfiguration::new, WRAP, fresh);
         assertEquals(1, fresh.finishes);
@@ -369,8 +369,8 @@ class ConfigurationUpgradeTest {
     }
 
     @Test
-    void theRealCanvasWorldsYmlKeySetRepairsADeletedSectionAndKeepsEdits(@TempDir final Path dir) throws IOException {
-        final Path file = dir.resolve("canvas-worlds.yml");
+    void theRealAuroraWorldsYmlKeySetRepairsADeletedSectionAndKeepsEdits(@TempDir final Path dir) throws IOException {
+        final Path file = dir.resolve("aurora-worlds.yml");
         ConfigurationProvider.buildSolidConfiguration(file, WorldConfig::new, WRAP, new RealRecorder<WorldConfig>());
         final Map<String, Object> shipped = load(file);
         assertTrue(shipped.size() > 1, "world defaults have sections: " + shipped.keySet());

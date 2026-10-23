@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Thu, 22 Oct 2026 22:08:01 +0700
+Subject: [PATCH] SourbyCraft - PaperLib version parse sees a 26.x server
+
+PaperLib 1.0.x (shaded into EssentialsX and other plugins) parses Bukkit.getVersion() with a pattern that only accepts 1.x, so on 26.x it keeps its synchronous fallbacks: World#getChunkAt on the calling thread, which a region thread may not do for a chunk it does not own. Plugin class bytes pass through PaperLibVersionAdapter (legacy processClass and the Paper plugin bytecode modifier), which gives only that parse a 1.21.11 version so PaperLib uses World#getChunkAtAsync and Entity#teleportAsync.
+
+diff --git a/src/main/java/io/papermc/paper/plugin/entrypoint/classloader/PaperClassloaderBytecodeModifier.java b/src/main/java/io/papermc/paper/plugin/entrypoint/classloader/PaperClassloaderBytecodeModifier.java
+index f9a2c55a354c877749db3f92956de802ae575788..256866c6ee27acbc236fcc606b31159bb4ef9515 100644
+--- a/src/main/java/io/papermc/paper/plugin/entrypoint/classloader/PaperClassloaderBytecodeModifier.java
++++ b/src/main/java/io/papermc/paper/plugin/entrypoint/classloader/PaperClassloaderBytecodeModifier.java
+@@ -7,6 +7,6 @@ public class PaperClassloaderBytecodeModifier implements ClassloaderBytecodeModi
+ 
+     @Override
+     public byte[] modify(PluginMeta configuration, byte[] bytecode) {
+-        return bytecode;
++        return dev.iyanz.sourbycraft.compat.PaperLibVersionAdapter.adapt(configuration == null ? null : configuration.getName(), bytecode); // SourbyCraft - PaperLib version parse
+     }
+ }
+diff --git a/src/main/java/org/bukkit/craftbukkit/util/CraftMagicNumbers.java b/src/main/java/org/bukkit/craftbukkit/util/CraftMagicNumbers.java
+index 4a71c68f6239af95d0b8c51b2a6c9685c9752e16..93a3960b29276315872ab783c9677364aefa0b3c 100644
+--- a/src/main/java/org/bukkit/craftbukkit/util/CraftMagicNumbers.java
++++ b/src/main/java/org/bukkit/craftbukkit/util/CraftMagicNumbers.java
+@@ -421,6 +421,7 @@ public final class CraftMagicNumbers implements UnsafeValues {
+ 
+     @Override
+     public byte[] processClass(PluginDescriptionFile pdf, String path, byte[] clazz) {
++        clazz = dev.iyanz.sourbycraft.compat.PaperLibVersionAdapter.adapt(pdf.getName(), clazz); // SourbyCraft - PaperLib version parse
+         // Paper start
+         if (DISABLE_OLD_API_SUPPORT) {
+             return clazz;

@@ -1,0 +1,18 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Thu, 22 Oct 2026 05:55:41 +0700
+Subject: [PATCH] SourbyCraft - close SourbyCraft services at shutdown
+
+
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index a32d4c59630f8c0b22201c6d9d831249a1ce82ba..087a7a5b92199925f34110b7ca97795f86363cab 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -1107,6 +1107,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+             this.server.spark.disable(); // Paper - spark
+             this.server.disablePlugins();
+             this.server.waitForAsyncTasksShutdown(); // Paper - Wait for Async Tasks during shutdown
++            dev.iyanz.sourbycraft.core.SourbyCraftBootstrap.close();
+         }
+         // CraftBukkit end
+         this.isSaving = true; // Canvas - region threading

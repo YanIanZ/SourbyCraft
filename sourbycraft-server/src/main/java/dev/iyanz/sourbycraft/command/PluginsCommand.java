@@ -138,6 +138,9 @@ public class PluginsCommand extends Command {
                 sender.sendMessage(UiPanel.row("Scheduler redirects / owner handoffs", stats.schedulerRedirects() + " / " + stats.ownerHandoffs()));
                 sender.sendMessage(UiPanel.row("Rejected / fatal operations", stats.rejectedOperations() + " / " + stats.fatalViolations()));
                 sender.sendMessage(UiPanel.row("Quarantined", stats.quarantined() ? "yes" : "no"));
+                if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) {
+                    sender.sendMessage(UiPanel.row("Relaxed ownership hits (thread-checks)", Long.toString(stats.relaxedOwnershipHits())));
+                }
                 var load = AuroraBridge.taskLoad(plugin);
                 if (load != null) {
                     sender.sendMessage(UiPanel.row("Pending tasks / limit", load.pending() + " / "
@@ -209,7 +212,7 @@ public class PluginsCommand extends Command {
         try {
             Request request = parse(args);
             if (request.detail() != null) return detail(sender, request.detail());
-            render(roster(), request, SourbyCraftConfig.cfgInt("ui.plugins-page-size", 12)).forEach(sender::sendMessage);
+            render(roster(), request, SourbyCraftConfig.cfgInt(dev.iyanz.sourbycraft.config.UtilityKeys.PLUGINS_PAGE_SIZE.path(), 12)).forEach(sender::sendMessage);
         } catch (IllegalArgumentException invalid) {
             sender.sendMessage(text(invalid.getMessage(), SourbyCraftColors.DANGER));
             sender.sendMessage(UiPanel.hint(usageMessage));

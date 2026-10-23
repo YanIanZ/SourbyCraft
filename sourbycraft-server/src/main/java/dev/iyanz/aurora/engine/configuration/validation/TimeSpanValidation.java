@@ -15,7 +15,7 @@ import org.jspecify.annotations.Nullable;
  * rather than be guessed at. It also means a bad value is caught even when the log directory is empty,
  * where the old per-file parse never ran.</p>
  *
- * @param keyPath         the dotted path of the option in {@code config/canvas-server.yml}, used in the message
+ * @param keyPath         the dotted path of the option in {@code config/aurora-server.yml}, used in the message
  * @param acceptLargeUnits {@code true} when weeks, months and years are fine (the log cleaner); {@code false}
  *                         when the option must not exceed days (the autosave period)
  */
@@ -30,7 +30,7 @@ public record TimeSpanValidation(String keyPath, boolean acceptLargeUnits) imple
             }
             span.asNanoSpan(); // overflows on an absurd count such as 9999999999y
         } catch (final IllegalArgumentException | DateTimeException | ArithmeticException invalid) {
-            throw new IllegalArgumentException(keyPath + " (config/canvas-server.yml) is not a usable time span: "
+            throw new IllegalArgumentException(keyPath + " (config/aurora-server.yml) is not a usable time span: "
                 + invalid.getMessage() + ". Write a whole number and a unit, e.g. 90s, 5m, 12h, 30d"
                 + (acceptLargeUnits ? ", 4w, 1mo, 1y" : " (at most days for this option)")
                 + "; 'm' is minutes and 'mo' is months. The value was not applied.", invalid);

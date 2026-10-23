@@ -27,7 +27,7 @@ step (needs a live mob-behaviour soak before default-on).
 
 diff --git a/dev/iyanz/aurora/level/SnapshotPathRegion.java b/dev/iyanz/aurora/level/SnapshotPathRegion.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..512b655ab551c575062c4f76753fa61c9b469346
+index 0000000000000000000000000000000000000000..efcb7f5f4a926ea6546bccfa53c7a0af653187a2
 --- /dev/null
 +++ b/dev/iyanz/aurora/level/SnapshotPathRegion.java
 @@ -0,0 +1,220 @@
@@ -81,7 +81,7 @@ index 0000000000000000000000000000000000000000..512b655ab551c575062c4f76753fa61c
 + * EntityCollisionContext} from {@code isDescending()}, {@code getY()} and {@code getMainHandItem()}.
 + * Those are the same staleness a path always races — a path is recomputed constantly and acts on a
 + * position that has already moved — and they are reads, not writes. Evaluators that <i>write</i> to the
-+ * mob are refused the offload entirely; see {@code PathNavigation.sourbyAsyncSolveSafe}. The parent also
++ * mob are refused the offload entirely; see {@code dev.iyanz.sourbycraft.perf.AsyncPathRecompute#solveWritesMob}. The parent also
 + * retains its live {@link ChunkAccess} references in {@code chunks}; every read path is overridden here,
 + * so they are never dereferenced off-thread, but they do pin those chunks for the solve.
 + */

@@ -1,0 +1,523 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Fri, 23 Oct 2026 00:15:51 +0700
+Subject: [PATCH] SourbyCraft - relaxed region-ownership checks
+ (LightingLuminol)
+
+Owner decision 2026-10-22, verbatim after the risks were stated (data races, chunk corruption persisted to disk, item dupes, deadlocks): "Tiru penuh LightingLuminol". Adapted from LightingLuminol (GPL-3.0, Bacteriawa, revision 72d51c4d, minecraft patch 0001 "Base Dirty Patches"), where the throws are commented out unconditionally; here every check stays and asks guards/ThreadChecks (aurora.bridge.thread-checks: relaxed by default, bridged, enforced; effective only while aurora.bridge.mode admits plugins). RegionizedServer.ensureGlobalTickThread and the six RegionizedWorldData "not under this region's control" checks consult it; RegionizedServer.getCurrentTick and MinecraftServer.getTickCount answer with the global tick counter off every region (all modes); TickRegions.RegionStats tolerates a foreign thread; NearbyPlayers and EntityLookup (section-status guard, entity slices) lock only while checks are relaxed (static final, folded away otherwise); the RegionizedWorldData block-entity ticker hand-off, block events and the broadcast set lock their cross-thread touch points while the fields keep upstream's containers (LightingLuminol swapped the containers); redstoneTime is volatile; ServerChunkCache lets the global tick load a chunk synchronously while pumping global chunk tasks and keeps refusing a non-owning region thread (Folia#280); ChunkMap and the chunk tick loop tolerate holes a foreign removal leaves. A relaxed server is unsafe and unqualified; the boot log, /ver and /sourbycraft config say so.
+
+diff --git a/ca/spottedleaf/moonrise/common/misc/NearbyPlayers.java b/ca/spottedleaf/moonrise/common/misc/NearbyPlayers.java
+index f7ac9ce135af97056f1a7f8bf9633837f90ed60d..cf4207e6c03036a1a42e58aa2871a7e3d73f00f3 100644
+--- a/ca/spottedleaf/moonrise/common/misc/NearbyPlayers.java
++++ b/ca/spottedleaf/moonrise/common/misc/NearbyPlayers.java
+@@ -74,6 +74,11 @@ public final class NearbyPlayers {
+     }
+ 
+     public void addPlayer(final ServerPlayer player) {
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (this) { this.addPlayer0(player); return; } } // SourbyCraft - relaxed thread checks: LightingLuminol MC 0001 made every NearbyPlayers method synchronized; here only while checks are relaxed (static final, folded away otherwise)
++        this.addPlayer0(player);
++    }
++
++    private void addPlayer0(final ServerPlayer player) {
+         final TrackedPlayer[] newTrackers = new TrackedPlayer[TOTAL_MAP_TYPES];
+         if (this.players.putIfAbsent(player, newTrackers) != null) {
+             throw new IllegalStateException("Already have player " + player);
+@@ -91,6 +96,11 @@ public final class NearbyPlayers {
+     }
+ 
+     public void removePlayer(final ServerPlayer player) {
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (this) { this.removePlayer0(player); return; } } // SourbyCraft - relaxed thread checks: LightingLuminol MC 0001 made every NearbyPlayers method synchronized; here only while checks are relaxed (static final, folded away otherwise)
++        this.removePlayer0(player);
++    }
++
++    private void removePlayer0(final ServerPlayer player) {
+         final TrackedPlayer[] players = this.players.remove(player);
+         if (players == null) {
+             return; // May be called during teleportation before the player is actually placed
+@@ -102,6 +112,11 @@ public final class NearbyPlayers {
+     }
+ 
+     public void clear() {
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (this) { this.clear0(); return; } } // SourbyCraft - relaxed thread checks: LightingLuminol MC 0001 made every NearbyPlayers method synchronized; here only while checks are relaxed (static final, folded away otherwise)
++        this.clear0();
++    }
++
++    private void clear0() {
+         if (this.players.isEmpty()) {
+             return;
+         }
+@@ -112,6 +127,11 @@ public final class NearbyPlayers {
+     }
+ 
+     public void tickPlayer(final ServerPlayer player) {
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (this) { this.tickPlayer0(player); return; } } // SourbyCraft - relaxed thread checks: LightingLuminol MC 0001 made every NearbyPlayers method synchronized; here only while checks are relaxed (static final, folded away otherwise)
++        this.tickPlayer0(player);
++    }
++
++    private void tickPlayer0(final ServerPlayer player) {
+         final TrackedPlayer[] players = this.players.get(player);
+         if (players == null) {
+             throw new IllegalStateException("Don't have player " + player);
+@@ -129,30 +149,65 @@ public final class NearbyPlayers {
+     }
+ 
+     public TrackedChunk getChunk(final ChunkPos pos) {
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (this) { return this.getChunk0(pos); } } // SourbyCraft - relaxed thread checks: LightingLuminol MC 0001 made every NearbyPlayers method synchronized; here only while checks are relaxed (static final, folded away otherwise)
++        return this.getChunk0(pos);
++    }
++
++    private TrackedChunk getChunk0(final ChunkPos pos) {
+         return this.byChunk.get(CoordinateUtils.getChunkKey(pos));
+     }
+ 
+     public TrackedChunk getChunk(final BlockPos pos) {
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (this) { return this.getChunk0(pos); } } // SourbyCraft - relaxed thread checks: LightingLuminol MC 0001 made every NearbyPlayers method synchronized; here only while checks are relaxed (static final, folded away otherwise)
++        return this.getChunk0(pos);
++    }
++
++    private TrackedChunk getChunk0(final BlockPos pos) {
+         return this.byChunk.get(CoordinateUtils.getChunkKey(pos));
+     }
+ 
+     public TrackedChunk getChunk(final int chunkX, final int chunkZ) {
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (this) { return this.getChunk0(chunkX, chunkZ); } } // SourbyCraft - relaxed thread checks: LightingLuminol MC 0001 made every NearbyPlayers method synchronized; here only while checks are relaxed (static final, folded away otherwise)
++        return this.getChunk0(chunkX, chunkZ);
++    }
++
++    private TrackedChunk getChunk0(final int chunkX, final int chunkZ) {
+         return this.byChunk.get(CoordinateUtils.getChunkKey(chunkX, chunkZ));
+     }
+ 
+     public ReferenceList<ServerPlayer> getPlayers(final BlockPos pos, final NearbyMapType type) {
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (this) { return this.getPlayers0(pos, type); } } // SourbyCraft - relaxed thread checks: LightingLuminol MC 0001 made every NearbyPlayers method synchronized; here only while checks are relaxed (static final, folded away otherwise)
++        return this.getPlayers0(pos, type);
++    }
++
++    private ReferenceList<ServerPlayer> getPlayers0(final BlockPos pos, final NearbyMapType type) {
+         return this.directByChunk[type.ordinal()].get(CoordinateUtils.getChunkKey(pos));
+     }
+ 
+     public ReferenceList<ServerPlayer> getPlayers(final ChunkPos pos, final NearbyMapType type) {
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (this) { return this.getPlayers0(pos, type); } } // SourbyCraft - relaxed thread checks: LightingLuminol MC 0001 made every NearbyPlayers method synchronized; here only while checks are relaxed (static final, folded away otherwise)
++        return this.getPlayers0(pos, type);
++    }
++
++    private ReferenceList<ServerPlayer> getPlayers0(final ChunkPos pos, final NearbyMapType type) {
+         return this.directByChunk[type.ordinal()].get(CoordinateUtils.getChunkKey(pos));
+     }
+ 
+     public ReferenceList<ServerPlayer> getPlayersByChunk(final int chunkX, final int chunkZ, final NearbyMapType type) {
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (this) { return this.getPlayersByChunk0(chunkX, chunkZ, type); } } // SourbyCraft - relaxed thread checks: LightingLuminol MC 0001 made every NearbyPlayers method synchronized; here only while checks are relaxed (static final, folded away otherwise)
++        return this.getPlayersByChunk0(chunkX, chunkZ, type);
++    }
++
++    private ReferenceList<ServerPlayer> getPlayersByChunk0(final int chunkX, final int chunkZ, final NearbyMapType type) {
+         return this.directByChunk[type.ordinal()].get(CoordinateUtils.getChunkKey(chunkX, chunkZ));
+     }
+ 
+     public ReferenceList<ServerPlayer> getPlayersByBlock(final int blockX, final int blockZ, final NearbyMapType type) {
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (this) { return this.getPlayersByBlock0(blockX, blockZ, type); } } // SourbyCraft - relaxed thread checks: LightingLuminol MC 0001 made every NearbyPlayers method synchronized; here only while checks are relaxed (static final, folded away otherwise)
++        return this.getPlayersByBlock0(blockX, blockZ, type);
++    }
++
++    private ReferenceList<ServerPlayer> getPlayersByBlock0(final int blockX, final int blockZ, final NearbyMapType type) {
+         return this.directByChunk[type.ordinal()].get(CoordinateUtils.getChunkKey(blockX >> 4, blockZ >> 4));
+     }
+ 
+diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/EntityLookup.java b/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/EntityLookup.java
+index b6c99d7a84263e5239946296d8e803a0e5e36b55..d8a7381de871b12fc2d036f09849e380383142f9 100644
+--- a/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/EntityLookup.java
++++ b/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/EntityLookup.java
+@@ -239,13 +239,15 @@ public abstract class EntityLookup implements LevelEntityGetter<Entity> {
+                                    final boolean created, final boolean destroyed) {
+         this.checkThread(entity, "Entity status change must only happen on the main thread");
+ 
+-        if (((ChunkSystemEntity)entity).moonrise$isUpdatingSectionStatus()) {
++        // SourbyCraft start - relaxed thread checks: LightingLuminol MC 0001 commented Moonrise's section-status reentrancy guard out; here it is skipped only while checks are relaxed (a foreign thread's add/remove would otherwise be dropped with an error)
++        if (!dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE && ((ChunkSystemEntity)entity).moonrise$isUpdatingSectionStatus()) {
+             // recursive status update
+             LOGGER.error("Cannot recursively update entity chunk status for entity " + entity, new Throwable());
+             return;
+         }
+ 
+-        final boolean entityStatusUpdateBefore = slices == null ? false : slices.startPreventingStatusUpdates();
++        final boolean entityStatusUpdateBefore = dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE || slices == null ? false : slices.startPreventingStatusUpdates();
++        // SourbyCraft end - relaxed thread checks
+ 
+         if (entityStatusUpdateBefore) {
+             LOGGER.error("Cannot update chunk status for entity " + entity + " since entity chunk (" + slices.chunkX + "," + slices.chunkZ + ") is receiving update", new Throwable());
+@@ -328,7 +330,7 @@ public abstract class EntityLookup implements LevelEntityGetter<Entity> {
+                 this.setBlockTicketUpdates(ticketBlockBefore);
+             }
+         } finally {
+-            if (slices != null) {
++            if (!dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE && slices != null) { // SourbyCraft - relaxed thread checks
+                 slices.stopPreventingStatusUpdates(false);
+             }
+         }
+@@ -417,7 +419,7 @@ public abstract class EntityLookup implements LevelEntityGetter<Entity> {
+             return false;
+         }
+ 
+-        if (((ChunkSystemEntity)entity).moonrise$isUpdatingSectionStatus()) {
++        if (!dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE && ((ChunkSystemEntity)entity).moonrise$isUpdatingSectionStatus()) { // SourbyCraft - relaxed thread checks (LightingLuminol MC 0001)
+             LOGGER.warn("Entity " + entity + " is currently prevented from being added/removed to world since it is processing section status updates", new Throwable());
+             return false;
+         }
+@@ -444,6 +446,20 @@ public abstract class EntityLookup implements LevelEntityGetter<Entity> {
+         ((ChunkSystemEntity)entity).moonrise$setSectionY(sectionY);
+         ((ChunkSystemEntity)entity).moonrise$setSectionZ(sectionZ);
+         final ChunkEntitySlices slices = this.getOrCreateChunk(sectionX, sectionZ);
++        // SourbyCraft start - relaxed thread checks: LightingLuminol MC 0001 wrapped the add in synchronized (slices); here only while checks are relaxed
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) {
++            synchronized (slices) {
++                this.addEntityToSlices(entity, slices, sectionX, sectionY, sectionZ, fromDisk);
++            }
++        } else {
++            this.addEntityToSlices(entity, slices, sectionX, sectionY, sectionZ, fromDisk);
++        }
++
++        return true;
++    }
++
++    private void addEntityToSlices(final Entity entity, final ChunkEntitySlices slices, final int sectionX, final int sectionY, final int sectionZ, final boolean fromDisk) {
++        // SourbyCraft end - relaxed thread checks
+         if (!slices.addEntity(entity, sectionY)) {
+             LOGGER.warn("Entity " + entity + " added to world '" + WorldUtil.getWorldName(this.world) + "', but was already contained in entity chunk (" + sectionX + "," + sectionZ + ")");
+         }
+@@ -453,11 +469,12 @@ public abstract class EntityLookup implements LevelEntityGetter<Entity> {
+         this.addEntityCallback(entity);
+ 
+         this.entityStatusChange(entity, slices, Visibility.HIDDEN, getEntityStatus(entity), false, !fromDisk, false);
+-
+-        return true;
+     }
+ 
+     public boolean canRemoveEntity(final Entity entity) {
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) {
++            return true; // SourbyCraft - relaxed thread checks: LightingLuminol MC 0001 returns true unconditionally
++        }
+         if (((ChunkSystemEntity)entity).moonrise$isUpdatingSectionStatus()) {
+             return false;
+         }
+@@ -490,11 +507,23 @@ public abstract class EntityLookup implements LevelEntityGetter<Entity> {
+             throw new IllegalStateException("Only call Entity#setRemoved to remove an entity");
+         }
+         final ChunkEntitySlices slices = this.getChunk(sectionX, sectionZ);
++        // SourbyCraft start - relaxed thread checks: LightingLuminol MC 0001 wrapped the removal in synchronized (slices) (and NPE'd on null slices); here only while checks are relaxed, on the lookup when there are no slices
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) {
++            synchronized (slices == null ? this : slices) {
++                this.removeEntityFromSlices(entity, slices, sectionX, sectionY, sectionZ);
++            }
++        } else {
++            this.removeEntityFromSlices(entity, slices, sectionX, sectionY, sectionZ);
++        }
++    }
++
++    private void removeEntityFromSlices(final Entity entity, final ChunkEntitySlices slices, final int sectionX, final int sectionY, final int sectionZ) {
++        // SourbyCraft end - relaxed thread checks
+         // all entities should be in a chunk
+         if (slices == null) {
+             LOGGER.warn("Cannot remove entity " + entity + " from null entity slices (" + sectionX + "," + sectionZ + ")");
+         } else {
+-            if (slices.isPreventingStatusUpdates()) {
++            if (!dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE && slices.isPreventingStatusUpdates()) { // SourbyCraft - relaxed thread checks (LightingLuminol MC 0001)
+                 throw new IllegalStateException("Attempting to remove entity " + entity + " from entity slices (" + sectionX + "," + sectionZ + ") that is receiving status updates");
+             }
+             if (!slices.removeEntity(entity, sectionY)) {
+diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
+index 6b4a5851bd4160198f5fc812d495eabe90f40ac2..b474c2a429e1a73336dac5db5e6abf6219c1050e 100644
+--- a/io/papermc/paper/threadedregions/RegionizedServer.java
++++ b/io/papermc/paper/threadedregions/RegionizedServer.java
+@@ -154,7 +154,7 @@ public final class RegionizedServer {
+             if (TickThread.isShutdownThread()) {
+                 return 0L;
+             }
+-            throw new IllegalStateException("No currently ticking region");
++            return getGlobalTickData().getCurrentTick(); // SourbyCraft - off every region (global tick, async threads) the global tick counter answers instead of throwing; adapted from LightingLuminol paper 0002 CraftServer#getCurrentTick
+         }
+         return region.getData().getCurrentTick();
+     }
+@@ -165,6 +165,7 @@ public final class RegionizedServer {
+ 
+     public static void ensureGlobalTickThread(final String reason) {
+         if (!isGlobalTickThread()) {
++            if (!dev.iyanz.sourbycraft.guards.ThreadChecks.refuse(reason)) return; // SourbyCraft - relaxed thread checks (aurora.bridge.thread-checks); adapted from LightingLuminol MC 0001 RegionizedServer ("//throw new IllegalStateException(reason);")
+             LOGGER.error(reason, new Throwable()); // Canvas - log ts like TickThread does
+             throw new IllegalStateException(reason);
+         }
+diff --git a/io/papermc/paper/threadedregions/RegionizedWorldData.java b/io/papermc/paper/threadedregions/RegionizedWorldData.java
+index 33a849ce24fe16ea5e742ea5478fef29921dde20..5b2ed56c56cff214fdf371b5f0b5a31c7d157cc8 100644
+--- a/io/papermc/paper/threadedregions/RegionizedWorldData.java
++++ b/io/papermc/paper/threadedregions/RegionizedWorldData.java
+@@ -109,7 +109,7 @@ public final class RegionizedWorldData {
+                 into.trackerEntities.add(trackerEntity);
+             }
+             // block ticking
+-            into.blockEvents.addAll(from.blockEvents);
++            synchronized (into.blockEvents) { into.blockEvents.addAll(from.blockEvents); } // SourbyCraft - relaxed thread checks: block events may be pushed by a foreign thread (LightingLuminol MC 0001)
+             // ticklists use game time
+             from.blockLevelTicks.merge(into.blockLevelTicks, fromRedstoneTimeOffset);
+             from.fluidLevelTicks.merge(into.fluidLevelTicks, fromRedstoneTimeOffset);
+@@ -416,7 +416,7 @@ public final class RegionizedWorldData {
+     private boolean tickingBlockEntities;
+ 
+     // time
+-    private long redstoneTime = 1L;
++    private volatile long redstoneTime = 1L; // SourbyCraft - relaxed thread checks: read off the owning thread through the world-data pool (LightingLuminol MC 0001)
+ 
+     public long getRedstoneGameTime() {
+         return this.redstoneTime;
+@@ -546,7 +546,7 @@ public final class RegionizedWorldData {
+         try { // Canvas - region threading debug
+         // now that the connection is removed, we can allow this region to die
+         player.level().moonrise$getChunkTaskScheduler().chunkHolderManager.removeTicketAtLevel(
+-            ServerGamePacketListenerImpl.DISCONNECT_TICKET, player.connection.disconnectPos,
++            ServerGamePacketListenerImpl.DISCONNECT_TICKET, player.connection.disconnectPos == null ? player.chunkPosition() : player.connection.disconnectPos, // SourbyCraft - LightingLuminol MC 0001: a connection that never recorded a disconnect position
+             ChunkHolderManager.MAX_TICKET_LEVEL,
+             player.connection.disconnectTicketId
+         );
+@@ -695,7 +695,7 @@ public final class RegionizedWorldData {
+     }
+ 
+     public void addEntityTickingEntity(final Entity entity) {
+-        if (!TickThread.isTickThreadFor(entity)) {
++        if (!TickThread.isTickThreadFor(entity) && dev.iyanz.sourbycraft.guards.ThreadChecks.refuse("Entity is not under this region's control")) { // SourbyCraft - relaxed thread checks: LightingLuminol MC 0001 deleted these six checks; here they stay and ask ThreadChecks
+             throw new IllegalArgumentException("Entity " + entity + " is not under this region's control");
+         }
+         this.entityTickList.add(entity);
+@@ -707,7 +707,7 @@ public final class RegionizedWorldData {
+     }
+ 
+     public void removeEntityTickingEntity(final Entity entity) {
+-        if (!TickThread.isTickThreadFor(entity)) {
++        if (!TickThread.isTickThreadFor(entity) && dev.iyanz.sourbycraft.guards.ThreadChecks.refuse("Entity is not under this region's control")) { // SourbyCraft - relaxed thread checks: LightingLuminol MC 0001 deleted these six checks; here they stay and ask ThreadChecks
+             throw new IllegalArgumentException("Entity " + entity + " is not under this region's control");
+         }
+         this.entityTickList.remove(entity);
+@@ -726,7 +726,7 @@ public final class RegionizedWorldData {
+     }
+ 
+     public void addEntity(final @NonNull Entity entity) {
+-        if (!TickThread.isTickThreadFor(this.world, entity.chunkPosition())) {
++        if (!TickThread.isTickThreadFor(this.world, entity.chunkPosition()) && dev.iyanz.sourbycraft.guards.ThreadChecks.refuse("Entity is not under this region's control")) { // SourbyCraft - relaxed thread checks: LightingLuminol MC 0001 deleted these six checks; here they stay and ask ThreadChecks
+             throw new IllegalArgumentException("Entity " + entity + " is not under this region's control");
+         }
+         if (this.allEntities.add(entity)) {
+@@ -743,7 +743,7 @@ public final class RegionizedWorldData {
+     }
+ 
+     public void removeEntity(final Entity entity) {
+-        if (!TickThread.isTickThreadFor(entity)) {
++        if (!TickThread.isTickThreadFor(entity) && dev.iyanz.sourbycraft.guards.ThreadChecks.refuse("Entity is not under this region's control")) { // SourbyCraft - relaxed thread checks: LightingLuminol MC 0001 deleted these six checks; here they stay and ask ThreadChecks
+             throw new IllegalArgumentException("Entity " + entity + " is not under this region's control");
+         }
+         if (this.allEntities.remove(entity)) {
+@@ -756,14 +756,14 @@ public final class RegionizedWorldData {
+     }
+ 
+     public void addNavigatingMob(final Mob mob) {
+-        if (!TickThread.isTickThreadFor(mob)) {
++        if (!TickThread.isTickThreadFor(mob) && dev.iyanz.sourbycraft.guards.ThreadChecks.refuse("Entity is not under this region's control")) { // SourbyCraft - relaxed thread checks: LightingLuminol MC 0001 deleted these six checks; here they stay and ask ThreadChecks
+             throw new IllegalArgumentException("Entity " + mob + " is not under this region's control");
+         }
+         this.navigatingMobs.add(mob);
+     }
+ 
+     public void removeNavigatingMob(final Mob mob) {
+-        if (!TickThread.isTickThreadFor(mob)) {
++        if (!TickThread.isTickThreadFor(mob) && dev.iyanz.sourbycraft.guards.ThreadChecks.refuse("Entity is not under this region's control")) { // SourbyCraft - relaxed thread checks: LightingLuminol MC 0001 deleted these six checks; here they stay and ask ThreadChecks
+             throw new IllegalArgumentException("Entity " + mob + " is not under this region's control");
+         }
+         this.navigatingMobs.remove(mob);
+@@ -791,7 +791,9 @@ public final class RegionizedWorldData {
+     // make the code easier by simply discarding it in such an event
+     public void pushBlockEvent(final @NonNull BlockEventData blockEventData) {
+         TickThread.ensureTickThread(this.world, blockEventData.pos(), "Cannot queue block even data async");
++        synchronized (this.blockEvents) { // SourbyCraft - relaxed thread checks (LightingLuminol MC 0001)
+         this.blockEvents.add(blockEventData);
++        } // SourbyCraft - relaxed thread checks
+     }
+ 
+     public void pushBlockEvents(final @NonNull Collection<? extends BlockEventData> blockEvents) {
+@@ -801,18 +803,20 @@ public final class RegionizedWorldData {
+     }
+ 
+     public void removeIfBlockEvents(final Predicate<? super BlockEventData> predicate) {
+-        this.blockEvents.removeIf(predicate);
++        synchronized (this.blockEvents) { this.blockEvents.removeIf(predicate); } // SourbyCraft - relaxed thread checks (LightingLuminol MC 0001)
+     }
+ 
+     @Nullable
+     public BlockEventData removeFirstBlockEvent() {
+         BlockEventData ret;
++        synchronized (this.blockEvents) { // SourbyCraft - relaxed thread checks (LightingLuminol MC 0001)
+         while (!this.blockEvents.isEmpty()) {
+             ret = this.blockEvents.removeFirst();
+             if (TickThread.isTickThreadFor(this.world, ret.pos())) {
+                 return ret;
+             } // else: chunk must have been unloaded
+         }
++        } // SourbyCraft - relaxed thread checks
+ 
+         return null;
+     }
+@@ -829,7 +833,9 @@ public final class RegionizedWorldData {
+     public void addBlockEntityTicker(final @NonNull TickingBlockEntity ticker) {
+         TickThread.ensureTickThread(this.world, ticker.getPos(), "Tile entity must be owned by current region");
+ 
++        synchronized (this.pendingBlockEntityTickers) { // SourbyCraft - relaxed thread checks: a foreign thread may add through the world-data pool while the owner drains (LightingLuminol MC 0001 synchronized the lists; here the hand-off is locked and the fields stay upstream's)
+         (this.tickingBlockEntities ? this.pendingBlockEntityTickers : this.blockEntityTickers).add(ticker);
++        } // SourbyCraft - relaxed thread checks
+     }
+ 
+     public void setTickingBlockEntities(final boolean to) {
+@@ -841,10 +847,12 @@ public final class RegionizedWorldData {
+     }
+ 
+     public void pushPendingTickingBlockEntities() {
++        synchronized (this.pendingBlockEntityTickers) { // SourbyCraft - relaxed thread checks: see addBlockEntityTicker
+         if (!this.pendingBlockEntityTickers.isEmpty()) {
+             this.blockEntityTickers.addAll(this.pendingBlockEntityTickers);
+             this.pendingBlockEntityTickers.clear();
+         }
++        } // SourbyCraft - relaxed thread checks
+     }
+ 
+     // ticking chunks
+diff --git a/io/papermc/paper/threadedregions/TickRegions.java b/io/papermc/paper/threadedregions/TickRegions.java
+index 83ecb544b155cf598f9fa2389b4b9fa411282fe8..cb3023f86bcc655ca3d3e90223e5a95931845cf9 100644
+--- a/io/papermc/paper/threadedregions/TickRegions.java
++++ b/io/papermc/paper/threadedregions/TickRegions.java
+@@ -226,7 +226,13 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+         }
+ 
+         static void updateCurrentRegion() {
+-            TickRegionScheduler.getCurrentRegion().getData().getRegionStats().updateFrom(TickRegionScheduler.getCurrentRegionizedWorldData());
++            // SourbyCraft start - relaxed thread checks: a foreign thread writing through the world-data pool has no current region; the owner refreshes its stats on its next change (LightingLuminol MC 0001 looked the region up by entity/chunk instead)
++            final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> current = TickRegionScheduler.getCurrentRegion();
++            if (current == null) {
++                return;
++            }
++            current.getData().getRegionStats().updateFrom(TickRegionScheduler.getCurrentRegionizedWorldData());
++            // SourbyCraft end - relaxed thread checks
+         }
+     }
+ 
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index 1d63c3cef4c5bb4eb59cdf0ee21a2a7bf2940b8d..2c166286bb41015e3f43af7f3feaa4a472c3449f 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -2290,7 +2290,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+     }
+ 
+     public int getTickCount() {
+-        throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_COUNT.error(); // Folia - region threading
++        return (int) io.papermc.paper.threadedregions.RegionizedServer.getGlobalTickData().getCurrentTick(); // Folia - region threading // SourbyCraft - a global-tick counter, as LightingLuminol MC 0001 and the owned MinecraftServer.currentTick (bridge/LegacyServerTick) count it
+     }
+ 
+     public boolean isUnderSpawnProtection(final ServerLevel level, final BlockPos pos, final Player player) {
+diff --git a/net/minecraft/server/level/ChunkMap.java b/net/minecraft/server/level/ChunkMap.java
+index 0994d28f4506f6e60b842764bcea108ac0b7352c..d3eb9969c65c3f4cb1e4f272d894971e2d6b7e19 100644
+--- a/net/minecraft/server/level/ChunkMap.java
++++ b/net/minecraft/server/level/ChunkMap.java
+@@ -1071,13 +1071,16 @@ public class ChunkMap extends SimpleRegionStorage implements ChunkHolder.PlayerP
+             final Entity[] trackerEntitiesRaw = trackerEntities.getRawDataUnchecked();
+             for (int i = 0, len = trackerEntities.size(); i < len; ++i) {
+                 final Entity entity = trackerEntitiesRaw[i];
++                if (entity == null) continue; // SourbyCraft - relaxed thread checks: a foreign thread's removal may leave a hole (LightingLuminol MC 0001)
+                 final ChunkMap.TrackedEntity tracker = ((ca.spottedleaf.moonrise.patches.entity_tracker.EntityTrackerEntity)entity).moonrise$getTrackedEntity();
+                 if (tracker == null) {
+                     continue;
+                 }
++                final FullChunkStatus trackedChunkStatus = ((ca.spottedleaf.moonrise.patches.chunk_system.entity.ChunkSystemEntity)entity).moonrise$getChunkStatus(); // SourbyCraft - relaxed thread checks
++                if (trackedChunkStatus == null) continue; // SourbyCraft - relaxed thread checks: the entity is mid-removal on another thread (LightingLuminol MC 0001)
+                 ((ca.spottedleaf.moonrise.patches.entity_tracker.EntityTrackerTrackedEntity)tracker).moonrise$tick(nearbyPlayers.getChunk(entity.chunkPosition())); // Folia - region threading
+                 if (((ca.spottedleaf.moonrise.patches.entity_tracker.EntityTrackerTrackedEntity)tracker).moonrise$hasPlayers()
+-                    || ((ca.spottedleaf.moonrise.patches.chunk_system.entity.ChunkSystemEntity)entity).moonrise$getChunkStatus().isOrAfter(FullChunkStatus.ENTITY_TICKING)) {
++                    || trackedChunkStatus.isOrAfter(FullChunkStatus.ENTITY_TICKING)) { // SourbyCraft - relaxed thread checks
+                     tracker.serverEntity.sendChanges();
+                 }
+             }
+diff --git a/net/minecraft/server/level/ServerChunkCache.java b/net/minecraft/server/level/ServerChunkCache.java
+index f9b72435195643b674931da0d2aa312a06d44bf7..ffb910a8e25f0483ef9cbf79a16513b4d240a6e0 100644
+--- a/net/minecraft/server/level/ServerChunkCache.java
++++ b/net/minecraft/server/level/ServerChunkCache.java
+@@ -97,7 +97,15 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+     private ChunkAccess syncLoad(final int chunkX, final int chunkZ, final ChunkStatus toStatus) {
+         // Folia start - region threading
+         if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThread()) {
+-            ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.level, chunkX, chunkZ, "Cannot asynchronously load chunks");
++            // SourbyCraft start - relaxed thread checks: adapted from LightingLuminol MC 0001 ServerChunkCache#syncLoad. The global tick may load a chunk synchronously (it blocks below, pumping global chunk tasks); a region thread that does not own the chunk is refused whatever the setting, because its wait could need its own tick (Folia#280)
++            if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED && io.papermc.paper.threadedregions.RegionizedServer.isGlobalTickThread()) {
++                // allowed: the global tick waits for the load below
++            } else if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.level, chunkX, chunkZ)) {
++                final String ex = "Thread failed main thread check: Cannot asynchronously load chunks, context=" + ca.spottedleaf.moonrise.common.util.TickThread.getThreadContext() + ", world=" + ca.spottedleaf.moonrise.common.util.WorldUtil.getWorldName(this.level) + ", chunk_pos=" + new ChunkPos(chunkX, chunkZ);
++                LOGGER.error(ex, new Throwable());
++                throw new IllegalStateException(ex);
++            }
++            // SourbyCraft end - relaxed thread checks
+         }
+         // Folia end - region threading
+         final ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkTaskScheduler chunkTaskScheduler = ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getChunkTaskScheduler();
+@@ -114,7 +122,7 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+             );
+         }
+ 
+-        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.level, chunkX, chunkZ)) {
++        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.level, chunkX, chunkZ) || (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED && io.papermc.paper.threadedregions.RegionizedServer.isGlobalTickThread())) { // SourbyCraft - relaxed thread checks: the global tick blocks here too (LightingLuminol MC 0001)
+             ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkTaskScheduler.pushChunkWait(this.level, chunkX, chunkZ);
+             this.mainThreadProcessor.managedBlock(completable::isDone);
+             ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkTaskScheduler.popChunkWait();
+@@ -172,6 +180,7 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+ 
+         java.util.Objects.checkFromToIndex(0, size, raw.length);
+         for (int i = 0; i < size; ++i) {
++            if (raw[i] == null) continue; // SourbyCraft - relaxed thread checks: a foreign thread's removal may leave a hole (LightingLuminol MC 0001)
+             world.tickChunk(raw[i], randomTickSpeed, worldData); // Canvas - optimize random tick
+ 
+             // call mid-tick tasks for chunk system
+@@ -508,6 +517,7 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+ 
+     private void broadcastChangedChunks() {
+         final io.papermc.paper.threadedregions.RegionizedWorldData regionizedWorldData = this.level.getCurrentWorldData(); // Folia - region threading
++        synchronized (regionizedWorldData.chunkHoldersToBroadcast) { // SourbyCraft - relaxed thread checks: blockChanged may add from a foreign thread through the world-data pool (LightingLuminol MC 0001 synchronized the set; here the two touch points are locked and the field stays upstream's)
+         for (ChunkHolder chunkHolder : regionizedWorldData.chunkHoldersToBroadcast) { // Folia - region threading - note: do not need to thread check, as getChunkToSend is only non-null when the chunkholder is loaded
+             LevelChunk chunk = chunkHolder.getChunkToSend(); // Paper - rewrite chunk system
+             if (chunk != null) {
+@@ -516,6 +526,7 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+         }
+ 
+         regionizedWorldData.chunkHoldersToBroadcast.clear(); // Folia - region threading
++        } // SourbyCraft - relaxed thread checks
+     }
+ 
+     private void tickChunks(final long timeDiff) {
+@@ -892,16 +903,25 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+         @Override
+         protected boolean pollTask() {
+             // Folia start - region threading
+-            if (ServerChunkCache.this.level != io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegionizedWorldData().world) {
++            // SourbyCraft start - relaxed thread checks: the global tick has no current region; while it waits for a synchronous chunk load it pumps the world's global chunk tasks (LightingLuminol MC 0001: "we need to process some callbacks here, or we'll get stuck")
++            final io.papermc.paper.threadedregions.RegionizedWorldData currentWorldData = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegionizedWorldData();
++            if (currentWorldData == null) {
++                if (!(dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED && io.papermc.paper.threadedregions.RegionizedServer.isGlobalTickThread())) {
++                    throw new IllegalStateException("Polling tasks from non-owned region");
++                }
++            } else if (ServerChunkCache.this.level != currentWorldData.world) {
+                 throw new IllegalStateException("Polling tasks from non-owned region");
+             }
++            // SourbyCraft end - relaxed thread checks
+             // Folia end - region threading
+             if (ServerChunkCache.this.runDistanceManagerUpdates()) {
+                 return true;
+             }
+ 
+             // Paper - rewrite chunk system
+-            return io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegion().getData().getTaskQueueData().executeChunkTask(); // Folia - region threading
++            final io.papermc.paper.threadedregions.ThreadedRegionizer.ThreadedRegion<io.papermc.paper.threadedregions.TickRegions.TickRegionData, io.papermc.paper.threadedregions.TickRegions.TickRegionSectionData> currentRegion = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegion(); // SourbyCraft - relaxed thread checks
++            if (currentRegion == null) return ServerChunkCache.this.level.taskQueueRegionData.executeGlobalChunkTask(); // SourbyCraft - relaxed thread checks: the global tick
++            return currentRegion.getData().getTaskQueueData().executeChunkTask(); // Folia - region threading
+         }
+     }
+ }

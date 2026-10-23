@@ -5,7 +5,7 @@ Subject: [PATCH] SourbyCraft - time region-file chunk saves for /perf storage
 
 
 diff --git a/net/minecraft/world/level/chunk/storage/RegionFileStorage.java b/net/minecraft/world/level/chunk/storage/RegionFileStorage.java
-index ae06d6cfc4fa08f7a073c5af134281a0237df7a1..690e4e0454952e05b5ca6d54e479c506e584b9f2 100644
+index b30c8392ec281292221e95a5fe66d44fa395cac8..7491bf708d7d4ec0861e9b044fa785dba4a3880c 100644
 --- a/net/minecraft/world/level/chunk/storage/RegionFileStorage.java
 +++ b/net/minecraft/world/level/chunk/storage/RegionFileStorage.java
 @@ -27,6 +27,7 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
@@ -16,10 +16,10 @@ index ae06d6cfc4fa08f7a073c5af134281a0237df7a1..690e4e0454952e05b5ca6d54e479c506
  
      @Nullable
      public static ChunkPos getRegionFileCoordinates(Path file) {
-@@ -191,6 +192,21 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
-             return;
-         }
-         // SourbyCraft end - Aurora World Fabric
+@@ -178,6 +179,21 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
+         final int chunkX, final int chunkZ, final ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.WriteData writeData
+     ) throws IOException {
+         if (dev.iyanz.sourbycraft.awf.RegionFileStorageHooks.finishWrite(this.sourby$awf, writeData)) return;
 +        // SourbyCraft start - /perf storage: time the region-file I/O stage, on success and on failure; the exception propagates unchanged
 +        final long sourby$started = System.nanoTime();
 +        boolean sourby$failed = true;
@@ -38,11 +38,11 @@ index ae06d6cfc4fa08f7a073c5af134281a0237df7a1..690e4e0454952e05b5ca6d54e479c506
          final ChunkPos pos = new ChunkPos(chunkX, chunkZ);
          if (writeData.result() == ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.WriteData.WriteResult.DELETE) {
              final RegionFile regionFile = this.moonrise$getRegionFileIfExists(chunkX, chunkZ);
-@@ -302,6 +318,7 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
+@@ -275,6 +291,7 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
          this.sync = sync;
          this.info = info;
          this.isChunkData = info.dfuType()[0] == net.minecraft.util.datafix.DataFixTypes.CHUNK; // Paper - recalculate region file headers
 +        this.sourby$saveLatency = dev.iyanz.sourbycraft.perf.RegionFileSaveLatency.GLOBAL.recorder(String.valueOf(info.level()), info.dimension() == null ? "?" : info.dimension().identifier().toString(), String.valueOf(info.type())); // SourbyCraft - /perf storage
-         this.sourby$awf = sourby$attachAwf(folder); // SourbyCraft - Aurora World Fabric
+         this.sourby$awf = dev.iyanz.sourbycraft.awf.RegionFileStorageHooks.attach(this, folder); // SourbyCraft - Aurora World Fabric
      }
  

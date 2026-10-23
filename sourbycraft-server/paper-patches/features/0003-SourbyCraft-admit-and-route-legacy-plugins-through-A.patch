@@ -32,7 +32,7 @@ index 6ef0042a355c65262bdb89dcf151bd644653216d..c47a804d023a8917f69bd4e61d6b17b0
          }
          // Folia end - block plugins not marked as supported
 diff --git a/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java b/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
-index 8c6892ec60c1841cae45889da764cdd7d314d1f9..aee27c0e8783859b2810fb3e6ee44a04eb3f9327 100644
+index 8c6892ec60c1841cae45889da764cdd7d314d1f9..68382311c2a0c954b04cf2e5f72d587532a4dad3 100644
 --- a/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
 +++ b/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
 @@ -264,6 +264,7 @@ public class CraftScheduler implements BukkitScheduler {
@@ -55,7 +55,7 @@ index 8c6892ec60c1841cae45889da764cdd7d314d1f9..aee27c0e8783859b2810fb3e6ee44a04
  
      @Override
      public boolean isCurrentlyRunning(final int taskId) {
-+        if (dev.iyanz.sourbycraft.bridge.AuroraBridge.knows(taskId)) return dev.iyanz.sourbycraft.bridge.AuroraBridge.isRunning(taskId); // SourbyCraft - Aurora Bridge
++        final Boolean bridged = dev.iyanz.sourbycraft.bridge.AuroraBridge.currentlyRunning(taskId); if (bridged != null) return bridged; // SourbyCraft - Aurora Bridge
          // Paper start
          if (!this.isAsyncScheduler) {
              if (this.asyncScheduler.isCurrentlyRunning(taskId)) {
@@ -71,28 +71,23 @@ index 8c6892ec60c1841cae45889da764cdd7d314d1f9..aee27c0e8783859b2810fb3e6ee44a04
          // Paper start
          if (!this.isAsyncScheduler) {
              pending.addAll(this.asyncScheduler.getPendingTasks());
-+            for (final Object bridged : dev.iyanz.sourbycraft.bridge.AuroraBridge.pendingTasks()) pending.add((BukkitTask) bridged); // SourbyCraft - Aurora Bridge
++            pending.addAll(dev.iyanz.sourbycraft.bridge.AuroraBridge.pendingBukkitTasks()); // SourbyCraft - Aurora Bridge
          }
          // Paper end
          return pending;
-@@ -514,6 +519,12 @@ public class CraftScheduler implements BukkitScheduler {
+@@ -514,6 +519,7 @@ public class CraftScheduler implements BukkitScheduler {
      }
  
      protected CraftTask handle(final CraftTask task, final long delay) { // Paper
-+        // SourbyCraft start - Aurora Bridge: route a bridged legacy plugin's task instead of refusing it
-+        if (dev.iyanz.sourbycraft.bridge.AuroraBridge.handles(task.getOwner())) {
-+            dev.iyanz.sourbycraft.bridge.AuroraBridge.submit(task.getOwner(), bridgeTask(task), delay);
-+            return task;
-+        }
-+        // SourbyCraft end - Aurora Bridge
++        if (dev.iyanz.sourbycraft.bridge.AuroraBridge.submitIfBridged(task.getOwner(), bridgeTask(task), delay)) return task; // SourbyCraft - Aurora Bridge: route a bridged legacy plugin's task instead of refusing it
          if (true) throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - region threading
          // Paper start
          if (!this.isAsyncScheduler && !task.isSync()) {
-@@ -526,6 +537,31 @@ public class CraftScheduler implements BukkitScheduler {
+@@ -526,6 +532,20 @@ public class CraftScheduler implements BukkitScheduler {
          return task;
      }
  
-+    // SourbyCraft start - Aurora Bridge
++    // SourbyCraft start - Aurora Bridge: the bridge's view of a CraftTask; behaviour lives in dev.iyanz.sourbycraft.bridge
 +    private static dev.iyanz.sourbycraft.bridge.BridgeRuntime.Task bridgeTask(final CraftTask task) {
 +        return new dev.iyanz.sourbycraft.bridge.BridgeRuntime.Task() {
 +            @Override public int id() { return task.getTaskId(); }
@@ -101,18 +96,7 @@ index 8c6892ec60c1841cae45889da764cdd7d314d1f9..aee27c0e8783859b2810fb3e6ee44a04
 +            @Override public boolean cancelled() { return task.isCancelled(); }
 +            @Override public void markCancelled() { task.cancel0(); }
 +            @Override public Object handle() { return task; }
-+            @Override public void run() {
-+                // CraftAsyncTask#run swallows and logs exceptions and keeps worker lists the bridge
-+                // does not use; run the plugin's body directly so violations reach the bridge.
-+                // CraftFuture must run itself: its run() is what completes the future.
-+                if (task instanceof CraftFuture<?> || (task.rTask == null && task.cTask == null)) {
-+                    task.run();
-+                } else if (task.rTask != null) {
-+                    task.rTask.run();
-+                } else {
-+                    task.cTask.accept(task);
-+                }
-+            }
++            @Override public void run() { dev.iyanz.sourbycraft.bridge.AuroraBridge.runBukkitTask(task, task.rTask, task.cTask, task instanceof CraftFuture<?>); }
 +        };
 +    }
 +    // SourbyCraft end - Aurora Bridge

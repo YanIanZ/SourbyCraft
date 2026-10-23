@@ -28,15 +28,19 @@ Aurora Bridge admitted <Plugin> (no folia-supported/canvas-supported). ...
 | Plugin calls | Runs on |
 | --- | --- |
 | `runTask`, `runTaskLater`, `runTaskTimer`, `scheduleSync*`, `callSyncMethod`, `BukkitRunnable.runTask*` from a command, event or task running on a region | That region, anchored on a chunk it owned when the task was scheduled |
-| The same from `onEnable`, the console, the global region or async code | The global region: server-wide state only; any block or entity access is refused by the engine |
+| `runTask`, `runTaskLater`, `runTaskTimer`, `scheduleSync*` scheduled while a **player's** event is handled or a player's command runs (also from the plugin's own async task started there, e.g. DeluxeMenus's async menu build, or an event the plugin fires from it) | The region owning that player when the task is due, following the player (2026-10-22). Player already gone when scheduled: the row below. Player leaves before the task runs: cancelled and counted rejected (not a violation); a repeating task stops |
+| The same from `onEnable`, the console, the global region or async code with no player frame | The global region: server-wide state only; any block or entity access is refused by the engine |
 | The same with the callback wrapped in `EntityTask.of(entity, action)` (`sourbyapi`) | The region owning the entity when the task is due, following it across regions; if the entity is removed first the task is cancelled without running and counted under rejected operations in `/plugins` (not a violation) |
 | `runTaskAsynchronously`, `runTaskTimerAsynchronously` | Timed by Folia's async scheduler, executed on the bounded `SourbyCraft-BridgeIO-*` lane (`/perf governor`) |
 | `BukkitTask.cancel`, `cancelTask`, `cancelTasks`, `isQueued`, `isCurrentlyRunning`, `getPendingTasks` | Answered by the bridge |
 
 Since patch 0008 `getActiveWorkers` lists running bridged async bodies too. Not covered: a task that
 touches a player or block in a *different* region than the one it runs on is refused by the
-engine (`IllegalStateException`). A long-running timer anchored on one region does not follow a
-player who walks away.
+engine (`IllegalStateException`). A timer anchored on a region (not on a player) does not follow a
+player who walks away. A task that sweeps every entity or chunk of a world from the global region
+(ClearLag's clear task) has no single owner and cannot be routed; its violation line says so, and the
+plugin needs a Folia-supported replacement
+([not bridgeable](../architecture/aurora-plugin-bridge.md#not-bridgeable-2026-10-22)).
 
 ### Legacy synchronous events and `ServerTickManager` (2026-10-22, unit-tested; see the coordination entry for the boot check)
 
@@ -80,6 +84,16 @@ shared tick boundary; step and sprint count global ticks (a region that is behin
 tick rate is the one server-wide rate (1–10 000). A region's own pause from
 `getRegionThreadingTickRateManager()` still applies on top. The vanilla `/tick` command stays
 unregistered: `/tick query` reads main-loop tick times that do not exist under region threading.
+
+## 2b. Thread checks: relaxed by default (owner decision 2026-10-22)
+
+With `mode = "safe"` the region-ownership checks are **relaxed** unless `aurora.bridge.thread-checks` says
+`"enforced"` (or `"bridged"`: relaxed only inside bridged task bodies). Relaxed means a legacy plugin's
+cross-region access runs on the wrong thread and is only counted (`/perf plugins`: "Thread checks" and per-plugin
+"relaxed ownership hits"; `/plugins <name>`). Test both: the thing you are checking under `relaxed` is "does the
+plugin's flow complete", under `enforced` "what does it still refuse". Neither result qualifies the plugin, and a
+relaxed server must never be presented as stable (boot WARN, `/ver`). For a one-off run, `-Daurora.bridge.thread-checks=enforced`
+overrides the file. Details: [aurora-plugin-bridge.md, Thread checks](../architecture/aurora-plugin-bridge.md#thread-checks-owner-decision-2026-10-22).
 
 ## 3. Test it
 

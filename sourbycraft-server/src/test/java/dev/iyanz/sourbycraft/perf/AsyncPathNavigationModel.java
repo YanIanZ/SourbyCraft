@@ -12,17 +12,18 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
- * A hand-written model (not a line-by-line copy) of the part of {@code PathNavigation} that minecraft feature patch 0006 adds
- * ({@code sourbyKickAsyncRecompute} and the periodic-recompute guard) and patch 0047 extends with the
- * navigation request generation, written against the real
+ * A hand-written model (not a line-by-line copy) of the async recompute: the glue that
+ * {@link AsyncPathRecompute#offload} implements (since 2026-10-22; before that it was
+ * {@code PathNavigation.sourbyKickAsyncRecompute} inside minecraft feature patch 0006) together with
+ * the navigation request generation of patch 0047, written against the real
  * {@link AsyncPathProcessor}, {@link AsyncPathCompletion} and {@link AsyncPathValidity}.
  *
- * <p>The patched lambda itself cannot run here: it lives in {@code net.minecraft} code that needs a
- * bootstrapped server and a real {@code Mob}. So the pieces it is built from are the real ones and
- * the glue is modelled by hand; {@link AsyncPathPatchShapeTest} pins selected patch text (check
- * order, where the token and generation are taken, the generation bumps), which narrows but does not
- * remove drift: the first version modelled moveTo with reference inequality instead of
- * {@code Path.sameAs} and missed a retarget. Nothing here exercises the patch's own bytecode.</p>
+ * <p>{@code offload} itself needs a real {@code Mob}, level and {@code EntityPathfindEvent}, so the
+ * pieces it is built from are the real ones and the glue is modelled by hand;
+ * {@link AsyncPathPatchShapeTest} pins the source order (check order, where the token and generation
+ * are taken, the generation bumps) and {@link AsyncPathRecomputeTest} runs the real delivery checks on
+ * a real {@code PathNavigation}. That narrows but does not remove drift: the first version modelled
+ * moveTo with reference inequality instead of {@code Path.sameAs} and missed a retarget.</p>
  */
 final class AsyncPathNavigationModel {
 

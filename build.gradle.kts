@@ -116,11 +116,25 @@ val slimServerJar = tasks.register("slimServerJar") {
     // an input so a changed value re-runs the task instead of leaving a jar with stale entry times.
     val sourceDateEpoch = providers.environmentVariable("SOURCE_DATE_EPOCH").orElse("")
     inputs.property("sourceDateEpoch", sourceDateEpoch)
+    // SEC-13 (GPL-3.0-only): the published file is this launcher jar, so it carries the GPL text
+    // (LICENSE_SOURBYCRAFT), the source notice (NOTICE_SOURBYCRAFT) and the upstream licence texts
+    // itself, under META-INF/licenses/, instead of only inside the patched server jar that exists
+    // after first boot. Same source files as the server jar's resources, so the two never drift.
+    // The File is captured at configuration time (config-cache safe); a changed text re-runs the task.
+    val licenceDir = serverProj.file("src/main/resources/META-INF/licenses")
+    inputs.dir(licenceDir).withPropertyName("licences")
     val outFileProvider = layout.buildDirectory.file("libs/SourbyCraft-slim.jar")
     outputs.file(outFileProvider)
 
     doLast {
-        val fatJar = inputs.files.singleFile
+        // inputs.files also holds the licence texts; the paperclip jar is the only .jar among them.
+        val fatJar = inputs.files.files.single { it.name.endsWith(".jar") }
+        val licenceFiles = (licenceDir.listFiles() ?: emptyArray()).filter { it.isFile }
+            .associateBy { "META-INF/licenses/${it.name}" }
+        if (licenceFiles.keys.none { it.endsWith("/LICENSE_SOURBYCRAFT") } ||
+            licenceFiles.keys.none { it.endsWith("/NOTICE_SOURBYCRAFT") }) {
+            throw GradleException("slimServerJar: LICENSE_SOURBYCRAFT/NOTICE_SOURBYCRAFT missing in $licenceDir")
+        }
         val out = outFileProvider.get().asFile
         out.parentFile.mkdirs()
 
@@ -142,23 +156,33 @@ val slimServerJar = tasks.register("slimServerJar") {
             JarOutputStream(out.outputStream().buffered()).use { jos ->
                 // Deterministic order: MANIFEST.MF first (readers expect it early), then by name.
                 // Never the source jar's own order, which is whatever the producing task emitted.
+                // The licence texts are merged into the same sorted order (one fixed entry time, as
+                // every other entry), so adding them keeps the jar reproducible.
                 val manifestName = "META-INF/MANIFEST.MF"
-                val ordered = jar.entries().toList().sortedWith(
-                    compareBy<JarEntry>({ it.name != "META-INF/" }, { it.name != manifestName }, { it.name })
+                val jarEntries = jar.entries().toList().associateBy { it.name }
+                val clash = licenceFiles.keys.filter { it in jarEntries }
+                if (clash.isNotEmpty()) {
+                    throw GradleException("slimServerJar: the paperclip jar already has $clash; refusing to write duplicates")
+                }
+                val licenceDirEntry = "META-INF/licenses/"
+                val names = (jarEntries.keys + licenceFiles.keys + licenceDirEntry).sortedWith(
+                    compareBy<String>({ it != "META-INF/" }, { it != manifestName }, { it })
                 )
-                for (entry in ordered) {
-                    val name = entry.name
-                    val strip = name.endsWith(".jar") && normalizedPrefixes.any { name.startsWith(it) }
+                for (name in names) {
+                    val entry = jarEntries[name]
+                    val strip = entry != null && name.endsWith(".jar") && normalizedPrefixes.any { name.startsWith(it) }
                     if (strip) {
                         strippedCount++
-                        if (entry.size >= 0) strippedBytes += entry.size
+                        if (entry!!.size >= 0) strippedBytes += entry.size
                         continue
                     }
                     val outEntry = JarEntry(name)
                     outEntry.setTimeLocal(entryTime)
                     jos.putNextEntry(outEntry)
-                    if (!entry.isDirectory) {
-                        jar.getInputStream(entry).use { it.copyTo(jos) }
+                    val licence = licenceFiles[name]
+                    when {
+                        licence != null -> licence.inputStream().use { it.copyTo(jos) }
+                        entry != null && !entry.isDirectory -> jar.getInputStream(entry).use { it.copyTo(jos) }
                     }
                     jos.closeEntry()
                 }

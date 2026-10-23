@@ -19,7 +19,6 @@ import static org.mockito.Mockito.withSettings;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
-import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
@@ -250,10 +249,9 @@ class AsyncPathEvaluatorIsolationTest {
 
     @Test
     void creakingAllowsTheOffload() throws Exception {
-        final PathNavigation navigation = creakingNavigation(creakingWithHome(null));
-        final Method safe = PathNavigation.class.getDeclaredMethod("sourbyAsyncSolveSafe");
-        safe.setAccessible(true);
-        assertTrue((Boolean) safe.invoke(navigation), "the creaking offload is no longer refused");
+        final Creaking creaking = creakingWithHome(null);
+        final PathNavigation navigation = creakingNavigation(creaking);
+        assertFalse(AsyncPathRecompute.solveWritesMob(navigation, creaking), "the creaking offload is no longer refused");
     }
 
     @Test
@@ -289,7 +287,7 @@ class AsyncPathEvaluatorIsolationTest {
         final PathNavigationRegion region = flatWorld();
         final Mob mob = walker();
 
-        // Two submissions as PathNavigation.sourbyKickAsyncRecompute makes them on the owner: solver,
+        // Two submissions as AsyncPathRecompute.offload makes them on the owner: solver,
         // then the mob snapshot. One before the creaking has a home, one after it gets a far one.
         final PathFinder homeless = navigation.sourbyIsolatedPathFinder(512);
         final MobPathSnapshot homelessSubject = MobPathSnapshot.captureDetached(mob);

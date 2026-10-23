@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -28,7 +29,10 @@ class TickDataBinaryCompatibilityTest {
         assertEquals(1L, List.of(TickRegionScheduler.RegionScheduleHandle.class.getDeclaredFields()).stream()
             .filter(field -> field.getType() == RegionTickMetricsHolder.class)
             .count());
-        assertTrue(Modifier.isFinal(TickData.class.getModifiers()));
+        // Patch 0013 drops `final` from TickData so the handle's fields can hold RegionTickDataView
+        // (removing `final` is binary compatible); the view itself stays final.
+        assertFalse(Modifier.isFinal(TickData.class.getModifiers()));
+        assertTrue(Modifier.isFinal(RegionTickDataView.class.getModifiers()));
     }
 
     @Test
@@ -54,7 +58,7 @@ class TickDataBinaryCompatibilityTest {
         owner.tickCompleted(tick(TARGET_INTERVAL, 2L * TARGET_INTERVAL, 2L * MILLISECOND), TARGET_INTERVAL);
 
         for (final long window : new long[] {5L, 15L}) {
-            final TickData.TickReportData report = new TickData(owner, TimeUnit.SECONDS.toNanos(window))
+            final TickData.TickReportData report = RegionTickDataView.of(owner, TimeUnit.SECONDS.toNanos(window))
                 .generateTickReport(null, 102L * MILLISECOND, TARGET_INTERVAL);
             assertArrayEquals(new long[] {TARGET_INTERVAL, TARGET_INTERVAL, TARGET_INTERVAL}, report.tpsData().rawData());
             assertArrayEquals(new long[] {MILLISECOND, 2L * MILLISECOND, 3L * MILLISECOND}, report.timePerTickData().rawData());
@@ -78,7 +82,7 @@ class TickDataBinaryCompatibilityTest {
         assertTrue(owner.refreshSnapshot(now).fiveSeconds().truncated());
         assertTrue(owner.refreshSnapshot(now).fifteenSeconds().truncated());
         for (final long window : new long[] {5L, 15L}) {
-            final TickData view = new TickData(owner, TimeUnit.SECONDS.toNanos(window));
+            final TickData view = RegionTickDataView.of(owner, TimeUnit.SECONDS.toNanos(window));
             assertNull(view.generateTickReport(null, now, MILLISECOND));
             assertNull(view.getMSPTData(null, MILLISECOND));
             assertNull(view.getTPSAverage(null, MILLISECOND));
@@ -88,7 +92,7 @@ class TickDataBinaryCompatibilityTest {
     @Test
     void directSharedViewInsertionMatchesStandaloneFirstAndContinuingTickTps() {
         final RegionTickMetrics owner = new RegionTickMetrics();
-        final TickData shared = new TickData(owner, TimeUnit.SECONDS.toNanos(5L));
+        final TickData shared = RegionTickDataView.of(owner, TimeUnit.SECONDS.toNanos(5L));
         final TickData standalone = new TickData(TimeUnit.SECONDS.toNanos(5L));
         final TickTime first = tick(TimeUtil.DEADLINE_NOT_SET, 0L, 2L * MILLISECOND);
         shared.addDataFrom(first);
@@ -112,7 +116,7 @@ class TickDataBinaryCompatibilityTest {
     @Test
     void directSharedFirstIntervalIsResolvedInsideLongBucketReports() {
         final RegionTickMetrics owner = new RegionTickMetrics();
-        final TickData shared = new TickData(owner, TimeUnit.MINUTES.toNanos(1L));
+        final TickData shared = RegionTickDataView.of(owner, TimeUnit.MINUTES.toNanos(1L));
         final TickData standalone = new TickData(TimeUnit.MINUTES.toNanos(1L));
         long previous = TimeUtil.DEADLINE_NOT_SET;
         for (int i = 0; i < 500; ++i) {
@@ -138,7 +142,7 @@ class TickDataBinaryCompatibilityTest {
         for (final long windowMinutes : new long[] {1L, 5L, 15L}) {
             final long window = TimeUnit.MINUTES.toNanos(windowMinutes);
             final RegionTickMetrics owner = new RegionTickMetrics();
-            final TickData shared = new TickData(owner, window);
+            final TickData shared = RegionTickDataView.of(owner, window);
             final TickData standalone = new TickData(window);
             final long olderOffset = TimeUnit.SECONDS.toNanos(windowMinutes == 1L ? 40L : 70L);
             final TickTime[] samples = {
@@ -165,7 +169,7 @@ class TickDataBinaryCompatibilityTest {
     @Test
     void unresolvedSampleRingOverflowMakesLongCompatibilityViewsUnavailable() {
         final RegionTickMetrics owner = new RegionTickMetrics();
-        final TickData shared = new TickData(owner, TimeUnit.MINUTES.toNanos(5L));
+        final TickData shared = RegionTickDataView.of(owner, TimeUnit.MINUTES.toNanos(5L));
         final TickData standalone = new TickData(TimeUnit.MINUTES.toNanos(5L));
         for (int i = 0; i < 1_000; ++i) {
             final TickTime sample = tick(TimeUtil.DEADLINE_NOT_SET, i * MILLISECOND, MILLISECOND);
@@ -187,7 +191,7 @@ class TickDataBinaryCompatibilityTest {
     @Test
     void targetlessCompatibilityRingIsExactThroughEightAndUnavailableOnOverflow() {
         final RegionTickMetrics owner = new RegionTickMetrics();
-        final TickData shared = new TickData(owner, TimeUnit.MINUTES.toNanos(5L));
+        final TickData shared = RegionTickDataView.of(owner, TimeUnit.MINUTES.toNanos(5L));
         final TickData standalone = new TickData(TimeUnit.MINUTES.toNanos(5L));
         for (int i = 0; i < 8; ++i) {
             final TickTime sample = tick(TimeUtil.DEADLINE_NOT_SET, i * MILLISECOND, MILLISECOND);
@@ -217,7 +221,7 @@ class TickDataBinaryCompatibilityTest {
         final long now = 499L * interval + duration;
 
         for (final long window : new long[] {1L, 5L, 15L}) {
-            final TickData.TickReportData report = new TickData(owner, TimeUnit.MINUTES.toNanos(window))
+            final TickData.TickReportData report = RegionTickDataView.of(owner, TimeUnit.MINUTES.toNanos(window))
                 .generateTickReport(null, now, interval);
             assertNotNull(report);
             assertEquals(500, report.collectedTicks());
@@ -245,7 +249,7 @@ class TickDataBinaryCompatibilityTest {
             totalExecution += duration;
         }
 
-        final TickData.TickReportData report = new TickData(owner, TimeUnit.MINUTES.toNanos(5L))
+        final TickData.TickReportData report = RegionTickDataView.of(owner, TimeUnit.MINUTES.toNanos(5L))
             .generateTickReport(null, 499L * MILLISECOND + 900_000L, MILLISECOND);
         assertNotNull(report);
         assertEquals((double)totalExecution / 500.0, report.timePerTickData().segmentAll().average(), 0.0);
@@ -256,7 +260,7 @@ class TickDataBinaryCompatibilityTest {
 
     @Test
     void sharedViewsPreserveEmptyAndInProgressBehavior() {
-        final TickData view = new TickData(new RegionTickMetrics(), TimeUnit.MINUTES.toNanos(1L));
+        final TickData view = RegionTickDataView.of(new RegionTickMetrics(), TimeUnit.MINUTES.toNanos(1L));
 
         assertNull(view.getTPSAverage(null, TARGET_INTERVAL));
         assertNull(view.getMSPTData(null, TARGET_INTERVAL));
@@ -284,11 +288,11 @@ class TickDataBinaryCompatibilityTest {
 
     private static List<TickData> views(final RegionTickMetrics owner) {
         return List.of(
-            new TickData(owner, TimeUnit.SECONDS.toNanos(5L)),
-            new TickData(owner, TimeUnit.SECONDS.toNanos(15L)),
-            new TickData(owner, TimeUnit.MINUTES.toNanos(1L)),
-            new TickData(owner, TimeUnit.MINUTES.toNanos(5L)),
-            new TickData(owner, TimeUnit.MINUTES.toNanos(15L))
+            RegionTickDataView.of(owner, TimeUnit.SECONDS.toNanos(5L)),
+            RegionTickDataView.of(owner, TimeUnit.SECONDS.toNanos(15L)),
+            RegionTickDataView.of(owner, TimeUnit.MINUTES.toNanos(1L)),
+            RegionTickDataView.of(owner, TimeUnit.MINUTES.toNanos(5L)),
+            RegionTickDataView.of(owner, TimeUnit.MINUTES.toNanos(15L))
         );
     }
 

@@ -82,23 +82,25 @@ public class SourbyCraftCommand extends Command {
     private static void config(CommandSender sender) {
         sender.sendMessage(UiPanel.header("Configuration"));
         sender.sendMessage(UiPanel.section("Files"));
-        sender.sendMessage(UiPanel.row("Utility & UI", "sourbycraft_config/sourbycraft_global_config.toml"));
-        sender.sendMessage(UiPanel.row("Aurora services", "sourbycraft_config/aurora.toml (wins over legacy Aurora keys)"));
-        sender.sendMessage(UiPanel.row("Region engine", "config/canvas-server.yml + config/canvas-worlds.yml"));
+        sender.sendMessage(UiPanel.row("Console, players, messages, plugins, updater", "sourbycraft_config/sourbycraft_global_config.toml"));
+        sender.sendMessage(UiPanel.row("Aurora services", "sourbycraft_config/aurora.toml (wins over Aurora keys left in the global TOML)"));
+        sender.sendMessage(UiPanel.row("Region engine", "config/aurora-server.yml + config/aurora-worlds.yml (Build 49 names; canvas-*.yml migrated once)"));
         sender.sendMessage(UiPanel.row("Security limits", "sourbycraft-security.yml"));
         var config = SourbyCraftConfig.aurora();
         sender.sendMessage(UiPanel.section("LIVE · after explicit reload"));
         sender.sendMessage(UiPanel.row("Lane CPU sampling / network counters", config.diagnostics().laneSampling() + " / " + config.network().counters()));
         sender.sendMessage(UiPanel.row("Async pathfinding (experimental)", Boolean.toString(config.entity().asyncPathfinding())));
         sender.sendMessage(UiPanel.row("Bridge route / quarantine threshold", config.bridge().syncRoute().name() + " / " + config.bridge().quarantineAfter()));
-        sender.sendMessage(UiPanel.row("Plugin page size", Integer.toString(Math.clamp(SourbyCraftConfig.cfgInt("ui.plugins-page-size", 12), 1, 40))));
+        sender.sendMessage(UiPanel.row("Plugin page size", Integer.toString(Math.clamp(SourbyCraftConfig.cfgInt(dev.iyanz.sourbycraft.config.UtilityKeys.PLUGINS_PAGE_SIZE.path(), 12), 1, 40))));
         sender.sendMessage(UiPanel.section("RESTART_REQUIRED · configured values"));
         sender.sendMessage(UiPanel.row("Aurora CPU budget", config.cpu().cores() == 0 ? "auto (JVM-visible processors)" : Integer.toString(config.cpu().cores())));
         sender.sendMessage(UiPanel.row("Bridge configured / active", config.bridge().mode().name() + " / " + AuroraBridge.runtimeMode().name()));
-        sender.sendMessage(UiPanel.row("Console style", SourbyCraftConfig.cfgGet("ui.console-style", "auto") + " (JVM property may override)"));
+        sender.sendMessage(UiPanel.row("Bridge thread checks configured / effective", config.bridge().threadChecks().configValue() + " / "
+            + dev.iyanz.sourbycraft.guards.ThreadChecks.describe()));
+        sender.sendMessage(UiPanel.row("Console style", SourbyCraftConfig.cfgGet(dev.iyanz.sourbycraft.config.UtilityKeys.CONSOLE_STYLE.path(), "auto") + " (JVM property may override)"));
         sender.sendMessage(UiPanel.hint("Scheduler budgets, AWF, startup provisioning, MOTD and updater interval also require restart."));
         sender.sendMessage(UiPanel.row("Pending tracked changes", SourbyCraftConfig.pendingRestartKeys().isEmpty() ? "none" : String.join(", ", SourbyCraftConfig.pendingRestartKeys())));
-        sender.sendMessage(UiPanel.hint("Views use loaded values. Boot/reload preserves existing utility and Aurora TOML files."));
+        sender.sendMessage(UiPanel.hint("Views use loaded values. Reload never rewrites a file; Build 49 migrated old layouts once (copies kept as *.migrated)."));
         sender.sendMessage(UiPanel.actions(List.of("/sourbycraft reload", "/aurora status")));
         sender.sendMessage(UiPanel.footer());
     }

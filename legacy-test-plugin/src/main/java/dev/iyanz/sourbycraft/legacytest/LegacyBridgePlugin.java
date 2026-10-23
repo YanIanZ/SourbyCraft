@@ -62,6 +62,7 @@ public final class LegacyBridgePlugin extends JavaPlugin {
         final org.bukkit.World world = this.getServer().getWorlds().get(0);
         world.getChunkAtAsync(0, 0).thenAccept(chunk -> {
             world.addPluginChunkTicket(0, 0, this);
+            AsyncChunkProbe.run(this, world);
             scheduler.runTask(this, () -> {
                 try {
                     final String type = world.getBlockAt(8, 0, 8).getType().name();
@@ -77,6 +78,8 @@ public final class LegacyBridgePlugin extends JavaPlugin {
 
         regionTask();
         entityTask();
+        new ContextProbes(this).run();
+        new RelaxedProbes(this).run();
         globalScheduler();
 
         // World access from a legacy "sync" task scheduled outside any region (onEnable). The

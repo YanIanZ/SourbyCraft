@@ -1,6 +1,8 @@
 package dev.iyanz.sourbycraft.entity.teleport;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -94,5 +96,33 @@ class TeleportRouteTest {
     void aPlayerWithoutConnectionFailsOnlyWhenTheCallerOwnsIt() {
         assertEquals(false, TeleportRoute.playerMayProceed(true, () -> false));
         assertEquals(true, TeleportRoute.playerMayProceed(true, () -> true));
+    }
+
+    // Relaxed thread checks (owner decision 2026-10-22): LightingLuminol's join semantics, bounded to threads
+    // whose wait can never need their own tick.
+
+    @Test
+    void aThreadThatTicksNothingWaitsForTheMove() {
+        final Probe probe = new Probe(false, true, false, false);
+        assertTrue(TeleportRoute.joinsWhenRelaxed(probe, false));
+        assertEquals(List.of(), probe.asked, "nothing of the entity is read off its region");
+    }
+
+    @Test
+    void anOwningTickThreadWaitsOnlyForALoadedDestinationOwnedElsewhere() {
+        assertTrue(TeleportRoute.joinsWhenRelaxed(new Probe(true, true, false, true), true));
+        assertFalse(TeleportRoute.joinsWhenRelaxed(new Probe(true, true, false, false), true),
+            "an unloaded destination may be merged into this region, whose tick is blocked (Folia#280): schedule instead");
+        assertFalse(TeleportRoute.joinsWhenRelaxed(new Probe(true, true, true, true), true),
+            "the caller owns the destination: that is the SYNC route, nothing to wait for");
+        assertFalse(TeleportRoute.joinsWhenRelaxed(new Probe(false, true, false, true), true),
+            "a tick thread that does not own the entity never blocks on another region's schedule");
+    }
+
+    @Test
+    void relaxedQuestionsStopAtOwnershipWhenTheCallerDoesNotOwnTheEntity() {
+        final Probe probe = new Probe(false, true, true, true);
+        assertFalse(TeleportRoute.joinsWhenRelaxed(probe, true));
+        assertEquals(List.of("entity"), probe.asked);
     }
 }

@@ -76,4 +76,15 @@ class WorldMetadataAutosavePatchShapeTest {
         final String patch = patch("-SourbyCraft-persist-world-metadata-on-autosave");
         at(patch, "+                dev.iyanz.sourbycraft.world.WorldMetadataAutosave.addGlobalOwnedTypes(toSave);");
     }
+
+    /** Feature patch 0077: the shutdown save of {@code level.dat} waits for a scheduled periodic write first. */
+    @Test
+    void theShutdownLevelDatSaveWaitsForTheScheduledWrite() throws IOException {
+        final String patch = patch("-SourbyCraft-write-the-periodic-level.dat-off-the-global-tick");
+        at(patch, "+++ b/net/minecraft/server/MinecraftServer.java");
+        final int await = at(patch, "+        dev.iyanz.sourbycraft.world.WorldMetadataAutosave.awaitLevelDatWrites();");
+        final int save = at(patch, " this.storageSource.saveDataTag(this.worldData, singleplayerProfile == null ? null : singleplayerProfile.id());");
+        assertTrue(await < save, "the wait comes before the shutdown write");
+        assertTrue(patch.indexOf("\n+", await + 1) < 0 || patch.indexOf("\n+", await + 1) > save, "one added line only");
+    }
 }

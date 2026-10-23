@@ -32,21 +32,31 @@ import org.yaml.snakeyaml.constructor.SafeConstructor;
  * @param depend plugins that must be present and load first
  * @param softDepend plugins that load first when present
  * @param loadBefore plugins this one must load before
+ * @param provides other plugin names this one stands in for ({@code provides}), which satisfy
+ *                 another plugin's dependency on that name the way Paper's loader resolves them
  */
 public record PluginDescriptor(String name, String version, String main, boolean paperPlugin,
                                boolean regionSupported, List<String> depend, List<String> softDepend,
-                               List<String> loadBefore) {
+                               List<String> loadBefore, List<String> provides) {
 
     public PluginDescriptor {
         depend = List.copyOf(depend);
         softDepend = List.copyOf(softDepend);
         loadBefore = List.copyOf(loadBefore);
+        provides = List.copyOf(provides);
+    }
+
+    /** A descriptor that provides no other plugin name. */
+    public PluginDescriptor(final String name, final String version, final String main, final boolean paperPlugin,
+                            final boolean regionSupported, final List<String> depend, final List<String> softDepend,
+                            final List<String> loadBefore) {
+        this(name, version, main, paperPlugin, regionSupported, depend, softDepend, loadBefore, List.of());
     }
 
     /** A descriptor with no dependency declarations. */
     public PluginDescriptor(final String name, final String version, final String main, final boolean paperPlugin,
                             final boolean regionSupported) {
-        this(name, version, main, paperPlugin, regionSupported, List.of(), List.of(), List.of());
+        this(name, version, main, paperPlugin, regionSupported, List.of(), List.of(), List.of(), List.of());
     }
 
     static final String PAPER_DESCRIPTOR = "paper-plugin.yml";
@@ -102,8 +112,10 @@ public record PluginDescriptor(String name, String version, String main, boolean
             soft.addAll(names(map.get("softdepend")));
             before.addAll(names(map.get("loadbefore")));
         }
+        // Both PluginDescriptionFile and PaperPluginMeta read a top-level "provides" list.
+        final List<String> provides = names(map.get("provides"));
         return new PluginDescriptor(clean(name), clean(version), clean(main), paper,
-            paper ? paperSupported(map) : legacySupported(map), depend, soft, before);
+            paper ? paperSupported(map) : legacySupported(map), depend, soft, before, provides);
     }
 
     /**
@@ -173,18 +185,20 @@ public record PluginDescriptor(String name, String version, String main, boolean
     String encode() {
         return String.join("\n", this.name, this.version, this.main,
             Boolean.toString(this.paperPlugin), Boolean.toString(this.regionSupported),
-            String.join(",", this.depend), String.join(",", this.softDepend), String.join(",", this.loadBefore));
+            String.join(",", this.depend), String.join(",", this.softDepend), String.join(",", this.loadBefore),
+            String.join(",", this.provides));
     }
 
     /** The descriptor in a payload, or {@code null} when the payload is not one. */
     static PluginDescriptor decode(final String payload) {
         final String[] fields = payload.split("\n", -1);
-        if (fields.length != 8 || fields[0].isEmpty()) {
+        // An 8-field payload predates "provides"; it is not trusted, so the jar is read again.
+        if (fields.length != 9 || fields[0].isEmpty()) {
             return null;
         }
         return new PluginDescriptor(fields[0], fields[1], fields[2],
             Boolean.parseBoolean(fields[3]), Boolean.parseBoolean(fields[4]),
-            list(fields[5]), list(fields[6]), list(fields[7]));
+            list(fields[5]), list(fields[6]), list(fields[7]), list(fields[8]));
     }
 
     private static List<String> list(final String joined) {

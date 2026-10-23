@@ -106,6 +106,10 @@ public final class AwfRegionStorage {
     private final AtomicLong refusedWrites = new AtomicLong();
     /** Rate-limits the log of failed reads: first per window with its stack, then one summary. */
     private volatile ReadFailureLog failureLog;
+    /** Rate-limits the INFO of fenced positions read back: first per window, then one summary. */
+    private volatile ReadFailureLog recoveryLog;
+    /** Rate-limits the WARN of failed periodic commits: first per 60 s window with its stack, then one summary. */
+    private volatile ReadFailureLog commitFailureLog;
     /** Whether a read is on the engine's chunk-load path; tests replace it. */
     private volatile java.util.function.BooleanSupplier loadPath = AwfRegionStorage::onChunkLoadPath;
     /** Set when {@link #close} committed everything but the backend could not release the store. */
@@ -135,6 +139,8 @@ public final class AwfRegionStorage {
         this.lastCommitNanos = new AtomicLong(nowNanos);
         this.onClose = onClose;
         this.failureLog = ReadFailureLog.serverLog(name);
+        this.recoveryLog = ReadFailureLog.recoveryLog(name);
+        this.commitFailureLog = ReadFailureLog.commitFailureLog(name);
         this.shutdown = shutdown;
         this.shutdownReport = shutdownReport;
     }
@@ -365,11 +371,23 @@ public final class AwfRegionStorage {
         this.failureLog = log;
     }
 
+    /** Replaces the recovered-position log. Tests only. */
+    void recoveryLog(final ReadFailureLog log) {
+        this.recoveryLog = log;
+    }
+
+    /** Replaces the failed-commit log. Tests only. */
+    void commitFailureLog(final ReadFailureLog log) {
+        this.commitFailureLog = log;
+    }
+
     private void recovered(final ChunkKey key) {
         if (!this.loadPath.getAsBoolean()) return;
         if (this.unreadable.remove(key) != null) {
-            dev.iyanz.sourbycraft.util.SourbyLogger.info("AWF read chunk " + key + " of " + this.name
-                + " again; its stored bytes were loaded and writes of it are accepted again");
+            // A chunk load reads every fenced neighbour back at once (529 in one second on the agent
+            // test server): the first of a window is logged on its own, the rest in one summary.
+            this.recoveryLog.failed("AWF read chunk " + key + " of " + this.name
+                + " again; its stored bytes were loaded and writes of it are accepted again", null);
         }
     }
 
@@ -464,6 +482,8 @@ public final class AwfRegionStorage {
      */
     public boolean maintain(final long nowNanos) {
         this.failureLog.flush();
+        this.recoveryLog.flush();
+        this.commitFailureLog.flush();
         if (this.discarding || this.closed.get() || this.world.dirtyCount() == 0 || this.world.pendingSaveCount() > 0) return false;
         final AwfShutdownBudget budget = this.shutdown.get();
         if (budget != null && budget.expired()) return false;          // no new attempt after the deadline
@@ -476,11 +496,17 @@ public final class AwfRegionStorage {
         if (!this.lastCommitNanos.compareAndSet(last, nowNanos)) return false;
         this.world.save(this.settings.persistence(), this.storageLane, this.settings.commitAttempts())
             .whenComplete((ok, failed) -> {
-                if (failed == null) this.lastCommitFailed = false;
+                if (failed == null) {
+                    this.lastCommitFailed = false;
+                    this.commitFailureLog.close();             // the outage's summary, now that commits succeed
+                }
                 if (failed != null && !(unwrap(failed) instanceof AwfWorld.FencedException)) {
                     this.lastCommitFailed = true;
-                    dev.iyanz.sourbycraft.util.SourbyLogger.warn("AWF commit for " + this.name
-                        + " failed; its chunks stay in memory and the next commit retries them", failed);
+                    // Once per commit interval while the backend is down: the first of a 60 s window
+                    // with its stack, the rest counted into one summary.
+                    this.commitFailureLog.failed("AWF commit for " + this.name
+                        + " failed; its chunks stay in memory and the next commit retries them ("
+                        + unwrap(failed) + ")", failed);
                 }
             });
         return true;
@@ -663,6 +689,8 @@ public final class AwfRegionStorage {
             this.transition.writeLock().unlock();
         }
         this.failureLog.close();
+        this.recoveryLog.close();
+        this.commitFailureLog.close();
         if (!this.unreadable.isEmpty()) {
             dev.iyanz.sourbycraft.util.SourbyLogger.warn("AWF " + this.name + ": " + this.unreadable.size()
                 + " chunk position(s) could not be read this session; their stored bytes were kept and "
@@ -719,6 +747,8 @@ public final class AwfRegionStorage {
             this.transition.writeLock().unlock();
         }
         this.failureLog.close();
+        this.recoveryLog.close();
+        this.commitFailureLog.close();
         if (!this.unreadable.isEmpty()) {
             dev.iyanz.sourbycraft.util.SourbyLogger.warn("AWF " + this.name + ": " + this.unreadable.size()
                 + " chunk position(s) could not be read this session; their stored bytes were kept and "

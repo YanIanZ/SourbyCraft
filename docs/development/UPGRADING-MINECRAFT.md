@@ -32,15 +32,31 @@ patch.
 | Distinct pre-existing files they modify | 35 (44 file entries counting repeats and the 3 new files carried in 0002, 0005, 0016) | |
 | Paper feature patches | 10 (hook 1, logic 9) | `sourbycraft-server/paper-patches/features/` |
 | API feature patches | 0 | `sourbyapi/paper-patches/features/` |
-| Engine baseline file patches (former Canvas/Folia) | 476 + 234 + 16 = **726** | `minecraft-patches/sources`, `paper-patches/files`, `sourbyapi/paper-patches/files` |
+| Engine baseline file patches (former Canvas/Folia) | 472 + 234 + 16 = **722** | `minecraft-patches/sources`, `paper-patches/files`, `sourbyapi/paper-patches/files` |
 
 Conflict hot spots, meaning files that several feature patches touch:
-`CraftScheduler.java` (Paper 0003, 0006–0010: six patches), `MinecraftServer.java`
+`CraftScheduler.java` (Paper 0003, 0006–0010: six patches; eight since 0011 and 0019, see the
+Build 50 note below), `MinecraftServer.java`
 (0013, 0019, and the since-removed old 0024), `TickRegionScheduler.java` (0013, old 0026, now 0025), `TickRegions.java` (0002, 0013),
 `ServerLevel.java` (0010, 0013) and `Entity.java` (0009, 0012). Every Minecraft file a feature
 patch modifies is also patched by the engine baseline (28 of 28 Minecraft rows, 7 of 10 Paper
 rows). A Paper change to one of those files can therefore break the baseline patch first and
 the feature patch second.
+
+> Build 50 (2026-10-22, `patch_surface.py` on the hook-scheduler worktree at `6176d517`):
+> `CraftScheduler.java` is still touched by eight Paper feature patches (0003, 0006, 0007, 0008,
+> 0009, 0010, 0011, 0019), but every site is now one line calling `AuroraBridge` /
+> `FoliaSchedulerCompatibility` (or `RegionRefusal` for 0019), plus 0003's `bridgeTask` adapter,
+> whose methods are one-line accessors of package-private `CraftTask` state or one delegating
+> call each. The inline bridge logic (the no-op cancels of 0006/0009, the draining
+> `isCurrentlyRunning` tri-state and ID reservation of 0008, the worker merge, the pending-task
+> cast, the body dispatch and the global-callback checks of 0007) moved to
+> `bridge/AuroraBridge` and `bridge/FoliaSchedulerCompatibility` (`CraftSchedulerHooksTest`).
+> No patch touches `CraftTask` or `CraftAsyncScheduler`. Net `CraftScheduler` diff against Paper
+> (9 hunks either way): 68 added / 3 removed before, 30 added / 3 removed after; summed over the
+> eight patches' `CraftScheduler` sections (lines a later patch rewrites count twice): 70/5 before,
+> 33/6 after. A conflict on a Paper update is now on call lines; re-apply each line where its
+> upstream method moved.
 
 ## 1. Pre-flight
 
@@ -258,7 +274,7 @@ Every line inside an upstream file is a line that can conflict on the next bump.
    `FoliaSparkPlugin` ("three lines, all delegation") and 0019 (one call). The REWORK verdict
    on the `isInWall` patch (now 0012), which "needed three follow-up fixes after landing", is
    what logic inside an upstream method costs. `patch-classification.md` gives 0002, 0005
-   and 0016 MOVE TO SOURBY SOURCE and 0006 and 0013 SPLIT for the same reason.
+   and 0016 MOVE TO SOURBY SOURCE and 0006 and 0013 SPLIT for the same reason (both split on 2026-10-22).
 2. **Prefer `paper-patches` over `minecraft-patches`** when the Bukkit/CraftBukkit layer is
    enough. Paper's layer changes less between Minecraft versions than `net.minecraft` does.
    This is a tendency, not a measured fact for this repository.
@@ -285,18 +301,82 @@ inside patches because of the package the upstream code imports) has to be check
 | MC 0002 tick-thread count | 24/7 | replaces the upstream default formula (7 removed lines) | **Done 2026-10-20:** `AuroraCpu` moved to Sourby source; one call plus the log line left in `TickRegions`. Stays `logic` only because it removes upstream lines |
 | MC 0005 `SnapshotPathRegion` | 222/2 | carries the class | **Candidate:** move the class; hook stays in `PathNavigationRegion` (MOVE TO SOURBY SOURCE) |
 | MC 0016 cross-region block test | 18/2 | the `ExecuteCommand` ownership check | **Done 2026-10-20:** `AuroraCommandErrors` moved to Sourby source; the check stays and the patch is now a hook |
-| MC 0006 async pathfinding | 141/1 | 70 code lines over five files | **Candidate:** split per `patch-classification.md`, then push scheduling into `perf/AsyncPath*` |
-| MC 0013 tick metrics | 97/14 | 84 code lines over six files | **Candidate:** split telemetry from lifecycle. Most lines are already calls into `dev.iyanz.sourbycraft.perf` |
-| MC 0021 storage traffic counters + AWF routing | 94/0 | 72 code lines in `RegionFileStorage` (mostly the AWF read/write/scan/flush/close branches, not counters) | **Candidate:** AWF branches into an owned class, one call per I/O site. Started 2026-10-20: the chunk NBT codec moved to `awf/AwfChunkNbt` (`AwfChunkNbtTest`); `sourby$attachAwf` and the branches remain |
+| MC 0006 async pathfinding | 44/0 (was 181/1) | 27 code lines, all in `PathNavigation`: one flag-gated call plus the seams that touch private state (pending flag, two lazy reads, isolated solver, result write) | **Split 2026-10-22:** offload logic and the refusal list moved to `perf/AsyncPathRecompute` (`AsyncPathRecomputeTest`); `Mob`, `Sniffer`, `AmphibiousPathNavigation` hunks removed; `PathfindingContext` guard -> MC 0082 (2/1); 0039/0042/0047 lost the lines that followed the kick. Still `logic` by size: the seams would need access transformers to leave `PathNavigation` |
+| MC 0013 tick metrics | 9/11 (was 97/14) | removed lines are one-for-one replacements of upstream statements (`final` modifier, five window constructors, five per-window inserts folded into one call) | **Split 2026-10-22:** 0013 keeps the handle wiring; `TickData`'s shared-owner logic moved to `perf/RegionTickDataView`; lifecycle calls -> MC 0079 (hook, 8/0), percentile-order fix -> MC 0080 (`fix`), bootstrap close -> MC 0081 (hook, 1/0). 0013 cannot reach hook shape without keeping five per-window collectors: a hook cannot replace an upstream statement |
+| MC 0021 storage traffic counters + AWF routing | 9/0 | One `RegionFileStorageHooks` delegation at each affected I/O/attachment site, plus the AWF field; upstream fallback and locks remain | **Extracted 2026-10-22:** AWF routing, attachment, counters and codec handoff live in the ledgered `awf/RegionFileStorageHooks` adapter; `AwfChunkNbt` remains the codec. `patch_surface` = hook. Scan routing is separate in MC 0053 |
+| MC 0053 AWF structure scans | 1/0 | One `RegionFileStorageHooks.scanChunk` delegation | Owned adapter calls `AwfRegionStorage.scanRead` once, with the existing refusal, deletion, parse and region-file fallback behavior; `patch_surface` = hook |
 | MC 0026 chunk-generation stage timing | 16/0 | 13 code lines (two fields, the `run()` try/finally split, three calls) | **Partly done 2026-10-20:** stamps and the record decision moved to `ChunkGenerationMetrics.stampQueued`/`stampRunStart`/`runFinished` (`ChunkGenerationMetricsTest`); still `logic` because the try/finally wrapper around `runTask()` has to stay in the task |
 | MC 0025 region watchdog off by default | 17/3 | property gate written into upstream | Possible: read the flag from an owned config class. Small gain |
 | MC 0003, 0014, 0023 spawn and worldgen rules | 47/0, 25/3, 25/0 | gameplay decisions inline | Possible: move the predicate to an owned static method. The upstream `if` stays either way |
-| Paper 0003, 0007 bridge admission and routing | 39/3, 43/1 | scheduler/provider logic in CraftBukkit | Possible: concentrate on `AuroraBridge` calls. `CraftScheduler` is the largest hot spot (six patches) |
+| Paper 0026 scheduling context (2026-10-22) | 4/1 | — | Hook from the start: `PaperEventManager#callEvent` (try/finally around the listener loop, `AuroraBridge.enterEventContext`/`exitContext`) and `BukkitCommandNode.BukkitBrigCommand#run` (`AuroraBridge.withCommandContext`). Logic in `bridge/SchedulingContext`, `bridge/EventAnchors` |
+| Paper 0003, 0007 bridge admission and routing | 39/3, 43/1 (Build 50: 23/3, 40/1) | scheduler/provider logic in CraftBukkit | **Done for `CraftScheduler` (Build 50, 2026-10-22):** every `CraftScheduler` site of 0003 and 0006–0011 is one call into `AuroraBridge`/`FoliaSchedulerCompatibility` (`CraftSchedulerHooksTest`); 0006, 0008, 0009 are hooks now. 0003 stays `logic` (20 code lines: the three loader gates, six one-line sites and the 11-line `bridgeTask` adapter that has to read package-private `CraftTask` state). 0007 stays `logic` because of its LightingLuminol port in `FoliaGlobalRegionScheduler` and `PaperPluginInstanceManager` (not changed); its `CraftScheduler` part is +2/−1 |
 | Paper 0002 branded bootstrap line | 37/6 | formatting inline | Branding rule: render the line in an owned class from `BuildInfo` |
-| MC 0004, 0009–0012, 0015, 0017, 0018, 0022, 0027; Paper 0001, 0004, 0005, 0006, 0008, 0009; MC 0020 | small | they replace upstream statements in place (allocation removals, operand order, a gate, a removed registration) | **Not candidates.** A hook cannot replace an upstream statement. These stay as patches, or go upstream |
+| MC 0004, 0009–0012, 0015, 0017, 0018, 0022, 0027; Paper 0001, 0004, 0005; MC 0020 (Paper 0006, 0008, 0009 became hooks in Build 50) | small | they replace upstream statements in place (allocation removals, operand order, a gate, a removed registration) | **Not candidates.** A hook cannot replace an upstream statement. These stay as patches, or go upstream |
 
 The classifier's limits: it reads only `+`/`-` lines. It cannot tell a gameplay rule from a
 counter, and it uses fixed thresholds (≤ 10 added and ≤ 2 removed code lines plus a
 `dev.iyanz` call for a hook). Paper 0008 (8 added, 3 removed, every line calling
-`AuroraBridge`) is a near-hook just over the removed-line limit. The rule that fired is
+`AuroraBridge`) was a near-hook just over the removed-line limit; since Build 50 it is a hook
+(2 added, 2 removed). The rule that fired is
 printed per patch so a reviewer can disagree with it.
+
+## Rebasing the engine baseline onto a new upstream
+
+This offline tooling is a planning aid for the Build 50 / Minecraft 26.3 port, not
+an end-to-end qualified upgrade. The manifest's 722 baseline patches are the
+inventory; feature patches remain a separate layer. Markers are evidence, not
+proof of authorship. Canvas may never ship 26.3, so canvas-origin files are ours
+to port when there is no suitable new upstream implementation.
+
+1. Run `python3 scripts/engine_baseline_origin.py --write`, then `--check`.
+   Review `build-data/engine-baseline-origin.json`: marker/package classifications,
+   confidence, import hashes and subsequent commits identify porting candidates.
+   Files renamed since import have a null same-path import hash; `renamed_from`
+   records detected ancestry. Manifest/directory differences are reported.
+2. Prepare old and new Canvas/Folia/Paper materialized source trees locally.
+   No command here downloads upstreams. Use repository-shaped trees with Minecraft
+   under `sourbycraft-server/src/minecraft/java/`, Paper under `paper-server/`, and
+   API under `paper-api/`; standalone source roots are also accepted as upstream
+   inputs. Current files are read from this repository's materialized trees
+   (`--root` selects another repository). Missing materialized files require review.
+
+   ```bash
+   python3 scripts/upstream_rebase.py plan --old-upstream /local/old-tree --new-upstream /local/new-tree --out /local/rebase-plan.json
+   ```
+
+   The default ordered literal renames are `io.canvasmc.canvas` to
+   `dev.iyanz.aurora.engine`, then remaining `io.canvasmc` to
+   `dev.iyanz.sourbycraft.api`. They transform upstream contents and corresponding
+   package paths before comparison. `--rename-map file.json` replaces this list
+   with an ordered JSON array, for example `[["old.package", "new.package"]]`.
+   Text replacement is deliberately literal, not a Java-aware refactor.
+3. Review the plan and every MANUAL path (unknown origin, missing counterparts,
+   or merge conflicts). VERBATIM takes the transformed new upstream when ours
+   matches the transformed old upstream; MERGE3_CLEAN embeds a clean Git 3-way
+   merge. Review DELETED entries carefully: applying removes the target even if
+   it contains local changes. ADDED entries are informational and never applied.
+   A clean merge does not prove correct runtime semantics or region ownership.
+4. Preview, then apply the reviewed plan to a repository-shaped materialized tree:
+
+   ```bash
+   python3 scripts/upstream_rebase.py apply --plan /local/rebase-plan.json --target /local/target-tree
+   python3 scripts/upstream_rebase.py apply --plan /local/rebase-plan.json --target /local/target-tree --yes
+   ```
+
+   The first command refuses and lists proposed writes/deletions. The target
+   must still match the recorded current-file hashes. Apply leaves MANUAL and
+   ADDED entries alone and refuses protected paths or symlinks. It never edits
+   patch files or the baseline manifest.
+5. Resolve remaining ports by editing patch files or the appropriate materialized
+   repository. Keep SourbyCraft feature changes in feature patches. Follow the
+   rebuild safeguards above, commit materialized changes as appropriate, and run
+   the matching Gradle `rebuild*Patches` tasks yourself. Inspect the regenerated
+   patch diff and verify that it applies; the Python tools never run Gradle.
+6. After deliberate baseline changes pass review, run
+   `python3 scripts/baseline_policy.py --write-manifest`, then regenerate with
+   `python3 scripts/engine_baseline_origin.py --write` and verify with `--check`.
+   `--check` ignores `change_commits` (a commit cannot list its own hash, so that
+   field is a snapshot as of the last `--write`) and needs the import commit
+   `e20df47b` in the clone; the PR job's shallow checkout skips the repository check.
+   Run the normal upgrade correctness/build/boot gates separately. None of these
+   classifications certifies a port or a release.

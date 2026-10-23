@@ -16,6 +16,7 @@ connections fails the build until it is added here with its thread context.
 | `bootstrap/LibDownloader.java`, `bootstrap/PluginProvisioner.java` | Library and plugin provisioning, including ProtocolLib | Plugin JAR/config work runs on the startup path before Paper's plugin scan / plugin enable, before region threads start; library fetch is bootstrap-only |
 | `net/HandshakeAddresses.java` | Parses IP literals for the handshake address (Guava `InetAddresses`); opens no connection and never resolves a name. Listed only because it matches the scan pattern | Netty event loop (`ServerHandshakePacketListenerImpl.handleIntention`) |
 | `security/SecurityGuards.java` | Reads the numeric bytes of a peer/forwarded `InetSocketAddress` for connection-guard admission limits (SEC-11); opens no connection and never resolves a name (unresolved addresses bypass). Listed only because it matches the scan pattern | Netty event loop (`ServerConnectionListener` `initChannel`, `ServerLoginPacketListenerImpl.handleHello` / Velocity forwarding) |
+| `update/UpdateOverrides.java` | Validates the test-only `sourbycraft.update.api-base` JVM property (loopback `http(s)` URL only) with `java.net.URI`; opens no connection and never resolves a name. Listed only because it matches the scan pattern | Async scheduler, inside `SourbyUpdater.check` |
 | `awf/redis/RedisClient.java` | The `redis` AWF backend (`aurora.awf.backend = "redis"`) | Store opening: the I/O lane (`AwfEngine.prepare`) for runtime worlds, the main thread at boot. Commits: the storage lane, refused on a region thread like FILE commits. Chunk reads: wherever the engine reads a region file for that chunk — the same exposure the FILE backend's reads have. Lease renewal: its own daemon thread. Every socket read is bounded by `timeout-ms`. |
 
 ## File I/O
@@ -76,7 +77,7 @@ plugin listener) whose blocking behaviour this repository cannot see.
 | H5 | **FIXED** in materialized commit `822d4d7`: the forwarded address must be an IP literal (`net/HandshakeAddresses`, also with `Paper.bypassHostCheck`), otherwise the existing BungeeCord-forwarding disconnect applies; was CONFIRMED (code path), DNS conditional | `server/network/ServerHandshakePacketListenerImpl.java:19,157-160` | BungeeCord forwarding: `new InetSocketAddress(split[1], port)`. `HOST_PATTERN` is `[0-9a-f\.:]{0,45}`, which admits non-literals such as `cafe.dead`; those are resolved by DNS on the event loop. `-DPaper.bypassHostCheck=true` (`:26`) skips the pattern entirely. | Same handler, only with `spigot.yml settings.bungeecord: true`. A client can supply the string only when the backend port is reachable without the proxy (already a security misconfiguration) or the proxy forwards it. | Low | Same fix as H4 (literal-only parse, disconnect on failure). |
 | H6 | PLAUSIBLE | `io/papermc/paper/connection/ReadablePlayerCookieConnectionImpl.java:39-42`, reached from `ServerLoginPacketListenerImpl.java:456` and `ServerCommonPacketListenerImpl.java:263` | Cookie futures are completed on the event loop; a plugin's non-`Async` dependent stage (`thenAccept`, …) runs inline there. | `handleCookieResponse` has no thread hop. | Info (plugin-dependent) | Plugin guidance: attach cookie continuations with an explicit executor. |
 | H7 | PLAUSIBLE | `paper-server/src/main/resources/log4j2.xml` (`<Async name="Async">`, default `blocking`/`bufferSize`); `security/SecurityGuards.java:50,158-160`; e.g. `ServerLoginPacketListenerImpl.java:134,158`, `ServerCommonPacketListenerImpl.java` keep-alive disconnect lines | Log calls made on the event loop enqueue into Log4j's Async appender, which (per Log4j defaults, not re-verified here) blocks the caller when its queue is full, i.e. when file/console output stalls. SourbyCraft's own decode guard logs at most once per 30 s per limit (`LOG_INTERVAL`), so it adds no per-packet logging. | Disconnect, login and security log lines are emitted from handlers on the loop. | Info | None now; if a disk-stall test ever shows it, set `blocking="false"` with a discard policy for the event-loop path. |
-| H8 | PLAUSIBLE, not inspected | Third-party pipeline handlers installed through `ChannelInitializeListenerHolder` / channel injection: ProtocolLib (auto-provisioned by default, `[protocollib] auto-provision = true`), ViaVersion/ViaBackwards (auto-provisioned) | Their packet listeners run on the event loop for inbound packets; whether a given plugin listener blocks is outside this repository. | Every inbound packet passes their handlers. | Info (deployment-dependent) | None in the server; note in plugin guidance and keep ProtocolLib/Via versions pinned as today. |
+| H8 | PLAUSIBLE, not inspected | Third-party pipeline handlers installed through `ChannelInitializeListenerHolder` / channel injection: ProtocolLib (auto-provisioned by default, `[plugins.protocollib] auto-provision = true`), ViaVersion/ViaBackwards (auto-provisioned) | Their packet listeners run on the event loop for inbound packets; whether a given plugin listener blocks is outside this repository. | Every inbound packet passes their handlers. | Info (deployment-dependent) | None in the server; note in plugin guidance and keep ProtocolLib/Via versions pinned as today. |
 
 ### Checked, no unrelated blocking found
 
@@ -169,3 +170,21 @@ region only through an existing synchronous chunk wait; (3) the item is still op
 question: a Redis-down or Redis-slow test with a structure search on a region thread and a sync
 chunk load on a region thread has not been run (`needs-server`), and plugin-driven
 `World#getChunkAt` on a region thread is the same R1 wait and was not separately traced.
+
+## Runtime sampling under plugins and a disk stall (2026-10-22)
+
+Evidence: [region-io-blocking-2026-10-22.md](../development/region-io-blocking-2026-10-22.md) (agent test
+server, macOS, no players). Across 1218 `jcmd Thread.print` dumps (9744 region-scheduler thread stacks), with
+the world directory on a disk image whose serving process was SIGSTOPped for 60 s:
+
+- **R2 confirmed at runtime**: `/locate` from a command block (region thread) read region files inline
+  (`StructureCheck.tryLoadFromStorage` -> `RegionFileStorage.scanChunk` -> `FileChannelImpl.read`) and held
+  its region for 51-60 s of the stall (203 stacks per stall run). Not fixed; proposal in the evidence doc.
+- **Global tick (0056)**: the periodic `level.dat` write held the global tick in `write0` for the stall
+  (92-113 stacks). Fixed by feature patch 0077 / `WorldMetadataAutosave.scheduleLevelDat`: after the fix the
+  global tick shows 0 I/O stacks during the stall and the write waits on its own thread.
+- Chunk loads/saves ran on the `Paper I/O Worker` pool. The one region-thread wait on that pool was
+  `/locate`'s `ChunkTaskScheduler.syncLoadNonFull` (R1 shape, 9 stacks, unstalled run only).
+- Not exercised (no players): per-player saves on the owning region (`PlayerList.saveAll` ->
+  `PlayerDataStorage.save`, stats, advancements) and the join-time read in `PrepareSpawnTask.spawn`; both are
+  synchronous file I/O on a region thread by source reading.

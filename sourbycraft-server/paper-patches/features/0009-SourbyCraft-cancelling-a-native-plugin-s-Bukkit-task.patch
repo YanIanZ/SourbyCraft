@@ -6,19 +6,15 @@ Subject: [PATCH] SourbyCraft - cancelling a native plugin's Bukkit tasks is a
 
 
 diff --git a/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java b/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
-index 7d7a961cfdc3048043677cf75c9cacf40cbad187..4e5deef1d16f847d8401a084f07f2ed9f069132f 100644
+index fd5a7b2c8d60b1cb2a6e95df64418bba980a7f07..488a13efbf57e3a386636148562e27b2a2cb1d94 100644
 --- a/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
 +++ b/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
-@@ -319,6 +319,12 @@ public class CraftScheduler implements BukkitScheduler {
+@@ -312,7 +312,7 @@ public class CraftScheduler implements BukkitScheduler {
+     @Override
      public void cancelTasks(final Plugin plugin) {
          Preconditions.checkArgument(plugin != null, "Cannot cancel tasks of null plugin");
-         if (dev.iyanz.sourbycraft.bridge.AuroraBridge.cancelAll(plugin)) return; // SourbyCraft - Aurora Bridge
-+        // SourbyCraft start - a plugin the bridge does not handle has no task in this scheduler on a
-+        // region-threaded server (handle() refuses it), so there is nothing to cancel. Falling
-+        // through would schedule the legacy cancel task, which handle() refuses: every native
-+        // plugin's disable then logged "Unsupported in region threading".
-+        if (true) return;
-+        // SourbyCraft end
+-        if (dev.iyanz.sourbycraft.bridge.AuroraBridge.cancelAll(plugin)) return; // SourbyCraft - Aurora Bridge
++        if (dev.iyanz.sourbycraft.bridge.AuroraBridge.cancelTasks(plugin)) return; // SourbyCraft - Aurora Bridge: nothing else to cancel
          // Paper start
          if (!this.isAsyncScheduler) {
              this.asyncScheduler.cancelTasks(plugin);

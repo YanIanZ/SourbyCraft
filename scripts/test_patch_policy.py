@@ -103,7 +103,9 @@ class UpstreamDefaultTest(unittest.TestCase):
     reviewable, and makes a new one fail until somebody writes down the reason.
     """
 
-    # Upstream defaults the SourbyCraft feature patches change. None at the moment.
+    # Upstream defaults the SourbyCraft feature patches change. None at the moment: the relaxed-thread-checks
+    # port (MC 0084, 2026-10-22) locks the RegionizedWorldData hand-off points instead of swapping the containers
+    # LightingLuminol swapped, so that nothing here is redefined.
     APPROVED = {}
 
     def test_the_shipped_default_changes_are_exactly_the_approved_ones(self):
@@ -127,7 +129,7 @@ class UpstreamDefaultTest(unittest.TestCase):
         ("WorldConfig.java", "LOGGER"): 'LoggerFactory.getLogger("Aurora")',
         # Canvas shipped THROW, which crashes the server when a plugin touches state
         # off-region. On a production server that should be logged, not fatal.
-        # Operators can restore THROW in config/canvas-server.yml.
+        # Operators can restore THROW in config/aurora-server.yml.
         ("GlobalConfiguration.java", "guardSeverity"): "GuardSeverity.LOG",
         # Canvas logged every ender pearl save/load: console spam on an active server.
         ("GlobalConfiguration.java", "logEnderPearlRewriteActions"): "false",

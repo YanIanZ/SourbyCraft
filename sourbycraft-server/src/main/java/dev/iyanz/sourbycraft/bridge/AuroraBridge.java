@@ -36,8 +36,37 @@ public final class AuroraBridge {
     private static volatile AuroraConfig.SyncRoute earlySyncRoute = AuroraConfig.Bridge.DEFAULT.syncRoute();
     private static volatile int earlyMaxPendingTasks = AuroraConfig.Bridge.DEFAULT.maxPendingTasksPerPlugin();
     private static volatile int earlyMaxRunningAsyncTasks = AuroraConfig.Bridge.DEFAULT.maxRunningAsyncTasksPerPlugin();
+    /**
+     * Whether any plugin has been admitted this run. The event and command context hooks run on hot paths
+     * (every event dispatch); while nothing is bridged they return at once and publish nothing.
+     */
+    private static volatile boolean contextActive;
 
     private AuroraBridge() {}
+
+    /** The bridge settings as the TOML files held them when first asked; read once, never creates the runtime. */
+    private static volatile AuroraConfig.Bridge earlySettings;
+    // ThreadChecks class initialization reads these settings while runtime() invokes ThreadChecks
+    // under AuroraBridge.class. A separate monitor prevents a class-initialization lock cycle.
+    private static final Object EARLY_SETTINGS_LOCK = new Object();
+
+    /**
+     * {@code aurora.bridge.*} as configured on disk, read once on first use (before the plugin scan, or earlier
+     * when the region-ownership checks ask: {@code guards/ThreadChecks}). Never creates the bridge runtime.
+     */
+    public static AuroraConfig.Bridge earlySettings() {
+        AuroraConfig.Bridge settings = earlySettings;
+        if (settings == null) {
+            synchronized (EARLY_SETTINGS_LOCK) {
+                settings = earlySettings;
+                if (settings == null) {
+                    settings = readEarly(AURORA_FILE, UNIFIED_FILE);
+                    earlySettings = settings;
+                }
+            }
+        }
+        return settings;
+    }
 
     static BridgeRuntime runtime() {
         BridgeRuntime current = runtime;
@@ -45,7 +74,8 @@ public final class AuroraBridge {
             synchronized (AuroraBridge.class) {
                 current = runtime;
                 if (current == null) {
-                    final AuroraConfig.Bridge settings = readEarly(AURORA_FILE, UNIFIED_FILE);
+                    final AuroraConfig.Bridge settings = earlySettings();
+                    dev.iyanz.sourbycraft.guards.ThreadChecks.bootReport(SourbyLogger::warn, SourbyLogger::info);
                     earlyQuarantineAfter = settings.quarantineAfter();
                     earlySyncRoute = settings.syncRoute();
                     earlyMaxPendingTasks = settings.maxPendingTasksPerPlugin();
@@ -123,7 +153,7 @@ public final class AuroraBridge {
                 final var config = new com.electronwill.nightconfig.toml.TomlParser().parse(reader);
                 for (final String key : List.of(AuroraConfig.BRIDGE_MODE_KEY, AuroraConfig.BRIDGE_QUARANTINE_KEY,
                     AuroraConfig.BRIDGE_SYNC_ROUTE_KEY, AuroraConfig.BRIDGE_MAX_PENDING_KEY,
-                    AuroraConfig.BRIDGE_MAX_RUNNING_ASYNC_KEY)) {
+                    AuroraConfig.BRIDGE_MAX_RUNNING_ASYNC_KEY, AuroraConfig.BRIDGE_THREAD_CHECKS_KEY)) {
                     final Object value = config.get(key);
                     if (value != null) values.put(key, value);
                 }
@@ -193,6 +223,7 @@ public final class AuroraBridge {
         final BridgeRuntime current = runtime();
         final boolean known = current.isBridged(pluginName);
         final boolean admitted = current.admit(pluginName);
+        if (admitted) contextActive = true;
         // The provider factory and the API-version check both ask; say it once.
         if (admitted && !known) {
             bootWarn("Aurora Bridge admitted " + pluginName + " (no folia-supported/canvas-supported)."
@@ -282,6 +313,184 @@ public final class AuroraBridge {
         return true;
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // CraftScheduler hooks. Each Paper feature patch site in org.bukkit.craftbukkit.scheduler.CraftScheduler
+    // is one call into one of these (Build 50, docs/development/UPGRADING-MINECRAFT.md hook table), so a
+    // Paper update conflicts on a call line, not on bridge behaviour. None of them creates the runtime
+    // except submitIfBridged for a plugin the bridge already handles.
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * {@code CraftScheduler#cancelTask} (Paper feature patches 0003, 0006): cancels the task if the bridge
+     * holds it, and always tells the caller to stop. Nothing below can hold a task on a region-threaded
+     * server: every task the Bukkit scheduler accepts goes to the bridge, and {@code handle()} refuses the
+     * rest. A task the bridge no longer knows has finished or was cancelled already, and cancelling it is a
+     * no-op, as on Paper. Falling through would schedule the legacy cancel task, which {@code handle()}
+     * refuses.
+     *
+     * @return always {@code true}
+     */
+    public static boolean cancelTask(final int taskId) {
+        cancel(taskId);
+        return true;
+    }
+
+    /**
+     * {@code CraftScheduler#cancelTasks} (Paper feature patches 0003, 0009): cancels every bridged task of
+     * the plugin, and always tells the caller to stop. A plugin the bridge does not handle has no task in the
+     * Bukkit scheduler on a region-threaded server ({@code handle()} refuses it), so there is nothing to
+     * cancel; falling through would schedule the legacy cancel task, which {@code handle()} refuses, and every
+     * native plugin's disable then logged "Unsupported in region threading".
+     *
+     * @return always {@code true}
+     */
+    public static boolean cancelTasks(final Plugin plugin) {
+        cancelAll(plugin);
+        return true;
+    }
+
+    /**
+     * {@code CraftScheduler#isCurrentlyRunning} (Paper feature patches 0003, 0008): {@code TRUE} while a
+     * bridged body runs (a cancelled async body stays running until its last invocation finishes),
+     * {@code FALSE} for a task the bridge holds that is not running, {@code null} when the bridge does not
+     * know the id (the caller falls through to Paper). Never creates the runtime.
+     */
+    public static Boolean currentlyRunning(final int taskId) {
+        return currentlyRunning(runtime, taskId);
+    }
+
+    static Boolean currentlyRunning(final BridgeRuntime current, final int taskId) {
+        if (current == null) return null;
+        if (current.running(taskId)) return Boolean.TRUE;
+        if (current.knows(taskId)) return Boolean.FALSE;
+        return null;
+    }
+
+    /**
+     * {@code CraftScheduler#nextId} (Paper feature patch 0008): an id the bridge still holds, or one whose
+     * body is still draining after cancellation, must not be handed out again. Never creates the runtime.
+     */
+    public static boolean idInUse(final int taskId) {
+        final BridgeRuntime current = runtime;
+        return current != null && (current.knows(taskId) || current.running(taskId));
+    }
+
+    /**
+     * {@code CraftScheduler#getActiveWorkers} on the main scheduler (Paper feature patch 0008): the async
+     * scheduler's workers plus the bridge's actual workers on the governed bridge I/O lane, each once.
+     *
+     * @return a new mutable list, as Paper returns
+     */
+    public static List<org.bukkit.scheduler.BukkitWorker> withBridgedWorkers(
+            final List<org.bukkit.scheduler.BukkitWorker> asyncWorkers) {
+        final List<org.bukkit.scheduler.BukkitWorker> workers = new java.util.ArrayList<>(asyncWorkers);
+        workers.addAll(activeWorkers());
+        return workers;
+    }
+
+    /**
+     * {@code CraftScheduler#getPendingTasks} on the main scheduler (Paper feature patch 0003): the bridged
+     * tasks still scheduled, as the scheduler's own task objects. Never creates the runtime.
+     */
+    public static List<org.bukkit.scheduler.BukkitTask> pendingBukkitTasks() {
+        final List<Object> handles = pendingTasks();
+        final List<org.bukkit.scheduler.BukkitTask> tasks = new java.util.ArrayList<>(handles.size());
+        for (final Object handle : handles) tasks.add((org.bukkit.scheduler.BukkitTask)handle);
+        return tasks;
+    }
+
+    /**
+     * {@code CraftScheduler#handle} (Paper feature patch 0003): schedules a bridged legacy plugin's task
+     * through the bridge instead of refusing it.
+     *
+     * @return {@code true} when the bridge took the task; {@code false} for a plugin the bridge does not
+     *     handle (the caller refuses it as before)
+     */
+    public static boolean submitIfBridged(final Plugin plugin, final BridgeRuntime.Task task, final long delayTicks) {
+        if (!handles(plugin)) return false;
+        submit(plugin, task, delayTicks);
+        return true;
+    }
+
+    /**
+     * {@code CraftScheduler}'s bridge adapter, {@code run()} (Paper feature patch 0003). {@code CraftAsyncTask#run}
+     * swallows and logs exceptions and keeps worker lists the bridge does not use, so the plugin's body runs
+     * directly and violations reach the bridge. A task that must run itself ({@code CraftFuture}: its
+     * {@code run()} completes the future), or one without a body, runs itself.
+     *
+     * @param task the scheduler's task object
+     * @param runnable its Runnable body, or {@code null}
+     * @param consumer its Consumer body, or {@code null}
+     * @param runsItself whether the task must run itself
+     */
+    public static <T extends org.bukkit.scheduler.BukkitTask & Runnable> void runBukkitTask(final T task,
+            final Runnable runnable, final java.util.function.Consumer<org.bukkit.scheduler.BukkitTask> consumer,
+            final boolean runsItself) {
+        if (runsItself || (runnable == null && consumer == null)) {
+            task.run();
+        } else if (runnable != null) {
+            runnable.run();
+        } else {
+            consumer.accept(task);
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Scheduling-context hooks (Paper feature patch 0026): the player a server frame acts for, so a
+    // bridged legacy sync task scheduled inside it is routed to that player's owner. Logic in
+    // SchedulingContext/EventAnchors; each site is one call. Never throw into the caller.
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * {@code PaperEventManager#callEvent}, before the listener loop: publishes the player the event is about
+     * (players only; leaving/not-yet-placed players resolve to nothing, see {@link EventAnchors}) for the
+     * listeners' duration. An event about no player keeps the frame it was fired in (an async body carrying a
+     * player's context firing a plugin's own event). Returns the token {@link #exitContext} takes; {@code null}
+     * while nothing is bridged, so the hot path costs one volatile read.
+     */
+    public static Object enterEventContext(final org.bukkit.event.Event event) {
+        if (!contextActive) return null;
+        try {
+            return SchedulingContext.enter(EventAnchors.resolve(event));
+        } catch (final RuntimeException unexpected) {
+            return null;
+        }
+    }
+
+    /** Closes a scope opened by {@link #enterEventContext}; {@code null} is a no-op. */
+    public static void exitContext(final Object scope) {
+        if (scope instanceof SchedulingContext.Scope opened) opened.close();
+    }
+
+    /**
+     * {@code BukkitCommandNode.BukkitBrigCommand#run}: executes a Bukkit command with its player sender
+     * published as the scheduling context (a console, block or proxied sender publishes nothing). Player
+     * commands execute on the player's region, so this adds "follows the player" to the caller-region route
+     * and carries the player into the command's async continuations.
+     */
+    public static void withCommandContext(final org.bukkit.command.CommandSender sender, final Runnable execute) {
+        if (!contextActive || !(sender instanceof org.bukkit.entity.Player player)) {
+            execute.run();
+            return;
+        }
+        try (SchedulingContext.Scope scope = SchedulingContext.enter(player)) {
+            execute.run();
+        }
+    }
+
+    /** Test seam: whether the context hooks are live (set by the first admission). */
+    static boolean contextActive() {
+        return contextActive;
+    }
+
+    /** Test seam: installs a runtime (not started through the TOML files) until closed. Not for production code. */
+    static synchronized AutoCloseable installRuntimeForTesting(final BridgeRuntime installed) {
+        resetRuntime();
+        runtime = installed;
+        contextActive = true;
+        return AuroraBridge::resetRuntime;
+    }
+
     /** GlobalRegionScheduler cancellation also releases the bridge's task indexes. */
     public static void cancelGlobal(final Plugin plugin) {
         final BridgeRuntime current = runtime;
@@ -354,6 +563,8 @@ public final class AuroraBridge {
 
     private static synchronized void resetRuntime() {
         runtime = null;
+        contextActive = false;
+        earlySettings = null;
         earlyQuarantineAfter = AuroraConfig.Bridge.DEFAULT.quarantineAfter();
         earlySyncRoute = AuroraConfig.Bridge.DEFAULT.syncRoute();
         earlyMaxPendingTasks = AuroraConfig.Bridge.DEFAULT.maxPendingTasksPerPlugin();
@@ -431,7 +642,14 @@ public final class AuroraBridge {
                 : delayTicks > 0 ? scheduler.runDelayed(plugin, t -> body.run(), retired, delayTicks)
                 : scheduler.run(plugin, t -> body.run(), retired);
             if (task == null) {
-                // Folia returns null without calling retired when the entity is already removed.
+                // Folia returns null without calling retired when the entity's scheduler is retired, which
+                // happens only when the entity has been removed for good. A retired scheduler on an entity
+                // that is still valid is an anomaly worth one line (it would route a player's task elsewhere).
+                if (entity.isValid()) {
+                    SourbyLogger.warn("Aurora Bridge: the entity scheduler of " + entity + " refused a task for "
+                        + plugin.getName() + " although the entity is still valid (scheduler retired; thread "
+                        + Thread.currentThread().getName() + ")");
+                }
                 retired.run();
                 return () -> {};
             }

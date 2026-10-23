@@ -42,6 +42,13 @@ public final class DependencyGraph {
     public static Report analyse(final Collection<PluginDescriptor> plugins) {
         final Map<String, PluginDescriptor> byName = new TreeMap<>();
         for (final PluginDescriptor p : plugins) byName.putIfAbsent(p.name(), p);
+        // A name another plugin "provides" (FastAsyncWorldEdit provides WorldEdit) satisfies a
+        // dependency on it, as in Paper's loader; a real plugin of that name takes precedence.
+        final Map<String, String> provider = new TreeMap<>();
+        for (final PluginDescriptor p : byName.values()) provider.put(p.name(), p.name());
+        for (final PluginDescriptor p : byName.values()) {
+            for (final String alias : p.provides()) provider.putIfAbsent(alias, p.name());
+        }
 
         // Edge a -> b means a must load before b.
         final Map<String, Set<String>> edges = new TreeMap<>();
@@ -49,14 +56,17 @@ public final class DependencyGraph {
         for (final String name : byName.keySet()) edges.put(name, new TreeSet<>());
         for (final PluginDescriptor p : byName.values()) {
             for (final String dep : p.depend()) {
-                if (byName.containsKey(dep)) edges.get(dep).add(p.name());
+                final String by = provider.get(dep);
+                if (by != null) edges.get(by).add(p.name());
                 else missing.computeIfAbsent(p.name(), k -> new ArrayList<>()).add(dep);
             }
             for (final String dep : p.softDepend()) {
-                if (byName.containsKey(dep)) edges.get(dep).add(p.name());
+                final String by = provider.get(dep);
+                if (by != null) edges.get(by).add(p.name());
             }
             for (final String later : p.loadBefore()) {
-                if (byName.containsKey(later)) edges.get(p.name()).add(later);
+                final String by = provider.get(later);
+                if (by != null) edges.get(p.name()).add(by);
             }
         }
         final List<List<String>> cycles = stronglyConnected(edges);

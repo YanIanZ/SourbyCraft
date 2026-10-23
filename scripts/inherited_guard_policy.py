@@ -666,6 +666,16 @@ def scan(root):
                 for family, (pattern, marked_only, _) in FAMILIES.items():
                     if pattern.search(code) and (not marked_only or INHERITED_MARKER.search(line)):
                         families[family] += 1
+    # Patch mode: a family site a feature patch deletes (e.g. paper 0025 replacing CraftWorld's
+    # world-settings ensureGlobalTickThread calls) is gone from the materialized scan too.
+    for relative, gone in removed.items():
+        if relative.startswith(ENGINE_SOURCE_ROOT):
+            continue
+        for (_, line), count in gone.items():
+            code = code_lines([line])[0]
+            for family, (pattern, marked_only, _) in FAMILIES.items():
+                if pattern.search(code) and (not marked_only or INHERITED_MARKER.search(line)):
+                    families[family] -= count
     return guards, families, mode
 
 

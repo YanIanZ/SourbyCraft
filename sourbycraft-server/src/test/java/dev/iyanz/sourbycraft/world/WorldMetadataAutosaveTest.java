@@ -16,6 +16,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtIo;
@@ -186,6 +188,80 @@ class WorldMetadataAutosaveTest {
             assertFalse(WorldMetadataAutosave.saveLevelDat(access, bad, null), "a failed encode is reported, not thrown");
             assertTrue(Files.exists(dir.resolve("w").resolve("level.dat")), "the previous level.dat is untouched");
         } finally {
+            access.close();
+        }
+    }
+
+    private static WorldData levelData(final String name) {
+        final CompoundTag data = new CompoundTag();
+        data.putString("LevelName", name);
+        final WorldData world = mock(WorldData.class);
+        when(world.createTag(null)).thenReturn(data);
+        return world;
+    }
+
+    private static String levelName(final Path levelDat) throws IOException {
+        return NbtIo.readCompressed(levelDat, net.minecraft.nbt.NbtAccounter.unlimitedHeap()).getCompoundOrEmpty("Data").getStringOr("LevelName", "");
+    }
+
+    /**
+     * Disk-stall regression (docs/development/region-io-blocking-2026-10-22.md): the periodic autosave held the
+     * global tick in write0 for the whole stall. Holding the write lock stands in for a stalled disk: the caller
+     * must return at once, a second periodic write must be skipped rather than queued, and save-all must still
+     * write after the outstanding one, so the newest tag wins.
+     */
+    @Test
+    void thePeriodicLevelDatWriteNeverWaitsForTheDiskAndSkipsWhileOneIsOutstanding(@TempDir final Path dir) throws Exception {
+        final LevelStorageSource.LevelStorageAccess access = LevelStorageSource.createDefault(dir).createAccess("w");
+        final Path levelDat = dir.resolve("w").resolve("level.dat");
+        try {
+            final CompletableFuture<Boolean> first;
+            final CompletableFuture<Boolean> second;
+            synchronized (WorldMetadataAutosave.LEVEL_DAT_WRITE_LOCK) {
+                final long start = System.nanoTime();
+                first = WorldMetadataAutosave.scheduleLevelDat(access, levelData("first"), null);
+                second = WorldMetadataAutosave.scheduleLevelDat(access, levelData("second"), null);
+                assertTrue(System.nanoTime() - start < TimeUnit.SECONDS.toNanos(2), "the caller did not wait for the write");
+                assertFalse(first.isDone(), "the write is still held by the stalled disk");
+                assertFalse(second.getNow(true), "a periodic write while one is outstanding is skipped, not queued");
+                assertFalse(Files.exists(levelDat));
+            }
+            assertTrue(first.get(10, TimeUnit.SECONDS));
+            assertEquals("first", levelName(levelDat));
+
+            assertTrue(WorldMetadataAutosave.saveLevelDat(access, levelData("third"), null));
+            assertEquals("third", levelName(levelDat), "save-all writes on the caller");
+            assertTrue(WorldMetadataAutosave.scheduleLevelDat(access, levelData("fourth"), null).get(10, TimeUnit.SECONDS),
+                "a finished write lets the next periodic one through");
+            assertEquals("fourth", levelName(levelDat));
+        } finally {
+            WorldMetadataAutosave.awaitLevelDatWrites();
+            access.close();
+        }
+    }
+
+    /** The shutdown save (feature patch 0077) and save-all wait for an outstanding periodic write before theirs. */
+    @Test
+    void anOutstandingPeriodicWriteFinishesBeforeTheShutdownOrSaveAllWrite(@TempDir final Path dir) throws Exception {
+        final LevelStorageSource.LevelStorageAccess access = LevelStorageSource.createDefault(dir).createAccess("w");
+        final Path levelDat = dir.resolve("w").resolve("level.dat");
+        try {
+            final Thread saveAll = new Thread(() -> WorldMetadataAutosave.saveLevelDat(access, levelData("newer"), null));
+            final CompletableFuture<Boolean> periodic;
+            synchronized (WorldMetadataAutosave.LEVEL_DAT_WRITE_LOCK) {
+                periodic = WorldMetadataAutosave.scheduleLevelDat(access, levelData("older"), null);
+                final Thread waiter = new Thread(WorldMetadataAutosave::awaitLevelDatWrites);
+                waiter.start();
+                saveAll.start();
+                waiter.join(300);
+                assertTrue(waiter.isAlive(), "awaitLevelDatWrites waits for the outstanding write");
+            }
+            saveAll.join(10_000);
+            assertFalse(saveAll.isAlive());
+            assertTrue(periodic.isDone());
+            assertEquals("newer", levelName(levelDat), "the older scheduled tag never replaces the newer file");
+        } finally {
+            WorldMetadataAutosave.awaitLevelDatWrites();
             access.close();
         }
     }

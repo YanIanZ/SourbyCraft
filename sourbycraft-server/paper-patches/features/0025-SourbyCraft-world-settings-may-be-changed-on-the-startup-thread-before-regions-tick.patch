@@ -1,0 +1,117 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Thu, 22 Oct 2026 17:48:54 +0700
+Subject: [PATCH] SourbyCraft - world settings may be changed on the startup
+ thread before regions tick
+
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftWorld.java b/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
+index 0e37c74c8a644d98472c6670b232ee86778601cb..1ff85a5457f210ba374f3a2ea1bfadd379ea939b 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
+@@ -801,7 +801,7 @@ public class CraftWorld extends CraftRegionAccessor implements World {
+ 
+     @Override
+     public void setTime(long time) {
+-        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot modify time off of the global region"); // Folia - region threading
++        dev.iyanz.sourbycraft.guards.WorldSettingsOwner.ensure("Cannot modify time off of the global region"); // Folia - region threading // SourbyCraft - the startup thread owns world settings until the region scheduler starts
+         long margin = (time - this.getFullTime()) % SharedConstants.TICKS_PER_GAME_DAY;
+         if (margin < 0) margin += SharedConstants.TICKS_PER_GAME_DAY;
+         this.setFullTime(this.getFullTime() + margin);
+@@ -814,7 +814,7 @@ public class CraftWorld extends CraftRegionAccessor implements World {
+ 
+     @Override
+     public void setFullTime(long time) {
+-        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot modify time off of the global region"); // Folia - region threading
++        dev.iyanz.sourbycraft.guards.WorldSettingsOwner.ensure("Cannot modify time off of the global region"); // Folia - region threading // SourbyCraft - the startup thread owns world settings until the region scheduler starts
+         if (this.world.dimensionType().defaultClock().isEmpty()) {
+             throw new IllegalArgumentException("Cannot set time in world without world clock");
+         }
+@@ -1198,7 +1198,7 @@ public class CraftWorld extends CraftRegionAccessor implements World {
+ 
+     @Override
+     public void setStorm(boolean hasStorm) {
+-        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot modify weather off of the global region"); // Folia - region threading
++        dev.iyanz.sourbycraft.guards.WorldSettingsOwner.ensure("Cannot modify weather off of the global region"); // Folia - region threading // SourbyCraft - the startup thread owns world settings until the region scheduler starts
+         this.world.getWeatherData().setRaining(hasStorm, WeatherChangeEvent.Cause.PLUGIN);
+         this.setWeatherDuration(0); // Reset weather duration (legacy behaviour)
+         this.setClearWeatherDuration(0); // Reset clear weather duration (reset "/weather clear" commands)
+@@ -1211,7 +1211,7 @@ public class CraftWorld extends CraftRegionAccessor implements World {
+ 
+     @Override
+     public void setWeatherDuration(int duration) {
+-        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot modify weather off of the global region"); // Folia - region threading
++        dev.iyanz.sourbycraft.guards.WorldSettingsOwner.ensure("Cannot modify weather off of the global region"); // Folia - region threading // SourbyCraft - the startup thread owns world settings until the region scheduler starts
+         this.world.getWeatherData().setRainTime(duration);
+     }
+ 
+@@ -1222,7 +1222,7 @@ public class CraftWorld extends CraftRegionAccessor implements World {
+ 
+     @Override
+     public void setThundering(boolean thundering) {
+-        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot modify weather off of the global region"); // Folia - region threading
++        dev.iyanz.sourbycraft.guards.WorldSettingsOwner.ensure("Cannot modify weather off of the global region"); // Folia - region threading // SourbyCraft - the startup thread owns world settings until the region scheduler starts
+         this.world.getWeatherData().setThundering(thundering, ThunderChangeEvent.Cause.PLUGIN);
+         this.setThunderDuration(0); // Reset weather duration (legacy behaviour)
+         this.setClearWeatherDuration(0); // Reset clear weather duration (reset "/weather clear" commands)
+@@ -1235,7 +1235,7 @@ public class CraftWorld extends CraftRegionAccessor implements World {
+ 
+     @Override
+     public void setThunderDuration(int duration) {
+-        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot modify weather off of the global region"); // Folia - region threading
++        dev.iyanz.sourbycraft.guards.WorldSettingsOwner.ensure("Cannot modify weather off of the global region"); // Folia - region threading // SourbyCraft - the startup thread owns world settings until the region scheduler starts
+         this.world.getWeatherData().setThunderTime(duration);
+     }
+ 
+@@ -1246,7 +1246,7 @@ public class CraftWorld extends CraftRegionAccessor implements World {
+ 
+     @Override
+     public void setClearWeatherDuration(int duration) {
+-        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot modify weather off of the global region"); // Folia - region threading
++        dev.iyanz.sourbycraft.guards.WorldSettingsOwner.ensure("Cannot modify weather off of the global region"); // Folia - region threading // SourbyCraft - the startup thread owns world settings until the region scheduler starts
+         this.world.getWeatherData().setClearWeatherTime(duration);
+     }
+ 
+@@ -1499,13 +1499,13 @@ public class CraftWorld extends CraftRegionAccessor implements World {
+ 
+     @Override
+     public void setHardcore(boolean hardcore) {
+-        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot modify server settings off of the global region"); // Folia - region threading
++        dev.iyanz.sourbycraft.guards.WorldSettingsOwner.ensure("Cannot modify server settings off of the global region"); // Folia - region threading // SourbyCraft - the startup thread owns world settings until the region scheduler starts
+         this.world.serverLevelData.setHardcore(hardcore);
+     }
+ 
+     @Override
+     public void setTicksPerSpawns(SpawnCategory spawnCategory, int ticksPerCategorySpawn) {
+-        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot modify server settings off of the global region"); // Folia - region threading
++        dev.iyanz.sourbycraft.guards.WorldSettingsOwner.ensure("Cannot modify server settings off of the global region"); // Folia - region threading // SourbyCraft - the startup thread owns world settings until the region scheduler starts
+         Preconditions.checkArgument(spawnCategory != null, "SpawnCategory cannot be null");
+         Preconditions.checkArgument(CraftSpawnCategory.isValidForLimits(spawnCategory), "SpawnCategory.%s are not supported", spawnCategory);
+ 
+@@ -1562,7 +1562,7 @@ public class CraftWorld extends CraftRegionAccessor implements World {
+ 
+     @Override
+     public void setSpawnLimit(SpawnCategory spawnCategory, int limit) {
+-        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot modify server settings off of the global region"); // Folia - region threading
++        dev.iyanz.sourbycraft.guards.WorldSettingsOwner.ensure("Cannot modify server settings off of the global region"); // Folia - region threading // SourbyCraft - the startup thread owns world settings until the region scheduler starts
+         Preconditions.checkArgument(spawnCategory != null, "SpawnCategory cannot be null");
+         Preconditions.checkArgument(CraftSpawnCategory.isValidForLimits(spawnCategory), "SpawnCategory.%s are not supported", spawnCategory);
+ 
+@@ -1692,7 +1692,7 @@ public class CraftWorld extends CraftRegionAccessor implements World {
+     @SuppressWarnings({"unchecked", "rawtypes"})
+     @Override
+     public boolean setGameRuleValue(String rule, String value) {
+-        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot modify server settings off of the global region"); // Folia - region threading
++        dev.iyanz.sourbycraft.guards.WorldSettingsOwner.ensure("Cannot modify server settings off of the global region"); // Folia - region threading // SourbyCraft - the startup thread owns world settings until the region scheduler starts
+         // No null values allowed
+         if (rule == null || value == null) return false;
+ 
+@@ -1738,7 +1738,7 @@ public class CraftWorld extends CraftRegionAccessor implements World {
+ 
+     @Override
+     public <T> boolean setGameRule(org.bukkit.@NotNull GameRule<T> rule, @NotNull T newValue) {
+-        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot modify server settings off of the global region"); // Folia - region threading
++        dev.iyanz.sourbycraft.guards.WorldSettingsOwner.ensure("Cannot modify server settings off of the global region"); // Folia - region threading // SourbyCraft - the startup thread owns world settings until the region scheduler starts
+         Preconditions.checkArgument(rule != null, "GameRule cannot be null");
+         Preconditions.checkArgument(newValue != null, "GameRule value cannot be null");
+ 

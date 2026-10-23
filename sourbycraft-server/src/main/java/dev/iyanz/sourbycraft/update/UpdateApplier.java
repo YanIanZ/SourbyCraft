@@ -12,23 +12,25 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Applies a staged update and self-restarts (apply_mode=auto).
+ * Applies a staged update and self-restarts (apply-mode=auto).
  *
  * <p><b>Jar swap is an atomic rename, after the previous jar is kept.</b> The launch jar (the
  * {@code -jar} argument of this JVM) is first copied to {@code <jar>.prev}
  * ({@link UpdateRollbackGuard#keepPrevious}); only then is the staged jar {@code Files.move}d over
  * it. POSIX rename replaces the directory entry while the running JVM keeps its already-open file
- * — the live process is never corrupted. The guard records the apply so the next boot can restore
- * {@code .prev} if it never reaches ready (audit SEC-3). If the {@code .prev} copy fails (disk
- * full, permissions) the swap does NOT happen and no restart is scheduled: an update without a way
- * back is not applied automatically. On Windows the rename fails on the lock;
+ * — the live process is never corrupted. The guard records the apply <em>before</em> the rename so
+ * the next boot can restore {@code .prev} if it never reaches ready (audit SEC-3). If the
+ * {@code .prev} copy or that record fails (disk full, permissions) the swap does NOT happen and no
+ * restart is scheduled: an update without a way back is not applied automatically. If the rename
+ * itself fails, the earlier record is put back. On Windows the rename fails on the lock;
  * {@code auto_update/core.path} stays behind for a launcher-side swap on the NEXT boot.
  *
- * <p><b>Restart modes</b> ({@code misc.auto_update.restart_mode}):
+ * <p><b>Restart modes</b> ({@code updater.restart-mode}):
  * <ul>
  *   <li>{@code auto} — Pterodactyl/Pelican container detected (P_SERVER_UUID env) → {@code exit};
  *       otherwise {@code spigot}.</li>
@@ -72,6 +74,8 @@ public final class UpdateApplier {
                 t -> broadcast("Server restarts in 10s"),
                 delayMs - 10_000L, TimeUnit.MILLISECONDS);
         }
+        // The copy and prev_sha256 streaming hash run here on the updater async callback,
+        // never on a region, tick or main-server thread.
         Bukkit.getAsyncScheduler().runDelayed(owner,
             t -> applyNow(tag, stagedJar, restartMode), delayMs, TimeUnit.MILLISECONDS);
     }
@@ -81,36 +85,17 @@ public final class UpdateApplier {
             Path launchJar = launchJarPath();
             boolean swapped = false;
             if (launchJar != null) {
-                Path prev;
-                try {
-                    prev = UpdateRollbackGuard.SERVER.keepPrevious(launchJar);
-                } catch (Exception e) {
-                    SourbyLogger.error("auto-updater: could not keep the previous jar as "
-                        + UpdateRollbackGuard.prevPathFor(launchJar) + " (" + e.getMessage()
-                        + ") — NOT swapping " + tag + " and NOT restarting; the staged jar stays at " + stagedJar + ".");
+                SwapResult result = swapInPlace(tag, stagedJar, launchJar, UpdateRollbackGuard.SERVER);
+                if (result == SwapResult.ABORTED) {
                     IN_FLIGHT.set(false);
                     return;
                 }
-                try {
-                    // Atomic rename: the running JVM keeps its open (old) file; the path now
-                    // serves the new jar for the next boot. REPLACE_EXISTING is required.
-                    Files.move(stagedJar, launchJar, StandardCopyOption.REPLACE_EXISTING);
+                if (result == SwapResult.SWAPPED) {
                     swapped = true;
                     writeApplied(tag);
-                    try {
-                        UpdateRollbackGuard.SERVER.recordApplied(tag, launchJar, prev, Instant.now());
-                    } catch (Exception e) {
-                        SourbyLogger.warn("auto-updater: swapped but could not record the apply for rollback ("
-                            + e.getMessage() + "); the next boot will not auto-restore " + prev + ".");
-                    }
                     // The stage is consumed — remove the pointer so the bootstrap fallback
                     // does not try to re-apply a jar that no longer exists.
                     Files.deleteIfExists(Path.of("auto_update", "core.path"));
-                    SourbyLogger.info("auto-updater: swapped " + launchJar + " -> " + tag
-                        + " (previous build kept at " + prev + ").");
-                } catch (Exception e) {
-                    SourbyLogger.warn("auto-updater: in-place swap failed (" + e.getMessage()
-                        + ") — leaving auto_update/core.path for the bootstrap to swap on next boot.");
                 }
             } else {
                 SourbyLogger.warn("auto-updater: could not determine the launch jar path — "
@@ -125,6 +110,63 @@ public final class UpdateApplier {
             SourbyLogger.error("auto-updater: apply/restart failed", t);
             IN_FLIGHT.set(false);
         }
+    }
+
+    /** What {@link #swapInPlace} did. */
+    enum SwapResult {
+        /** The new jar is at the launch path and the guard tracks its first boot. */
+        SWAPPED,
+        /** Nothing changed on disk that the next boot would run; do not restart. */
+        ABORTED,
+        /** The rename failed; the launch jar is still the old build (bootstrap fallback). */
+        SWAP_FAILED
+    }
+
+    /**
+     * Keep the previous jar, record the apply and rename the staged jar over the launch jar.
+     * Package-private and free of Bukkit so the ordering is unit-tested.
+     */
+    static SwapResult swapInPlace(final String tag, final Path stagedJar, final Path launchJar,
+                                  final UpdateRollbackGuard guard) {
+        Path prev;
+        try {
+            prev = guard.keepPrevious(launchJar);
+        } catch (Exception e) {
+            SourbyLogger.error("auto-updater: could not keep the previous jar as "
+                + UpdateRollbackGuard.prevPathFor(launchJar) + " (" + e.getMessage()
+                + ") — NOT swapping " + tag + " and NOT restarting; the staged jar stays at " + stagedJar + ".");
+            return SwapResult.ABORTED;
+        }
+        // Record the apply BEFORE the new jar takes the launch path: a restart must never run a
+        // new jar the guard does not track. A crash between this record and the rename leaves
+        // APPLIED over the old jar, which the next boot confirms (or restores to the same bytes).
+        final Optional<UpdateRollbackGuard.State> before;
+        try {
+            before = guard.currentState();
+            guard.recordApplied(tag, launchJar, prev, Instant.now());
+        } catch (Exception e) {
+            SourbyLogger.error("auto-updater: could not record the apply for rollback (" + e.getMessage()
+                + ") — NOT swapping " + tag + " and NOT restarting; the staged jar stays at " + stagedJar + ".");
+            return SwapResult.ABORTED;
+        }
+        try {
+            // Atomic rename: the running JVM keeps its open (old) file; the path now
+            // serves the new jar for the next boot. REPLACE_EXISTING is required.
+            Files.move(stagedJar, launchJar, StandardCopyOption.REPLACE_EXISTING);
+        } catch (Exception e) {
+            try {
+                guard.restoreState(before);
+            } catch (Exception undo) {
+                SourbyLogger.warn("auto-updater: could not take back the apply record (" + undo.getMessage()
+                    + "); the next boot confirms or restores the unchanged old jar.");
+            }
+            SourbyLogger.warn("auto-updater: in-place swap failed (" + e.getMessage()
+                + ") — leaving auto_update/core.path for the bootstrap to swap on next boot.");
+            return SwapResult.SWAP_FAILED;
+        }
+        SourbyLogger.info("auto-updater: swapped " + launchJar + " -> " + tag
+            + " (previous build kept at " + prev + ").");
+        return SwapResult.SWAPPED;
     }
 
     /** The {@code -jar <path>} argument of THIS JVM (the slim paperclip the panel launches). */

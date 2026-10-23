@@ -26,10 +26,12 @@ import org.apache.logging.log4j.message.SimpleMessage;
 import org.junit.jupiter.api.Test;
 
 /**
- * The shipped {@code log4j2.xml} and the SourbyCraft log4j plugins it uses ({@code %scLogger},
- * {@code %ansiIfTerminal}, {@code RepeatedMessageFilter}). The plugins live in the
- * {@code log4jPlugins} source set, which is on the test runtime classpath only, so they are reached
- * the way log4j reaches them: through patterns and the plugin registry.
+ * The shipped {@code log4j2.xml} (paper feature patch 0016) and the SourbyCraft log4j plugins it
+ * uses ({@code %scLogger}, {@code %scLevel}, {@code %scHighlight}, {@code %scDim},
+ * {@code %ansiIfTerminal}, {@code %plainText}, {@code RepeatedMessageFilter}). The plugins live in
+ * the {@code log4jPlugins} source set, which is on the test runtime classpath only, so they are
+ * reached the way log4j reaches them: through patterns and the plugin registry. Tests never run on
+ * a terminal, so every rendered line here must be free of escape codes.
  */
 class StartupLogLayoutTest {
 
@@ -43,13 +45,13 @@ class StartupLogLayoutTest {
         }
     }
 
-    /** The defaultPattern of the appender named {@code appender}, XML-unescaped. */
-    private static String defaultPattern(final String appender) throws IOException {
+    /** The PatternLayout pattern of the appender named {@code appender}, XML-unescaped. */
+    private static String pattern(final String appender) throws IOException {
         final String xml = config();
         final int at = xml.indexOf("name=\"" + appender + "\"");
         assertTrue(at >= 0, appender + " appender missing");
-        final Matcher m = Pattern.compile("defaultPattern=\"([^\"]*)\"").matcher(xml);
-        assertTrue(m.find(at), appender + " has no LoggerNamePatternSelector defaultPattern");
+        final Matcher m = Pattern.compile("<PatternLayout pattern=\"([^\"]*)\"").matcher(xml);
+        assertTrue(m.find(at), appender + " has no PatternLayout pattern");
         return m.group(1).replace("&quot;", "\"").replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&");
     }
 
@@ -65,30 +67,85 @@ class StartupLogLayoutTest {
     }
 
     @Test
-    void scLoggerShortensQualifiedNamesAndKeepsShortOnes() {
+    void scLoggerFoldsInternalNamespacesOntoFiveTagsAndKeepsEveryOtherName() {
         final String[][] cases = {
-            {"ca.spottedleaf.dataconverter.minecraft.datatypes.MCTypeRegistry", "[DataConverter]"},
-            {"oshi.software.os.mac.MacOperatingSystem", "[OSHI]"},
-            {"dev.iyanz.sourbycraft.perf.AsyncPathProcessor", "[SourbyCraft/AsyncPathProcessor]"},
-            {"dev.iyanz.aurora.engine.GlobalConfiguration", "[Aurora/GlobalConfiguration]"},
-            {"io.papermc.paper.threadedregions.TickRegionScheduler$Inner", "[TickRegionScheduler]"},
-            {"org.bukkit.craftbukkit.CraftServer", "[CraftServer]"},
-            {"ca.spottedleaf.moonrise.common.util.MoonriseCommon", "[MoonriseCommon]"},
+            {"dev.iyanz.sourbycraft.perf.AsyncPathProcessor", "SourbyCraft"},
+            {"dev.iyanz.sourbycraft.Foo$Inner", "SourbyCraft"},
+            {"dev.iyanz.aurora.engine.GlobalConfiguration", "Aurora"},
+            {"io.papermc.paper.threadedregions.TickRegionScheduler$Inner", "Aurora"},
+            {"net.minecraft.server.MinecraftServer", "Minecraft"},
+            {"com.mojang.authlib.Foo", "Minecraft"},
+            {"Minecraft", "Minecraft"},
+            {"", "Minecraft"},
+            {"io.papermc.paper.plugin.manager.PluginInitializerManager", "Paper"},
+            {"ca.spottedleaf.dataconverter.minecraft.datatypes.MCTypeRegistry", "Paper"},
+            {"ca.spottedleaf.moonrise.common.util.MoonriseCommon", "Paper"},
+            {"org.bukkit.craftbukkit.CraftServer", "Paper"},
+            {"com.destroystokyo.paper.Foo", "Paper"},
+            {"org.spigotmc.WatchdogThread", "Paper"},
+            {"oshi.software.os.mac.MacOperatingSystem", "OSHI"},
+            // Classes that log by simple name (LogUtils.getClassLogger()) or a literal.
+            {"PluginInitializerManager", "Paper"},
+            {"MoonriseCommon", "Paper"},
+            {"ChunkHolderManager", "Paper"},
+            {"SpigotLibraryLoader", "Paper"},
+            {"TickRegions", "Aurora"},
+            {"TickRegionScheduler", "Aurora"},
+            {"WorldShutdownThread", "Aurora"},
+            {"ConfigurationProvider", "Aurora"},
+            {"FoliaAsyncScheduler", "Aurora"},
+            // Owned area loggers fold onto the brand tag.
+            {"SourbyCraft/AWF", "SourbyCraft"},
+            {"SourbyCraft/VirtualExecutor", "SourbyCraft"},
+            // The names Paper printed without a prefix (plugins bypassing the plugin logger).
+            {"com.sk89q.worldedit.WorldEdit", "WorldEdit"},
+            {"ru.tehkode.permissions.Foo$Bar", "Foo"},
             // Unknown names are a plugin's or library's identity: never shortened.
-            {"com.example.plugin.Main", "[com.example.plugin.Main]"},
-            {"My.Plugin", "[My.Plugin]"},
-            {"dev.iyanzfake.Other", "[dev.iyanzfake.Other]"},
-            {"SourbyCraft", "[SourbyCraft]"},
-            {"Aurora", "[Aurora]"},
-            {"TickRegions", "[TickRegions]"},
-            {"SourbyCraft/AWF", "[SourbyCraft/AWF]"},
-            {"", ""},
+            {"com.example.plugin.Main", "com.example.plugin.Main"},
+            {"My.Plugin", "My.Plugin"},
+            {"dev.iyanzfake.Other", "dev.iyanzfake.Other"},
+            {"SourbyCraft", "SourbyCraft"},
+            {"SourbyCraft-Test-Plugin", "SourbyCraft-Test-Plugin"},
+            {"Aurora", "Aurora"},
+            {"bootstrap", "bootstrap"},
+            {"spark", "spark"},
+            {"bStats", "bStats"},
         };
         for (final String[] c : cases) {
             assertEquals(c[1], render("%scLogger", c[0], Level.INFO, "m"), c[0]);
-            // Not a terminal in tests: the console option must not colour either.
-            assertEquals(c[1], render("%scLogger{console}", c[0], Level.INFO, "m"), c[0]);
+            assertEquals("[" + c[1] + "]", render("%scLogger{file}", c[0], Level.INFO, "m"), c[0]);
         }
+    }
+
+    @Test
+    void scLoggerConsolePadsToTheColumnAndNeverCutsALongTag() {
+        assertEquals("SourbyCraft ", render("%scLogger{console}", "dev.iyanz.sourbycraft.X", Level.INFO, "m"));
+        assertEquals("Aurora      ", render("%scLogger{console}", "Aurora", Level.INFO, "m"));
+        assertEquals("Minecraft   ", render("%scLogger{console}", "net.minecraft.A", Level.INFO, "m"));
+        assertEquals("Paper       ", render("%scLogger{console}", "io.papermc.paper.B", Level.INFO, "m"));
+        assertEquals("SourbyCraft-Test-Plugin", render("%scLogger{console}", "SourbyCraft-Test-Plugin", Level.INFO, "m"));
+        // Not a terminal in tests: the console option must not colour either.
+        assertFalse(render("%scLogger{console}", "dev.iyanz.sourbycraft.X", Level.INFO, "m").contains(ESC));
+    }
+
+    @Test
+    void scLevelIsAFiveCharacterColumn() {
+        assertEquals("INFO ", render("%scLevel", "x", Level.INFO, "m"));
+        assertEquals("WARN ", render("%scLevel{console}", "x", Level.WARN, "m"));
+        assertEquals("ERROR", render("%scLevel{console}", "x", Level.ERROR, "m"));
+        assertEquals("FATAL", render("%scLevel", "x", Level.FATAL, "m"));
+        assertEquals("DEBUG", render("%scLevel", "x", Level.DEBUG, "m"));
+        assertEquals("TRACE", render("%scLevel", "x", Level.TRACE, "m"));
+        assertEquals("NOTIC", render("%scLevel", "x", Level.forName("NOTICE", 350), "m"));
+        assertEquals("X    ", render("%scLevel", "x", Level.forName("X", 360), "m"));
+    }
+
+    @Test
+    void scHighlightAndScDimArePlainOffATerminal() {
+        assertEquals("boom", render("%scHighlight{%msg}", "x", Level.ERROR, "boom"));
+        assertEquals("boom", render("%scHighlight{%msg}", "x", Level.WARN, "boom"));
+        assertEquals("fine", render("%scHighlight{%msg}", "x", Level.INFO, "fine"));
+        assertEquals("12:00:00", render("%scDim{12:00:00}", "x", Level.INFO, "m"));
     }
 
     @Test
@@ -98,20 +155,40 @@ class StartupLogLayoutTest {
     }
 
     @Test
+    void theConsoleLineIsTimeLevelTagMessage() throws IOException {
+        final String line = render(pattern("TerminalConsole"), "dev.iyanz.aurora.engine.X", Level.INFO, "Autosave every 5m");
+        assertTrue(line.matches("(?s)\\d{2}:\\d{2}:\\d{2} INFO  Aurora       Autosave every 5m\\R"), line);
+        final String warn = render(pattern("TerminalConsole"), "", Level.WARN, "**** SERVER IS RUNNING IN OFFLINE/INSECURE MODE!");
+        assertTrue(warn.matches("(?s)\\d{2}:\\d{2}:\\d{2} WARN  Minecraft    \\*\\*\\*\\* SERVER IS RUNNING IN OFFLINE/INSECURE MODE!\\R"), warn);
+        final String plugin = render(pattern("TerminalConsole"), "SourbyCraft-Test-Plugin", Level.INFO, "SOURBY_METRICS_ONLOAD_OK state=WARMING");
+        assertTrue(plugin.contains(" INFO  SourbyCraft-Test-Plugin SOURBY_METRICS_ONLOAD_OK state=WARMING"), plugin);
+    }
+
+    @Test
+    void theFileLineKeepsTheShapeLogAnalysersParse() throws IOException {
+        final String line = render(pattern("File"), "dev.iyanz.aurora.engine.X", Level.INFO, "Autosave every 5m");
+        assertTrue(line.matches("(?s)\\[\\d{2}:\\d{2}:\\d{2}\\] \\[Server thread/INFO\\]: \\[Aurora\\] Autosave every 5m\\R"), line);
+        final String vanilla = render(pattern("File"), "net.minecraft.server.dedicated.DedicatedServer", Level.INFO, "Done (1.000s)! For help, type \"help\"");
+        assertTrue(vanilla.contains("]: [Minecraft] Done (1.000s)! For help, type \"help\""), vanilla);
+    }
+
+    @Test
     void fileAndConsolePatternsPrintNoQualifiedNameAndNoEscapes() throws IOException {
         final String xml = config();
         assertFalse(xml.contains("%style"), "%style writes escapes even when stdout is not a terminal");
         assertFalse(xml.contains("[%logger]"), "[%logger] prints fully qualified logger names");
+        assertFalse(xml.contains("%highlightError"), "the console palette is %scHighlight, level-aware and terminal-only");
+        assertFalse(xml.contains("LoggerNamePatternSelector"), "one pattern per appender; %scLogger decides the tag");
         for (final String appender : new String[] {"TerminalConsole", "File"}) {
-            final String pattern = defaultPattern(appender);
+            final String pattern = pattern(appender);
             assertTrue(pattern.contains("%scLogger"), appender + ": " + pattern);
             for (final String logger : new String[] {
                 "ca.spottedleaf.dataconverter.minecraft.datatypes.MCTypeRegistry",
                 "oshi.software.os.mac.MacOperatingSystem", "dev.iyanz.sourbycraft.Foo",
-                "dev.iyanz.aurora.engine.Bar", "SourbyCraft", "Aurora"}) {
+                "dev.iyanz.aurora.engine.Bar", "io.papermc.paper.threadedregions.Baz", "SourbyCraft", "Aurora", ""}) {
                 final String line = render(pattern, logger, Level.INFO, COLOURED);
                 assertFalse(line.contains(ESC), appender + " wrote an escape: " + line);
-                assertFalse(line.matches("(?s).*\\b(dev\\.iyanz|ca\\.spottedleaf|oshi)\\..*"),
+                assertFalse(line.matches("(?s).*\\b(dev\\.iyanz|dev\\.yanianz|ca\\.spottedleaf|io\\.papermc|net\\.minecraft|oshi)\\..*"),
                     appender + " wrote a qualified logger name: " + line);
                 assertTrue(line.contains("SourbyCraft / Version"), line);
             }
@@ -122,8 +199,9 @@ class StartupLogLayoutTest {
     void configuredRepeatFiltersCoverTheKnownStartupDuplicates() throws IOException {
         final String xml = config();
         assertTrue(xml.contains("<RepeatedMessageFilter logger=\"oshi.\" message=\"Unable to parse version\" level=\"WARN\""), xml);
-        // "Tick" (a logger-name prefix) rather than the scheduler class name: feature patches must not
-        // name region-scheduler internals (scripts/independence_policy.py SCHEDULER_SYMBOL).
+        // "Tick" (a logger-name prefix: the scheduler class logs by simple name through
+        // LogUtils.getClassLogger()) rather than the class name: feature patches must not name
+        // region-scheduler internals (scripts/independence_policy.py SCHEDULER_SYMBOL).
         assertTrue(xml.contains("<RepeatedMessageFilter logger=\"Tick\" message=\"Region tick threads: \" level=\"INFO\""), xml);
         assertFalse(xml.matches("(?s).*\\b(TickRegions|TickRegionScheduler|RegionizedServer|ThreadedRegionizer)\\b.*"),
             "log4j2.xml (paper feature 0016) names a region-scheduler symbol");
@@ -140,6 +218,68 @@ class StartupLogLayoutTest {
         assertNotNull(type, "RepeatedMessageFilter is not registered in Log4j2Plugins.dat");
         final Method factory = type.getPluginClass().getMethod("createFilter", String.class, String.class, String.class);
         return (Filter) factory.invoke(null, logger, message, level);
+    }
+
+    @Test
+    void theRegionTickThreadsFilterMatchesTheSchedulerClassLogger() throws Exception {
+        // The scheduler class logs by simple name; a boot prints the line at configuration load
+        // and again when the scheduler starts (seen on the 2026-10-22 test boot with a non-matching prefix).
+        final Filter filter = repeatFilter("Tick", "Region tick threads: ", "INFO");
+        final String logger = "TickRegions";
+        final String line = "Region tick threads: 8 (aurora.cpu.cores unset; using all 8 available processor(s))";
+        assertEquals(Filter.Result.NEUTRAL, filter.filter(event(logger, Level.INFO, line)));
+        assertEquals(Filter.Result.DENY, filter.filter(event(logger, Level.INFO, line)));
+    }
+
+    /** Walks up from the working directory to the tree that holds the materialized sources, or null. */
+    private static java.nio.file.Path materializedRoot() {
+        java.nio.file.Path dir = java.nio.file.Path.of("").toAbsolutePath();
+        while (dir != null) {
+            if (java.nio.file.Files.isDirectory(dir.resolve("paper-server/src/main/java"))
+                && java.nio.file.Files.isDirectory(dir.resolve("sourbycraft-server/src/minecraft/java"))) {
+                return dir;
+            }
+            dir = dir.getParent();
+        }
+        return null;
+    }
+
+    @Test
+    void everyInternalClassThatLogsByItsSimpleNameFoldsOntoPaperOrAurora() throws IOException {
+        // Mojang's LogUtils.getClassLogger() names the logger after the simple class name, which
+        // the converter cannot tell from a plugin's name; it folds a fixed table instead. This
+        // scans the materialized Paper, Minecraft and engine sources so the table cannot go stale
+        // silently after a paperRef bump.
+        final java.nio.file.Path root = materializedRoot();
+        org.junit.jupiter.api.Assumptions.assumeTrue(root != null, "materialized sources not present (applyAllPatches)");
+        final List<String> unfolded = new ArrayList<>();
+        final java.util.Map<String, Integer> scanned = new java.util.LinkedHashMap<>();
+        for (final String dir : new String[] {"paper-server/src/main/java", "sourbycraft-server/src/minecraft/java",
+            "sourbycraft-server/src/main/java/dev/iyanz/aurora"}) {
+            final java.nio.file.Path base = root.resolve(dir);
+            assertTrue(java.nio.file.Files.isDirectory(base), "scan root missing: " + base);
+            scanned.put(dir, 0);
+            try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.walk(base)) {
+                for (final java.nio.file.Path file : (Iterable<java.nio.file.Path>) files.filter(f -> f.toString().endsWith(".java"))::iterator) {
+                    if (!java.nio.file.Files.readString(file).contains("LogUtils.getClassLogger()")) {
+                        continue;
+                    }
+                    scanned.merge(dir, 1, Integer::sum);
+                    final String simple = file.getFileName().toString().replace(".java", "");
+                    final String tag = render("%scLogger", simple, Level.INFO, "m");
+                    if (!tag.equals("Paper") && !tag.equals("Aurora")) {
+                        unfolded.add(simple + " -> " + tag);
+                    }
+                }
+            }
+        }
+        // An empty result proves nothing unless declarations were found: the Paper and Minecraft
+        // trees each declare dozens of class loggers, so a zero count means the scan looked in the
+        // wrong place (moved tree, renamed factory), not that the table is complete.
+        assertTrue(scanned.get("paper-server/src/main/java") > 0
+            && scanned.get("sourbycraft-server/src/minecraft/java") > 0,
+            "no LogUtils.getClassLogger() declaration found in the materialized sources: " + scanned);
+        assertTrue(unfolded.isEmpty(), "add to SourbyCraftLoggerConverter.ENGINE_CLASSES or PAPER_CLASSES: " + unfolded);
     }
 
     @Test
@@ -236,7 +376,7 @@ class StartupLogLayoutTest {
         final IllegalStateException failure = new IllegalStateException(ESC + "[31mred failure" + ESC + "[0m");
         for (final String appender : new String[] {"TerminalConsole", "File"}) {
             final PatternLayout layout = PatternLayout.newBuilder()
-                .withPattern(defaultPattern(appender)).withConfiguration(new DefaultConfiguration()).build();
+                .withPattern(pattern(appender)).withConfiguration(new DefaultConfiguration()).build();
             final String line = layout.toSerializable(Log4jLogEvent.newBuilder().setLoggerName("SourbyCraft")
                 .setLevel(Level.ERROR).setThreadName("Server thread").setMessage(new SimpleMessage(COLOURED))
                 .setThrown(failure).build());

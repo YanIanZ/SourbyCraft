@@ -101,10 +101,10 @@ public class UpdateCommand extends Command {
     /** One line per outcome; public so the test can assert every outcome has one. */
     public static Component describe(SourbyUpdater.Outcome outcome) {
         return switch (outcome) {
-            case DISABLED   -> text("Updater is disabled (misc.auto_update.apply_mode=off).", SourbyCraftColors.DIM);
+            case DISABLED   -> text("Updater is disabled (updater.apply-mode=off).", SourbyCraftColors.DIM);
             case NO_RELEASE -> text("No matching release on this channel.", SourbyCraftColors.DIM);
             case UP_TO_DATE -> text("Already up to date (build " + BuildInfo.load().build() + ").", SourbyCraftColors.SUCCESS);
-            case NOTIFIED   -> text("Update available — see console (apply_mode=notify; use /update apply to install).", SourbyCraftColors.PRIMARY);
+            case NOTIFIED   -> text("Update available — see console (apply-mode=notify; use /update apply to install).", SourbyCraftColors.PRIMARY);
             case STAGED     -> text("Update staged — applies on the next restart.", SourbyCraftColors.SUCCESS);
             case APPLYING   -> text("Update downloaded — restart countdown started.", SourbyCraftColors.SUCCESS);
             case STAGE_FAILED -> text("Download/verify failed — see console.", SourbyCraftColors.DANGER);

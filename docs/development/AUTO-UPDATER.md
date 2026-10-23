@@ -1,4 +1,9 @@
-# Auto-updater (`misc.auto_update.*`)
+# Auto-updater (`[updater]` in `sourbycraft_config/sourbycraft_global_config.toml`)
+
+Key names below are the Build 49 ones (`updater.*`, kebab-case). The pre-49 names (`misc.auto_update.enabled`,
+`repo`, `apply_mode`, `check_times`, `check_interval_minutes`, `restart_mode`, `restart_delay_seconds`,
+`allow_prerelease`, `via_auto_update`) are rewritten once at boot by `config/ConfigMigration` (copy kept as
+`*.migrated`) and still read until Build 50 with one WARN each.
 
 State as of 2026-10-20 (security wave SEC-2, SEC-3, SEC-9, SEC-10; OBS-8 for `/update`).
 Code: `sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/update/`, command
@@ -9,13 +14,13 @@ column names the regression test that pins it.
 
 `SourbyUpdater` polls `https://api.github.com/repos/<repo>/releases` for a newer release **on the
 same channel** (REL/DEV/EXP, from this build's version suffix) and acts according to
-`apply_mode`:
+`apply-mode`:
 
-| `apply_mode` | Behaviour |
+| `apply-mode` | Behaviour |
 |---|---|
 | `notify` (**default** since this change; was `auto`) | log + operator banner only |
 | `stage` | download, verify, place in `auto_update/sourbycraft/`, write `auto_update/core.path` |
-| `auto` | `stage`, then swap the launch jar and restart after `restart_delay_seconds` |
+| `auto` | `stage`, then swap the launch jar and restart after `restart-delay-seconds` |
 | `off` | no checks scheduled |
 
 `/update` runs one check with the configured mode, `/update apply` forces one `auto` run,
@@ -23,7 +28,7 @@ same channel** (REL/DEV/EXP, from this build's version suffix) and acts accordin
 rollback hold.
 
 **Existing installs keep their stored value.** The TOML seed only writes keys that are absent
-(`SourbyCraftConfig.seed`), so a file created under the old default still says `apply_mode = "auto"`
+(`SourbyCraftConfig.seed`), so a file created under the old default still says `apply-mode = "auto"`
 until the operator changes it. New files get `notify`.
 
 ## Settings and reloadability
@@ -32,18 +37,18 @@ Verified against the consumers: `/sourbycraft reload` → `SourbyCraftConfig.app
 `AutoUpdateSettings.loadFromToml()` refreshes the static fields; `SourbyUpdater.check()` reads
 them on every check; `SourbyUpdater.start()` builds the schedule once at boot and is not re-run
 by reload. A key that is missing, blank or of the wrong type reads as the default in the table
-below, not as the previous live value: deleting `apply_mode` and reloading gives `notify`.
+below, not as the previous live value: deleting `apply-mode` and reloading gives `notify`.
 
 | Key | Default | Reloadability |
 |---|---|---|
 | `enabled` | `true` | RESTART_REQUIRED (decides whether `start()` runs) |
-| `repo` | `YanIanZ/SourbyCraft` | LIVE (next check) |
+| `repository` | `YanIanZ/SourbyCraft` | LIVE (next check) |
 | `channel` | `""` = from the build version | LIVE (next check) |
-| `apply_mode` | `notify` | LIVE between `notify`/`stage`/`auto` (next check); switching from or to `off` is RESTART_REQUIRED because `off` skips the schedule in `start()` |
-| `check_times`, `check_interval_minutes` | `["06:00"]`, `30` | RESTART_REQUIRED (schedule built in `start()`); `/update status` prints the interval the running schedule uses, plus `(pending restart: Nm)` when a reload changed it |
-| `restart_mode`, `restart_delay_seconds` | `auto`, `60` | LIVE (read when an apply is scheduled) |
-| `allow_prerelease` | `false` | LIVE (next check) |
-| `via_auto_update` | `true` | LIVE: recover missing reviewed Via pins; installed jars require restart |
+| `apply-mode` | `notify` | LIVE between `notify`/`stage`/`auto` (next check); switching from or to `off` is RESTART_REQUIRED because `off` skips the schedule in `start()` |
+| `check-times`, `check-interval-minutes` | `["06:00"]`, `30` | RESTART_REQUIRED (schedule built in `start()`); `/update status` prints the interval the running schedule uses, plus `(pending restart: Nm)` when a reload changed it |
+| `restart-mode`, `restart-delay-seconds` | `auto`, `60` | LIVE (read when an apply is scheduled) |
+| `allow-prerelease` | `false` | LIVE (next check) |
+| `via-auto-update` | `true` | LIVE: recover missing reviewed Via pins; installed jars require restart |
 
 ## Verification chain before a jar is staged
 
@@ -106,6 +111,27 @@ against the *running* launcher, so a later minimum bump needs a code change here
 `aReleaseWhoseLauncherSpeaksAnotherProtocolIsRefusedAndDeleted`, `aReleaseWithNoLauncherMetadataFailsClosed`
 and the others in the "SEC-4: launcher gate" section.
 
+## Hotfix releases (`v26.2-r<N>.<M>`)
+
+A hotfix publishes a fix for an already released build without the later 26.2 work. It is cut as a
+branch `hotfix/26.2-r<N>.<M>` from the tag `v26.2-r<N>`, carries only the fix commits plus
+`sourbyBuild=<N>.<M>` in `gradle.properties`, and is published by a push to that branch through the
+same CI jobs as a 26.2 release (build and tests, boot test, rebuild compare, signature, signed
+manifest, provenance attestation). `scripts/release_version.py --hotfix-branch` refuses the publish
+when the hotfix tag already exists, when `v26.2-r<N>` was never published, when `<M>` does not exceed
+an earlier hotfix of `<N>`, or when `sourbyBuild` does not equal `<N>.<M>`; any later push to the
+branch is a development build. The release notes list the commits since `v26.2-r<N>`, and a hotfix
+of an older build than the newest release is published without the "Latest" mark.
+
+Identity in the jar: `buildNumber`/`build` in `sourbycraft-build.properties` and the manifest
+`Implementation-Version` say `<N>.<M>` (`/ver`: `Build 48.1 — Aurora Nexus`); the manifest
+`Build-Number` stays the integer `<N>` because Paper parses it with `Integer.parseInt`
+(`ServerBuildInfo.buildNumber()` is an `OptionalInt`), so `Bukkit.getVersion()` still reads
+`26.2-<N>-...`. `scripts/verify_build_identity.py` checks both. The updater compares
+`BuildVersion` tokens: `48 < 48.1 < 49`, so a Build 48 server is offered `v26.2-r48.1`, a 48.1 server
+is offered `v26.2-r49`, and a 49 server is never offered `v26.2-r48.1` (`BuildVersion`,
+`SourbyUpdater.releaseVersionOf`).
+
 ## Same-Minecraft-version gate (SEC-3)
 
 A newer release whose tag core differs from the running Minecraft version (`v26.3-r50` on a 26.2
@@ -118,15 +144,24 @@ bare dev classpath) stages nothing. Test: `aReleaseForAnotherMinecraftVersionIsA
 ## Previous jar and rollback (SEC-3) — `UpdateRollbackGuard`
 
 Files, all next to the server: `<launch jar>.prev`, `auto_update/rollback.state` (a properties
-file with `phase`, `tag`, `launch`, `prev`, `applied_at`, `note`), plus the pre-existing
+file with `phase`, `tag`, `launch`, `prev`, `applied_at`, `note`, and optional `prev_sha256`), plus the pre-existing
 `auto_update/applied.tag`.
 
-Sequence for `apply_mode=auto` (or `/update apply`):
+Sequence for `apply-mode=auto` (or `/update apply`):
 
 1. **Apply** (`UpdateApplier.applyNow`): copy the launch jar to `<jar>.prev` (via a `.part` file,
    then an atomic rename). If that copy fails, the swap and the restart do **not** happen — an
-   update without a way back is not applied automatically. Then the staged jar is renamed over
-   the launch jar, `applied.tag` is written and the guard records `phase=APPLIED`.
+   update without a way back is not applied automatically. Next the guard records
+   `phase=APPLIED` with `prev_sha256`: the streamed SHA-256 of the completed `.prev`, stored as 64
+   lowercase hex characters. This record is written **before** the swap: if it cannot be written,
+   the swap and the restart do not happen either, so a restart never boots a new jar the guard
+   does not track. Only then is the staged jar renamed over the launch jar and `applied.tag`
+   written; if that rename fails, the state file is put back as it was before the apply (a crash
+   between record and rename leaves `APPLIED` over the unchanged old jar, which the next boot
+   confirms or restores to the same bytes). Copy, hash and state write run on the updater's Bukkit async scheduler callback
+   (the updater has no private executor), away from region/tick/main-server threads. The hash is
+   preserved on every later rewrite, including `BOOTING`, `OK`, `ROLLED_BACK` and `RESTORE_FAILED`.
+   This state contract applies to future applies; existing states without a hash keep their legacy behavior.
 2. **First boot on the new jar**: the `auto updater` stage of `SourbyCraftBootstrap.init()` (runs
    in `DedicatedServer.initServer`, before worlds load) calls `guard.onBoot()`, which sees
    `APPLIED`, records `phase=BOOTING` and registers a `ServerLoadEvent` listener. **Ready** is
@@ -134,19 +169,46 @@ Sequence for `apply_mode=auto` (or `/update apply`):
    immediately before `acceptConnections()` and shortly before the `Done (` line
    (`MinecraftServer.java` line ~665 in the materialized source). Reaching it records `phase=OK`.
 3. **Boot that finds `BOOTING`**: the previous boot after the apply ended before ready. The guard
-   copies `.prev` back over the launch jar (copy, not move; `.prev` stays), records
+   refuses a `.prev` that is a symbolic link (`RESTORE_FAILED`, jar files untouched). It copies
+   `.prev` once into a fresh temporary file beside the launch jar and, when `prev_sha256` is
+   present, hashes that temporary file, so the bytes renamed over the launch jar are exactly the
+   bytes verified even if `.prev` changes meanwhile. A mismatch (including an invalid/empty
+   recorded hash) refuses restore, logs an ERROR naming `.prev`, expected and actual hashes,
+   records `RESTORE_FAILED`, and leaves every jar file untouched. Comparison accepts uppercase
+   hex; every state write normalizes it to lowercase. With no field, the copy is restored
+   unverified, as before. This restore validation runs during the existing server boot guard, before
+   worlds/ticking; it is distinct from async apply hashing. With a matching hash, the guard
+   renames the verified temporary copy over the launch jar (`.prev` stays), records
    `phase=ROLLED_BACK` and the updater is **held**: every `check()` returns `Outcome.HELD` without
    touching the network, and the boot log prints a framed `UPDATE ROLLED BACK` block. If `.prev`
    is missing or the copy fails: `phase=RESTORE_FAILED`, also held, with a `ROLLBACK FAILED` block.
 4. **Every later boot** while held prints `AUTO-UPDATER HELD` and does nothing else.
 
-The guard boot step runs even when `enabled=false` or `apply_mode=off`
+The guard boot step runs even when `enabled=false` or `apply-mode=off`
 (`AutoUpdateSettings.startUpdater()` calls it first).
 
 Operator actions: `/update resume` (or delete `auto_update/rollback.state`) lifts the hold.
 `applied.tag` is left alone so the rolled-back tag is not offered again; delete it too to retry
-that exact release. Tests: `UpdateRollbackGuardTest` (eight scenarios, one `onBoot()` per
+that exact release. Tests: `UpdateRollbackGuardTest` (one `onBoot()` per
 simulated start), `SourbyUpdaterCheckTest.aRollbackHoldShortCircuitsTheCheckWithoutTouchingTheNetwork`.
+
+**Launcher-side recovery — RESTART_REQUIRED, version-gated (not shipped by the current pin).**
+`gradle.properties` currently pins `clipVersion=3.1.2`, below 3.1.4. SourbyClip 3.1.4's
+`BootRollbackGuard` can restore before loading server classes: an `APPLIED` boot records a
+`rollback.attempt` tied to tag/applied time; a later matching failed attempt, or `BOOTING`,
+triggers validation and restore. It checks paths and the previous jar; when `prev_sha256`
+exists it must be 64 hex characters and match `.prev`. Without it the launcher falls back to
+requiring a jar manifest with `Main-Class`. A hash mismatch refuses the launcher restore too.
+On success it preserves the hash, writes `ROLLED_BACK`, and sets the note to
+`launcher: the boot after applying <tag> did not reach the updater stage or ready; <prev> copied back over <launch>`.
+It logs `UPDATE ROLLED BACK by launcher` and exits **71** before loading suspect server code;
+the panel/service must start the restored jar on the next cycle. This differs from apply's
+clean shutdown exit **70**. The server holds **all** `ROLLED_BACK` states, including this exact
+launcher state, with the same reporting and no checks/reapply until `/update resume`;
+`applied.tag` still prevents re-offering that tag after resume. No note substring matching is used.
+The fixture reads the pin at runtime: >=3.1.4 requires launcher restore/71; older pins explicitly
+skip that expectation and check manual recovery. A broken launcher that cannot reach even its
+own guard still needs manual recovery. No launcher-version bump is included here.
 
 **Limits, stated plainly:**
 
@@ -157,18 +219,40 @@ simulated start), `SourbyUpdaterCheckTest.aRollbackHoldShortCircuitsTheCheckWith
   before ready, a host kill, or a crash unrelated to the update all look the same and trigger
   the restore. It is conservative, not a diagnosis; if the restored-from boot comes up fine the
   operator can `/update resume`, delete `applied.tag` and re-apply.
-- A crash before the SourbyCraft bootstrap stage (launcher, library download, class loading)
-  leaves `APPLIED`; the next boot treats itself as the first one after the apply, so the restore
-  happens one boot later than ideal.
+- A jar that never reaches the SourbyCraft bootstrap `auto updater` stage (launcher, library
+  download, class loading, early JVM abort) is **not restored automatically by the currently pinned launcher/server path**: the server restore code
+  is inside the jar that is booted, so every later boot dies the same way and `rollback.state`
+  stays `APPLIED`. Shown on a real boot with a release whose `Main-Class` exits 4 (fixture
+  scenario `dead-launcher`, 2026-10-22); the operator copies `<jar>.prev` over the launch jar by
+  hand. The launcher metadata gate (SEC-4) does not catch it: it reads declared metadata only.
 - The in-server swap is a POSIX rename. On Windows the rename fails on the file lock and the old
   `core.path` fallback path is left as before; the guard records nothing in that case.
-- Not boot-tested in this wave (agents may not start a server). The state machine is unit-tested;
-  the Bukkit glue (`ServerLoadEvent` registration, the loud log blocks) compiled and is read-verified
-  against `MinecraftServer.java` only.
+- Boot-tested locally on 2026-10-22 (apply → failed boot → restore → held, and the healthy apply
+  that is confirmed and kept) with the fixture in
+  [updater-rollback-fixture-2026-10-22.md](updater-rollback-fixture-2026-10-22.md): agent test server,
+  fake release server on loopback, throwaway signing key, no clients. Not run on a panel, on Linux
+  or Windows, against the real GitHub or with the real release key. The boot that performs the
+  restore still runs the new bytes, so a rollback costs two failed boots (observed: boots 2 and 3
+  of the fixture), not one.
+
+## Local fixture overrides (test only)
+
+Two JVM system properties exist for `scripts/updater_rollback_fixture.py` and
+`agent_testserver.py --auto-update`. Both are unset by default, are not config keys and cannot be
+set from the TOML; only whoever starts the JVM can use them. Class: `update/UpdateOverrides`.
+
+| Property | Effect |
+|---|---|
+| `sourbycraft.update.api-base=http://127.0.0.1:PORT` | the releases listing comes from `<base>/repos/<repo>/releases` instead of `https://api.github.com`. Only `http`/`https` on `127.0.0.1`, `localhost` or `[::1]`, no user info, path, query or fragment; a value that is set but refused makes `check()` return `DISABLED` and log an ERROR, it never falls back to GitHub. Every check logs a WARN while it is active. |
+| `sourbycraft.update.release-key-file=FILE` | PEM/base64 Ed25519 public key; turns jar-signature **and** signed-manifest enforcement on for a build that ships no `META-INF/sourbycraft-release.pub` (log: `release signatures ENFORCED (TEST key …)`). Ignored with an ERROR line when the build ships its own key, so it can only add enforcement. An unreadable, oversize (> 16 KiB) or unparseable file keeps enforcement on and failing closed. |
+
+Tests: `UpdateOverridesTest` (9). The harness refuses `--auto-update` unless both properties are given.
+Since Build 48 builds ship the key, so the fixture needs a jar built without it (procedure in
+[updater-rollback-fixture-2026-10-22.md](updater-rollback-fixture-2026-10-22.md#run-it)).
 
 ## Restart modes (SEC-9)
 
-`restart_mode`: `auto` = `exit` inside a Pterodactyl/Pelican container (`P_SERVER_UUID`), else
+`restart-mode`: `auto` = `exit` inside a Pterodactyl/Pelican container (`P_SERVER_UUID`), else
 `spigot`; `spigot` = `RestartCommand.restart()` (falls back to a clean stop); `stop` = clean stop;
 `exit` = clean stop **and exit code 70**.
 

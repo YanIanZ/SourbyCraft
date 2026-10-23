@@ -1,0 +1,19 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Thu, 22 Oct 2026 22:17:38 +0700
+Subject: [PATCH] SourbyCraft - World#getChunkAt from a thread that ticks
+ nothing waits for the chunk
+
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftWorld.java b/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
+index 1ff85a5457f210ba374f3a2ea1bfadd379ea939b..ed92d96188d43b1a5d01d89a5faee6220bdd5370 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
+@@ -371,6 +371,7 @@ public class CraftWorld extends CraftRegionAccessor implements World {
+ 
+     @Override
+     public Chunk getChunkAt(int x, int z) {
++        if (dev.iyanz.sourbycraft.guards.OffThreadChunkLoad.applies()) { warnUnsafeChunk("getting a faraway chunk", x, z); return new CraftChunk(dev.iyanz.sourbycraft.guards.OffThreadChunkLoad.fullChunk(this.getHandle(), x, z, ca.spottedleaf.concurrentutil.util.Priority.BLOCKING)); } // SourbyCraft - a thread that ticks nothing waits for the chunk (bounded), as on Paper; tick threads keep the refusal below
+         ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.getHandle(), x, z, "Async chunk retrieval"); // Folia - region threading
+         warnUnsafeChunk("getting a faraway chunk", x, z); // Paper
+         net.minecraft.world.level.chunk.LevelChunk chunk = (net.minecraft.world.level.chunk.LevelChunk) this.world.getChunk(x, z, ChunkStatus.FULL, true);

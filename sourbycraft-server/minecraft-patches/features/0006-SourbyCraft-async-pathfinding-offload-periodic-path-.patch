@@ -11,86 +11,33 @@ Phase 1a wiring (config-gated, default OFF). PathNavigation.recomputePath —
 the throttled ~20-tick path refresh that dominates repeated pathfinding for
 chasing/following mobs — now, when perf.ai.async-pathfinding is on AND the
 mob already has a live path to keep following, offloads the A* solve to the
-AsyncPathProcessor pool:
+AsyncPathProcessor pool.
 
-- On the region thread (sourbyKickAsyncRecompute): validate, fire the
-  EntityPathfindEvent, build an immutable SnapshotPathRegion, and create a
-  fresh thread-isolated PathFinder/NodeEvaluator.
-- Off-thread: run findPath against the snapshot (block reads immutable-safe;
-  the mob is only read, never structurally mutated, during a solve).
-- Apply the result back on the mob's own region thread via its
-  EntityScheduler; the mob keeps its current path until then, so there is no
-  idle gap and no AsyncPath placeholder / tick() guards are needed.
+The logic lives in dev.iyanz.sourbycraft.perf.AsyncPathRecompute (admission
+checks, EntityPathfindEvent, the immutable SnapshotPathRegion, submission and
+the owner-thread delivery with its staleness checks; the list of navigations
+and mobs whose solve writes to the mob and so stay synchronous). This patch
+keeps one delegating call behind the flag in recomputePath and the seams that
+must touch PathNavigation's private state: the pending flag, two lazy reads,
+the isolated PathFinder/NodeEvaluator and the write of an accepted result.
 
 Flag OFF (default) = byte-for-byte the vanilla synchronous recompute. First
 paths and direct moveTo stay synchronous; only the repeated recompute goes
 async. Degrades to sync on any failure. Needs a live mob-behaviour soak
 before default-on.
 
-Folded in the PathfindingContext guard that shipped separately as 0007: the
-regionized PathTypeCache lives on the current region's world data and is null on
-the async worker, so without it every off-region solve NPEs. The two are one
-feature and neither stands alone.
-
-diff --git a/net/minecraft/world/entity/Mob.java b/net/minecraft/world/entity/Mob.java
-index baee9c8e23027aac3217fe5af210c2b0413de990..ec9e3a5005c7f8ea2eed6817e55705359b2d9e50 100644
---- a/net/minecraft/world/entity/Mob.java
-+++ b/net/minecraft/world/entity/Mob.java
-@@ -205,6 +205,19 @@ public abstract class Mob extends LivingEntity implements Targeting, EquipmentUs
-     public void onPathfindingDone() {
-     }
- 
-+    // SourbyCraft start - async pathfinding
-+    /**
-+     * Whether this mob's pathfinding callbacks write to it. The evaluators call
-+     * {@link #onPathfindingStart} and {@link #onPathfindingDone} from inside the solve, so for a
-+     * solve running off the owning region thread an overriding mob would be mutating itself from
-+     * a thread that does not own it. {@code pathfindingMalus} is a plain EnumMap, so that is an
-+     * unsynchronised write, not merely a stale one.
-+     */
-+    public boolean sourbyPathfindingMutatesMob() {
-+        return false;
-+    }
-+    // SourbyCraft end - async pathfinding
-+
-     protected BodyRotationControl createBodyControl() {
-         return new BodyRotationControl(this);
-     }
-diff --git a/net/minecraft/world/entity/ai/navigation/AmphibiousPathNavigation.java b/net/minecraft/world/entity/ai/navigation/AmphibiousPathNavigation.java
-index 45942481a972f2308eae80f6f0f8b886e47016ec..e50157aa7469c654b06dd7d697993b294c2fb973 100644
---- a/net/minecraft/world/entity/ai/navigation/AmphibiousPathNavigation.java
-+++ b/net/minecraft/world/entity/ai/navigation/AmphibiousPathNavigation.java
-@@ -12,6 +12,16 @@ public class AmphibiousPathNavigation extends PathNavigation {
-         super(mob, level);
-     }
- 
-+    // SourbyCraft start - async pathfinding
-+    // AmphibiousNodeEvaluator.prepare writes WATER, WALKABLE and WATER_BORDER malus on the mob
-+    // and done() restores two of them, so a solve off the owning region thread both races the
-+    // region's own reads and can restore a value it never saved.
-+    @Override
-+    protected boolean sourbyAsyncSolveSafe() {
-+        return false;
-+    }
-+    // SourbyCraft end - async pathfinding
-+
-     @Override
-     protected PathFinder createPathFinder(final int maxVisitedNodes) {
-         this.nodeEvaluator = new AmphibiousNodeEvaluator(false);
 diff --git a/net/minecraft/world/entity/ai/navigation/PathNavigation.java b/net/minecraft/world/entity/ai/navigation/PathNavigation.java
-index 0b5fab274d9471472ffe81dead60e4d0906b0f31..1e61ab4e0aabdd4c140a0957dda48dd54a0e9536 100644
+index 0b5fab274d9471472ffe81dead60e4d0906b0f31..0461856c593da513a7e9796160d4f8050fb24ba3 100644
 --- a/net/minecraft/world/entity/ai/navigation/PathNavigation.java
 +++ b/net/minecraft/world/entity/ai/navigation/PathNavigation.java
-@@ -100,6 +100,17 @@ public abstract class PathNavigation {
+@@ -100,6 +100,15 @@ public abstract class PathNavigation {
          if (this.tick - this.timeLastRecompute <= 20L || !this.canUpdatePath()) { // Folia - region threading
              this.hasDelayedRecomputation = true;
          } else if (this.targetPos != null) {
 +            // SourbyCraft start - async pathfinding: offload the periodic recompute off the region thread
-+            // (only when the mob already has a live path to keep following meanwhile). See sourbyKickAsyncRecompute.
++            // (perf/AsyncPathRecompute; flag perf.ai.async-pathfinding, default off)
 +            if (dev.iyanz.sourbycraft.perf.AsyncPathProcessor.isEnabled()
-+                && this.path != null && !this.path.isDone()
-+                && !this.sourbyAsyncPathPending
-+                && this.sourbyKickAsyncRecompute(this.targetPos, this.reachRange)) {
++                && dev.iyanz.sourbycraft.perf.AsyncPathRecompute.offload(this, this.mob, this.level, this.targetPos, this.reachRange)) {
 +                this.timeLastRecompute = this.tick; // Folia - region threading
 +                this.hasDelayedRecomputation = false;
 +                return;
@@ -99,180 +46,45 @@ index 0b5fab274d9471472ffe81dead60e4d0906b0f31..1e61ab4e0aabdd4c140a0957dda48dd5
              this.path = null;
              this.path = this.createPath(this.targetPos, this.reachRange);
              this.timeLastRecompute = this.tick; // Folia - region threading
-@@ -107,6 +118,139 @@ public abstract class PathNavigation {
+@@ -107,6 +116,41 @@ public abstract class PathNavigation {
          }
      }
  
-+    // SourbyCraft start - async pathfinding
-+    private volatile boolean sourbyAsyncPathPending = false;
++    // SourbyCraft start - async pathfinding: the navigation's side of perf/AsyncPathRecompute, which reads
++    // and writes these on the owning region thread only (the flag also from the delivery's release).
++    public volatile boolean sourbyAsyncPathPending = false;
 +
-+    /**
-+     * Recompute the path off the region thread. The setup — target validation, {@code
-+     * EntityPathfindEvent}, the immutable {@link dev.iyanz.aurora.level.SnapshotPathRegion} and a
-+     * fresh thread-isolated {@code PathFinder}/{@code NodeEvaluator} — all happens HERE on the region
-+     * thread. Only the A* solve runs on the worker pool, against the immutable snapshot (block reads
-+     * are safe; the mob is only read, never structurally mutated, during a solve). The mob keeps its
-+     * current path until the result lands, which is applied back on the mob's own region thread via
-+     * its {@code EntityScheduler}. Returns {@code false} (caller falls back to the vanilla sync path)
-+     * if the mob can't path right now or the event cancelled every target.
-+     */
-+    /**
-+     * Whether this navigation's node evaluator only reads the mob during a solve.
-+     *
-+     * <p>An evaluator that writes to the mob cannot run off the owning region thread, so a
-+     * navigation using one refuses the offload and keeps the synchronous path.</p>
-+     */
-+    protected boolean sourbyAsyncSolveSafe() {
-+        return true;
++    public final float sourbyMaxPathLength() {
++        return this.getMaxPathLength();
++    }
++
++    public final float sourbyVisitedNodesMultiplier() {
++        return this.maxVisitedNodesMultiplier;
 +    }
 +
 +    /**
 +     * A {@code PathFinder} with its own {@code NodeEvaluator} for one off-thread solve.
-+     *
-+     * <p>{@link #createPathFinder} assigns the evaluator it creates to {@code this.nodeEvaluator}
-+     * as a side effect. That field is the live one: {@code setCanOpenDoors}, {@code canFloat} and
-+     * the other flag accessors read and write it, and {@code this.pathFinder} solves with it. So
-+     * the live evaluator is put back, and the new one takes over the live door, float and fence
-+     * flags, which a fresh evaluator would otherwise have at their defaults.</p>
++     * {@link #createPathFinder} replaces {@code this.nodeEvaluator} as a side effect; the live one is
++     * put back (see {@code AsyncPathRecompute.restoreLiveEvaluator}).
 +     */
-+    public final net.minecraft.world.level.pathfinder.PathFinder sourbyIsolatedPathFinder(final int maxVisitedNodes) {
-+        final net.minecraft.world.level.pathfinder.NodeEvaluator live = this.nodeEvaluator;
-+        final net.minecraft.world.level.pathfinder.PathFinder solver;
++    public final PathFinder sourbyIsolatedPathFinder(final int maxVisitedNodes) {
++        final NodeEvaluator live = this.nodeEvaluator;
 +        try {
-+            solver = this.createPathFinder(maxVisitedNodes);
++            return this.createPathFinder(maxVisitedNodes);
 +        } finally {
-+            final net.minecraft.world.level.pathfinder.NodeEvaluator isolated = this.nodeEvaluator;
-+            this.nodeEvaluator = live;
-+            if (isolated != null && live != null && isolated != live) {
-+                isolated.setCanPassDoors(live.canPassDoors());
-+                isolated.setCanOpenDoors(live.canOpenDoors());
-+                isolated.setCanFloat(live.canFloat());
-+                isolated.setCanWalkOverFences(live.canWalkOverFences());
-+            }
++            this.nodeEvaluator = dev.iyanz.sourbycraft.perf.AsyncPathRecompute.restoreLiveEvaluator(live, this.nodeEvaluator);
 +        }
-+        return solver;
 +    }
 +
-+    private boolean sourbyKickAsyncRecompute(final net.minecraft.core.BlockPos targetPos, final int reachRange) {
-+        // The solve runs on a worker, so anything it touches on the mob is touched from a thread
-+        // that does not own the entity. Reads of position and bounding box are tolerable -- they
-+        // are the same kind of staleness a path always races against. Writes are not:
-+        // Mob.pathfindingMalus is a plain EnumMap, and AmphibiousNodeEvaluator's save-and-restore
-+        // around a solve can lose the original cost permanently if the owning region starts its
-+        // own solve in between. Refuse those, and fall back to the synchronous recompute.
-+        if (!this.sourbyAsyncSolveSafe() || this.mob.sourbyPathfindingMutatesMob()) {
-+            return false;
-+        }
-+        if (this.mob.getY() < this.level.getMinY() || !this.canUpdatePath()) {
-+            return false;
-+        }
-+        // Ask the pool for room before firing the event and paying for the snapshot: a declined
-+        // offload leaves the caller's synchronous recompute to run this slot, so a full pool
-+        // never costs a snapshot and never leaves the mob on its stale path.
-+        if (!dev.iyanz.sourbycraft.perf.AsyncPathProcessor.hasCapacity()) {
-+            return false;
-+        }
-+        // EntityPathfindEvent must fire on the region thread (Bukkit event), same as createPath.
-+        if (!this.mob.level().getWorldBorder().isWithinBounds(targetPos)
-+            || !new com.destroystokyo.paper.event.entity.EntityPathfindEvent(this.mob.getBukkitEntity(),
-+                org.bukkit.craftbukkit.util.CraftLocation.toBukkit(targetPos, this.mob.level()), null).callEvent()) {
-+            return false;
-+        }
-+        final java.util.Set<net.minecraft.core.BlockPos> targets = com.google.common.collect.ImmutableSet.of(targetPos);
-+        final float maxPathLength = this.getMaxPathLength();
-+        final net.minecraft.core.BlockPos fromPos = this.mob.blockPosition();
-+        final int radius = (int) (maxPathLength + 8.0F);
-+        final dev.iyanz.aurora.level.SnapshotPathRegion snapshot = new dev.iyanz.aurora.level.SnapshotPathRegion(
-+            this.level, fromPos.offset(-radius, -radius, -radius), fromPos.offset(radius, radius, radius));
-+        // A fresh solver per solve — PathFinder/NodeEvaluator hold mutable A* buffers and MUST NOT be
-+        // shared with the region thread's this.pathFinder.
-+        final net.minecraft.world.level.pathfinder.PathFinder solver =
-+            this.sourbyIsolatedPathFinder(net.minecraft.util.Mth.floor(maxPathLength * 16.0F));
-+        final float mult = this.maxVisitedNodesMultiplier;
-+        final net.minecraft.world.entity.Mob mob = this.mob;
-+        // The path the mob is following right now, as this solve's validity token. Every event
-+        // that invalidates the result replaces this object: the synchronous recompute below
-+        // (which still runs while a solve is in flight, because the pending flag only skips the
-+        // offload), moveTo assigning or clearing a path, and stop(). targetPos and reachRange
-+        // only change inside createPath, whose caller assigns this.path in the same statement,
-+        // so a retarget shows up here too. No epoch field is needed to see any of it.
-+        final net.minecraft.world.level.pathfinder.Path requested = this.path;
-+        this.sourbyAsyncPathPending = true;
-+        final java.util.concurrent.CompletableFuture<net.minecraft.world.level.pathfinder.Path> solving =
-+            dev.iyanz.sourbycraft.perf.AsyncPathProcessor
-+                .trySubmit(() -> solver.findPath(snapshot, mob, targets, maxPathLength, reachRange, mult));
-+        if (solving == null) {
-+            // Another region filled the pool since hasCapacity(): run the synchronous recompute
-+            // now instead of keeping the stale path. Rare; the pathfind event then fires twice.
-+            this.sourbyAsyncPathPending = false;
-+            return false;
-+        }
-+        solving.whenComplete((path, err) -> dev.iyanz.sourbycraft.perf.AsyncPathCompletion.deliver(
-+                dev.iyanz.sourbycraft.execution.RegionOwnerHandoff.forEntity(mob),
-+                owner -> {
-+                    // The region hands back the entity as it is now. A dimension transfer
-+                    // replaces the underlying entity, so a solve computed for the old one must
-+                    // not be applied: this navigation belongs to the entity that was replaced,
-+                    // and its level, position and target are no longer the live ones.
-+                    if (!dev.iyanz.sourbycraft.perf.AsyncPathValidity.sameSubject(owner, mob)) {
-+                        return;
-+                    }
-+                    // Something replaced the path while this solve was running, so the result
-+                    // describes a route the navigation is no longer taking. Applying it would
-+                    // overwrite a newer synchronous recompute, undo a retarget, or resurrect a
-+                    // navigation that was stopped.
-+                    if (!dev.iyanz.sourbycraft.perf.AsyncPathValidity.stillRequested(this.path, requested)) {
-+                        return;
-+                    }
-+                    if (path != null && path.getTarget() != null) {
-+                        this.path = path;
-+                        this.targetPos = path.getTarget();
-+                        this.reachRange = reachRange;
-+                        this.resetStuckTimeout();
-+                    }
-+                },
-+                () -> this.sourbyAsyncPathPending = false));
-+        return true;
++    /** An async result AsyncPathRecompute accepted, on the owning region thread. */
++    public final void sourbyApplyAsyncPath(final Path path, final int reachRange) {
++        this.path = path;
++        this.targetPos = path.getTarget();
++        this.reachRange = reachRange;
++        this.resetStuckTimeout();
 +    }
 +    // SourbyCraft end - async pathfinding
 +
      public final @Nullable Path createPath(final double x, final double y, final double z, final int reachRange) {
          return this.createPath(BlockPos.containing(x, y, z), reachRange);
      }
-diff --git a/net/minecraft/world/entity/animal/sniffer/Sniffer.java b/net/minecraft/world/entity/animal/sniffer/Sniffer.java
-index 427dd88bd63679314462d5ef2e9df4803e93b47b..9b55b7a72a2e8cca273d5304d656e414bfa0722f 100644
---- a/net/minecraft/world/entity/animal/sniffer/Sniffer.java
-+++ b/net/minecraft/world/entity/animal/sniffer/Sniffer.java
-@@ -113,6 +113,13 @@ public class Sniffer extends Animal {
-         this.setPathfindingMalus(PathType.WATER, -1.0F);
-     }
- 
-+    // SourbyCraft start - async pathfinding: both callbacks above write pathfindingMalus
-+    @Override
-+    public boolean sourbyPathfindingMutatesMob() {
-+        return true;
-+    }
-+    // SourbyCraft end - async pathfinding
-+
-     @Override
-     public int getBabyStartAge() {
-         return -48000;
-diff --git a/net/minecraft/world/level/pathfinder/PathfindingContext.java b/net/minecraft/world/level/pathfinder/PathfindingContext.java
-index 64e1a34de133beccb90486f247e7e74d6535941f..e01bb2b30552a6bb8f35d780e235cec6cb969fa6 100644
---- a/net/minecraft/world/level/pathfinder/PathfindingContext.java
-+++ b/net/minecraft/world/level/pathfinder/PathfindingContext.java
-@@ -15,7 +15,13 @@ public class PathfindingContext {
- 
-     public PathfindingContext(final CollisionGetter level, final Mob mob) {
-         this.level = level;
--        if (mob.level() instanceof ServerLevel serverLevel) {
-+        // SourbyCraft - async pathfinding: the regionized PathTypeCache lives on the CURRENT region's
-+        // world data (ServerLevel.getPathTypeCache -> getCurrentWorldData().pathTypesByPosCache), which
-+        // is null on the async-pathfinding worker thread (not a region tick thread). Only use the shared
-+        // cache when actually running on a region thread; off-region, fall back to no cache — the static
-+        // path-type computer in getPathTypeFromState is correct, just uncached for that one solve.
-+        if (mob.level() instanceof ServerLevel serverLevel
-+            && io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegionizedWorldData() != null) {
-             this.cache = serverLevel.getPathTypeCache();
-         } else {
-             this.cache = null;

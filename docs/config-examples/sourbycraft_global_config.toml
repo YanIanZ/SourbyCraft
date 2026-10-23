@@ -1,0 +1,73 @@
+# sourbycraft_config/sourbycraft_global_config.toml — Build 49 layout, every key at its default.
+# A fresh server writes this file (comments included) at first boot. An older file is migrated to
+# this layout once, with the previous file kept beside it as sourbycraft_global_config.toml.migrated.
+# LIVE = /sourbycraft reload applies it; RESTART_REQUIRED = read once at startup.
+# Not here: Aurora services (aurora.toml), the region engine (config/aurora-server.yml,
+# config/aurora-worlds.yml), network limits (sourbycraft-security.yml). Reference: docs/AURORA-CONFIG.md.
+
+[console]
+# RESTART_REQUIRED. Character set of the startup lines SourbyCraft builds (section rules, launch and ready
+# lines): auto = rich on an interactive terminal, plain otherwise; plain = ASCII dashes and hyphens;
+# rich = Unicode box drawing and em dash. -Dsourbycraft.console=plain|rich|auto overrides this.
+# Not colour: the console colours time, level and tag only when the terminal supports ANSI
+# (-Dterminal.ansi=false turns that off); redirected output and logs/latest.log are never coloured.
+style = "auto"
+# LIVE. Rows per page of /plugins and /pl, clamped to 1-40.
+plugins-page-size = 12
+# RESTART_REQUIRED. Print the GC / JVM-flag advisory at startup.
+gc-advisor = true
+
+[players]
+# RESTART_REQUIRED when edited here; /maxp <n> changes the live count and writes this key.
+# Re-applied at boot so it wins over server.properties; 0 = use server.properties.
+max-players = 0
+# RESTART_REQUIRED. Let holders of sourbycraft.maxplayers.bypass (and operators) join a full server.
+# true registers a PlayerLoginEvent listener that slows every join; false keeps the fast join path.
+full-server-bypass = false
+
+[messages]
+# Each key is a LIST of MiniMessage/hex variants; one is picked at random per event. <player> = the
+# player's name in join/leave. [] (empty list) disables an optional message; remove a key to restore
+# the built-in variants. The built-in variants are seeded here at first boot (omitted in this example).
+# server-full: kick line on a full server (LIVE). motd: RESTART_REQUIRED, one variant per boot.
+# join / leave: LIVE.
+# server-full = [ "...", "..." ]
+# motd = [ "line1\nline2", "..." ]
+# join = [ "<#77DD77><player> joined</#77DD77>" ]
+# leave = [ "<gray><player> left</gray>" ]
+
+[plugins.viaversion]
+# RESTART_REQUIRED (read before the plugin scan). Install the pinned, SHA-256-verified ViaVersion and
+# ViaBackwards jars and their default configs. false = manage Via yourself (jars this server installed
+# earlier are quarantined as *.jar.disabled; operator-installed jars are left alone).
+auto-provision = true
+
+[plugins.protocollib]
+# RESTART_REQUIRED (read before the plugin scan). Install the pinned official ProtocolLib jar
+# (build-data/protocollib-pin.json). Existing operator jars and configs are preserved.
+auto-provision = true
+
+[updater]
+# SourbyCraft auto-updater (docs/development/AUTO-UPDATER.md): checks GitHub Releases on this build's channel.
+# RESTART_REQUIRED. Check at all.
+enabled = true
+# LIVE (next check). GitHub repository, owner/name.
+repository = "YanIanZ/SourbyCraft"
+# LIVE (next check). REL, DEV or EXP; blank = this build's own channel.
+channel = ""
+# LIVE (next check). notify = log and tell operators; stage = download, verify, swap at the next restart;
+# auto = download, verify, swap the launch jar and self-restart (keeps <jar>.prev, restores it if the next
+# boot fails); off = no checks. Switching from or to off is RESTART_REQUIRED (the schedule is built once).
+apply-mode = "notify"
+# RESTART_REQUIRED. Daily check times, HH:mm, server-local time zone.
+check-times = ["06:00"]
+# RESTART_REQUIRED. Also poll every N minutes; 0 = only the daily check-times.
+check-interval-minutes = 30
+# LIVE (next check). How apply-mode = auto restarts: auto (Pterodactyl -> exit 70, else spigot), spigot, exit or stop.
+restart-mode = "auto"
+# LIVE (next check). Warning window broadcast before an automatic restart; at least 5.
+restart-delay-seconds = 60
+# LIVE (next check). Whether GitHub prereleases on the tracked channel are eligible.
+allow-prerelease = false
+# LIVE (next check). Also keep the auto-provisioned ViaVersion and ViaBackwards current on the same cadence.
+via-auto-update = true

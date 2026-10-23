@@ -1,0 +1,90 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Thu, 22 Oct 2026 05:55:41 +0700
+Subject: [PATCH] SourbyCraft - region tick metrics lifecycle
+
+
+diff --git a/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java b/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java
+index b325336584a632ab4ffffb82bb4fc58c47cac941..8225af108c22c01a0e64e436f99f4b5d5f2d1eed 100644
+--- a/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java
++++ b/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java
+@@ -203,6 +203,7 @@ public class WorldShutdownThread extends RegionShutdownThread {
+ 
+         LOGGER.info("Saved {} level data", getWorldName());
+ 
++        dev.iyanz.sourbycraft.perf.RegionTickMetricsHolder.retireWorld(this.level.sourbyTelemetryWorldId, System.nanoTime());
+         RegionizedServer.getInstance().worlds.remove(this.level);
+         MinecraftServer.getServer().removeLevel(this.level);
+         MinecraftServer.getServer().server.worlds.remove(this.level.getWorld().getName().toLowerCase(java.util.Locale.ROOT));
+diff --git a/io/papermc/paper/threadedregions/TickRegions.java b/io/papermc/paper/threadedregions/TickRegions.java
+index 04b2ec9a0d43ec8a51b8acf2cb2ef0740765af25..98214ae8895244ec9e77bb22052c3debbae7aa1a 100644
+--- a/io/papermc/paper/threadedregions/TickRegions.java
++++ b/io/papermc/paper/threadedregions/TickRegions.java
+@@ -136,6 +136,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+ 
+     @Override
+     public void onRegionDestroy(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
++        region.getData().tickHandle.sourbyTickMetrics.retireDestroyed(System.nanoTime());
+         // nothing for now
+         dev.iyanz.aurora.engine.threadedregions.SchedulerUtil.getHandle().onRegionDestroy(region); // Canvas - region profiler
+         // Canvas start - region threading
+@@ -156,6 +157,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+     @Override
+     public void onRegionActive(final ThreadedRegionizer.@NonNull ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
+         final TickRegionData data = region.getData();
++        data.tickHandle.sourbyTickMetrics.activate(data.world.sourbyTelemetryWorldId, data.id, System.nanoTime());
+ 
+         data.tickHandle.checkInitialSchedule();
+         scheduler.scheduleRegion(data.tickHandle);
+@@ -166,6 +168,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+         final TickRegionData data = region.getData();
+ 
+         scheduler.descheduleRegion(data.tickHandle);
++        data.tickHandle.sourbyTickMetrics.retireInactive(System.nanoTime());
+         // we call inactive here, since unpinning needs to occur before copying, or else this will cause issues
+         dev.iyanz.aurora.engine.threadedregions.SchedulerUtil.getHandle().onRegionInactive(region); // Canvas - region profiler
+         // old handle cannot be scheduled anymore, copy to a new handle
+@@ -175,13 +178,13 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+     @Override
+     public void preMerge(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> from,
+                          final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> into) {
+-
++        from.getData().tickHandle.sourbyTickMetrics.retireMerged(System.nanoTime());
+     }
+ 
+     @Override
+     public void preSplit(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> from,
+                          final java.util.List<ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData>> into) {
+-
++        from.getData().tickHandle.sourbyTickMetrics.retireSplit(System.nanoTime());
+     }
+ 
+     public static final class TickRegionSectionData implements ThreadedRegionizer.ThreadedRegionSectionData {}
+@@ -551,6 +554,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+         public void mergeInto(final ThreadedRegionizer.@NonNull ThreadedRegion<TickRegionData, TickRegionSectionData> into) {
+             // note: merge target is always a region being released from ticking
+             final TickRegionData data = into.getData();
++            data.tickHandle.sourbyTickMetrics.rotateForMerge(data.world.sourbyTelemetryWorldId, data.id, System.nanoTime());
+             final long currentTickTo = data.getCurrentTick();
+             final long currentTickFrom = this.getCurrentTick();
+ 
+@@ -599,6 +603,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+ 
+         @NonNull
+         private ConcreteRegionTickHandle copy() {
++            // The constructor creates a fresh telemetry owner; only scheduling state is copied.
+             final ConcreteRegionTickHandle ret = new ConcreteRegionTickHandle(this.region, this.getScheduledStart());
+ 
+             ret.currentTick = this.currentTick;
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+index f7be9043d724f794ed82ef8d234585f9040e3941..e69b72fac61f6adbffbe0d6c59b470a2dca1c32f 100644
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -190,6 +190,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+     private static final int EMPTY_TIME_NO_TICK = 300;
+     private static final int MAX_SCHEDULED_TICKS_PER_TICK = 65536;
+     private static final AtomicInteger ENTITY_COUNTER = new AtomicInteger();
++    public final long sourbyTelemetryWorldId = dev.iyanz.sourbycraft.perf.RegionTickMetricsHolder.newWorldId();
+     private final List<ServerPlayer> players = new java.util.concurrent.CopyOnWriteArrayList<>(); // Folia - region threading
+     private final ServerChunkCache chunkSource;
+     private final MinecraftServer server;

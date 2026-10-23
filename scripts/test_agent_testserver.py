@@ -24,10 +24,13 @@ FAKE_SERVER = textwrap.dedent("""
     print("Starting fake server", flush=True)
     if mode == "no-done":
         time.sleep(600)
+    if mode == "die":
+        print("SOURBY_UPDATER_FIXTURE_FAIL fake: dying before ready", flush=True)
+        sys.exit(3)
     if mode == "bind-fail":
         print("**** FAILED TO BIND TO PORT!", flush=True)
         sys.exit(1)
-    print("[Aurora Engine] COMPLETE | 3/3 stages completed without error | 0 failed | 5ms", flush=True)
+    print("[12:00:00 INFO]: [Aurora] Engine COMPLETE | 3/3 stages ok | 0 failed | 5 ms", flush=True)
     print('[12:00:00 INFO]: Done (0.42s)! For help, type "help"', flush=True)
     if mode == "crash":
         time.sleep(2.5)
@@ -375,6 +378,141 @@ class HarnessCase(TempCase):
 
     def run_json(self, name="t"):
         return json.loads((self.root / "servers" / name / "run.json").read_text())
+
+
+class AutoUpdateTomlTest(TempCase):
+    KEY = "sourbycraft.update.release-key-file"
+    API = "sourbycraft.update.api-base"
+
+    def props(self, api="http://127.0.0.1:8123", key=True):
+        key_file = self.root / "release.pub"
+        key_file.write_text("pub")
+        props = []
+        if api:
+            props.append(f"{self.API}={api}")
+        if key:
+            props.append(f"{self.KEY}={key_file}")
+        return props
+
+    def test_the_table_replaces_the_disabled_default_and_keeps_signatures_on(self):
+        text = ats.auto_update_toml({"apply_mode": "auto", "restart_mode": "exit",
+                                     "restart_delay_seconds": 5, "allow_prerelease": False}, self.props())
+        self.assertEqual(text.splitlines(), [
+            "[updater]", "enabled=true", "via-auto-update=false", 'apply-mode="auto"',
+            'restart-mode="exit"', "restart-delay-seconds=5", "allow-prerelease=false"])
+        self.assertIn("[updater]\nenabled=false\n", ats.GLOBAL_TOML)
+        self.assertIn('repository="o/r"', ats.auto_update_toml({"repo": "o/r"}, self.props()))
+
+    def test_it_is_refused_without_a_loopback_endpoint_or_without_a_key_file(self):
+        for api in (None, "https://api.github.com", "http://example.com:80", "http://127.0.0.1.evil.com:80",
+                    "http://localhost.evil.com:80", "http://127.0.0.1", "ftp://127.0.0.1:21"):
+            with self.assertRaisesRegex(ats.HarnessError, "loopback"):
+                ats.auto_update_toml({"apply_mode": "auto"}, self.props(api=api))
+        with self.assertRaisesRegex(ats.HarnessError, "signature verification stays on"):
+            ats.auto_update_toml({"apply_mode": "auto"}, self.props(key=False))
+        with self.assertRaisesRegex(ats.HarnessError, "signature verification stays on"):
+            ats.auto_update_toml({"apply_mode": "auto"}, [f"{self.API}=http://127.0.0.1:1",
+                                                          f"{self.KEY}={self.root / 'missing.pub'}"])
+
+    def test_unknown_keys_and_wrong_types_are_refused(self):
+        for settings in ({"enabled": False}, {"nope": 1}, {"restart_delay_seconds": "5"},
+                         {"apply_mode": 3}, {"allow_prerelease": 1}, {"restart_delay_seconds": True}):
+            with self.assertRaises(ats.HarnessError, msg=settings):
+                ats.auto_update_toml(settings, self.props())
+
+    def test_values_are_quoted_as_toml_strings(self):
+        self.assertEqual(ats.toml_value('a"b\\c'), '"a\\"b\\\\c"')
+        self.assertEqual(ats._auto_update_arg([["restart_delay_seconds", "5"], ["apply_mode", "auto"],
+                                               ["allow_prerelease", "false"]]),
+                         {"restart_delay_seconds": 5, "apply_mode": "auto", "allow_prerelease": False})
+        self.assertIsNone(ats._auto_update_arg([]))
+
+    def test_start_refuses_before_creating_anything(self):
+        harness = ats.Harness(base=self.root / "servers", lock_path=self.root / "ts.lock",
+                              jar=self.root / "x.jar", min_free=0, java=lambda: (sys.executable, "fake"),
+                              git=fake_git, hardware=no_hardware, memory=lambda: 8 * 1024 ** 3,
+                              gradle_builds=lambda: 0)
+        with self.assertRaisesRegex(ats.HarnessError, "loopback"):
+            harness.start("u", auto_update={"apply_mode": "auto"}, jvm_properties=())
+        self.assertFalse((self.root / "servers" / "u").exists())
+        self.assertFalse((self.root / "ts.lock").exists())
+
+    def test_auto_update_and_a_global_toml_file_are_refused_together(self):
+        harness = ats.Harness(base=self.root / "servers", lock_path=self.root / "ts.lock",
+                              jar=self.root / "x.jar", min_free=0, java=lambda: (sys.executable, "fake"),
+                              git=fake_git, hardware=no_hardware, memory=lambda: 8 * 1024 ** 3,
+                              gradle_builds=lambda: 0)
+        toml = self.root / "global.toml"
+        toml.write_text("[updater]\nenabled = false\n")
+        with self.assertRaisesRegex(ats.HarnessError, "cannot be combined"):
+            harness.start("u", auto_update={"apply_mode": "auto"}, jvm_properties=self.props(),
+                          global_toml=str(toml))
+        self.assertFalse((self.root / "servers" / "u").exists())
+
+
+class RestartTest(HarnessCase):
+    def test_a_boot_that_dies_then_a_boot_that_reaches_ready_in_the_same_directory(self):
+        first = self.start("r", mode="normal")
+        workdir = Path(first["workdir"])
+        jar = workdir / self.jar.name
+        self.assertEqual(self.harness.stop("r", timeout=10)["exit_code"], 0)
+        with self.assertRaisesRegex(ats.HarnessError, "already exists"):
+            self.start("r")
+
+        jar.write_bytes(b"swapped by the updater")          # what UpdateApplier does to the launch jar
+        (workdir / "auto_update").mkdir()
+        (workdir / "auto_update" / "rollback.state").write_text("phase=APPLIED\n")
+        died = self.harness.restart("r", command=[sys.executable, str(self.fake), "die"])
+        self.assertEqual((died["status"], died["exit_code"], died["boot"]), ("exited", 3, 2))
+        self.assertIsNone(died.get("done_line"), "per-boot fields of boot 1 must not leak into boot 2")
+        self.assertTrue(died["lock_released"])
+        self.assertIn("SOURBY_UPDATER_FIXTURE_FAIL", (workdir / "server.log").read_text())
+        self.assertEqual(hashlib.sha256(b"swapped by the updater").hexdigest(), died["jar"]["sha256"])
+        self.assertEqual((workdir / "auto_update" / "rollback.state").read_text(), "phase=APPLIED\n")
+
+        ready = self.harness.restart("r", command=[sys.executable, str(self.fake), "normal"])
+        self.assertEqual((ready["status"], ready["boot"]), ("ready", 3))
+        self.assertIn("Done (0.42s)!", ready["done_line"])
+        self.assertNotIn("SOURBY_UPDATER_FIXTURE_FAIL", (workdir / "server.log").read_text())
+        final = self.harness.stop("r", timeout=10)
+        self.assertEqual(final["exit_code"], 0)
+        self.assertTrue(final["lock_released"])
+
+        boots = sorted((workdir / "boots").iterdir())
+        self.assertEqual([b.name for b in boots], ["01", "02"])
+        self.assertIn("Done (0.42s)!", (boots[0] / "server.log").read_text())
+        self.assertIn("SOURBY_UPDATER_FIXTURE_FAIL", (boots[1] / "server.log").read_text())
+        summary = final["previous_boots"]
+        self.assertEqual([(b["boot"], b["exit_code"], b["reached_ready"]) for b in summary],
+                         [(1, 0, True), (2, 3, False)])
+        self.assertNotEqual(summary[0]["jar_sha256"], summary[1]["jar_sha256"])
+        self.assertEqual(first["server"]["port"], final["server"]["port"])
+
+    def test_a_live_run_is_never_restarted(self):
+        self.start("live")
+        with self.assertRaisesRegex(ats.HarnessError, "still running"):
+            self.harness.restart("live")
+        self.harness.stop("live", timeout=10)
+
+    def test_a_restart_takes_a_slot_and_is_refused_when_both_are_busy(self):
+        self.start("a")
+        self.harness.stop("a", timeout=10)
+        self.start("b")
+        self.start("c")
+        with self.assertRaises(ats.SlotsBusy):
+            self.harness.restart("a")
+        self.assertFalse((self.root / "servers" / "a" / "boots").exists(), "refused before anything is archived")
+        self.harness.stop("b", timeout=10)
+        self.harness.stop("c", timeout=10)
+
+    def test_a_restart_refuses_a_port_someone_else_took(self):
+        first = self.start("p")
+        self.harness.stop("p", timeout=10)
+        with socket.socket() as taken:
+            taken.bind(("127.0.0.1", first["server"]["port"]))
+            with self.assertRaisesRegex(ats.HarnessError, "not free"):
+                self.harness.restart("p")
+        self.assertFalse(self.harness.lock_path.exists())
 
 
 class LifecycleTest(HarnessCase):
@@ -936,6 +1074,25 @@ class WorldReuseAndKillTest(HarnessCase):
         with self.assertRaisesRegex(ats.HarnessError, "symlink"):
             self.start("b", config_files={"plugins/Link.jar": link})
 
+    def test_large_plugin_jar_raises_only_the_plugins_jar_cap_and_is_recorded(self):
+        big = self.root / "fawe.jar"
+        big.write_bytes(b"x" * (ats.PLUGIN_JAR_MAX_BYTES + 1))
+        with self.assertRaisesRegex(ats.HarnessError, "plugin jar .* under 8 MiB"):
+            self.start("a", config_files={"plugins/FAWE.jar": big})
+        workdir = Path(self.start("b", config_files={"plugins/FAWE.jar": big}, large_plugin_jars=True)["workdir"])
+        self.assertEqual((workdir / "plugins/FAWE.jar").stat().st_size, ats.PLUGIN_JAR_MAX_BYTES + 1)
+        self.assertTrue(self.run_json("b")["large_plugin_jars"])
+        huge = self.root / "huge.jar"
+        huge.write_bytes(b"x" * (ats.LARGE_PLUGIN_JAR_MAX_BYTES + 1))
+        with self.assertRaisesRegex(ats.HarnessError, "plugin jar .* under 32 MiB"):
+            self.start("c", config_files={"plugins/Huge.jar": huge}, large_plugin_jars=True)
+        with self.assertRaisesRegex(ats.HarnessError, "plugin file .* under 8 MiB"):
+            self.start("d", plugin_files={"plugins/Sky/modules/m.jar": big}, large_plugin_jars=True)
+        args = ats.build_parser().parse_args(["start", "--name", "e", "--large-plugin-jar"])
+        self.assertTrue(ats._start_kwargs(args)["large_plugin_jars"])
+        args = ats.build_parser().parse_args(["start", "--name", "e"])
+        self.assertIsNone(ats._start_kwargs(args)["large_plugin_jars"])
+
     def test_a_plugin_jar_is_read_once_and_never_past_the_cap(self):
         # A file that grows after a size check must not be read unbounded: the cap is enforced on
         # the bytes actually read from one open file.
@@ -1077,6 +1234,18 @@ class WorldReuseAndKillTest(HarnessCase):
         args = ats.build_parser().parse_args(["run", "--name", "a", "--scenario", "s.json",
                                               "--config-file", "spigot.yml=/x/s.yml"])
         self.assertEqual(ats._start_kwargs(args)["config_files"], {"spigot.yml": "/x/s.yml"})
+
+    def test_global_toml_replaces_the_harness_default_and_is_recorded(self):
+        toml = self.root / "old-layout.toml"
+        toml.write_text("[ui]\nconsole-style = \"plain\"\n[misc.auto_update]\nenabled = false\n")
+        first = Path(self.start("g", global_toml=toml)["workdir"])
+        self.assertEqual((first / "sourbycraft_config/sourbycraft_global_config.toml").read_text(), toml.read_text())
+        self.assertEqual(self.run_json("g")["global_toml"]["source"], str(toml))
+        second = Path(self.start("h")["workdir"])
+        self.assertEqual((second / "sourbycraft_config/sourbycraft_global_config.toml").read_text(), ats.GLOBAL_TOML)
+        self.assertIsNone(self.run_json("h")["global_toml"])
+        with self.assertRaisesRegex(ats.HarnessError, "global TOML"):
+            self.start("i", global_toml=self.root / "missing.toml")
 
     def test_aurora_toml_is_installed_and_carried_over_by_world_from(self):
         toml = self.root / "awf.toml"

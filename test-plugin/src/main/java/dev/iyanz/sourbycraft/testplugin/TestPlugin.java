@@ -21,6 +21,8 @@ public class TestPlugin extends JavaPlugin implements Listener {
 
     @Override
     public void onLoad() {
+        // Auto-updater rollback fixture: logs the launch jar and, for a jar built to fail, halts here.
+        UpdaterFixtureProbe.run(this.getLogger());
         this.requireMetrics("SOURBY_METRICS_ONLOAD_OK");
     }
 

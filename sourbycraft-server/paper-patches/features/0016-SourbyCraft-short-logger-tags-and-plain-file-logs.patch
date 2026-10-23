@@ -5,43 +5,51 @@ Subject: [PATCH] SourbyCraft - short logger tags and plain file logs
 
 
 diff --git a/src/main/resources/log4j2.xml b/src/main/resources/log4j2.xml
-index 86451d114ca7afec3695448615be092c8129bf57..0cb04faf39eebcdd4f5c50ac85e69176782be1c4 100644
+index 86451d114ca7afec3695448615be092c8129bf57..2b08f9cbdcf63f5836dca0874a2ebd49837e4e7c 100644
 --- a/src/main/resources/log4j2.xml
 +++ b/src/main/resources/log4j2.xml
-@@ -6,26 +6,23 @@
+@@ -5,29 +5,19 @@
+             <PatternLayout pattern="[%d{HH:mm:ss} %level]: %msg{nolookups}%n" />
          </Queue>
          <TerminalConsole name="TerminalConsole">
-             <PatternLayout>
+-            <PatternLayout>
 -                <LoggerNamePatternSelector defaultPattern="%highlightError{[%d{HH:mm:ss} %level]: [%logger] %msg%n%xEx{full}}">
-+                <!-- SourbyCraft start - short tags for internal loggers (%scLogger), escape codes only on a real terminal (%ansiIfTerminal), message and exception included -->
-+                <LoggerNamePatternSelector defaultPattern="%highlightError{%ansiIfTerminal{[%d{HH:mm:ss} %level]: %scLogger{console} %msg%n%xEx{full}}}">
-                     <!-- Log root, Minecraft, Mojang and Bukkit loggers without prefix -->
-                     <!-- Disable prefix for various plugins that bypass the plugin logger -->
-                     <PatternMatch key=",net.minecraft.,Minecraft,com.mojang.,com.sk89q.,ru.tehkode.,Minecraft.AWE"
+-                    <!-- Log root, Minecraft, Mojang and Bukkit loggers without prefix -->
+-                    <!-- Disable prefix for various plugins that bypass the plugin logger -->
+-                    <PatternMatch key=",net.minecraft.,Minecraft,com.mojang.,com.sk89q.,ru.tehkode.,Minecraft.AWE"
 -                                  pattern="%highlightError{[%d{HH:mm:ss} %level]: %msg%n%xEx{full}}" />
 -                    <!-- SourbyCraft - paint the [SourbyCraft] engine prefix yellow on the console
 -                         only (the message + everything else keep their normal colours; the File
 -                         and ServerGuiConsole appenders below stay uncoloured). -->
 -                    <PatternMatch key="SourbyCraft"
 -                                  pattern="%highlightError{[%d{HH:mm:ss} %level]: %style{[%logger]}{yellow} %msg%n%xEx{full}}" />
-+                                  pattern="%highlightError{%ansiIfTerminal{[%d{HH:mm:ss} %level]: %msg%n%xEx{full}}}" />
-                 </LoggerNamePatternSelector>
-+                <!-- SourbyCraft end -->
-             </PatternLayout>
+-                </LoggerNamePatternSelector>
+-            </PatternLayout>
++            <!-- SourbyCraft start - console line: time, five-character level, short tag column, message.
++                 The sc* converters live in sourbycraft-server/src/log4jPlugins. They write escape codes
++                 only on a real terminal (%scDim grey time, %scLevel level colour, %scLogger brand tags,
++                 %scHighlight yellow WARN / red ERROR message); %ansiIfTerminal strips escapes carried by
++                 the message itself when stdout is redirected (a panel, > server.log, docker logs). -->
++            <PatternLayout pattern="%ansiIfTerminal{%scDim{%d{HH:mm:ss}} %scLevel{console} %scLogger{console} %scHighlight{%msg%n%xEx{full}}}" />
++            <!-- SourbyCraft end -->
          </TerminalConsole>
          <RollingRandomAccessFile name="File" fileName="logs/latest.log" filePattern="logs/%d{yyyy-MM-dd}-%i.log.gz">
-             <PatternLayout>
+-            <PatternLayout>
 -                <LoggerNamePatternSelector defaultPattern="[%d{HH:mm:ss}] [%t/%level]: [%logger] %stripAnsi{%msg}%n%xEx{full}">
-+                <LoggerNamePatternSelector defaultPattern="[%d{HH:mm:ss}] [%t/%level]: %scLogger %plainText{%msg%n%xEx{full}}">
-                     <!-- Log root, Minecraft, Mojang and Bukkit loggers without prefix -->
-                     <!-- Disable prefix for various plugins that bypass the plugin logger -->
-                     <PatternMatch key=",net.minecraft.,Minecraft,com.mojang.,com.sk89q.,ru.tehkode.,Minecraft.AWE"
+-                    <!-- Log root, Minecraft, Mojang and Bukkit loggers without prefix -->
+-                    <!-- Disable prefix for various plugins that bypass the plugin logger -->
+-                    <PatternMatch key=",net.minecraft.,Minecraft,com.mojang.,com.sk89q.,ru.tehkode.,Minecraft.AWE"
 -                                  pattern="[%d{HH:mm:ss}] [%t/%level]: %stripAnsi{%msg}%n%xEx{full}" />
-+                                  pattern="[%d{HH:mm:ss}] [%t/%level]: %plainText{%msg%n%xEx{full}}" />
-                 </LoggerNamePatternSelector>
-             </PatternLayout>
+-                </LoggerNamePatternSelector>
+-            </PatternLayout>
++            <!-- SourbyCraft start - file line: the shape log analysers parse, with the same short tags;
++                 %plainText removes every escape sequence from the message and the stack trace. -->
++            <PatternLayout pattern="[%d{HH:mm:ss}] [%t/%level]: %scLogger{file} %plainText{%msg%n%xEx{full}}" />
++            <!-- SourbyCraft end -->
              <Policies>
-@@ -44,6 +41,10 @@
+                 <TimeBasedTriggeringPolicy />
+                 <OnStartupTriggeringPolicy />
+@@ -44,6 +34,10 @@
          <Root level="info">
              <filters>
                  <MarkerFilter marker="NETWORK_PACKETS" onMatch="DENY" onMismatch="NEUTRAL" />

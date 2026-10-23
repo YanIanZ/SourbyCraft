@@ -9,16 +9,16 @@ async requests. The server resolver also supports the fingerprinted
 SuperiorSkyblock2 2026.3 spawn-biome initialization callback.
 
 diff --git a/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java b/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
-index 4e5deef1d16f847d8401a084f07f2ed9f069132f..bd31b28d155c5a5a51b284ffc51384cfe0100085 100644
+index 488a13efbf57e3a386636148562e27b2a2cb1d94..c68188d905e424488db0b48e96fc4ae6f4681970 100644
 --- a/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
 +++ b/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
-@@ -560,6 +560,9 @@ public class CraftScheduler implements BukkitScheduler {
+@@ -538,6 +538,9 @@ public class CraftScheduler implements BukkitScheduler {
              @Override public int id() { return task.getTaskId(); }
              @Override public boolean sync() { return task.isSync(); }
-             @Override public boolean global() { return task.rTask instanceof dev.iyanz.sourbycraft.bridge.FoliaSchedulerCompatibility.GlobalCallback; }
+             @Override public boolean global() { return dev.iyanz.sourbycraft.bridge.FoliaSchedulerCompatibility.isGlobalCallback(task.rTask); }
 +            @Override public dev.iyanz.sourbycraft.execution.region.RegionAnchor targetRegion() {
 +                return dev.iyanz.sourbycraft.bridge.AuroraBridge.targetRegion(task.getOwner(), task.rTask);
 +            }
              @Override public long period() { return task.getPeriod(); }
              @Override public boolean cancelled() { return task.isCancelled(); }
-             @Override public void markCancelled() {
+             @Override public void markCancelled() { task.cancel0(); dev.iyanz.sourbycraft.bridge.FoliaSchedulerCompatibility.bridgeCancelled(task.rTask); }

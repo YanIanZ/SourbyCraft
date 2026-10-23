@@ -17,7 +17,10 @@ import java.util.function.IntSupplier;
  * <p>Scheduling: a bridged plugin's Bukkit scheduler tasks are routed by {@link BridgeRouter}. A
  * sync task naming an entity runs on the region owning that entity when due, and is cancelled and
  * counted as rejected (not as a violation) if the entity is removed first. A sync task with an
- * explicit target region runs on that region. Otherwise a sync task
+ * explicit target region runs on that region. A sync task naming nothing takes the player of the
+ * {@link SchedulingContext} (the player whose event or command is being handled, carried through
+ * bridged async bodies) as its entity anchor, with the same contract as a named entity, except that a
+ * player already gone at scheduling time simply yields no anchor. Otherwise a sync task
  * scheduled while a region is ticking runs on that region (anchored on a chunk it owned;
  * {@code aurora.bridge.sync-route = "caller-region"}, the default); from anywhere else, or with
  * {@code "global"}, it runs on the global region. A caller anchor does not prove that every
@@ -92,9 +95,15 @@ public final class BridgeRuntime {
         }
     }
 
-    /** {@code world}: the anchor's world for {@link BridgeRouter.Route#REGION_OWNER}, else {@code null}. */
+    /**
+     * {@code world}: the anchor's world for {@link BridgeRouter.Route#REGION_OWNER}, else {@code null}.
+     * {@code context}: what the body publishes as {@link SchedulingContext} (the entity it is anchored to,
+     * or the frame an async task was scheduled from), else {@code null}. {@code inferred}: the entity
+     * anchor came from the scheduling context, not from the plugin. {@code untargeted}: nothing named an
+     * owner and the task fell through to the global region.
+     */
     private record Scheduled(String plugin, Object owner, Handle handle, Task task, BridgeRouter.Route route,
-                             Object world) {}
+                             Object world, Object context, boolean inferred, boolean untargeted) {}
 
     /** The bridged body running on this thread, if any; see {@link GuardViolations}. */
     private static final ThreadLocal<Invocation> CURRENT = new ThreadLocal<>();
@@ -104,13 +113,16 @@ public final class BridgeRuntime {
         final BridgeRuntime runtime;
         final String plugin;
         final int taskId;
+        /** Whether the task named no owner and ran on the global region (see {@link #sweepHint}). */
+        final boolean untargeted;
         /** One body run counts at most one violation, however many guard hits it makes. */
         boolean violationCounted;
 
-        Invocation(final BridgeRuntime runtime, final String plugin, final int taskId) {
+        Invocation(final BridgeRuntime runtime, final String plugin, final int taskId, final boolean untargeted) {
             this.runtime = runtime;
             this.plugin = plugin;
             this.taskId = taskId;
+            this.untargeted = untargeted;
         }
     }
 
@@ -167,6 +179,11 @@ public final class BridgeRuntime {
     private final Map<String, LogWindow> logWindows = new ConcurrentHashMap<>();
     /** Test seam for the log rate limit and the body-time measurement. */
     java.util.function.LongSupplier nanoClock = System::nanoTime;
+    /**
+     * Whether failed ownership checks are relaxed this run ({@code guards/ThreadChecks}); then a guard hit
+     * inside a bridged body is counted and logged but never quarantines. Replaceable for tests.
+     */
+    java.util.function.BooleanSupplier relaxedChecks = () -> dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE;
 
     /** Unanchored sync tasks use the global region: no caller-region lookup. */
     public BridgeRuntime(final BridgeMode mode, final IntSupplier quarantineAfter, final Executor executor,
@@ -297,6 +314,12 @@ public final class BridgeRuntime {
     /**
      * Schedules a bridged plugin's task.
      *
+     * <p>Owner precedence for a sync task: explicit {@code EntityTask} entity, explicit
+     * {@code RegionTask} (or adapter) region, the player of the current {@link SchedulingContext}
+     * (inferred entity anchor), the caller's region ({@code sync-route = caller-region}), the global
+     * region. An explicit global request takes none of them; an async task takes the I/O lane and
+     * only carries the context for the tasks its body schedules.</p>
+     *
      * @return {@code false} when the task was rejected; it has then been marked cancelled
      */
     public boolean submit(final String plugin, final Object owner, final Task task, final long delayTicks) {
@@ -305,22 +328,9 @@ public final class BridgeRuntime {
             task.markCancelled();
             return false;
         }
-        final dev.iyanz.sourbycraft.execution.region.RegionAnchor anchor;
-        final Object entity;
+        final Resolution resolved;
         try {
-            // Precedence: explicit entity > explicit region > caller-region/global fallback.
-            entity = task.sync() && !task.global() ? task.targetEntity() : null;
-            if (task.sync() && !task.global() && entity == null) {
-                final dev.iyanz.sourbycraft.execution.region.RegionAnchor target = task.targetRegion();
-                anchor = target != null ? target
-                    : this.syncRoute.get() == dev.iyanz.sourbycraft.config.AuroraConfig.SyncRoute.CALLER_REGION
-                        ? this.callerRegion.get() : null;
-                if (anchor != null && anchor.world() == null) {
-                    throw new IllegalArgumentException("task region has no world");
-                }
-            } else {
-                anchor = null;
-            }
+            resolved = resolve(task);
         } catch (final RuntimeException failed) {
             this.telemetry.rejected(plugin);
             this.telemetry.failure(plugin, failed.toString());
@@ -328,6 +338,59 @@ public final class BridgeRuntime {
             this.warn.accept("Aurora Bridge could not resolve owner of task " + task.id() + " for " + plugin, failed);
             return false;
         }
+        return schedule(plugin, owner, task, delayTicks, resolved);
+    }
+
+    /**
+     * How a task's owner was decided: the entity or region anchor (at most one), whether the entity
+     * was inferred from the scheduling context rather than named by the plugin, the context the body
+     * publishes to the tasks it schedules, and whether nothing named an owner at all.
+     */
+    private record Resolution(Object entity, dev.iyanz.sourbycraft.execution.region.RegionAnchor anchor,
+                              boolean inferred, Object context, boolean untargeted) {
+        static Resolution none() { return new Resolution(null, null, false, null, false); }
+    }
+
+    private Resolution resolve(final Task task) {
+        if (!task.sync()) {
+            // The I/O lane owns nothing; the body publishes the frame it came from (DeluxeMenus: a
+            // player's command -> async build -> sync open; EssentialsX: join -> async -> callEvent).
+            return new Resolution(null, null, false, SchedulingContext.current(), false);
+        }
+        if (task.global()) return Resolution.none();
+        Object entity = task.targetEntity();
+        dev.iyanz.sourbycraft.execution.region.RegionAnchor anchor = null;
+        boolean inferred = false;
+        if (entity == null) {
+            anchor = task.targetRegion();
+            if (anchor == null) {
+                entity = SchedulingContext.current();
+                inferred = entity != null;
+                if (entity == null
+                    && this.syncRoute.get() == dev.iyanz.sourbycraft.config.AuroraConfig.SyncRoute.CALLER_REGION) {
+                    anchor = this.callerRegion.get();
+                }
+            }
+        }
+        if (anchor != null && anchor.world() == null) {
+            throw new IllegalArgumentException("task region has no world");
+        }
+        return new Resolution(entity, anchor, inferred, entity, entity == null && anchor == null);
+    }
+
+    /** The caller-region/global fallback for an inferred anchor whose player was already gone. */
+    private Resolution fallback() {
+        final dev.iyanz.sourbycraft.execution.region.RegionAnchor anchor =
+            this.syncRoute.get() == dev.iyanz.sourbycraft.config.AuroraConfig.SyncRoute.CALLER_REGION
+                ? this.callerRegion.get() : null;
+        return new Resolution(null, anchor != null && anchor.world() != null ? anchor : null, false, null,
+            anchor == null || anchor.world() == null);
+    }
+
+    private boolean schedule(final String plugin, final Object owner, final Task task, final long delayTicks,
+                             final Resolution resolved) {
+        final Object entity = resolved.entity();
+        final dev.iyanz.sourbycraft.execution.region.RegionAnchor anchor = resolved.anchor();
         final BridgeRouter.Route route = !isBridged(plugin) || quarantined(plugin)
             ? BridgeRouter.Route.REJECT
             : BridgeRouter.route(this.mode, task.sync()
@@ -350,7 +413,8 @@ public final class BridgeRuntime {
         final long period = task.period() > 0 ? task.period() : 0L;
         final LateHandle handle = new LateHandle();
         final Scheduled entry = new Scheduled(plugin, owner, handle, task, route,
-            route == BridgeRouter.Route.REGION_OWNER ? anchor.world() : null);
+            route == BridgeRouter.Route.REGION_OWNER ? anchor.world() : null, resolved.context(),
+            resolved.inferred(), resolved.untargeted());
         final PluginTasks tasks = this.admitted.get(plugin);
         final int pendingLimit = this.maxPendingTasks.getAsInt();
         boolean capacityRejected = false;
@@ -385,11 +449,21 @@ public final class BridgeRuntime {
             return false;
         }
         final Runnable body = () -> runGuarded(entry, period > 0);
+        // An inferred anchor whose player is already gone when the task is scheduled is no anchor:
+        // the entity scheduler reports that synchronously (Folia returns no task), and the task then
+        // takes the route it would have taken without the inference. Nothing has run yet, so this is
+        // a routing decision, not a retry. After scheduling, retirement cancels it like an EntityTask.
+        final java.util.concurrent.atomic.AtomicBoolean handed = new java.util.concurrent.atomic.AtomicBoolean();
+        final java.util.concurrent.atomic.AtomicBoolean goneAtSchedule = new java.util.concurrent.atomic.AtomicBoolean();
+        final Runnable retired = !resolved.inferred() ? () -> retired(entry) : () -> {
+            if (handed.get()) retiredInferred(entry);
+            else goneAtSchedule.set(true);
+        };
         try {
             handle.bind(Objects.requireNonNull(switch (route) {
                 case IO_LANE -> this.executor.async(owner, body, delay, period, () -> rejectedIo(entry, period > 0));
                 case REGION_OWNER -> this.executor.region(owner, anchor, body, delay, period);
-                case ENTITY_OWNER -> this.executor.entity(owner, entity, body, delay, period, () -> retired(entry));
+                case ENTITY_OWNER -> this.executor.entity(owner, entity, body, delay, period, retired);
                 default -> this.executor.global(owner, body, delay, period);
             }, "scheduler handle"));
         } catch (final RuntimeException failed) {
@@ -397,6 +471,15 @@ public final class BridgeRuntime {
             this.telemetry.failure(plugin, failed.toString());
             this.warn.accept("Aurora Bridge could not schedule task " + task.id() + " for " + plugin, failed);
             return false;
+        }
+        handed.set(true);
+        if (goneAtSchedule.get()) {
+            if (!remove(entry)) return !task.cancelled();
+            handle.cancel();
+            final Resolution fallback = fallback();
+            this.telemetry.failure(plugin, "task " + task.id() + ": the player it was scheduled for (" + entity
+                + ") was already gone when scheduled; routed to the " + (fallback.anchor() != null ? "caller region" : "global region"));
+            return schedule(plugin, owner, task, delayTicks, fallback);
         }
         this.telemetry.redirect(plugin);
         if (route == BridgeRouter.Route.REGION_OWNER || route == BridgeRouter.Route.ENTITY_OWNER) {
@@ -423,6 +506,18 @@ public final class BridgeRuntime {
         if (!rejected(entry)) return;
         this.telemetry.failure(entry.plugin(), "task " + entry.task().id()
             + " cancelled: its target entity was removed before it ran (retired)");
+    }
+
+    /**
+     * The entity scheduler retired a task whose player anchor the bridge inferred from the scheduling
+     * context: the player left between scheduling and the run. Same contract as an explicit
+     * {@code EntityTask}: cancelled, rejected, never a violation. (A player already gone at scheduling
+     * time is handled before this, by taking the fallback route instead.)
+     */
+    private void retiredInferred(final Scheduled entry) {
+        if (!rejected(entry)) return;
+        this.telemetry.failure(entry.plugin(), "task " + entry.task().id()
+            + " cancelled: the player it was scheduled for (from their event or command) left before it ran");
     }
 
     /**
@@ -515,7 +610,44 @@ public final class BridgeRuntime {
         return true;
     }
 
+    /**
+     * Called by {@code guards/ThreadChecks.refuse} on the thread where an ownership check failed and the
+     * configured mode may let it proceed.
+     *
+     * @return whether a bridged body is running on this thread (the hit was charged to its plugin); {@code false}
+     *     leaves the decision and the logging to the caller
+     */
+    public static boolean reportRelaxedViolation(final String reason) {
+        final Invocation invocation = CURRENT.get();
+        if (invocation == null) return false;
+        invocation.runtime.relaxedViolation(invocation, reason == null ? "unknown" : reason);
+        return true;
+    }
+
+    /** Whether a bridged plugin's task body is running on the calling thread. */
+    public static boolean bridgedBodyOnThread() {
+        return CURRENT.get() != null;
+    }
+
+    /** Owner decision 2026-10-22 (LightingLuminol parity): count and log, never quarantine for ownership. */
+    private void relaxedViolation(final Invocation invocation, final String reason) {
+        final String plugin = invocation.plugin;
+        final long hits = this.telemetry.relaxed(plugin, "region-ownership check relaxed (aurora.bridge.thread-checks): " + reason);
+        final long suppressed = admitLog(plugin, "relaxed|" + reason);
+        if (suppressed >= 0) {
+            this.warn.accept("Bridged plugin " + plugin + " accessed state owned by another thread in task "
+                + invocation.taskId + " and was allowed to (" + reason + "; aurora.bridge.thread-checks relaxed; "
+                + hits + " such hit(s); not qualified)" + suppressedNote(suppressed), null);
+        }
+    }
+
     private void guardViolation(final Invocation invocation, final String reason) {
+        if (this.relaxedChecks.getAsBoolean()) {
+            // The engine's LOG-mode guard let the access through; with relaxed checks that is the configured
+            // behaviour, not a violation to quarantine for.
+            relaxedViolation(invocation, reason);
+            return;
+        }
         final String plugin = invocation.plugin;
         if (invocation.violationCounted) {
             // A loop touching a hundred foreign blocks is one bad body run, not a hundred.
@@ -536,8 +668,20 @@ public final class BridgeRuntime {
         if (suppressed >= 0) {
             this.warn.accept("Bridged plugin " + plugin + " accessed state owned by another region in task "
                 + invocation.taskId + " (" + reason + "; " + fatal + "/" + this.quarantineAfter.getAsInt()
-                + " before quarantine)" + suppressedNote(suppressed), evidence);
+                + " before quarantine)" + suppressedNote(suppressed) + sweepHint(invocation.untargeted), evidence);
         }
+    }
+
+    /**
+     * Appended to a violation line when the task named no owner and ran on the global region. The
+     * bridge routes a task to <em>one</em> owner it can name (the player of the event or command the
+     * task was scheduled from, a {@code RegionTask}, an {@code EntityTask}); a body that sweeps
+     * entities or blocks across the world from one task has no single owner, and no routing fixes it.
+     */
+    static String sweepHint(final boolean untargeted) {
+        return untargeted ? " The task named no owner and ran on the global region (scheduled outside any player"
+            + " event or command, without RegionTask/EntityTask); a body that sweeps entities or blocks across the"
+            + " world cannot be routed to one owner and needs a region-aware (folia-supported) plugin version." : "";
     }
 
     /** Removes both indexes together; stale callbacks cannot remove another task's entry. */
@@ -604,18 +748,19 @@ public final class BridgeRuntime {
             return;
         }
         final Invocation previous = CURRENT.get();
-        final Invocation invocation = new Invocation(this, plugin, task.id());
+        final Invocation invocation = new Invocation(this, plugin, task.id(), entry.untargeted());
         CURRENT.set(invocation);
         try {
             // Body wall time only: queue wait and failure handling are outside the timed span.
             final long started = this.nanoClock.getAsLong();
-            try {
+            // The body publishes exactly its own anchor: tasks it schedules follow the same player.
+            try (SchedulingContext.Scope scope = SchedulingContext.body(entry.context())) {
                 task.run();
             } finally {
                 this.telemetry.bodyTime(plugin, BridgeTelemetry.BodyLane.of(entry.route()), this.nanoClock.getAsLong() - started);
             }
         } catch (final Throwable thrown) {
-            onFailure(plugin, thrown, task.id(), invocation.violationCounted);
+            onFailure(plugin, thrown, task.id(), invocation.violationCounted, invocation.untargeted);
         } finally {
             if (previous == null) CURRENT.remove();
             else CURRENT.set(previous);
@@ -651,7 +796,8 @@ public final class BridgeRuntime {
         }
     }
 
-    private void onFailure(final String plugin, final Throwable thrown, final int taskId, final boolean alreadyCounted) {
+    private void onFailure(final String plugin, final Throwable thrown, final int taskId, final boolean alreadyCounted,
+                           final boolean untargeted) {
         final String description = thrown.getClass().getSimpleName()
             + (thrown.getMessage() == null ? "" : ": " + thrown.getMessage());
         if (!ViolationClassifier.isRegionViolation(thrown) || alreadyCounted) {
@@ -669,7 +815,7 @@ public final class BridgeRuntime {
                 + "Last: " + description, thrown);
         } else {
             this.warn.accept("Bridged plugin " + plugin + " violated region ownership in task " + taskId
-                + " (" + fatal + "/" + this.quarantineAfter.getAsInt() + " before quarantine)", thrown);
+                + " (" + fatal + "/" + this.quarantineAfter.getAsInt() + " before quarantine)" + sweepHint(untargeted), thrown);
         }
     }
 

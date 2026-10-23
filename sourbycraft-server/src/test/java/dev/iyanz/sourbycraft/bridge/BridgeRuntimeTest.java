@@ -646,6 +646,50 @@ class BridgeRuntimeTest {
         assertTrue(this.warnings.get(2).contains("4 more suppressed"), this.warnings.get(2));
     }
 
+    // Owner decision 2026-10-22 (relaxed thread checks): a guard hit inside a bridged body is counted and
+    // logged but never quarantines.
+
+    @Test
+    void withRelaxedChecksAGuardHitCountsButNeverQuarantines() {
+        final BridgeRuntime bridge = runtime(BridgeMode.SAFE, 1);
+        bridge.relaxedChecks = () -> true;
+        bridge.admit("Legacy");
+        bridge.submit("Legacy", null, new FakeTask(1, true, 1, () -> {
+            GuardViolations.report("Cannot place block async");
+            GuardViolations.report("Cannot place block async");
+        }), 0);
+        final FakeTask innocent = new FakeTask(2, true, 1, () -> {});
+        bridge.submit("Legacy", null, innocent, 0);
+        this.executor.fire(0);
+        this.executor.fire(0);
+        final BridgeTelemetry.PluginStats stats = bridge.telemetry().stats("Legacy");
+        assertEquals(0, stats.fatalViolations(), "not a violation while relaxed");
+        assertEquals(4, stats.relaxedOwnershipHits(), "every hit is counted (two runs, two hits each)");
+        assertFalse(bridge.quarantined("Legacy"));
+        assertFalse(innocent.cancelled);
+        assertEquals(1, this.warnings.size(), "one line per (plugin, reason) per window");
+        assertTrue(this.warnings.get(0).contains("was allowed to"), this.warnings.get(0));
+        assertTrue(stats.lastFailure().contains("relaxed"), stats.lastFailure());
+    }
+
+    @Test
+    void reportRelaxedViolationChargesTheBridgedBodyOnThisThread() {
+        final BridgeRuntime bridge = runtime(BridgeMode.SAFE, 1);
+        bridge.admit("Legacy");
+        assertFalse(BridgeRuntime.reportRelaxedViolation("Cannot read world asynchronously"), "no bridged body here");
+        assertFalse(BridgeRuntime.bridgedBodyOnThread());
+        final List<Boolean> seen = new ArrayList<>();
+        bridge.submit("Legacy", null, new FakeTask(1, true, 1, () -> {
+            seen.add(BridgeRuntime.bridgedBodyOnThread());
+            seen.add(BridgeRuntime.reportRelaxedViolation("Cannot read world asynchronously"));
+        }), 0);
+        this.executor.fire(0);
+        assertEquals(List.of(true, true), seen);
+        assertEquals(1, bridge.telemetry().stats("Legacy").relaxedOwnershipHits());
+        assertEquals(0, bridge.telemetry().stats("Legacy").fatalViolations());
+        assertFalse(bridge.quarantined("Legacy"));
+    }
+
     @Test
     void aBodyThatHitsTheGuardAndThenThrowsCountsOnce() {
         final BridgeRuntime bridge = runtime(BridgeMode.SAFE, 5);

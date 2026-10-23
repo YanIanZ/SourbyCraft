@@ -1,0 +1,773 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Fri, 23 Oct 2026 00:15:52 +0700
+Subject: [PATCH] SourbyCraft - cross-region world data for relaxed thread
+ checks (LightingLuminol)
+
+Port of LightingLuminol's ReferenceCountedRegionizedWorldDataPool (GPL-3.0, Bacteriawa, revision 72d51c4d) and the worldDataPool call sites of its minecraft patch 0001 "Base Dirty Patches", as dev.iyanz.sourbycraft.compat.luminol.RegionizedWorldDataPool / WorldDataAccess leases: ServerLevel.sourbycraft$worldDataPool() hands any thread the RegionizedWorldData of the region that owns a chunk, holding a ticket while the lease is open, so an off-thread entity add/remove, tracker, spawn-chunk, block-event, neighbour update, scheduled tick, capture, redstone-time, explosion-cache or populate access reaches the structure that region ticks instead of the caller's region or null. Gated on guards/ThreadChecks.RELAXED_SCOPE (static final): an enforced server keeps the base's getCurrentWorldData() paths. The hottest capture-flag reads (Level.getBlockState and friends) only tolerate a missing region instead of going through the pool; the explosion density cache locks its two touch points. Owner decision 2026-10-22 "Tiru penuh LightingLuminol"; the ticket prevents an unload, not a merge or split, and a relaxed server is unsafe and unqualified.
+
+diff --git a/ca/spottedleaf/moonrise/paper/util/BaseChunkSystemHooks.java b/ca/spottedleaf/moonrise/paper/util/BaseChunkSystemHooks.java
+index ddd063344a394793e0f5ff4840e7dff10b7f5753..eb11f483decc1adee8ae683ebf98e3a3a3d743c3 100644
+--- a/ca/spottedleaf/moonrise/paper/util/BaseChunkSystemHooks.java
++++ b/ca/spottedleaf/moonrise/paper/util/BaseChunkSystemHooks.java
+@@ -94,14 +94,14 @@ public abstract class BaseChunkSystemHooks implements ca.spottedleaf.moonrise.co
+     @Override
+     public void onChunkBorder(final LevelChunk chunk, final ChunkHolder holder) {
+         dev.iyanz.sourbycraft.perf.ChunkLifecycleCounters.count(dev.iyanz.sourbycraft.perf.ChunkLifecycleCounters.Transition.FULL); // SourbyCraft - chunk lifecycle counters
+-        chunk.getLevel().getCurrentWorldData().addChunk(chunk); // Folia - region threading
++        try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at((ServerLevel) chunk.getLevel(), chunk.getPos().x(), chunk.getPos().z())) { lease.data().addChunk(chunk); } // Folia - region threading // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
+         chunk.loadCallback();
+     }
+ 
+     @Override
+     public void onChunkNotBorder(final LevelChunk chunk, final ChunkHolder holder) {
+         dev.iyanz.sourbycraft.perf.ChunkLifecycleCounters.count(dev.iyanz.sourbycraft.perf.ChunkLifecycleCounters.Transition.NOT_FULL); // SourbyCraft - chunk lifecycle counters
+-        chunk.getLevel().getCurrentWorldData().removeChunk(chunk); // Folia - region threading
++        try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at((ServerLevel) chunk.getLevel(), chunk.getPos().x(), chunk.getPos().z())) { lease.data().removeChunk(chunk); } // Folia - region threading // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
+         chunk.unloadCallback();
+     }
+ 
+@@ -114,7 +114,7 @@ public abstract class BaseChunkSystemHooks implements ca.spottedleaf.moonrise.co
+     @Override
+     public void onChunkTicking(final LevelChunk chunk, final ChunkHolder holder) {
+         dev.iyanz.sourbycraft.perf.ChunkLifecycleCounters.count(dev.iyanz.sourbycraft.perf.ChunkLifecycleCounters.Transition.TICKING); // SourbyCraft - chunk lifecycle counters
+-        chunk.getLevel().getCurrentWorldData().addTickingChunk(chunk); // Folia - region threading
++        try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at((ServerLevel) chunk.getLevel(), chunk.getPos().x(), chunk.getPos().z())) { lease.data().addTickingChunk(chunk); } // Folia - region threading // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
+         if (!((ChunkSystemLevelChunk)chunk).moonrise$isPostProcessingDone()) {
+             chunk.postProcessGeneration((ServerLevel)chunk.getLevel());
+         }
+@@ -124,20 +124,20 @@ public abstract class BaseChunkSystemHooks implements ca.spottedleaf.moonrise.co
+     @Override
+     public void onChunkNotTicking(final LevelChunk chunk, final ChunkHolder holder) {
+         dev.iyanz.sourbycraft.perf.ChunkLifecycleCounters.count(dev.iyanz.sourbycraft.perf.ChunkLifecycleCounters.Transition.NOT_TICKING); // SourbyCraft - chunk lifecycle counters
+-        chunk.getLevel().getCurrentWorldData().removeTickingChunk(chunk); // Folia - region threading
++        try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at((ServerLevel) chunk.getLevel(), chunk.getPos().x(), chunk.getPos().z())) { lease.data().removeTickingChunk(chunk); } // Folia - region threading // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
+     }
+ 
+     @Override
+     public void onChunkEntityTicking(final LevelChunk chunk, final ChunkHolder holder) {
+         dev.iyanz.sourbycraft.perf.ChunkLifecycleCounters.count(dev.iyanz.sourbycraft.perf.ChunkLifecycleCounters.Transition.ENTITY_TICKING); // SourbyCraft - chunk lifecycle counters
+-        chunk.getLevel().getCurrentWorldData().addEntityTickingChunk(chunk); // Folia - region threading
++        try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at((ServerLevel) chunk.getLevel(), chunk.getPos().x(), chunk.getPos().z())) { lease.data().addEntityTickingChunk(chunk); } // Folia - region threading // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
+         ((ChunkTickServerLevel)(ServerLevel)chunk.getLevel()).moonrise$markChunkForPlayerTicking(chunk); // Moonrise - chunk tick iteration
+     }
+ 
+     @Override
+     public void onChunkNotEntityTicking(final LevelChunk chunk, final ChunkHolder holder) {
+         dev.iyanz.sourbycraft.perf.ChunkLifecycleCounters.count(dev.iyanz.sourbycraft.perf.ChunkLifecycleCounters.Transition.NOT_ENTITY_TICKING); // SourbyCraft - chunk lifecycle counters
+-        chunk.getLevel().getCurrentWorldData().removeEntityTickingChunk(chunk); // Folia - region threading
++        try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at((ServerLevel) chunk.getLevel(), chunk.getPos().x(), chunk.getPos().z())) { lease.data().removeEntityTickingChunk(chunk); } // Folia - region threading // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
+         ((ChunkTickServerLevel)(ServerLevel)chunk.getLevel()).moonrise$removeChunkForPlayerTicking(chunk); // Moonrise - chunk tick iteration
+     }
+ 
+diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/EntityLookup.java b/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/EntityLookup.java
+index d8a7381de871b12fc2d036f09849e380383142f9..c15a321a94935b914822faa0da858e2e2c91263e 100644
+--- a/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/EntityLookup.java
++++ b/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/EntityLookup.java
+@@ -1039,7 +1039,7 @@ public abstract class EntityLookup implements LevelEntityGetter<Entity> {
+             // Folia start - region threading
+ 
+             // only AFTER full removal callbacks, so that thread checking will work.
+-            EntityLookup.this.world.getCurrentWorldData().removeEntity(entity);
++            try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(entity)) { lease.data().removeEntity(entity); } // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
+             // Folia end - region threading
+         }
+     }
+diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/server/ServerEntityLookup.java b/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/server/ServerEntityLookup.java
+index 848e251d80708863dd35f812dfacaa7225cf8cff..d917b21981e6937f9e3c929142dcaebf6abfd27b 100644
+--- a/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/server/ServerEntityLookup.java
++++ b/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/server/ServerEntityLookup.java
+@@ -88,10 +88,12 @@ public final class ServerEntityLookup extends EntityLookup {
+ 
+     @Override
+     protected void addEntityCallback(final Entity entity) {
+-        this.world.getCurrentWorldData().addEntity(entity); // Folia - region threading
++        try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(this.serverWorld, entity)) { // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
++        lease.data().addEntity(entity); // Folia - region threading
+         if (entity instanceof ServerPlayer player) {
+-            ((ChunkSystemServerLevel)this.serverWorld).moonrise$getNearbyPlayers().addPlayer(player);
++            lease.data().getNearbyPlayers().addPlayer(player); // SourbyCraft - relaxed thread checks: the region's nearby-players map (LightingLuminol MC 0001)
+         }
++        } // SourbyCraft - relaxed thread checks
+         if (entity instanceof ThrownEnderpearl enderpearl) {
+             this.addEnderPearl(CoordinateUtils.getChunkKey(enderpearl.chunkPosition()), enderpearl.getId()); // Folia - region threading
+         }
+@@ -101,7 +103,7 @@ public final class ServerEntityLookup extends EntityLookup {
+     @Override
+     protected void removeEntityCallback(final Entity entity) {
+         if (entity instanceof ServerPlayer player) {
+-            ((ChunkSystemServerLevel)this.serverWorld).moonrise$getNearbyPlayers().removePlayer(player);
++            try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(this.serverWorld, entity)) { lease.data().getNearbyPlayers().removePlayer(player); } // SourbyCraft - relaxed thread checks: the region's nearby-players map (LightingLuminol MC 0001)
+         }
+         if (entity instanceof ThrownEnderpearl enderpearl) {
+             this.removeEnderPearl(CoordinateUtils.getChunkKey(enderpearl.chunkPosition()), enderpearl.getId()); // Folia - region threading
+diff --git a/net/minecraft/server/level/ChunkMap.java b/net/minecraft/server/level/ChunkMap.java
+index d3eb9969c65c3f4cb1e4f272d894971e2d6b7e19..251cbfc5d897a9b12769f626c6db129a6b67f455 100644
+--- a/net/minecraft/server/level/ChunkMap.java
++++ b/net/minecraft/server/level/ChunkMap.java
+@@ -988,11 +988,12 @@ public class ChunkMap extends SimpleRegionStorage implements ChunkHolder.PlayerP
+                 ((ca.spottedleaf.moonrise.patches.entity_tracker.EntityTrackerEntity)entity).moonrise$setTrackedEntity(trackedEntity);
+                 // note: the tick loop is OK when adding entities
+                 // Folia start - region threading
+-                final io.papermc.paper.threadedregions.RegionizedWorldData worldData = this.level.getCurrentWorldData();
++                try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(this.level, entity)) { // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
++                final io.papermc.paper.threadedregions.RegionizedWorldData worldData = lease.data();
+                 worldData.trackerEntities.add(entity);
+                 // Folia end - region threading
+                 // Paper end - optimise entity tracker
+-                trackedEntity.updatePlayers(this.level.getLocalPlayers()); // Folia - region threading
++                trackedEntity.updatePlayers(worldData.getLocalPlayers()); // Folia - region threading // SourbyCraft - relaxed thread checks: the entity's region's players
+                 if (entity instanceof ServerPlayer player) {
+                     this.updatePlayerStatus(player, true);
+ 
+@@ -1008,13 +1009,15 @@ public class ChunkMap extends SimpleRegionStorage implements ChunkHolder.PlayerP
+                         }
+                     }
+                 }
++                } // SourbyCraft - relaxed thread checks (lease)
+             }
+         }
+     }
+ 
+     protected void removeEntity(final Entity entity) {
+         dev.iyanz.aurora.engine.util.TickGuard.guard(entity, "Cannot remove entity from tracking async"); // Canvas - region guards
+-        final io.papermc.paper.threadedregions.RegionizedWorldData worldData = this.level.getCurrentWorldData(); // Folia - region threading
++        try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(this.level, entity)) { // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
++        final io.papermc.paper.threadedregions.RegionizedWorldData worldData = lease.data(); // Folia - region threading
+         if (entity instanceof ServerPlayer player) {
+             this.updatePlayerStatus(player, false);
+ 
+@@ -1040,6 +1043,7 @@ public class ChunkMap extends SimpleRegionStorage implements ChunkHolder.PlayerP
+         worldData.trackerEntities.remove(entity);
+         // Folia end - region threading
+         // Paper end - optimise entity tracker
++        } // SourbyCraft - relaxed thread checks (lease)
+     }
+ 
+     // Paper start - optimise entity tracker
+diff --git a/net/minecraft/server/level/DistanceManager.java b/net/minecraft/server/level/DistanceManager.java
+index 0db4f9cde4ce2b4a99c17254a4fe26944a128cb3..ef96a0b14260d84497be028987162cf458091d4a 100644
+--- a/net/minecraft/server/level/DistanceManager.java
++++ b/net/minecraft/server/level/DistanceManager.java
+@@ -59,13 +59,17 @@ public abstract class DistanceManager implements ca.spottedleaf.moonrise.patches
+ 
+     @Override
+     public final void moonrise$addPlayer(final ServerPlayer player, final SectionPos pos) {
+-        this.moonrise$getChunkMap().level.getCurrentWorldData().spawnChunkTracker.add(player, pos.x(), pos.z(), ca.spottedleaf.moonrise.patches.chunk_tick_iteration.ChunkTickConstants.PLAYER_SPAWN_TRACK_RANGE); // Folia - region threading
++        try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(this.moonrise$getChunkMap().level, player)) { // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
++        lease.data().spawnChunkTracker.add(player, pos.x(), pos.z(), ca.spottedleaf.moonrise.patches.chunk_tick_iteration.ChunkTickConstants.PLAYER_SPAWN_TRACK_RANGE); // Folia - region threading
++        } // SourbyCraft - relaxed thread checks
+         // Note: Cannot do narrow tracking on Paper due to custom spawn range
+     }
+ 
+     @Override
+     public final void moonrise$removePlayer(final ServerPlayer player, final SectionPos pos) {
+-        this.moonrise$getChunkMap().level.getCurrentWorldData().spawnChunkTracker.remove(player); // Folia - region threading
++        try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(this.moonrise$getChunkMap().level, player)) { // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
++        lease.data().spawnChunkTracker.remove(player); // Folia - region threading
++        } // SourbyCraft - relaxed thread checks
+         // Note: Cannot do narrow tracking on Paper due to custom spawn range
+     }
+ 
+@@ -74,10 +78,14 @@ public abstract class DistanceManager implements ca.spottedleaf.moonrise.patches
+                                             final SectionPos oldPos, final SectionPos newPos,
+                                             final boolean oldIgnore, final boolean newIgnore) {
+         if (newIgnore) {
+-            this.moonrise$getChunkMap().level.getCurrentWorldData().spawnChunkTracker.remove(player); // Folia - region threading
++            try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(this.moonrise$getChunkMap().level, player)) { // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
++            lease.data().spawnChunkTracker.remove(player); // Folia - region threading
++            } // SourbyCraft - relaxed thread checks
+             // Note: Cannot do narrow tracking on Paper due to custom spawn range
+         } else {
+-            this.moonrise$getChunkMap().level.getCurrentWorldData().spawnChunkTracker.addOrUpdate(player, newPos.x(), newPos.z(), ca.spottedleaf.moonrise.patches.chunk_tick_iteration.ChunkTickConstants.PLAYER_SPAWN_TRACK_RANGE); // Folia - region threading
++            try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(this.moonrise$getChunkMap().level, player)) { // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
++            lease.data().spawnChunkTracker.addOrUpdate(player, newPos.x(), newPos.z(), ca.spottedleaf.moonrise.patches.chunk_tick_iteration.ChunkTickConstants.PLAYER_SPAWN_TRACK_RANGE); // Folia - region threading
++            } // SourbyCraft - relaxed thread checks
+             // Note: Cannot do narrow tracking on Paper due to custom spawn range
+         }
+     }
+diff --git a/net/minecraft/server/level/ServerChunkCache.java b/net/minecraft/server/level/ServerChunkCache.java
+index ffb910a8e25f0483ef9cbf79a16513b4d240a6e0..1b884e6da5fa046a2af87e9e9ef3adc445876702 100644
+--- a/net/minecraft/server/level/ServerChunkCache.java
++++ b/net/minecraft/server/level/ServerChunkCache.java
+@@ -681,7 +681,7 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+         int zc = SectionPos.blockToSectionCoord(pos.getZ());
+         ChunkHolder chunk = this.getVisibleChunkIfPresent(ChunkPos.pack(xc, zc));
+         if (chunk != null && chunk.blockChanged(pos)) {
+-            this.level.getCurrentWorldData().chunkHoldersToBroadcast.add(chunk); // Folia - region threading
++            try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(this.level, pos)) { synchronized (lease.data().chunkHoldersToBroadcast) { lease.data().chunkHoldersToBroadcast.add(chunk); } } // Folia - region threading // SourbyCraft - relaxed thread checks: the chunk's own region, under the set's monitor (LightingLuminol MC 0001 worldDataPool)
+         }
+     }
+ 
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+index e69b72fac61f6adbffbe0d6c59b470a2dca1c32f..967955f0945882cb03b02014267d449480601bc2 100644
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -732,6 +732,10 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+         );
+     }
+     public final io.papermc.paper.threadedregions.RegionizedTaskQueue.WorldRegionTaskData taskQueueRegionData = new io.papermc.paper.threadedregions.RegionizedTaskQueue.WorldRegionTaskData(this);
++    // SourbyCraft start - relaxed thread checks: cross-region world data, ported from LightingLuminol's Level.worldDataPool (MC 0001, revision 72d51c4d); only consulted while aurora.bridge.thread-checks is relaxed
++    private final dev.iyanz.sourbycraft.compat.luminol.RegionizedWorldDataPool sourbycraftWorldDataPool = new dev.iyanz.sourbycraft.compat.luminol.RegionizedWorldDataPool(this);
++    public dev.iyanz.sourbycraft.compat.luminol.RegionizedWorldDataPool sourbycraft$worldDataPool() { return this.sourbycraftWorldDataPool; }
++    // SourbyCraft end - relaxed thread checks
+     // Canvas start - region threading
+     // note: *never* pop the unload ticket, EVER.
+     public final dev.iyanz.aurora.engine.util.ticket.TicketHolder<dev.iyanz.aurora.engine.util.ticket.UnloadTicket>
+@@ -1826,10 +1830,13 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+         } else {
+             if (entity instanceof net.minecraft.world.entity.item.ItemEntity item && item.getItem().isEmpty()) return false; // Paper - Prevent empty items from being added
+             // Paper start - capture all item additions to the world
+-            if (this.getCurrentWorldData().captureDrops != null && entity instanceof net.minecraft.world.entity.item.ItemEntity item) { // Folia - region threading
+-                this.getCurrentWorldData().captureDrops.add(item); // Folia - region threading
++            try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(this, entity)) { // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
++            final io.papermc.paper.threadedregions.RegionizedWorldData captureData = lease.data();
++            if (captureData.captureDrops != null && entity instanceof net.minecraft.world.entity.item.ItemEntity item) { // Folia - region threading
++                captureData.captureDrops.add(item); // Folia - region threading
+                 return true;
+             }
++            } // SourbyCraft - relaxed thread checks
+             // Paper end - capture all item additions to the world
+             // SPIGOT-6415: Don't call spawn event when reason is null. For example when an entity teleports to a new world.
+             if (spawnReason != null && !org.bukkit.craftbukkit.event.CraftEventFactory.doEntityAddEventCalling(this, entity, spawnReason)) {
+@@ -2038,9 +2045,11 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+             String message = "recursive call to sendBlockUpdated";
+             Util.logAndPauseIfInIde("recursive call to sendBlockUpdated", new IllegalStateException("recursive call to sendBlockUpdated"));
+         }
++        try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(this, pos)) { // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool); the inherited line above is left in place so the ledger key of the guard it precedes is unchanged
++        final io.papermc.paper.threadedregions.RegionizedWorldData blockUpdateData = lease.data(); // SourbyCraft - relaxed thread checks
+ 
+         this.getChunkSource().blockChanged(pos);
+-        regionizedWorldData.pathTypesByPosCache.invalidate(pos); // Folia - region threading
++        blockUpdateData.pathTypesByPosCache.invalidate(pos); // Folia - region threading
+         if (this.paperConfig().misc.updatePathfindingOnBlockUpdate) { // Paper - option to disable pathfinding updates
+         VoxelShape oldShape = old.getCollisionShape(this, pos);
+         VoxelShape newShape = current.getCollisionShape(this, pos);
+@@ -2048,7 +2057,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+             List<PathNavigation> navigationsToUpdate = new ObjectArrayList<>();
+ 
+             try { // Paper - catch CME see below why
+-            for (java.util.Iterator<Mob> iterator = regionizedWorldData.getNavigatingMobs(); iterator.hasNext();) { // Folia - region threading
++            for (java.util.Iterator<Mob> iterator = blockUpdateData.getNavigatingMobs(); iterator.hasNext();) { // Folia - region threading
+                 Mob navigatingMob = iterator.next(); // Folia - region threading
+                 PathNavigation pathNavigation = navigatingMob.getNavigation();
+                 if (pathNavigation.shouldRecomputePath(pos)) {
+@@ -2076,24 +2085,29 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+             }
+         }
+         } // Paper - option to disable pathfinding updates
++    } // SourbyCraft - relaxed thread checks (lease)
+     }
+ 
+     @Override
+     public void updateNeighborsAt(final BlockPos pos, final Block sourceBlock) {
+         // CraftBukkit start
+-        if (this.getCurrentWorldData().populating) { // Folia - region threading
++        try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(this, pos)) { // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
++        if (lease.data().populating) { // Folia - region threading
+             return;
+         }
+         // CraftBukkit end
+-        if (this.getCurrentWorldData().captureBlockStates) { return; } // Paper - Cancel all physics during placement // Folia - region threading
++        if (lease.data().captureBlockStates) { return; } // Paper - Cancel all physics during placement // Folia - region threading
++        } // SourbyCraft - relaxed thread checks
+         this.updateNeighborsAt(pos, sourceBlock, ExperimentalRedstoneUtils.initialOrientation(this, null, null));
+     }
+ 
+     @Override
+     public void updateNeighborsAt(final BlockPos pos, final Block sourceBlock, final @Nullable Orientation orientation) {
+         // Folia start - region threading
+-        if (this.getCurrentWorldData().captureBlockStates) { return; } // Paper - Cancel all physics during placement
+-        this.getCurrentWorldData().neighborUpdater.updateNeighborsAtExceptFromFacing(pos, sourceBlock, null, orientation);
++        try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(this, pos)) { // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
++        if (lease.data().captureBlockStates) { return; } // Paper - Cancel all physics during placement
++        lease.data().neighborUpdater.updateNeighborsAtExceptFromFacing(pos, sourceBlock, null, orientation);
++        } // SourbyCraft - relaxed thread checks
+         // Folia end - region threading
+     }
+ 
+@@ -2101,19 +2115,25 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+     public void updateNeighborsAtExceptFromFacing(
+         final BlockPos pos, final Block blockObject, final Direction skipDirection, final @Nullable Orientation orientation
+     ) {
+-        this.getCurrentWorldData().neighborUpdater.updateNeighborsAtExceptFromFacing(pos, blockObject, skipDirection, orientation); // Folia - region threading
++        try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(this, pos)) { // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
++        lease.data().neighborUpdater.updateNeighborsAtExceptFromFacing(pos, blockObject, skipDirection, orientation); // Folia - region threading
++        } // SourbyCraft - relaxed thread checks
+     }
+ 
+     @Override
+     public void neighborChanged(final BlockPos pos, final Block changedBlock, final @Nullable Orientation orientation) {
+-        this.getCurrentWorldData().neighborUpdater.neighborChanged(pos, changedBlock, orientation); // Folia - region threading
++        try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(this, pos)) { // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
++        lease.data().neighborUpdater.neighborChanged(pos, changedBlock, orientation); // Folia - region threading
++        } // SourbyCraft - relaxed thread checks
+     }
+ 
+     @Override
+     public void neighborChanged(
+         final BlockState state, final BlockPos pos, final Block changedBlock, final @Nullable Orientation orientation, final boolean movedByPiston
+     ) {
+-        this.getCurrentWorldData().neighborUpdater.neighborChanged(state, pos, changedBlock, orientation, movedByPiston); // Folia - region threading
++        try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(this, pos)) { // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
++        lease.data().neighborUpdater.neighborChanged(state, pos, changedBlock, orientation, movedByPiston); // Folia - region threading
++        } // SourbyCraft - relaxed thread checks
+     }
+ 
+     @Override
+@@ -2222,7 +2242,9 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+ 
+     @Override
+     public void blockEvent(final BlockPos pos, final Block block, final int b0, final int b1) {
+-        this.getCurrentWorldData().pushBlockEvent(new BlockEventData(pos, block, b0, b1)); // Folia - region threading
++        try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(this, pos)) { // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
++        lease.data().pushBlockEvent(new BlockEventData(pos, block, b0, b1)); // Folia - region threading
++        } // SourbyCraft - relaxed thread checks
+     }
+ 
+     private void runBlockEvents() {
+@@ -3043,12 +3065,16 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+         @Override
+         public void onTickingStart(final Entity entity) {
+             if (entity instanceof net.minecraft.world.entity.Marker && !paperConfig().entities.markers.tick) return; // Paper - Configurable marker ticking
+-            ServerLevel.this.getCurrentWorldData().addEntityTickingEntity(entity); // Folia - region threading
++            try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(ServerLevel.this, entity)) { // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
++            lease.data().addEntityTickingEntity(entity); // Folia - region threading
++            } // SourbyCraft - relaxed thread checks
+         }
+ 
+         @Override
+         public void onTickingEnd(final Entity entity) {
+-            ServerLevel.this.getCurrentWorldData().removeEntityTickingEntity(entity); // Folia - region threading
++            try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(ServerLevel.this, entity)) { // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
++            lease.data().removeEntityTickingEntity(entity); // Folia - region threading
++            } // SourbyCraft - relaxed thread checks
+             // Paper start - Reset pearls when they stop being ticked
+             if (ServerLevel.this.paperConfig().fixes.disableUnloadedChunkEnderpearlExploit && ServerLevel.this.paperConfig().misc.legacyEnderPearlBehavior && entity instanceof net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownEnderpearl pearl) {
+                 pearl.setOwner(null);
+@@ -3059,7 +3085,9 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+         @Override
+         public void onTrackingStart(final Entity entity) {
+             org.spigotmc.AsyncCatcher.catchOp("entity register"); // Spigot
+-            ServerLevel.this.getCurrentWorldData().addLoadedEntity(entity); // Folia - region threading
++            try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(ServerLevel.this, entity)) { // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
++            lease.data().addLoadedEntity(entity); // Folia - region threading
++            } // SourbyCraft - relaxed thread checks
+             // ServerLevel.this.getChunkSource().addEntity(entity); // Paper - ignore and warn about illegal addEntity calls instead of crashing server; moved down below valid=true
+             if (entity instanceof ServerPlayer player) {
+                 ServerLevel.this.players.add(player);
+@@ -3082,7 +3110,9 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+                     );
+                 }
+ 
+-                ServerLevel.this.getCurrentWorldData().addNavigatingMob(mob); // Folia - region threading
++                try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(ServerLevel.this, mob)) { // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
++                lease.data().addNavigatingMob(mob); // Folia - region threading
++                } // SourbyCraft - relaxed thread checks
+             }
+ 
+             if (entity instanceof EnderDragon dragon) {
+@@ -3110,7 +3140,9 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+         @Override
+         public void onTrackingEnd(final Entity entity) {
+             org.spigotmc.AsyncCatcher.catchOp("entity unregister"); // Spigot
+-            ServerLevel.this.getCurrentWorldData().removeLoadedEntity(entity); // Folia - region threading
++            try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(ServerLevel.this, entity)) { // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
++            lease.data().removeLoadedEntity(entity); // Folia - region threading
++            } // SourbyCraft - relaxed thread checks
+             // Spigot start // TODO I don't think this is needed anymore
+             if (entity instanceof Player player) {
+                 for (final ServerLevel level : ServerLevel.this.getServer().getAllLevels()) {
+@@ -3156,7 +3188,9 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+                     );
+                 }
+ 
+-                ServerLevel.this.getCurrentWorldData().removeNavigatingMob(mob); // Folia - region threading
++                try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(ServerLevel.this, mob)) { // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
++                lease.data().removeNavigatingMob(mob); // Folia - region threading
++                } // SourbyCraft - relaxed thread checks
+             }
+ 
+             if (entity instanceof EnderDragon dragon) {
+diff --git a/net/minecraft/server/level/ServerPlayerGameMode.java b/net/minecraft/server/level/ServerPlayerGameMode.java
+index aa4f4071cd58c1cb4f8cb68b9b3556fe6ec48fa9..808d1e3bf803a2bc9caff95c0e97e319310ffad1 100644
+--- a/net/minecraft/server/level/ServerPlayerGameMode.java
++++ b/net/minecraft/server/level/ServerPlayerGameMode.java
+@@ -391,7 +391,9 @@ public class ServerPlayerGameMode {
+ 
+         // CraftBukkit start
+         org.bukkit.block.BlockState bState = bblock.getState();
+-        this.level.getCurrentWorldData().captureDrops = new java.util.ArrayList<>(); // Folia - region threading
++        try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(this.level, this.player)) { // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
++        final io.papermc.paper.threadedregions.RegionizedWorldData captureData = lease.data();
++        captureData.captureDrops = new java.util.ArrayList<>(); // Folia - region threading
+         // CraftBukkit end
+         BlockState adjustedState = block.playerWillDestroy(this.level, pos, state, this.player);
+         boolean changed = this.level.removeBlock(pos, false);
+@@ -417,8 +419,8 @@ public class ServerPlayerGameMode {
+         } // CraftBukkit
+ 
+         // CraftBukkit start
+-        java.util.List<net.minecraft.world.entity.item.ItemEntity> itemsToDrop = this.level.getCurrentWorldData().captureDrops; // Paper - capture all item additions to the world  // Folia - region threading
+-        this.level.getCurrentWorldData().captureDrops = null; // Paper - capture all item additions to the world; Remove this earlier so that we can actually drop stuff  // Folia - region threading
++        java.util.List<net.minecraft.world.entity.item.ItemEntity> itemsToDrop = captureData.captureDrops; // Paper - capture all item additions to the world  // Folia - region threading
++        captureData.captureDrops = null; // Paper - capture all item additions to the world; Remove this earlier so that we can actually drop stuff  // Folia - region threading
+         if (event.isDropItems()) {
+             org.bukkit.craftbukkit.event.CraftEventFactory.handleBlockDropItemEvent(bblock, bState, this.player, itemsToDrop); // Paper - capture all item additions to the world
+         }
+@@ -435,6 +437,7 @@ public class ServerPlayerGameMode {
+         }
+         // Paper end - Trigger bee_nest_destroyed trigger in the correct place
+         // CraftBukkit end
++        } // SourbyCraft - relaxed thread checks (lease)
+ 
+         return true;
+     }
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+index 945524aa885f353dbd37018b1d7b2c03db1c4bad..603f868b5f1b0e3bc4422846966d1a5030fad45a 100644
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -1702,7 +1702,8 @@ public abstract class Entity
+             return vec;
+         }
+ 
+-        long currentGameTime = this.level().getRedstoneGameTime(); // Folia - region threading
++        final long currentGameTime; // SourbyCraft - relaxed thread checks
++        try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(this)) { currentGameTime = lease.data().getRedstoneGameTime(); } // Folia - region threading // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
+         if (currentGameTime != this.pistonDeltasGameTime) {
+             Arrays.fill(this.pistonDeltas, 0.0);
+             this.pistonDeltasGameTime = currentGameTime;
+@@ -6737,7 +6738,7 @@ public abstract class Entity
+     // Paper end - Folia schedulers
+     // Paper start - optimise Folia entity scheduler
+     public final void registerScheduler() {
+-        this.getBukkitEntity().taskScheduler.registerTo(io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegionizedWorldData().entitySchedulerTickList); // Folia - region threading
++        try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(this)) { this.getBukkitEntity().taskScheduler.registerTo(lease.data().entitySchedulerTickList); } // Folia - region threading // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
+     }
+     // Paper end - optimise Folia entity scheduler
+ 
+diff --git a/net/minecraft/world/entity/LivingEntity.java b/net/minecraft/world/entity/LivingEntity.java
+index 9d9071d96354e2d3189e3502ebeff3728dab7da8..8859ca2672a170963509de2a8967c52f389de491 100644
+--- a/net/minecraft/world/entity/LivingEntity.java
++++ b/net/minecraft/world/entity/LivingEntity.java
+@@ -1594,7 +1594,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+         boolean success = !blocked; // CraftBukkit - Ensure to return false if damage is blocked
+         if (success) {
+             this.lastDamageSource = source;
+-            this.lastDamageStamp = this.level().getRedstoneGameTime(); // Folia - region threading
++            try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(this)) { this.lastDamageStamp = lease.data().getRedstoneGameTime(); } // Folia - region threading // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
+ 
+             for (MobEffectInstance effect : this.getActiveEffects()) {
+                 effect.onMobHurt(level, this, source, damage);
+@@ -1857,7 +1857,9 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+     }
+ 
+     public @Nullable DamageSource getLastDamageSource() {
+-        if (this.level().getRedstoneGameTime() - this.lastDamageStamp > 40L || this.lastDamageStamp == Long.MIN_VALUE) { // Folia - region threading
++        final long damageGameTime; // SourbyCraft - relaxed thread checks
++        try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(this)) { damageGameTime = lease.data().getRedstoneGameTime(); } // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
++        if (damageGameTime - this.lastDamageStamp > 40L || this.lastDamageStamp == Long.MIN_VALUE) { // Folia - region threading
+             this.lastDamageSource = null;
+         }
+ 
+@@ -2743,7 +2745,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+         }
+ 
+         this.lastDamageSource = source;
+-        this.lastDamageStamp = this.level().getRedstoneGameTime(); // Folia - region threading
++        try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(this)) { this.lastDamageStamp = lease.data().getRedstoneGameTime(); } // Folia - region threading // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
+     }
+ 
+     @Override
+diff --git a/net/minecraft/world/level/Level.java b/net/minecraft/world/level/Level.java
+index 81afb1bcf6b170d61cf3b235c62f33d449bcf47c..8d34ac163e26b1bc4f01e19fc51539a2f67f4c17 100644
+--- a/net/minecraft/world/level/Level.java
++++ b/net/minecraft/world/level/Level.java
+@@ -1030,8 +1030,9 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+     @Nullable
+     public final BlockState getBlockStateIfLoaded(BlockPos pos) {
+         // CraftBukkit start - tree generation
+-        if (this.getCurrentWorldData().captureTreeGeneration) { // Folia - region threading
+-            CraftBlockState previous = this.getCurrentWorldData().capturedBlockStates.get(pos); // Folia - region threading
++        final io.papermc.paper.threadedregions.RegionizedWorldData captureData = this.getCurrentWorldData(); // SourbyCraft - relaxed thread checks: a thread off every region has none; reads of the capture flag tolerate it (LightingLuminol MC 0001 went through the pool here; this is the hottest read path, so the current region's flag is read instead)
++        if (captureData != null && captureData.captureTreeGeneration) { // Folia - region threading
++            CraftBlockState previous = captureData.capturedBlockStates.get(pos); // Folia - region threading
+             if (previous != null) {
+                 return previous.getHandle();
+             }
+@@ -1094,7 +1095,8 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+     @Override
+     public boolean setBlock(final BlockPos pos, final BlockState blockState, final @Block.UpdateFlags int updateFlags, final int updateLimit) {
+         ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread((ServerLevel)this, pos, "Updating block asynchronously"); // Folia - region threading
+-        final io.papermc.paper.threadedregions.RegionizedWorldData worldData = this.getCurrentWorldData(); // Folia - region threading
++        try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at((ServerLevel) this, pos)) { // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
++        final io.papermc.paper.threadedregions.RegionizedWorldData worldData = lease.data(); // Folia - region threading
+         // CraftBukkit start - tree generation
+         if (worldData.captureTreeGeneration) { // Folia - region threading
+             // Paper start - Protect Bedrock and End Portal/Frames from being destroyed
+@@ -1191,6 +1193,7 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+         // CraftBukkit end
+ 
+         return true;
++    } // SourbyCraft - relaxed thread checks (lease)
+     }
+ 
+     // CraftBukkit start - Split off from above in order to directly send client and physic updates
+@@ -1217,7 +1220,8 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+                 // CraftBukkit start
+                 oldState.updateIndirectNeighbourShapes(this, pos, neighbourUpdateFlags, updateLimit - 1); // Don't call an event for the old block to limit event spam
+                 boolean cancelledUpdates = false; // Paper - Fix block place logic
+-                if (((ServerLevel)this).getCurrentWorldData().hasPhysicsEvent) { // Paper - BlockPhysicsEvent // Folia - region threading
++                final io.papermc.paper.threadedregions.RegionizedWorldData physicsData = ((ServerLevel)this).getCurrentWorldData(); // SourbyCraft - relaxed thread checks: a thread off every region has none
++                if (physicsData != null && physicsData.hasPhysicsEvent) { // Paper - BlockPhysicsEvent // Folia - region threading
+                     org.bukkit.event.block.BlockPhysicsEvent event = new org.bukkit.event.block.BlockPhysicsEvent(org.bukkit.craftbukkit.block.CraftBlock.at(this, pos), blockState.asBlockData());
+                     cancelledUpdates = !event.callEvent(); // Paper - Fix block place logic
+                 }
+@@ -1323,7 +1327,7 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+         final @Block.UpdateFlags int updateFlags,
+         final int updateLimit
+     ) {
+-        this.getCurrentWorldData().neighborUpdater.shapeUpdate(direction, neighborState, pos, neighborPos, updateFlags, updateLimit); // Folia - region threading
++        try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at((ServerLevel) this, pos)) { lease.data().neighborUpdater.shapeUpdate(direction, neighborState, pos, neighborPos, updateFlags, updateLimit); } // Folia - region threading // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
+     }
+ 
+     @Override
+@@ -1426,8 +1430,9 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+     @Override
+     public BlockState getBlockState(final BlockPos pos) {
+         // CraftBukkit start - tree generation
+-        if (this.getCurrentWorldData().captureTreeGeneration) { // Folia - region threading
+-            CraftBlockState previous = this.getCurrentWorldData().capturedBlockStates.get(pos); // Paper // Folia - region threading
++        final io.papermc.paper.threadedregions.RegionizedWorldData captureData = this.getCurrentWorldData(); // SourbyCraft - relaxed thread checks: see getBlockStateIfLoaded
++        if (captureData != null && captureData.captureTreeGeneration) { // Folia - region threading
++            CraftBlockState previous = captureData.capturedBlockStates.get(pos); // Paper // Folia - region threading
+             if (previous != null) {
+                 return previous.getHandle();
+             }
+@@ -1598,7 +1603,7 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+ 
+     public void addBlockEntityTicker(final TickingBlockEntity ticker) {
+         if (!this.paperConfig().unsupportedSettings.ticking.blockEntities) return; // Paper - option to disable ticking
+-        this.getCurrentWorldData().addBlockEntityTicker(ticker); // Folia - region threading
++        try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at((ServerLevel) this, ticker.getPos())) { lease.data().addBlockEntityTicker(ticker); } // Folia - region threading // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
+     }
+ 
+     public void tickBlockEntities() {
+@@ -1836,7 +1841,8 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+         // Folia end - region threading
+         // Paper start - Perf: Optimize capturedTileEntities lookup
+         net.minecraft.world.level.block.entity.BlockEntity blockEntity;
+-        if (!this.getCurrentWorldData().capturedBlockEntities.isEmpty() && (blockEntity = this.getCurrentWorldData().capturedBlockEntities.get(pos)) != null) { // Folia - region threading
++        final io.papermc.paper.threadedregions.RegionizedWorldData captureData = this.getCurrentWorldData(); // SourbyCraft - relaxed thread checks: see getBlockStateIfLoaded
++        if (captureData != null && !captureData.capturedBlockEntities.isEmpty() && (blockEntity = captureData.capturedBlockEntities.get(pos)) != null) { // Folia - region threading
+             return blockEntity;
+         }
+         // Paper end - Perf: Optimize capturedTileEntities lookup
+@@ -1853,10 +1859,12 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+         BlockPos pos = blockEntity.getBlockPos();
+         if (this.isInValidBounds(pos)) {
+             // CraftBukkit start
+-            if (this.getCurrentWorldData().captureBlockStates) { // Folia - region threading
+-                this.getCurrentWorldData().capturedBlockEntities.put(pos.immutable(), blockEntity); // Folia - region threading
++            try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at((ServerLevel) this, pos)) { // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
++            if (lease.data().captureBlockStates) { // Folia - region threading
++                lease.data().capturedBlockEntities.put(pos.immutable(), blockEntity); // Folia - region threading
+                 return;
+             }
++            } // SourbyCraft - relaxed thread checks
+             // CraftBukkit end
+             this.getChunkAt(pos).addAndRegisterBlockEntity(blockEntity);
+         }
+@@ -2119,7 +2127,10 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+     // Folia start - region threading
+     @Override
+     public long getRedstoneGameTime() {
+-        return this.getCurrentWorldData().getRedstoneGameTime();
++        // SourbyCraft start - relaxed thread checks: off every region (the global tick, an async thread) the level's game time answers instead of a NullPointerException
++        final io.papermc.paper.threadedregions.RegionizedWorldData worldData = this.getCurrentWorldData();
++        return worldData == null ? this.getLevelData().getGameTime() : worldData.getRedstoneGameTime();
++        // SourbyCraft end - relaxed thread checks
+     }
+ 
+     @Override
+diff --git a/net/minecraft/world/level/ScheduledTickAccess.java b/net/minecraft/world/level/ScheduledTickAccess.java
+index 28e8e600ea19ac2a52035779781e86e112a36497..b9ece4e417eae04812529e56a582d22acdcc921d 100644
+--- a/net/minecraft/world/level/ScheduledTickAccess.java
++++ b/net/minecraft/world/level/ScheduledTickAccess.java
+@@ -15,20 +15,52 @@ public interface ScheduledTickAccess {
+     LevelTickAccess<Block> getBlockTicks();
+ 
+     default void scheduleTick(final BlockPos pos, final Block type, final int tickDelay, final TickPriority priority) {
++        // SourbyCraft start - relaxed thread checks: the tick goes to the region that owns the chunk, with that region's redstone time (LightingLuminol MC 0001 ScheduledTickAccess/LevelAccessor); folded away unless relaxed
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE && this instanceof net.minecraft.server.level.ServerLevel level) {
++            try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(level, pos)) {
++                lease.data().getBlockLevelTicks().schedule(new net.minecraft.world.ticks.ScheduledTick<>(type, pos, lease.data().getRedstoneGameTime() + tickDelay, priority, level.nextSubTickCount()));
++            }
++            return;
++        }
++        // SourbyCraft end - relaxed thread checks
+         this.getBlockTicks().schedule(this.createTick(pos, type, tickDelay, priority));
+     }
+ 
+     default void scheduleTick(final BlockPos pos, final Block type, final int tickDelay) {
++        // SourbyCraft start - relaxed thread checks: see the priority overload
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE && this instanceof net.minecraft.server.level.ServerLevel level) {
++            try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(level, pos)) {
++                lease.data().getBlockLevelTicks().schedule(new net.minecraft.world.ticks.ScheduledTick<>(type, pos, lease.data().getRedstoneGameTime() + tickDelay, level.nextSubTickCount()));
++            }
++            return;
++        }
++        // SourbyCraft end - relaxed thread checks
+         this.getBlockTicks().schedule(this.createTick(pos, type, tickDelay));
+     }
+ 
+     LevelTickAccess<Fluid> getFluidTicks();
+ 
+     default void scheduleTick(final BlockPos pos, final Fluid type, final int tickDelay, final TickPriority priority) {
++        // SourbyCraft start - relaxed thread checks: the tick goes to the region that owns the chunk, with that region's redstone time (LightingLuminol MC 0001 ScheduledTickAccess/LevelAccessor); folded away unless relaxed
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE && this instanceof net.minecraft.server.level.ServerLevel level) {
++            try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(level, pos)) {
++                lease.data().getFluidLevelTicks().schedule(new net.minecraft.world.ticks.ScheduledTick<>(type, pos, lease.data().getRedstoneGameTime() + tickDelay, priority, level.nextSubTickCount()));
++            }
++            return;
++        }
++        // SourbyCraft end - relaxed thread checks
+         this.getFluidTicks().schedule(this.createTick(pos, type, tickDelay, priority));
+     }
+ 
+     default void scheduleTick(final BlockPos pos, final Fluid type, final int tickDelay) {
++        // SourbyCraft start - relaxed thread checks: see the priority overload
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE && this instanceof net.minecraft.server.level.ServerLevel level) {
++            try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(level, pos)) {
++                lease.data().getFluidLevelTicks().schedule(new net.minecraft.world.ticks.ScheduledTick<>(type, pos, lease.data().getRedstoneGameTime() + tickDelay, level.nextSubTickCount()));
++            }
++            return;
++        }
++        // SourbyCraft end - relaxed thread checks
+         this.getFluidTicks().schedule(this.createTick(pos, type, tickDelay));
+     }
+ }
+diff --git a/net/minecraft/world/level/ServerExplosion.java b/net/minecraft/world/level/ServerExplosion.java
+index 8d2047df8ff84cd67d9eb41fb1625d488a2473c9..27b4b901b7d431aea1491c2fa74a5d180fa078ab 100644
+--- a/net/minecraft/world/level/ServerExplosion.java
++++ b/net/minecraft/world/level/ServerExplosion.java
+@@ -792,15 +792,18 @@ public class ServerExplosion implements Explosion {
+         if (!this.level.paperConfig().environment.optimizeExplosions) {
+             return this.getSeenFraction(vec3d, entity, this.directMappedBlockCache, this.mutablePos); // Paper - collision optimisations
+         }
+-        final io.papermc.paper.threadedregions.RegionizedWorldData worldData = this.level.getCurrentWorldData(); // Folia - region threading
++        try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(this.level, net.minecraft.util.Mth.floor(this.center.x) >> 4, net.minecraft.util.Mth.floor(this.center.z) >> 4)) { // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
++        final io.papermc.paper.threadedregions.RegionizedWorldData worldData = lease.data(); // Folia - region threading
+         CacheKey key = new CacheKey(this, entity.getBoundingBox());
+-        Float blockDensity = worldData.explosionDensityCache.get(key); // Folia - region threading
++        Float blockDensity; // SourbyCraft - relaxed thread checks
++        synchronized (worldData.explosionDensityCache) { blockDensity = worldData.explosionDensityCache.get(key); } // Folia - region threading // SourbyCraft - relaxed thread checks: an explosion run off the owning thread shares the region's cache (LightingLuminol MC 0001 used a concurrent map; here the two touch points are locked)
+         if (blockDensity == null) {
+             blockDensity = this.getSeenFraction(vec3d, entity, this.directMappedBlockCache, this.mutablePos); // Paper - collision optimisations
+-            worldData.explosionDensityCache.put(key, blockDensity); // Folia - region threading
++            synchronized (worldData.explosionDensityCache) { worldData.explosionDensityCache.put(key, blockDensity); } // Folia - region threading
+         }
+ 
+         return blockDensity;
++    } // SourbyCraft - relaxed thread checks (lease)
+     }
+ 
+     public static class CacheKey {
+diff --git a/net/minecraft/world/level/block/Block.java b/net/minecraft/world/level/block/Block.java
+index 423c45d7be8ac0c27fd3caa0aa8f15f25ad4a3a6..c4829b5deafc285ae3e04ad8ff54b59a8abea88f 100644
+--- a/net/minecraft/world/level/block/Block.java
++++ b/net/minecraft/world/level/block/Block.java
+@@ -486,11 +486,13 @@ public class Block extends BlockBehaviour implements ItemLike {
+             ItemEntity entity = entityFactory.get();
+             entity.setDefaultPickUpDelay();
+             // CraftBukkit start
+-            if (level.getCurrentWorldData().captureDrops != null) { // Folia - region threading
+-                level.getCurrentWorldData().captureDrops.add(entity); // Folia - region threading
++            try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at((net.minecraft.server.level.ServerLevel) level, entity)) { // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
++            if (lease.data().captureDrops != null) { // Folia - region threading
++                lease.data().captureDrops.add(entity); // Folia - region threading
+             } else {
+                 level.addFreshEntity(entity);
+             }
++            } // SourbyCraft - relaxed thread checks
+             // CraftBukkit end
+         }
+     }
+diff --git a/net/minecraft/world/level/block/RedStoneWireBlock.java b/net/minecraft/world/level/block/RedStoneWireBlock.java
+index 8886b5b688858039fc3b7c56ab2dd0853f04ddf2..727a713e76e9f8e958170024a0adf7583a36e62f 100644
+--- a/net/minecraft/world/level/block/RedStoneWireBlock.java
++++ b/net/minecraft/world/level/block/RedStoneWireBlock.java
+@@ -295,7 +295,7 @@ public class RedStoneWireBlock extends Block {
+             if (orientation != null) {
+                 source = pos.relative(orientation.getFront().getOpposite());
+             }
+-            getTurbo(worldIn).updateSurroundingRedstone(worldIn, pos, state, source); // Folia - region threading
++            try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at((net.minecraft.server.level.ServerLevel) worldIn, pos)) { lease.data().turbo.updateSurroundingRedstone(worldIn, pos, state, source); } // Folia - region threading // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
+             return;
+         }
+         updatePowerStrength(worldIn, pos, state, orientation, blockAdded);
+@@ -319,7 +319,7 @@ public class RedStoneWireBlock extends Block {
+                 // [Space Walker] suppress shape updates and emit those manually to
+                 // bypass the new neighbor update stack.
+                 if (level.setBlock(pos, state, Block.UPDATE_KNOWN_SHAPE | Block.UPDATE_CLIENTS)) {
+-                    this.getTurbo(level).updateNeighborShapes(level, pos, state); // Folia - region threading
++                    try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at((net.minecraft.server.level.ServerLevel) level, pos)) { lease.data().turbo.updateNeighborShapes(level, pos, state); } // Folia - region threading // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
+                 }
+             }
+         }
+diff --git a/net/minecraft/world/level/chunk/LevelChunk.java b/net/minecraft/world/level/chunk/LevelChunk.java
+index e5a55bc6c0d8599dee7774b011fb437b428c80b6..1658bfd8bf2807e54c3e183d619fe19682f94553 100644
+--- a/net/minecraft/world/level/chunk/LevelChunk.java
++++ b/net/minecraft/world/level/chunk/LevelChunk.java
+@@ -448,9 +448,11 @@ public class LevelChunk extends ChunkAccess implements DebugValueSource, ca.spot
+             return null;
+         }
+ 
+-        if (!this.level.isClientSide() && (flags & Block.UPDATE_SKIP_ON_PLACE) == 0 && (!this.level.getCurrentWorldData().captureBlockStates || newBlock instanceof net.minecraft.world.level.block.BaseEntityBlock)) { // CraftBukkit - Don't place while processing the BlockPlaceEvent, unless it's a BlockContainer. Prevents blocks such as TNT from activating when cancelled. // Folia - region threading
++        try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at((net.minecraft.server.level.ServerLevel) this.level, pos)) { // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
++        if (!this.level.isClientSide() && (flags & Block.UPDATE_SKIP_ON_PLACE) == 0 && (!lease.data().captureBlockStates || newBlock instanceof net.minecraft.world.level.block.BaseEntityBlock)) { // CraftBukkit - Don't place while processing the BlockPlaceEvent, unless it's a BlockContainer. Prevents blocks such as TNT from activating when cancelled. // Folia - region threading
+             state.onPlace(this.level, pos, oldState, movedByPiston);
+         }
++        } // SourbyCraft - relaxed thread checks
+ 
+         if (state.hasBlockEntity() && section.getBlockState(localX, localY, localZ).is(newBlock)) {
+             BlockEntity blockEntity = this.getBlockEntity(pos, LevelChunk.EntityCreationType.CHECK);
+@@ -492,7 +494,8 @@ public class LevelChunk extends ChunkAccess implements DebugValueSource, ca.spot
+ 
+     public @Nullable BlockEntity getBlockEntity(final BlockPos pos, final LevelChunk.EntityCreationType creationType) {
+         // CraftBukkit start
+-        BlockEntity blockEntity = this.level.getCurrentWorldData().capturedBlockEntities.get(pos); // Folia - region threading
++        final io.papermc.paper.threadedregions.RegionizedWorldData captureData = this.level.getCurrentWorldData(); // SourbyCraft - relaxed thread checks: a thread off every region has none
++        BlockEntity blockEntity = captureData == null ? null : captureData.capturedBlockEntities.get(pos); // Folia - region threading
+         if (blockEntity == null) {
+             blockEntity = this.canvas$getFromBuckets(pos.getX(), pos.getY(), pos.getZ()); // Canvas - optimize block entity fetching
+         }
+@@ -679,14 +682,16 @@ public class LevelChunk extends ChunkAccess implements DebugValueSource, ca.spot
+ 
+                 org.bukkit.World world = this.level.getWorld();
+                 if (world != null) {
+-                    this.level.getCurrentWorldData().populating = true; // Folia - region threading
++                    try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at((net.minecraft.server.level.ServerLevel) this.level, this.getPos().x(), this.getPos().z())) { // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
++                    lease.data().populating = true; // Folia - region threading
+                     try {
+                         for (org.bukkit.generator.BlockPopulator populator : world.getPopulators()) {
+                             populator.populate(world, random, bukkitChunk);
+                         }
+                     } finally {
+-                        this.level.getCurrentWorldData().populating = false; // Folia - region threading
++                        lease.data().populating = false; // Folia - region threading
+                     }
++                    } // SourbyCraft - relaxed thread checks
+                 }
+                 server.getPluginManager().callEvent(new org.bukkit.event.world.ChunkPopulateEvent(bukkitChunk));
+             }
+@@ -711,7 +716,8 @@ public class LevelChunk extends ChunkAccess implements DebugValueSource, ca.spot
+     @Override
+     public boolean isUnsaved() {
+         // Paper start - rewrite chunk system
+-        final long gameTime = this.level.getRedstoneGameTime(); // Folia - region threading
++        final long gameTime; // SourbyCraft - relaxed thread checks
++        try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at((net.minecraft.server.level.ServerLevel) this.level, this.getPos().x(), this.getPos().z())) { gameTime = lease.data().getRedstoneGameTime(); } // Folia - region threading // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol MC 0001 worldDataPool)
+         if (((ca.spottedleaf.moonrise.patches.chunk_system.ticks.ChunkSystemLevelChunkTicks)this.blockTicks).moonrise$isDirty(gameTime)
+             || ((ca.spottedleaf.moonrise.patches.chunk_system.ticks.ChunkSystemLevelChunkTicks)this.fluidTicks).moonrise$isDirty(gameTime)) {
+             return true;

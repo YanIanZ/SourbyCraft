@@ -41,7 +41,7 @@ public class TickGuard {
                     LOGGER.warn("Thread failed main thread check: {}, context={}, world={}, chunk_pos={}", reason, getThreadContext(), WorldUtil.getWorldName(level), new ChunkPos(chunkX, chunkZ), new Throwable());
                 }
             }
-            case THROW -> TickThread.ensureTickThread(level, chunkX, chunkZ, reason);
+            case THROW -> TickThread.ensureTickThread(level, chunkX, chunkZ, reason); // SourbyCraft - relaxed by ThreadChecks inside ensureTickThread (paper feature patch)
         }
     }
 
@@ -72,7 +72,7 @@ public class TickGuard {
         else {
             final Thread currentThread = Thread.currentThread();
             final Thread startupThread = MinecraftServer.getServer().getRunningThread();
-            if (currentThread != startupThread) {
+            if (currentThread != startupThread && dev.iyanz.sourbycraft.guards.ThreadChecks.refuse(reason)) { // SourbyCraft - relaxed thread checks
                 LOGGER.error("Thread failed startup thread check: {}, context={}", reason, getThreadContext(), new Throwable());
                 throw new IllegalStateException(reason);
             }
@@ -80,7 +80,7 @@ public class TickGuard {
     }
 
     public static void hardThrowIfStarted(final BooleanSupplier isTickThreadFor, final String reason) {
-        if (TickRegions.hasStarted() && !isTickThreadFor.getAsBoolean()) {
+        if (TickRegions.hasStarted() && !isTickThreadFor.getAsBoolean() && dev.iyanz.sourbycraft.guards.ThreadChecks.refuse(reason)) { // SourbyCraft - relaxed thread checks
             LOGGER.error("Thread failed main thread check: {}, context={}", reason, getThreadContext(), new Throwable());
             throw new IllegalStateException(reason);
         }
@@ -88,6 +88,12 @@ public class TickGuard {
 
     private static void ensureIsTickThread(final String reason) {
         if (!TickThread.isTickThread()) {
+            // SourbyCraft start - relaxed thread checks (aurora.bridge.thread-checks; owner decision 2026-10-22, LightingLuminol parity):
+            // an async thread inside a guarded call proceeds when the setting says so; the hit is counted, not refused
+            if (!dev.iyanz.sourbycraft.guards.ThreadChecks.refuse(reason)) {
+                return;
+            }
+            // SourbyCraft end - relaxed thread checks
             LOGGER.error("Thread failed main thread check: {}, context={}", reason, getThreadContext(), new Throwable());
             throw new IllegalStateException(reason);
         }

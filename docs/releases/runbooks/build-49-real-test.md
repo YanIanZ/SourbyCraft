@@ -59,8 +59,8 @@ baselines and optimization belong to Build 50.
   not a source-defined qualification threshold. Record smaller/larger hosts exactly.
   Bootstrap additionally requires a remote Linux host; network failure tests require
   a separate Redis host. Keep private addresses and access details out of evidence.
-- Preserve and attach sanitized effective copies of `config/canvas-server.yml`,
-  `config/canvas-worlds.yml`, `config/paper-global.yml` (especially `threaded-regions`:
+- Preserve and attach sanitized effective copies of `config/aurora-server.yml`,
+  `config/aurora-worlds.yml` (Build 49 names; note any `*.migrated` copies present), `config/paper-global.yml` (especially `threaded-regions`:
   `threads`, `grid-exponent`, `scheduler`), `sourbycraft-security.yml`, and
   `sourbycraft_config/sourbycraft_global_config.toml`. List **every non-default value**;
   use `<fill in>` until captured. Also attach `server.properties`, JVM flags and,
@@ -146,12 +146,14 @@ before a successful automatic swap; a manual jar install does not guarantee one.
 If missing, mark rollback BLOCKED and ask the operator for the known prior artifact.
 This restores jar bytes only; no world/config restoration is promised.
 
-For the **automatic** rollback scenario: apply writes `APPLIED`; the first boot
+For the **automatic** server-side rollback scenario (current `clipVersion=3.1.2`): apply writes `APPLIED`; the first boot
 records `BOOTING`; `ServerLoadEvent STARTUP` marks `OK`. A later boot seeing `BOOTING`
 copies `.prev` over the launch jar and records `ROLLED_BACK`, holding updates.
 That JVM still runs the updated bytes: stop/restart again to execute the restored
-jar. A launcher failure before bootstrap can leave `APPLIED`, delaying restoration
-another cycle. Missing/failed copies yield `RESTORE_FAILED`. Capture `/update status`;
+jar, so a rollback costs two failed boots. A jar that never reaches the bootstrap
+`auto updater` stage (launcher/class-loading failure) is **not** restored automatically with that pin:
+`rollback.state` stays `APPLIED` and every boot dies the same way until an operator copies
+`<jar>.prev` over the launch jar (shown by the fixture's `dead-launcher` scenario). Missing/failed copies yield `RESTORE_FAILED`. Capture `/update status`;
 use `/update resume` only after diagnosis. Windows file locking may refuse the swap;
 do not report a POSIX apply/rollback PASS from that fallback.
 
@@ -308,7 +310,7 @@ Manual rerun on the agent test server: `python3 scripts/agent_testserver.py star
 
 **Steps:**
 
-1. Set `[protocollib] auto-provision = true` in utility TOML (default true, RESTART_REQUIRED); record `[viaversion] auto-provision` separately. Boot and verify ProtocolLib enables before dependents; capture any 26.2 warning.
+1. Set `[plugins.protocollib] auto-provision = true` in the utility TOML (default true, RESTART_REQUIRED); record `[plugins.viaversion] auto-provision` separately. Boot and verify ProtocolLib enables before dependents; capture any 26.2 warning.
 2. Run `/plugins`, `/plugins Essentials`, `/plugins Vault`, `/perf plugins`. Have real players use the installed EssentialsX teleport/home flow and a Vault-backed economy consumer, plus native island create/visit/leave and ProtocolLib-dependent gameplay. Record plugin-specific command syntax before use.
 3. Repeat during G04’s representative legacy-plugin soak. Read per-plugin bridged timings in that run; inspect cancellations, event delivery, quarantine and errors. Include dependent-plugin observations, not only enabled state.
 4. LightingLuminol global-scheduler port (bridged plugins calling Folia's `GlobalRegionScheduler`; [port doc](../../development/LIGHTINGLUMINOL-BRIDGE-PORT.md)). With `aurora.bridge.mode = "safe"`, for each bridged plugin that uses the global scheduler: confirm its timers still fire (and stop when the plugin cancels them), that `/plugins <name>` shows no growing `Pending tasks` while idle, and that a disable/re-enable of the plugin (plugin manager, if the operator uses one) leaves no task from before the disable running and logs no `Unsupported in region threading` / `while cancelling Bukkit scheduler tasks`. If a world holding bridged work is unloaded (AWF/multiverse), the log shows `Released N bridged legacy task(s) anchored in <world> for unload` and the plugin's pending count drops. Optional synthetic cross-check on the same jar: install `legacy-test-plugin`, wait for every `LEGACY_*_OK` marker, run `legacybridge reenable` then `legacybridge unload` on the console and expect `LEGACY_REENABLE_OK`, `LEGACY_UNLOAD_RELEASED_OK` and `LEGACY_UNLOAD_LATE_REFUSED_OK` with no `_WRONG`. If the operator sets `max-pending-tasks-per-plugin` / `max-running-async-tasks-per-plugin`: refusals show in `/plugins <name>` (Rejected, Last failure names the limit) and as at most one WARN per plugin and limit per 60 s, never as a fatal violation; `legacybridge pending-limit <n>` / `async-limit <n>` (pass the configured value; the async probe needs `bridge-io-threads` >= n + 3) print `LEGACY_LIMIT_*_OK`. After a `/sourbycraft reload` the report lists LIVE changes and `aurora.bridge.mode` under RESTART_REQUIRED. With `mode = "off"` a legacy plugin is not loaded and the log has one `Not loading <plugin> ...` WARN (no stack trace) and `/plugins` lists it FAILED. Agent evidence of 2026-10-22/22b (port doc, per-case table) is local and functional only; this step is the real-server acceptance.
@@ -399,10 +401,28 @@ Manual rerun on the agent test server: `python3 scripts/agent_testserver.py star
 
 1. Inspect CI signing results and the published release assets. Confirm verification is enforced by the jar and the signed release manifest is active; the no-key warning is a blocker, not acceptance.
 2. On a disposable POSIX server capture `/update status`, use `/update apply` only with a reviewed same-Minecraft signed release candidate, and preserve `.prev` plus rollback state before the controlled failed boot.
-3. Cause the applied jar’s boot to end before ready using an operator-reviewed fault (unverified until supplied). Follow the automatic rollback sequence in F; capture APPLIED/BOOTING/ROLLED_BACK or failure states and the extra restart needed to run the restored bytes.
+3. Cause the applied jar’s boot to end before ready using an operator-reviewed fault. Reproducible local rehearsal (agent test server, fake loopback release server, throwaway key, **not** a substitute for the panel run): `python3 scripts/updater_rollback_fixture.py run --scenario all --name g11` ([updater-rollback-fixture-2026-10-22.md](../../development/updater-rollback-fixture-2026-10-22.md)); it applies a broken jar (exits 3 before ready), shows `APPLIED` → `BOOTING` → `ROLLED_BACK`, the original jar booting to `Done (` with the updater held, `/update resume`, plus the healthy apply (`OK`, jar and `.prev` kept) and the dead-launcher limit. On the real server follow the automatic rollback sequence in F; capture APPLIED/BOOTING/ROLLED_BACK or failure states and the extra restart needed to run the restored bytes (two failed boots before the old jar runs); with the current 3.1.2 pin, a jar that fails before SourbyCraft code runs needs the manual `.prev` copy (see the version gate below).
 4. Boot behind the real proxy and exercise SEC-1 packet guards and SEC-11 connection limits per [SECURITY-GUARDS.md](../../development/SECURITY-GUARDS.md). Record configured LOG/KICK policy, ordinary player joins and controlled limit violations. LOG observes; it does not block.
 
 **Capture:** Common capture plus Signing/manifest verification, sanitized `/update status`, state transitions, `.prev` and active jar hashes, failed/restore/next boot logs, proxy topology class and limit counters. Store in `docs/releases/evidence/49/g11-security/` using the shared filename pattern.
+
+**G11 rollback contract and version gate (2026-10-22):** For a newly applied candidate,
+capture `prev_sha256` at `APPLIED` and check it equals the completed `.prev` SHA-256 in lowercase
+hex; verify preservation through `BOOTING`, `OK`, `ROLLED_BACK` (and failed restore states).
+A present hash mismatch must log ERROR with the file and both hashes and refuse restore with
+jar files untouched. Missing hashes keep the server's legacy behavior. Apply hashing uses the
+updater's async scheduler callback; restore validation uses the boot guard before worlds tick.
+Launcher restore is **RESTART_REQUIRED and version-gated**: this tree actually pins
+`clipVersion=3.1.2`. The fixture reads that property at runtime, explicitly skips the launcher
+expectation for <=3.1.3, and still checks legacy/manual recovery. With a candidate pinned
+>=3.1.4, require launcher restore before server classes, `ROLLED_BACK` with the exact launcher
+note and retained hash, **exit 71**, then the original jar reaching ready with the same updater
+hold/no reapply behavior. Apply's clean shutdown remains exit 70. Keep `applied.tag` through
+resume so the rolled-back tag is not re-offered. The revised dead-launcher stub calls the
+embedded guard before exiting 4; a failure before even that guard still needs manual recovery.
+The normal broken-plugin scenario also expects launcher exit 71 on boot 3 with >=3.1.4.
+No 3.1.4 launcher restore is claimed for the current pin, and the historical fixture runs do
+not verify these new expectations. G11 remains open for PM Java checks and real boot evidence.
 
 **Pass criteria:** SEC-2 signing in CI and verification in the jar; signed manifest active; `.prev` rollback exercised on a real boot (apply → failed boot → restore); SEC-1 guards and SEC-11 connection limits booted behind a proxy
 
@@ -710,6 +730,49 @@ SHA-256, host/JDK/hardware, config, capture and rollback requirements.
 
 **Fail:** Apply [procedure F](#failure-procedure-f-every-gate-and-runtime-check), include this check’s folder, `/ver`, jar SHA and config in the issue; stop, restore valid `<jar>.prev` over the active jar and restart under F. Missing conditional prerequisites stay BLOCKED.
 
+
+<a id="configuration-migration-build-49-layout"></a>
+
+### Configuration migration (Build 49 layout)
+
+**Goal:** Prove on a copy of a real Build 48 server that the one-time migration keeps every operator value, keeps the
+old files as `*.migrated`, logs exactly the documented lines once, and that the second boot is silent and identical.
+
+**Preconditions:** Shared requirements; a **copy** (never the live directory) of a server last run on Build 48 with
+non-default values in `config/canvas-server.yml`, `config/canvas-worlds.yml`, `sourbycraft_config/sourbycraft_global_config.toml`
+(old layout) and, if present, Aurora keys in that TOML; `sha256sum` of every configuration file before the first boot.
+
+**Steps:**
+
+1. Record `sha256sum config/*.yml sourbycraft_config/*.toml sourbycraft-security.yml` and list every non-default value.
+2. Boot the Build 49 jar once to `Done (`; run `/sourbycraft config` and `/update status`; stop cleanly.
+3. Check the log for exactly one `Migrated config/canvas-server.yml -> config/aurora-server.yml`, one
+   `... canvas-worlds.yml -> ... aurora-worlds.yml`, one `Migrated the configuration files to the Build 49 layout`
+   (its `N key(s) renamed` must equal the number of old-layout keys the TOML held), and no
+   `Deprecated config key` / `is ignored` / `Both ... exist` WARN.
+4. Verify files: `config/canvas-*.yml.migrated` byte-identical to step 1 (`sha256sum`), `aurora-*.yml` holding every
+   non-default engine value, `sourbycraft_global_config.toml.migrated` byte-identical to step 1, the new TOML holding every
+   value under its Build 49 name (`console.*`, `players.*`, `plugins.*`, `updater.*`), no `[ui]`/`[misc`/`[perf`/`[swap`
+   tables left, Aurora keys only in `aurora.toml`.
+5. Boot a second time: none of the three `Migrated` lines, no WARN from the configuration, same effective values in
+   `/sourbycraft config`; stop cleanly. Then copy `config/canvas-server.yml.migrated` back to `config/canvas-server.yml`,
+   boot once more and expect the `Both config/aurora-server.yml and config/canvas-server.yml exist ... ignored` WARN and
+   the new file's values; remove the copy again.
+6. Downgrade rehearsal on the same copy: follow the downgrade sequence in `docs/AURORA-CONFIG.md` §7 with the Build 48 jar
+   and confirm it boots with the pre-49 values.
+
+**Capture:** Common capture plus the step 1/4 checksums, the three `Migrated` lines, `/sourbycraft config` output of both
+boots and a diff of the old TOML against the migrated one. Store in `docs/releases/evidence/49/config-migration/`.
+
+**Pass criteria:** every value kept (none changed, none lost), old files kept as `*.migrated`, migration lines exactly once,
+second boot silent and identical, stale-file WARN appears only in the deliberate step 5 case, downgrade rehearsal boots.
+
+**Fail handling:** [Procedure F](#failure-procedure-f-every-gate-and-runtime-check). A lost or changed value is a release
+blocker; attach both files and the log.
+
+**Agent evidence (functional, not qualified):** see the Build 49 release doc, "Configuration migration (operators)", and
+`AGENT-COORDINATION.md` (`fable-configdesign`, 2026-10-22): a local agent test server booted from a Build-48-style
+configuration set (old engine files + old TOML layout), then a second time with the migrated files.
 
 ## Evidence template
 

@@ -5,19 +5,15 @@ Subject: [PATCH] SourbyCraft - cancelling a finished bridged task is a no-op
 
 
 diff --git a/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java b/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
-index aee27c0e8783859b2810fb3e6ee44a04eb3f9327..db0bd34f892379f3fc9316e9456d8fb9a018b3d8 100644
+index 68382311c2a0c954b04cf2e5f72d587532a4dad3..2b00df035716e442b0fbe87275a780b9181311c0 100644
 --- a/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
 +++ b/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
-@@ -265,6 +265,12 @@ public class CraftScheduler implements BukkitScheduler {
+@@ -264,7 +264,7 @@ public class CraftScheduler implements BukkitScheduler {
+         if (taskId <= 0) {
              return;
          }
-         if (dev.iyanz.sourbycraft.bridge.AuroraBridge.cancel(taskId)) return; // SourbyCraft - Aurora Bridge
-+        // SourbyCraft start - nothing below can hold a task on a region-threaded server: every task this
-+        // scheduler accepts goes to the Aurora Bridge, and handle() refuses the rest. A task the bridge
-+        // no longer knows has finished or was cancelled already, and cancelling it is a no-op, as on
-+        // Paper. Falling through would schedule the legacy cancel task, which handle() refuses.
-+        if (true) return;
-+        // SourbyCraft end
+-        if (dev.iyanz.sourbycraft.bridge.AuroraBridge.cancel(taskId)) return; // SourbyCraft - Aurora Bridge
++        if (dev.iyanz.sourbycraft.bridge.AuroraBridge.cancelTask(taskId)) return; // SourbyCraft - Aurora Bridge: cancelling a finished task is a no-op
          // Paper start
          if (!this.isAsyncScheduler) {
              this.asyncScheduler.cancelTask(taskId);

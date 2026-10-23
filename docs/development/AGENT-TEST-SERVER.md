@@ -47,6 +47,7 @@ python3 $S start --name tp-1 --config-file plugins/SourbyCraft-Test-Plugin.jar=t
     --jvm-property sourby.testplugin.probes=true    # plugin jar (bytes, <= 8 MiB, run.json keeps its sha256) + test-plugin probes
 python3 $S start --name ssb-1 --config-file plugins/SuperiorSkyblock2.jar=/path/SuperiorSkyblock2-2026.3.jar \
     --plugin-file plugins/SuperiorSkyblock2/modules/SSB-AuroraWorlds.jar=/path/SSB-AuroraWorlds.jar   # file inside a plugin's data folder
+python3 $S start --name fawe-1 --large-plugin-jar --config-file plugins/FastAsyncWorldEdit.jar=/path/FastAsyncWorldEdit-Paper-2.15.4.jar   # plugins/<name>.jar up to 32 MiB (only those; recorded as run.json large_plugin_jars)
 python3 $S start --name cache-2 --startup-cache-from cache-1 --startup-cache-corrupt truncated   # boot over a damaged startup cache
 python3 $S cache-check --name cache-2       # judge that boot against the seed (exit 1 = a check failed)
 # with probes=true the unload fixture runs by itself after startup: wait-for "SOURBY_UNLOAD_FIXTURE_(OK|FAILED|[A-Z_]*_WRONG)"
@@ -59,6 +60,27 @@ With the test-plugin probes on, `cmd --name tp-1 "stallprobe global sleep 15"` b
 (`global|region`, `sleep|lock|spin`, 1-600 s; `STALLPROBE start/end` log lines) so the stall recorder writes
 `<workdir>/logs/stalls/stall-*.txt` ([STALL-RECORDER.md](STALL-RECORDER.md)). The command itself returns at once; `stop` after
 the probe ends. Test servers only: it freezes the world it runs on.
+
+### Restart a run in its own directory (`restart`, `--auto-update`) and the updater rollback fixture
+
+`restart --name N` boots a **finished** run again in the same directory: the jar copy (as the auto-updater
+left it), `auto_update/`, config, world and port are kept; the previous boot is archived under `boots/NN/`
+(`run.json`, `server.log`, `supervisor.log`) and summarised in `run.json` `previous_boots` (exit code, whether it
+reached ready, jar SHA-256). It takes a free slot like `start`, is refused while the run is live, and returns once
+the new boot is `ready` **or has ended** (a boot that dies is data, exit 1 unless ready). The jar provenance in
+`run.json` is recomputed from the directory's jar.
+
+`start --auto-update KEY=VALUE` (keys: `apply_mode`, `restart_mode`, `restart_delay_seconds`, `repo`, `channel`,
+`check_interval_minutes`, `allow_prerelease`; written to the `[updater]` table under their Build 49 names, e.g.
+`apply-mode`, `repository`) enables the auto-updater, which the harness otherwise switches off. It cannot be
+combined with `--global-toml`.
+It is refused unless the start also passes `--jvm-property sourbycraft.update.api-base=http://127.0.0.1:PORT`
+(a loopback fake release server; the updater refuses any non-loopback value) and
+`--jvm-property sourbycraft.update.release-key-file=FILE` (a release public key, so signature and manifest checks
+stay on): a test server can never reach the real GitHub or install an unsigned release. Both properties are
+test-only (`UpdateOverrides`, `ReleaseSignatureVerifier.resolve`), unset by default, and not config keys.
+`scripts/updater_rollback_fixture.py` uses all of this for the Build 49 `.prev` rollback gate; see
+[updater-rollback-fixture-2026-10-22.md](updater-rollback-fixture-2026-10-22.md).
 
 `--world-from RUN` copies a finished (exited/failed, lock released) run's world directories —
 the `level-name` directory and its `_nether`/`_the_end` siblings, nothing else — into the new run,

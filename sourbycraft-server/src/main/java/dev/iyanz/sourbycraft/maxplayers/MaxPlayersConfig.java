@@ -15,7 +15,7 @@ import org.bukkit.Bukkit;
 public final class MaxPlayersConfig {
 
     /** Dotted key in the unified TOML. */
-    public static final String KEY = "sourbycraft.max-players";
+    public static final String KEY = dev.iyanz.sourbycraft.config.UtilityKeys.MAX_PLAYERS.path();
 
     // Sane upper bound: Bukkit stores max-players as an int; a slot count in the hundreds of
     // thousands is nonsensical and almost certainly a typo.

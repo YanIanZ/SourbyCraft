@@ -9,7 +9,10 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.time.Instant;
+import java.util.HexFormat;
+import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -132,5 +135,131 @@ class UpdateRollbackGuardTest {
         Files.writeString(autoUpdate.resolve(UpdateRollbackGuard.STATE_FILE), "phase=WHATEVER\n");
         assertTrue(guard.isHeld());
         assertEquals(BootDecision.HELD, guard.onBoot());
+    }
+
+    private Properties properties() throws IOException {
+        Properties p = new Properties();
+        try (var in = Files.newInputStream(guard.stateFile())) { p.load(in); }
+        return p;
+    }
+
+    private void save(Properties p) throws IOException {
+        try (var out = Files.newOutputStream(guard.stateFile())) { p.store(out, "test"); }
+    }
+
+    @Test
+    void applyRecordsLowercaseHashAndPreservesItThroughBootingAndOk() throws Exception {
+        applyNewBuild();
+        String expected = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(OLD));
+        assertEquals(expected, properties().getProperty("prev_sha256"));
+        guard.onBoot();
+        assertEquals(expected, properties().getProperty("prev_sha256"));
+        guard.onReady();
+        assertEquals(expected, properties().getProperty("prev_sha256"));
+    }
+
+    @Test
+    void matchingUppercaseHashRestoresAndIsWrittenLowercase() throws Exception {
+        Path prev = applyNewBuild();
+        String expected = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(OLD));
+        Properties p = properties();
+        p.setProperty("prev_sha256", expected.toUpperCase(java.util.Locale.ROOT));
+        save(p);
+        guard.onBoot();
+        assertEquals(expected, properties().getProperty("prev_sha256"));
+        assertEquals(BootDecision.RESTORED, guard.onBoot());
+        assertArrayEquals(OLD, Files.readAllBytes(launchJar));
+        assertArrayEquals(OLD, Files.readAllBytes(prev));
+        assertEquals(expected, properties().getProperty("prev_sha256"));
+    }
+
+    @Test
+    void mismatchingHashRefusesRestoreWithoutTouchingAnyJarFiles() throws IOException {
+        Path prev = applyNewBuild();
+        guard.onBoot();
+        String recorded = properties().getProperty("prev_sha256");
+        byte[] tampered = "tampered previous build".getBytes();
+        Files.write(prev, tampered);
+        Path restore = Files.write(root.resolve("SourbyCraft.jar.restore"), OLD);
+        assertEquals(BootDecision.RESTORE_FAILED, guard.onBoot());
+        assertArrayEquals(NEW, Files.readAllBytes(launchJar));
+        assertArrayEquals(tampered, Files.readAllBytes(prev));
+        assertArrayEquals(OLD, Files.readAllBytes(restore));
+        assertTrue(guard.isHeld());
+        assertTrue(guard.holdReason().contains("SHA-256 mismatch"));
+        assertTrue(guard.holdReason().contains(prev.toString()));
+        assertTrue(guard.holdReason().contains("expected="));
+        assertTrue(guard.holdReason().contains("actual="));
+        assertEquals(recorded, properties().getProperty("prev_sha256"));
+    }
+
+    @Test
+    void emptyOrMalformedHashIsNotTreatedAsMissing() throws IOException {
+        Path prev = applyNewBuild();
+        guard.onBoot();
+        for (String invalid : new String[]{"", "not-a-sha256"}) {
+            Properties p = properties();
+            p.setProperty("phase", "BOOTING");
+            p.setProperty("prev_sha256", invalid);
+            save(p);
+            assertEquals(BootDecision.RESTORE_FAILED, guard.onBoot());
+            assertArrayEquals(NEW, Files.readAllBytes(launchJar));
+            assertArrayEquals(OLD, Files.readAllBytes(prev));
+            assertFalse(Files.exists(root.resolve("SourbyCraft.jar.restore")));
+        }
+    }
+
+    @Test
+    void legacyStateWithoutHashStillRestores() throws IOException {
+        applyNewBuild();
+        Properties p = properties();
+        p.remove("prev_sha256");
+        save(p);
+        guard.onBoot();
+        assertEquals(BootDecision.RESTORED, guard.onBoot());
+        assertArrayEquals(OLD, Files.readAllBytes(launchJar));
+        assertFalse(properties().containsKey("prev_sha256"));
+    }
+
+    @Test
+    void launcherRollbackIsHeldAndReportedWithoutAnotherRestore() throws IOException {
+        Path prev = applyNewBuild();
+        Properties p = properties();
+        p.setProperty("phase", "ROLLED_BACK");
+        p.setProperty("note", "launcher: the boot after applying v26.2-r48 did not reach the updater stage or ready; "
+            + prev.getFileName() + " copied back over " + launchJar.getFileName());
+        save(p);
+        assertEquals(BootDecision.HELD, guard.onBoot());
+        guard.onReady();
+        assertTrue(guard.isHeld());
+        assertEquals("update v26.2-r48 was rolled back: " + p.getProperty("note"), guard.holdReason());
+        assertArrayEquals(NEW, Files.readAllBytes(launchJar), "held states never restore twice");
+        assertEquals(p, properties());
+    }
+
+
+    @Test
+    void aSymlinkedPrevIsRefusedEvenWhenItsTargetHashMatches() throws IOException {
+        Path prev = applyNewBuild();
+        guard.onBoot();
+        // The kept jar is replaced by a link to a file with the recorded bytes; a link can be
+        // retargeted between check and use, so the restore refuses it outright.
+        Path elsewhere = Files.write(root.resolve("elsewhere.jar"), OLD);
+        Files.delete(prev);
+        Files.createSymbolicLink(prev, elsewhere);
+        assertEquals(BootDecision.RESTORE_FAILED, guard.onBoot());
+        assertArrayEquals(NEW, Files.readAllBytes(launchJar));
+        assertTrue(guard.holdReason().contains("symbolic link"), guard.holdReason());
+    }
+
+    @Test
+    void aRestoreLeavesNoTemporaryFileBehind() throws IOException {
+        applyNewBuild();
+        guard.onBoot();
+        assertEquals(BootDecision.RESTORED, guard.onBoot());
+        try (var files = Files.list(root)) {
+            assertEquals(java.util.List.of("SourbyCraft.jar", "SourbyCraft.jar.prev", "auto_update"),
+                files.map(f -> f.getFileName().toString()).sorted().toList());
+        }
     }
 }

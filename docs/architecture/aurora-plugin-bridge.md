@@ -16,8 +16,57 @@ Aurora Bridge adapts supported classes of legacy Paper/Spigot plugin behavior to
 
 Green means “running through Aurora Bridge”; it never means official Folia support.
 
+Failed also counts plugins that never loaded (IMPLEMENTED, LIVE, no setting). At `ServerLoadEvent STARTUP`,
+`startup/UnloadedPlugins` compares the descriptors the startup index read from `plugins/*.jar` with the plugin
+manager: a descriptor whose plugin the manager never created is recorded in `PluginLoadDiagnostics` with a reason
+from the startup dependency graph (`Missing hard dependency: Citizens`, `Hard dependency did not load: B`, a
+dependency cycle, invalid YAML, or "the server log has the cause"). No log line is parsed for this: Paper's modern
+loader reports such a plugin only as `Could not load 'plugins/x.jar' in 'plugins'`, which the log capture does not
+match, so `/plugins` used to say `0 failed` beside it. A bridge refusal (`aurora.bridge.mode = off`) is recorded
+when it happens and is not counted twice. `/plugins`, `/plugins filter failed`, `/plugins <name|jar>`, `/perf
+plugins` and `/sys` read the same record. Limits: a jar without `plugin.yml`/`paper-plugin.yml` is treated as a
+library and not reported; the record is a bounded recent history (16 jars); a plugin missing from the index (added
+after it ran) is not reported.
+
 ## Safety
-Default mode is OFF. Operators can enable SAFE on a test server; unknown/unsafe world mutation is rejected and diagnosed rather than run on an arbitrary thread.
+Default mode is OFF. Operators can enable SAFE on a test server; unknown/unsafe world mutation is rejected and diagnosed rather than run on an arbitrary thread -- **unless** `aurora.bridge.thread-checks` relaxes the region-ownership checks (owner decision 2026-10-22, the default since then; see *Thread checks* below). With relaxed checks a bridged plugin's cross-region access runs on the wrong thread and is only counted.
+
+## Thread checks (owner decision 2026-10-22)
+
+Owner decision 2026-10-22, recorded verbatim after the risks (data races, chunk corruption persisted to disk, item
+dupes, deadlocks) were stated: **"Tiru penuh LightingLuminol"** -- make the bridge behave like LightingLuminol:
+legacy (non-folia-supported) plugins work because thread-ownership checks are relaxed, as LightingLuminol does. It
+overrides `DEVELOPMENT.md` 2.3 ("never weaken region ownership") for this feature only; the truthfulness policy
+still applies, so this section states plainly that a relaxed server is **unsafe and unqualified**.
+
+`aurora.bridge.thread-checks` (`sourbycraft_config/aurora.toml`, RESTART_REQUIRED, read once when the checks first
+run; `-Daurora.bridge.thread-checks=` overrides the file):
+
+| value | what a failed region-ownership check does | scope |
+| --- | --- | --- |
+| `relaxed` (**default**, the owner's choice) | counts and logs, never throws | every caller, as LightingLuminol (paper patch 0002 and minecraft patch 0001 "Base Dirty Patches" at revision 72d51c4d comment the throws out unconditionally) |
+| `bridged` | throws, except while a bridged plugin's task body is running on the calling thread | the cheap narrower scope: a legacy plugin's scheduler tasks (DeluxeMenus menu opens, ClearLag sweeps, SSB2 chunk preparation on the bridge I/O lane, Essentials spawn teleports from tasks) are relaxed; its event handlers and commands, and every native plugin and the server itself, stay enforced |
+| `enforced` | throws, as the region-threading base does | SourbyCraft's behaviour before 2026-10-22 |
+
+Whatever is configured only takes effect while `aurora.bridge.mode = safe`: with the bridge off nothing is admitted
+that the relaxation is for, so the checks stay enforced and the boot log says so (INFO). When relaxed, the boot
+log carries one WARN (`Aurora Bridge: region-ownership checks are RELAXED ... This server is NOT qualified`), `/ver`
+shows `Thread checks: relaxed (region-ownership safety off; unqualified)`, `/sourbycraft config` shows the configured
+and effective value, and `/perf plugins` shows the relaxed-hit counters (total, and outside bridged bodies).
+
+What relaxing changes, each site owned by SourbyCraft and asking `guards/ThreadChecks.refuse(reason)` instead of
+being commented out as upstream did:
+
+- `TickThread.ensureTickThread` (all overloads, Paper feature patch "relaxed thread checks"), `RegionizedServer.ensureGlobalTickThread` and the six `RegionizedWorldData` "is not under this region's control" checks (MC feature patch "relaxed region-ownership checks"), `TickGuard`'s off-tick-thread refusal and startup/hard-throw helpers. The access then proceeds on the wrong thread.
+- Bridge accounting: a guard hit inside a bridged body is counted as a **relaxed ownership hit** (per plugin, `/plugins <name>`, `/perf plugins`) and logged once per (plugin, reason) per 60 s; it is **not** a fatal violation and never quarantines (`BridgeRuntime.relaxedViolation`). Hits outside any bridged body log once per reason per 60 s on the hitting thread (`-Daurora.bridge.thread-checks.trace=true` adds a stack trace). `quarantine-after` still applies to exceptions a body throws.
+- Supporting pieces LightingLuminol needs so a relaxed server does not fail at once, all gated on the `static final` `ThreadChecks.RELAXED_SCOPE` (folded away on an enforced server): the cross-region world-data pool (`compat/luminol/RegionizedWorldDataPool`, LightingLuminol's `ReferenceCountedRegionizedWorldDataPool`; `WorldDataAccess` leases at ~50 Minecraft sites route an off-thread entity/chunk/block-event/neighbour/scheduled-tick write to the region that owns the chunk, holding a ticket while it runs), Moonrise's entity-section reentrancy guard skipped and entity slices locked during add/remove, `NearbyPlayers`, `ReferenceList` and `IteratorSafeOrderedReferenceSet` locked, the `RegionizedWorldData` block-entity ticker hand-off, block events, broadcast set and explosion cache locked at their cross-thread touch points (LightingLuminol swapped the containers for synchronized or concurrent ones; the upstream containers stay, so the policy that pins upstream defaults is satisfied and the capture maps keep the insertion order Paper's replay needs -- they are **not** locked: a foreign thread writing into another region's capture map while that region captures is one of the accepted races), the global tick allowed to load a chunk synchronously while pumping global chunk tasks (a non-owning *region* thread is still refused, as in LightingLuminol: its wait could need its own tick, Folia#280).
+- `Entity#teleport` on the `ASYNC` route waits for the move (LightingLuminol's `teleportAsync(location, cause).join()`), bounded (30 s on a tick thread, 60 s elsewhere): threads that tick nothing always wait; the global tick waits too (stalling the global tick, as upstream); a region thread waits only when it owns the entity and the destination is loaded in a region it does not own -- an unloaded destination is scheduled and returns `false` as before, because its region may be merged into the blocked one (`TeleportRoute.joinsWhenRelaxed`, unit-tested).
+
+Independent of the setting (safe techniques, all modes): `Bukkit.getCurrentTick()`/`MinecraftServer.getTickCount()` return the global tick counter off every region instead of throwing; `Entity#teleportAsync` fires `PlayerTeleportEvent` for players (cancel aborts, `getTo()` is honoured, never twice for one call) and the portal route fires `PlayerPortalEvent` once the exit is known (cancel places the player back where it stood) -- `entity/teleport/AsyncTeleportEvents`, escape hatch `-Daurora.compat.async-teleport-events=false`.
+
+Not ported, deliberately: running every Bukkit sync task on the global tick (the bridge routes by owner instead), redirecting a legacy plugin's Folia region/entity scheduler calls to Bukkit, admitting every plugin (`mode = off` stays the default), `AsyncCatcher.catchOp` (LightingLuminol leaves it too), the `CraftScoreboard` changes.
+
+**Honesty.** Nothing here makes a legacy plugin region-safe; it removes the refusal. The owner accepted: data races on chunk sections, entity lists and player containers (item duplication); writes that reach disk corrupted; a write into a region's data that is merged into another region before it ticks is lost; deadlocks where a blocked thread's wait needs its own tick. A relaxed server is **not qualified** and must not be called stable. Evidence so far is unit tests and agent test-server boots listed in the coordination entry `fable-lightingluminol-compat`; the owner runs real-player testing.
 
 ## Routing
 Entity-owned -> entity owner. Location-owned -> region owner. Global-safe -> global region. I/O -> plugin/I/O lane. Unknown unsafe -> reject.
@@ -26,10 +75,76 @@ Entity-owned -> entity owner. Location-owned -> region owner. Global-safe -> glo
 | --- | --- | --- |
 | Sync callback wrapped in `EntityTask` | Entity owner (Folia entity scheduler); follows the entity; entity removed first -> cancelled, counted rejected, not a violation | `EntityTask` (patch 0011), IMPLEMENTED, unit-tested; boot fixture not yet run in CI |
 | Sync callback wrapped in `RegionTask`, or the fingerprinted SSB2 spawn callback | Region owning that chunk | patch 0010 |
+| Other sync callback scheduled while a **player's** event is dispatched or a player's command executes, or from a bridged body that carries that player (its async continuation, or a sync task already anchored to the player) | That player's owner (entity scheduler), following the player; player already gone when scheduled -> the caller-region/global route below; player leaves afterwards -> cancelled, counted rejected, not a violation | `SchedulingContext` (patch 0026, 2026-10-22), IMPLEMENTED, unit-tested; headless fixture `LEGACY_CONTEXT_*` |
 | Other sync callback | Caller region (`sync-route = caller-region`) or global region | default |
-| Explicit global request, async task | Global region / I/O lane; target metadata never consulted | 0007, 0003 |
+| Explicit global request, async task | Global region / I/O lane; target metadata never consulted. An async body carries the scheduling context it was scheduled from; an explicit global body carries none | 0007, 0003 |
 
-Precedence: explicit entity > explicit region > caller-region/global fallback.
+Precedence: explicit entity (`EntityTask`) > explicit region (`RegionTask`, adapter) > entity anchor
+(the player of the scheduling context) > caller region > global.
+
+### Entity anchor from the scheduling context (2026-10-22)
+
+The two live failures that motivated it (Sourby Demo, v26.2-r48.2, Epic Skyblock, ~30 bridged
+plugins): DeluxeMenus `Menu.openMenu` runs `runTaskAsynchronously` (build the items) and from that
+body `runTask` (`player.openInventory`); EssentialsXSpawn's new-player teleport is
+`PlayerJoinEvent -> Essentials runTaskAsynchronously -> callEvent(AsyncUserDataLoadEvent) ->
+scheduleSyncDelayedTask(NewPlayerTeleport)`. Both inner sync tasks are scheduled from a bridge I/O
+thread, which ticks no region, so the caller-region route put them on the global region, where
+`openInventory` failed in `InventoryChangeTrigger` ("Cannot trigger criterion async") and the
+teleport's `CraftWorld.getChunkAt` was refused (a violation; 3 quarantine Essentials).
+
+The bridge now reads **why** a task was scheduled. `bridge/SchedulingContext` is a thread-confined
+frame holding the player a server frame acts for; `bridge/EventAnchors` decides which events name one.
+Paper feature patch 0026 publishes it from two sites, each one call into `AuroraBridge`:
+`PaperEventManager#callEvent` around the listener loop (`enterEventContext`/`exitContext`) and
+`BukkitCommandNode.BukkitBrigCommand#run` around `Command#execute` (`withCommandContext`, player
+senders only). `BridgeRuntime.submit` takes the frame's player as the task's entity anchor when the
+plugin named no `EntityTask`/`RegionTask` target, and routes it exactly like an `EntityTask`
+(`executor.entity`, retired callback). Every bridged body runs under its own anchor: an entity-anchored
+sync body publishes its player (a `runTaskLater` chain follows the player), an async body publishes
+the frame it was scheduled from (the two cases above), a region or global body publishes nothing (and
+never inherits a frame that happens to be open on the tick thread it runs on). Both hooks return at
+once while no plugin has been admitted (one volatile read per event dispatch).
+
+Rules, each pinned by `BridgeContextRoutingTest`, `EventAnchorsTest`, `AuroraBridgeContextHooksTest`:
+
+- **Players only.** `PlayerEvent`, `PlayerDeathEvent`, an `EntityEvent` whose entity is a player,
+  `InventoryEvent` (the viewer), `BlockBreakEvent`/`BlockPlaceEvent`/`SignChangeEvent`. A mob dies
+  without notice, and a task anchored to it would be retired unrun; a dropped task is a worse surprise
+  than a global run, so non-player entities never anchor (fixture `LEGACY_CONTEXT_MOB_EVENT_OK`).
+- **Leaving or unplaced players anchor nothing**: `PlayerQuitEvent`, `PlayerKickEvent`,
+  `PlayerLoginEvent`, `PlayerSpawnLocationEvent`. A cleanup task scheduled from a quit handler must
+  run; the entity scheduler of a gone or not-yet-placed player would retire or hold it.
+- **An event about no player keeps the enclosing frame** (`AsyncUserDataLoadEvent` fired inside the
+  carried join frame), so plugin-to-plugin events do not erase the player.
+- **Player already gone at scheduling time** (Folia's entity scheduler reports it synchronously): the
+  inference is dropped and the task takes the route it would have taken without it (caller region or
+  global). Nothing has run, so this is a routing decision, not a retry after a violation; it is not
+  counted as rejected. **Player leaves after scheduling**: cancelled, rejected, last failure names it,
+  never a violation, no per-task log line, same as `EntityTask`. A repeating task anchored this way
+  therefore stops when its player leaves (Folia semantics; on Paper it would keep running until it
+  cancelled itself).
+- **Explicit targets and explicit global requests are untouched**; async tasks only carry the frame.
+- **No retry.** A body that already ran and violated ownership is never re-dispatched to another owner.
+
+What this does not cover is listed under *Not bridgeable* below.
+
+**Evidence (2026-10-22, agent test server, not qualification).** Jar built from this branch, `mode = "safe"`,
+real EssentialsX + EssentialsXSpawn 2.22.1-dev+24, DeluxeMenus 1.14.1, PlaceholderAPI 2.12.3; a headless
+player (`scripts/baseline_client.py`) joined as a new player (EssentialsXSpawn newbie teleport) and ran
+`/testmenu` (DeluxeMenus `open_command`). Run `fable-routing-real3` (two new players, one of them sending
+the command 2 s after login): 7 menu opens, 7 DeluxeMenus sync bodies on the player's region, 0 violations;
+Essentials 4 region bodies (the join chain), 0 violations, 0 rejected; both quit-time `cleanInventory`
+tasks of DeluxeMenus (scheduled from `InventoryCloseEvent` as the player left) were retired as rejected.
+Run `fable-routing-real2` (jar without the diagnostic below): 1 of 2 opens, the first after a new player's
+join, took the "player already gone when scheduled" fallback and ran on the global region (violation,
+`Cannot init menu async`, with the sweep hint); the second open and every later open (3 more after a
+rejoin) ran on the region. Not reproduced in 7 further opens; `FoliaExecutor.entity` now logs one WARN
+when an entity scheduler refuses a task for an entity that is still valid, and the fallback is recorded as
+the plugin's last failure. The console form `dm open <menu> <player>` was not exercised with a player
+online. Fixture run `fable-routing-fixture1`: 22 `LEGACY_*_OK`, 0 `_WRONG`, 36 redirects / 6 handoffs /
+1 rejected (retired EntityTask) / 1 fatal (deliberate), not quarantined. Logs under the session scratchpad
+(`logs/fable-real2.log`, `fable-real3.log`, `fable-fixture1.log`). No Sourby Demo run: owner-run.
 
 ## Telemetry
 Per-plugin compatibility state, scheduler redirects, owner handoffs, rejected operations, fatal violations, quarantine, startup duration/cache state and last failure.
@@ -41,9 +156,15 @@ Per-plugin compatibility state, scheduler redirects, owner handoffs, rejected op
 Code: `dev.iyanz.sourbycraft.bridge` plus bridge feature patches under
 `sourbycraft-server/paper-patches/features` (0003, 0006, LightingLuminol port 0007
 and worker/query follow-up 0008, native-disable fix 0009, explicit callback owners 0010,
-entity callback owners 0011, one-line OFF-mode refusal 0024).
+entity callback owners 0011, one-line OFF-mode refusal 0024, scheduling-context hooks 0026).
 Feature patches are the source of truth for edits
-to Paper classes. The 0007/0008 materialized sources are present; build/testing of
+to Paper classes. Since Build 50 (2026-10-22) every `CraftScheduler` site those patches add is one
+call into `AuroraBridge` (`cancelTask`, `cancelTasks`, `currentlyRunning`, `knows`,
+`pendingBukkitTasks`, `submitIfBridged`, `withBridgedWorkers`, `idInUse`, `runBukkitTask`,
+`targetRegion`, `targetEntity`) or `FoliaSchedulerCompatibility` (`isGlobalCallback`,
+`bridgeCancelled`); the only scheduler code left in the patch is 0003's `bridgeTask` adapter, whose
+methods read package-private `CraftTask` state (`getPeriod`, `cancel0`, `CraftFuture`) or make one
+such call. Behaviour is unchanged and pinned by `CraftSchedulerHooksTest`. The 0007/0008 materialized sources are present; build/testing of
 this increment remains assigned to Claude.
 
 - **Mode.** `aurora.bridge.mode` in `aurora.toml` (or the unified file): `off` (default) keeps the
@@ -72,9 +193,10 @@ this increment remains assigned to Claude.
   entity-owner route: `entity.getScheduler().run/runDelayed/runAtFixedRate` with a retired
   callback that cancels the bridged task, frees both task indexes and counts one rejected
   operation (last failure names the retirement; no violation, no quarantine count, no per-task
-  log line). Entity routing only happens when the plugin author wraps the task; the bridge does
-  not infer an entity from an opaque callback. Caller-region fallback does not establish
-  ownership of other locations accessed by a task.
+  log line). The bridge never infers an entity from the callback object itself; since 2026-10-22
+  it infers one from the **scheduling frame** (the player whose event or command is being handled,
+  carried through bridged async continuations; see *Entity anchor from the scheduling context*
+  above). Caller-region fallback does not establish ownership of other locations accessed by a task.
 - **Violations.** A task body's `UnsupportedOperationException`/`IllegalStateException` from the
   base's region checks counts as a fatal violation. Other exceptions are recorded as the last
   failure, as the plain server would log them. After `aurora.bridge.quarantine-after` (LIVE,
@@ -113,6 +235,15 @@ this increment remains assigned to Claude.
 - **Not intercepted.** A bridged plugin calling world API directly from a bridged task on the
   global region is not rewritten; the base's own thread checks decide what happens. Async tasks
   run on the governed lane; the worker follow-up below exposes those threads to Bukkit callers.
+- **`World#getChunkAt` from an async task (paper 0028, 2026-10-22).** Not a bridge rule but an engine
+  one, for every thread that is not a `TickThread` (bridge I/O lane, Bukkit async task, plugin
+  executor): the call follows Paper. A loaded chunk is returned at once; an unloaded one is loaded
+  through the chunk system for its region while the caller waits, at most 30 s, then a plain
+  `IllegalStateException` that is not counted as a violation (`guards/OffThreadChunkLoad`). Before,
+  the base refused even a loaded chunk ("Async chunk retrieval") and the refusal counted toward the
+  plugin's quarantine. Tick threads keep the refusal. The `Chunk` returned holds no chunk reference;
+  block/entity access through it keeps its own ownership checks. Found with SuperiorSkyblock2 2026.3
+  (`/is create` island preparation); boot marker `LEGACY_BRIDGE_ASYNC_GETCHUNK_OK`.
 - **Sync route.** `aurora.bridge.sync-route` (LIVE), default `caller-region`: a legacy sync task
   scheduled while a region is ticking runs on that region, anchored on a chunk it owned
   (`execution/region/CurrentRegion`, implemented by the existing `FoliaRegionBackend` adapter; anchors cached per region id). From anywhere
@@ -188,6 +319,26 @@ possible endpoints:
 Full compatibility therefore means a native port; the bridge is the safety and diagnosis layer for
 plugins that have not had one. BRIDGED is not a compatibility verdict (see *Qualification*).
 
+### Not bridgeable (2026-10-22)
+
+Patterns the owner precedence above cannot place, with what the bridge offers for each. None of them
+weakens a guard; the engine's refusal stands and counts toward quarantine as before.
+
+| Pattern | Example (live, Sourby Demo 2026-10-22) | Why routing cannot fix it | What the bridge does |
+| --- | --- | --- | --- |
+| **Whole-world sweep from one task**: a global-routed timer iterates `world.getEntities()` / every chunk and touches each | ClearLag 3.2.2 `ClearTask -> EntityManager.removeEntities -> ClearModule.getRemovables -> CraftItem.getItemStack` ("Accessing entity state off owning region's thread" on the global tick; quarantined after 3) | The body is one Runnable over entities owned by many regions. A task can be handed to one owner; a loop inside a plugin cannot be split per region by anyone but its author. A hash-pinned adapter would have to re-implement the sweep, which is a port of the plugin, not an adapter | The violation/quarantine line says so: an untargeted global task's violation carries "The task named no owner and ran on the global region ...; a body that sweeps entities or blocks across the world cannot be routed to one owner and needs a region-aware (folia-supported) plugin version." Decision: documented not-bridgeable; replace with a Folia-supported plugin (or a native port). |
+| **Console command targeting a player** | `dm open <menu> <player>` from the console | The frame is the console's (global tick); the player is a command argument the bridge cannot read | Caller-region/global as before. Run the command as the player, or the plugin names the player (`EntityTask`). |
+| **Per-player work scheduled from `onEnable` or a global timer** (iterate online players, open/teleport each) | typical "scoreboard refresh" timers | No single owner; same class as the sweep | As before: global; each cross-region access is a violation. |
+| **A task that acts on a different player than the frame's** | trade GUI opened for both parties from one click | The anchor is the frame's player; the other party is usually in the same region, but not necessarily | Same as the caller-region route today (one hop, no retry). |
+
+Considered and not done (2026-10-22): making `openInventory`/`teleport` hand themselves to the entity
+scheduler when called from a bridged global body. `teleport` already has the owned sync/async route
+(Paper 0017); `openInventory` returns an `InventoryView`, so a hand-off would have to return `null`
+to callers that use it, and today's failure (the criterion check inside `initMenu`, after the menu
+was assigned and the open packet sent) leaves half-applied state. A fail-closed ownership check at
+the top of `CraftHumanEntity#openInventory` (refuse before any side effect, same violation count)
+is the recommended follow-up; it is a guard decision for `inherited-guards.md`, not routing.
+
 Bridge telemetry so far has been counts with no time dimension: it records how many tasks a plugin
 had redirected, handed off, rejected or failed, never how long they ran, so it cannot attribute tick
 time to a plugin. Per-plugin execution timing of bridged task bodies is being added on 2026-10-07
@@ -242,7 +393,9 @@ the target plugin, and the plugin manager closes admission before disable callba
 The upstream redirects of named region/entity requests are omitted so their native
 ownership and entity retirement contract remain in place. SAFE stays opt-in and
 RESTART_REQUIRED; no executor or configuration surface is added. Direct world API
-access remains subject to the runtime's thread guards.
+access remains subject to the runtime's thread guards -- until 2026-10-22, when the
+owner chose LightingLuminol's relaxed thread checks as the default (*Thread checks* above;
+the second LightingLuminol port, from its "Base Dirty Patches").
 
 Credit: **Luminol**, **LightingLuminol**, **Bacteriawa**, and contributors. The derived
 adapter and patch retain upstream GPL v3 licensing. Exact source revision, imported

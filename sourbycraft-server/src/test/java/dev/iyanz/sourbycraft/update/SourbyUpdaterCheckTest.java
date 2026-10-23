@@ -216,6 +216,18 @@ class SourbyUpdaterCheckTest {
         assertTrue(transport.requests.isEmpty());
     }
 
+    @Test
+    void launcherRollbackHoldBlocksReapplyWithoutTouchingTheNetwork() throws IOException {
+        Files.createDirectories(guard.stateFile().getParent());
+        Files.writeString(guard.stateFile(), "phase=ROLLED_BACK\ntag=v26.2-r48\n"
+            + "note=launcher: the boot after applying v26.2-r48 did not reach the updater stage or ready; "
+            + "SourbyCraft.jar.prev copied back over SourbyCraft.jar\n");
+        assertEquals(UpdateRollbackGuard.BootDecision.HELD, guard.onBoot());
+        assertEquals(Outcome.HELD, updater().check(ApplyMode.AUTO));
+        assertTrue(transport.requests.isEmpty());
+        assertTrue(guard.holdReason().startsWith("update v26.2-r48 was rolled back: launcher:"));
+    }
+
     // ------------------------------------------------------------------ SEC-2: signature gate
 
     @Test

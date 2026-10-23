@@ -927,8 +927,8 @@ class HeapGuardTest(unittest.TestCase):
             self.assertIn("online-mode=false", properties)
             self.assertIn(r"level-type=minecraft\:normal", properties)
             self.assertIn("auto-provision=false", config.read_text())
-            self.assertIn("[protocollib]\nauto-provision=false", config.read_text())
-            self.assertIn("[viaversion]\nauto-provision=false", config.read_text())
+            self.assertIn("[plugins.protocollib]\nauto-provision=false", config.read_text())
+            self.assertIn("[plugins.viaversion]\nauto-provision=false", config.read_text())
             self.assertEqual((target / "eula.txt").read_text(), "eula=true\n")
 
     def test_the_player_cap_covers_the_requested_clients(self):
@@ -955,8 +955,8 @@ class ReadinessTest(unittest.TestCase):
     """
 
     DONE = 'Done (12.345s)! For help, type "help"\n'
-    SUMMARY = ("[Aurora Engine] COMPLETE | 14/14 stages completed without error | 0 failed | 812ms\n"
-               "Minecraft continues loading; wait for the server-ready message before connecting.\n")
+    SUMMARY = ("[12:00:00 INFO]: [Aurora] Engine COMPLETE | 14/14 stages ok | 0 failed | 812 ms"
+               " | slowest: startup index 23 ms\n")
 
     def test_done_alone_is_not_ready(self):
         self.assertEqual(run_baseline.startup_state(self.DONE), ("waiting", None))
@@ -969,12 +969,35 @@ class ReadinessTest(unittest.TestCase):
         self.assertEqual(run_baseline.startup_state(self.DONE + self.SUMMARY), ("ready", None))
 
     def test_a_colour_painted_summary_is_recognised(self):
-        # ConsoleStyle.paint wraps the verdict text in a 24-bit ANSI sequence when the style is rich.
+        # On a real terminal the console layout paints the level and tag; the message text stays plain.
+        painted = ("\x1b[38;2;100;116;139m12:00:00\x1b[0m \x1b[38;2;125;211;252mINFO \x1b[0m "
+                   "\x1b[38;2;192;132;252mAurora\x1b[0m       Engine COMPLETE | 14/14 stages ok | 0 failed"
+                   " | 812 ms\n")
+        self.assertEqual(run_baseline.startup_state(painted + self.DONE), ("ready", None))
+
+    def test_a_degraded_boot_fails_the_run_instead_of_being_measured(self):
+        degraded = "Engine DEGRADED | 13/14 stages ok | 1 failed: configuration | 900 ms\n"
+        state, reason = run_baseline.startup_state(degraded + self.DONE)
+        self.assertEqual(state, "failed")
+        self.assertIn("Aurora boot DEGRADED", reason)
+        self.assertIn("13/14 stages ok | 1 failed", reason)
+
+    # Control jars from before Build 49 (#35) print the older summary form; a baseline run
+    # against one must still see it, or startup_state waits until the timeout.
+    LEGACY_SUMMARY = ("[Aurora Engine] COMPLETE | 14/14 stages completed without error | 0 failed | 812ms\n"
+                      "Minecraft continues loading; wait for the server-ready message before connecting.\n")
+
+    def test_a_pre_build_49_summary_is_ready(self):
+        self.assertEqual(run_baseline.startup_state(self.LEGACY_SUMMARY + self.DONE), ("ready", None))
+        self.assertEqual(run_baseline.startup_state(self.LEGACY_SUMMARY), ("waiting", None))
+
+    def test_a_pre_build_49_colour_painted_summary_is_ready(self):
+        # Old ConsoleStyle.paint wrapped the verdict text in a 24-bit ANSI sequence when rich.
         painted = ("\x1b[38;2;80;200;120mCOMPLETE | 14/14 stages completed without error | 0 failed"
                    " | 812ms\x1b[0m\n")
         self.assertEqual(run_baseline.startup_state(painted + self.DONE), ("ready", None))
 
-    def test_a_degraded_boot_fails_the_run_instead_of_being_measured(self):
+    def test_a_pre_build_49_degraded_boot_fails_the_run(self):
         degraded = "DEGRADED | 13/14 stages completed without error | 1 failed | 900ms\n"
         state, reason = run_baseline.startup_state(degraded + self.DONE)
         self.assertEqual(state, "failed")

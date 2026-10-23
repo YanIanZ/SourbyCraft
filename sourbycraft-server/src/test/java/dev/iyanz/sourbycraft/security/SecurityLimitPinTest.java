@@ -49,13 +49,48 @@ class SecurityLimitPinTest {
     private static final String IPV6_PREFIX_KEY = "connection-guard.per-address.ipv6-prefix-length";
     private static final long IPV6_PREFIX_DEFAULT = 64L;
 
-    private static YamlConfiguration shippedYaml() throws Exception {
+    private static Path shippedFile() {
         Path root = Path.of("").toAbsolutePath();
         while (root != null && !Files.isRegularFile(root.resolve("build-data/sourbycraft-security.yml"))) root = root.getParent();
         assertNotNull(root, "build-data/sourbycraft-security.yml is checked in");
+        return root.resolve("build-data/sourbycraft-security.yml");
+    }
+
+    private static YamlConfiguration shippedYaml() throws Exception {
         final YamlConfiguration yaml = new YamlConfiguration();
-        yaml.load(root.resolve("build-data/sourbycraft-security.yml").toFile());
+        yaml.load(shippedFile().toFile());
         return yaml;
+    }
+
+    /**
+     * The checked-in sample is byte-for-byte what a server without the file writes at boot, so the
+     * documented file and the seeded file cannot drift (header, group comments, defaults, LOG modes).
+     * On a failure the generated text is printed: copy it over the sample after reviewing the diff.
+     */
+    @Test
+    void theShippedSampleIsTheSeededDocument() throws Exception {
+        final String seeded = SecurityGuards.seededDocument();
+        final String shipped = Files.readString(shippedFile());
+        if (!seeded.equals(shipped)) {
+            System.out.println("---- generated sourbycraft-security.yml ----\n" + seeded + "---- end ----");
+        }
+        assertEquals(seeded, shipped, "build-data/sourbycraft-security.yml must equal SecurityGuards.seededDocument()");
+        assertTrue(seeded.startsWith("# SourbyCraft security limits"), seeded.substring(0, 80));
+        for (final String group : SecurityGuards.GROUP_DOCS.keySet()) {
+            assertTrue(seeded.contains(group.substring(group.lastIndexOf('.') + 1) + ":"), group);
+        }
+    }
+
+    /** A server without the file gets the documented one, and loads it back to the same limits (round trip). */
+    @Test
+    void aFreshServerWritesTheDocumentedFileAndLoadsItBack(@org.junit.jupiter.api.io.TempDir final Path dir) throws Exception {
+        final Path file = dir.resolve("sourbycraft-security.yml");
+        final SecurityGuards guard = new SecurityGuards(line -> { }, () -> 0L);
+        guard.load(file);
+        assertEquals(SecurityGuards.seededDocument(), Files.readString(file));
+        final String written = Files.readString(file);
+        guard.load(file);
+        assertEquals(written, Files.readString(file), "a reload never rewrites the operator's file");
     }
 
     @Test

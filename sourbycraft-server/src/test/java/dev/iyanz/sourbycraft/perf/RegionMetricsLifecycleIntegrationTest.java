@@ -32,9 +32,9 @@ class RegionMetricsLifecycleIntegrationTest {
     void schedulerHandleAndTickDataViewsUseMutableOwnerHolder() throws Exception {
         assertEquals(RegionTickMetricsHolder.class,
             TickRegionScheduler.RegionScheduleHandle.class.getField("sourbyTickMetrics").getType());
-        assertEquals(RegionTickMetricsHolder.class,
-            ca.spottedleaf.common.time.TickData.class
-                .getConstructor(RegionTickMetricsHolder.class, long.class).getParameterTypes()[0]);
+        // Patch 0013: the handle's TickData fields are RegionTickDataView windows over the holder.
+        assertTrue(new RegionTickMetricsHolder().view(1L) instanceof RegionTickDataView);
+        assertEquals(ca.spottedleaf.common.time.TickData.class, RegionTickDataView.class.getSuperclass());
     }
 
     @Test
@@ -45,7 +45,7 @@ class RegionMetricsLifecycleIntegrationTest {
         assertMethodDoesNotInvoke(TickRegions.TickRegionData.class, "mergeInto", Set.of(
             "scheduleRegion", "descheduleRegion", "copy"
         ));
-        assertMethodDoesNotInvoke(TickRegions.class, "rotateMergeTargetTelemetry", Set.of(
+        assertMethodDoesNotInvoke(RegionTickMetricsHolder.class, "rotateForMerge", Set.of(
             "scheduleRegion", "descheduleRegion", "copy"
         ));
     }
