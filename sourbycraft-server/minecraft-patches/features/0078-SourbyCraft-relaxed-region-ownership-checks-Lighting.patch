@@ -386,10 +386,10 @@ index 33a849ce24fe16ea5e742ea5478fef29921dde20..5b2ed56c56cff214fdf371b5f0b5a31c
  
      // ticking chunks
 diff --git a/io/papermc/paper/threadedregions/TickRegions.java b/io/papermc/paper/threadedregions/TickRegions.java
-index 83ecb544b155cf598f9fa2389b4b9fa411282fe8..cb3023f86bcc655ca3d3e90223e5a95931845cf9 100644
+index 88b5fb966488ad875edf894e446b67ddbb0f42cb..d8c46106ee120d6d1b83bcdba55d8d731de60fb8 100644
 --- a/io/papermc/paper/threadedregions/TickRegions.java
 +++ b/io/papermc/paper/threadedregions/TickRegions.java
-@@ -226,7 +226,13 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+@@ -253,7 +253,13 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
          }
  
          static void updateCurrentRegion() {
@@ -405,10 +405,10 @@ index 83ecb544b155cf598f9fa2389b4b9fa411282fe8..cb3023f86bcc655ca3d3e90223e5a959
      }
  
 diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
-index 1d63c3cef4c5bb4eb59cdf0ee21a2a7bf2940b8d..2c166286bb41015e3f43af7f3feaa4a472c3449f 100644
+index 270af2496de30ac8d280ef90429039219cf5f484..a43b6fffdd02616cb4506b1d3d5b7d31fc60d7a7 100644
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
-@@ -2290,7 +2290,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -2288,7 +2288,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
      }
  
      public int getTickCount() {

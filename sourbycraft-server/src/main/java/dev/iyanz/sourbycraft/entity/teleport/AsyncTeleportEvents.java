@@ -139,13 +139,13 @@ public final class AsyncTeleportEvents {
     }
 
     /** Detached portal passengers already name the originally selected world; cancel/redirect may change it. */
-    public static void retargetPortalEntity(final Entity entity, final ServerLevel destination) {
+    public static void retargetPortalEntity(final Entity entity, final ServerLevel destination, final boolean loadingScreenSent) {
         if (entity.level() == destination) return;
         if (entity instanceof ServerPlayer player) {
             player.setServerLevel(destination);
             // The loading screen already announced the original destination before the event.
             // Cancellation returns through same-world placement, which sends no replacement respawn.
-            if (dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().displayWorldLoadScreenForCrossRegionTransfers) {
+            if (loadingScreenSent) {
                 player.sendRespawnClientbound(false);
             }
         } else {

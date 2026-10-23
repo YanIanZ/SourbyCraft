@@ -39,6 +39,7 @@ port; none is an accepted consequence of relaxed ownership, and the fixes apply 
 - Detached portal players already name the original destination. Cancellation or redirection now retargets
   every detached passenger's level before transforming and placing it (including the player's game-mode level).
   If the portal loading screen already announced the old destination, the client receives the corrected dimension too.
+  The patch captures that setting before detaching and passes it to the helper, preserving the audited engine boundary.
 - Portal event locations now use resolved absolute movement, including relative rotation. The listener's
   returned rotation is honored; the transition's velocity, flags, cause and post-transition callback are retained.
 - Waiting for an owned async fallback now uses the same motion-aware route as the non-waiting fallback,

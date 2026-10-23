@@ -200,10 +200,10 @@ index ffb910a8e25f0483ef9cbf79a16513b4d240a6e0..1b884e6da5fa046a2af87e9e9ef3adc4
      }
  
 diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
-index e69b72fac61f6adbffbe0d6c59b470a2dca1c32f..967955f0945882cb03b02014267d449480601bc2 100644
+index d4aac8594842d2ed5c98e92115180849efae128a..1b57d293b5c6c702c37ecde9e31f854fb8b86c45 100644
 --- a/net/minecraft/server/level/ServerLevel.java
 +++ b/net/minecraft/server/level/ServerLevel.java
-@@ -732,6 +732,10 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+@@ -733,6 +733,10 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
          );
      }
      public final io.papermc.paper.threadedregions.RegionizedTaskQueue.WorldRegionTaskData taskQueueRegionData = new io.papermc.paper.threadedregions.RegionizedTaskQueue.WorldRegionTaskData(this);
@@ -214,7 +214,7 @@ index e69b72fac61f6adbffbe0d6c59b470a2dca1c32f..967955f0945882cb03b02014267d4494
      // Canvas start - region threading
      // note: *never* pop the unload ticket, EVER.
      public final dev.iyanz.aurora.engine.util.ticket.TicketHolder<dev.iyanz.aurora.engine.util.ticket.UnloadTicket>
-@@ -1826,10 +1830,13 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+@@ -1827,10 +1831,13 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
          } else {
              if (entity instanceof net.minecraft.world.entity.item.ItemEntity item && item.getItem().isEmpty()) return false; // Paper - Prevent empty items from being added
              // Paper start - capture all item additions to the world
@@ -230,7 +230,7 @@ index e69b72fac61f6adbffbe0d6c59b470a2dca1c32f..967955f0945882cb03b02014267d4494
              // Paper end - capture all item additions to the world
              // SPIGOT-6415: Don't call spawn event when reason is null. For example when an entity teleports to a new world.
              if (spawnReason != null && !org.bukkit.craftbukkit.event.CraftEventFactory.doEntityAddEventCalling(this, entity, spawnReason)) {
-@@ -2038,9 +2045,11 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+@@ -2039,9 +2046,11 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
              String message = "recursive call to sendBlockUpdated";
              Util.logAndPauseIfInIde("recursive call to sendBlockUpdated", new IllegalStateException("recursive call to sendBlockUpdated"));
          }
@@ -243,7 +243,7 @@ index e69b72fac61f6adbffbe0d6c59b470a2dca1c32f..967955f0945882cb03b02014267d4494
          if (this.paperConfig().misc.updatePathfindingOnBlockUpdate) { // Paper - option to disable pathfinding updates
          VoxelShape oldShape = old.getCollisionShape(this, pos);
          VoxelShape newShape = current.getCollisionShape(this, pos);
-@@ -2048,7 +2057,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+@@ -2049,7 +2058,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
              List<PathNavigation> navigationsToUpdate = new ObjectArrayList<>();
  
              try { // Paper - catch CME see below why
@@ -252,7 +252,7 @@ index e69b72fac61f6adbffbe0d6c59b470a2dca1c32f..967955f0945882cb03b02014267d4494
                  Mob navigatingMob = iterator.next(); // Folia - region threading
                  PathNavigation pathNavigation = navigatingMob.getNavigation();
                  if (pathNavigation.shouldRecomputePath(pos)) {
-@@ -2076,24 +2085,29 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+@@ -2077,24 +2086,29 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
              }
          }
          } // Paper - option to disable pathfinding updates
@@ -286,7 +286,7 @@ index e69b72fac61f6adbffbe0d6c59b470a2dca1c32f..967955f0945882cb03b02014267d4494
          // Folia end - region threading
      }
  
-@@ -2101,19 +2115,25 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+@@ -2102,19 +2116,25 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
      public void updateNeighborsAtExceptFromFacing(
          final BlockPos pos, final Block blockObject, final Direction skipDirection, final @Nullable Orientation orientation
      ) {
@@ -315,7 +315,7 @@ index e69b72fac61f6adbffbe0d6c59b470a2dca1c32f..967955f0945882cb03b02014267d4494
      }
  
      @Override
-@@ -2222,7 +2242,9 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+@@ -2223,7 +2243,9 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
  
      @Override
      public void blockEvent(final BlockPos pos, final Block block, final int b0, final int b1) {
@@ -326,7 +326,7 @@ index e69b72fac61f6adbffbe0d6c59b470a2dca1c32f..967955f0945882cb03b02014267d4494
      }
  
      private void runBlockEvents() {
-@@ -3043,12 +3065,16 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+@@ -3044,12 +3066,16 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
          @Override
          public void onTickingStart(final Entity entity) {
              if (entity instanceof net.minecraft.world.entity.Marker && !paperConfig().entities.markers.tick) return; // Paper - Configurable marker ticking
@@ -345,7 +345,7 @@ index e69b72fac61f6adbffbe0d6c59b470a2dca1c32f..967955f0945882cb03b02014267d4494
              // Paper start - Reset pearls when they stop being ticked
              if (ServerLevel.this.paperConfig().fixes.disableUnloadedChunkEnderpearlExploit && ServerLevel.this.paperConfig().misc.legacyEnderPearlBehavior && entity instanceof net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownEnderpearl pearl) {
                  pearl.setOwner(null);
-@@ -3059,7 +3085,9 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+@@ -3060,7 +3086,9 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
          @Override
          public void onTrackingStart(final Entity entity) {
              org.spigotmc.AsyncCatcher.catchOp("entity register"); // Spigot
@@ -356,7 +356,7 @@ index e69b72fac61f6adbffbe0d6c59b470a2dca1c32f..967955f0945882cb03b02014267d4494
              // ServerLevel.this.getChunkSource().addEntity(entity); // Paper - ignore and warn about illegal addEntity calls instead of crashing server; moved down below valid=true
              if (entity instanceof ServerPlayer player) {
                  ServerLevel.this.players.add(player);
-@@ -3082,7 +3110,9 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+@@ -3083,7 +3111,9 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
                      );
                  }
  
@@ -367,7 +367,7 @@ index e69b72fac61f6adbffbe0d6c59b470a2dca1c32f..967955f0945882cb03b02014267d4494
              }
  
              if (entity instanceof EnderDragon dragon) {
-@@ -3110,7 +3140,9 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+@@ -3111,7 +3141,9 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
          @Override
          public void onTrackingEnd(final Entity entity) {
              org.spigotmc.AsyncCatcher.catchOp("entity unregister"); // Spigot
@@ -378,7 +378,7 @@ index e69b72fac61f6adbffbe0d6c59b470a2dca1c32f..967955f0945882cb03b02014267d4494
              // Spigot start // TODO I don't think this is needed anymore
              if (entity instanceof Player player) {
                  for (final ServerLevel level : ServerLevel.this.getServer().getAllLevels()) {
-@@ -3156,7 +3188,9 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+@@ -3157,7 +3189,9 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
                      );
                  }
  
