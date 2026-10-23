@@ -115,6 +115,9 @@ public final class ChunkGenerationMetrics {
                     .get(AuroraConfig.CHUNK_GENERATION_METRICS_KEY);
                 if (value != null) values.put(AuroraConfig.CHUNK_GENERATION_METRICS_KEY, value);
             } catch (final Exception | LinkageError unreadable) {
+                dev.iyanz.sourbycraft.util.SourbyLogger.warn("chunk-generation metrics could not read "
+                    + dev.iyanz.sourbycraft.config.ConfigParseErrors.describe(file, unreadable)
+                    + "; the measurement stays off this run");
                 return false;
             }
         }
