@@ -133,6 +133,7 @@ Priority: **P0** data/region safety, **P1** runtime correctness, **P2** performa
 | NW-001 | Network counters | `aurora.network.counters` | Low | `03` §NW-001 | READY FOR OWNER TEST |
 | AB-001 | AbyssLink disabled path | `aurora.abysslink.enabled: false` | Low | `03` §AB-001 | READY FOR OWNER TEST |
 | AB-002 | AbyssLink enabled against a test peer | `aurora.abysslink.*` | Medium | `03` §AB-002 | BLOCKED (needs a Leviathan test peer) |
+| SM-001 | SourbyMod (ML1): load, reject, isolate | `mods/*.jar` with `sourbymod.yml` | Medium | `03` §SM-001 | READY FOR OWNER TEST |
 | UP-001 | Auto-updater notify mode | `updater.apply-mode: notify` | Low | `03` §UP-001 | READY FOR OWNER TEST |
 
 ## Highest-risk Build 50 changes (owner reported tested 2026-10-24)

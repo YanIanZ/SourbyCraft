@@ -66,6 +66,9 @@ public final class SourbyCraftBootstrap {
         AuroraRuntime.transition(AuroraRuntime.State.STOPPING);
         // Before the first AWF wait of the shutdown (the storage lane draining below, then the region
         // saves, the chunk I/O drain and AwfEngine.closeAll): one deadline for all of them.
+        // Mods first: they may still need Bukkit and every SourbyCraft service below.
+        try { dev.iyanz.sourbycraft.mod.ModLoader.shutdown(); }
+        catch (Throwable failure) { SourbyLogger.error("SourbyMod shutdown failed", failure); }
         try { dev.iyanz.sourbycraft.awf.AwfEngine.beginShutdown(); }
         catch (Throwable failure) { SourbyLogger.error("AWF shutdown deadline could not start", failure); }
         try { dev.iyanz.sourbycraft.hud.HudBars.close(); }
@@ -126,6 +129,10 @@ public final class SourbyCraftBootstrap {
         stage("configuration", () -> {
             SourbyCraftConfig.init();
         });
+
+        // SourbyMod (ML1): after configuration, before worlds and Bukkit plugins. onLoad may read
+        // SourbyCraft settings; onEnable fires at ServerLoadEvent(STARTUP), onDisable at close().
+        stage("sourby mods", dev.iyanz.sourbycraft.mod.ModLoader::bootstrap);
 
         // After configuration (reads aurora.diagnostics.stall-recorder.*, RESTART_REQUIRED). Its own daemon
         // thread; evidence for a hung tick on hosts with no shell. Disabled = no thread, no hook.
@@ -276,7 +283,7 @@ public final class SourbyCraftBootstrap {
     static synchronized int failureCountForTesting() { return failureCount; }
 
     /** Stages the engine brings up, in order; the denominator of the boot bar. */
-    private static final int TOTAL_STAGES = 18;
+    private static final int TOTAL_STAGES = 19;
     private static int stageCount;
     private static int failureCount;
     private static final java.util.List<dev.iyanz.sourbycraft.brand.AuroraBoot.Stage> progress = new java.util.ArrayList<>();

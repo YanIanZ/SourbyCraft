@@ -1,0 +1,34 @@
+package dev.iyanz.sourbycraft.mod;
+
+/**
+ * SourbyMod — implement this interface in a mod's main class (the {@code main:} class named in
+ * {@code sourbymod.yml}).
+ *
+ * <p>Lifecycle, in order:</p>
+ * <ul>
+ *   <li>{@link #onLoad(ModContext)} — during SourbyCraft bootstrap, before world load and before
+ *       Bukkit plugins enable. Safe: SourbyCraft configuration access, class initialisation, the
+ *       mod's data directory. Not safe: Bukkit API, worlds, schedulers.</li>
+ *   <li>{@link #onEnable()} — on {@code ServerLoadEvent(STARTUP)}: worlds are loaded and plugins are
+ *       enabled, so the full Bukkit/Paper API is available.</li>
+ *   <li>{@link #onDisable()} — during shutdown, in reverse enable order, before the rest of
+ *       SourbyCraft's services stop.</li>
+ * </ul>
+ *
+ * <p>Mods run in-process with full server privileges. No sandbox is applied — the same trust level as
+ * a plugin, including NMS access. See {@code docs/SOURBYMODS.md} for the format and limits.</p>
+ */
+public interface SourbyMod {
+
+    /**
+     * Bootstrap phase: after SourbyCraft's configuration is initialised, before worlds load and
+     * before Bukkit plugins enable.
+     */
+    void onLoad(ModContext ctx);
+
+    /** The server is ready (worlds loaded, plugins enabled); the Bukkit API is safe here. */
+    default void onEnable() {}
+
+    /** Shutdown; release resources. Called in reverse enable order. */
+    default void onDisable() {}
+}

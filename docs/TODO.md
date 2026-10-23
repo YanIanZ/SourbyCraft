@@ -795,6 +795,10 @@ belum direncanakan, kecuali yang ditandai; hanya butir yang bertanda [x] sudah d
 
 ## AWF MultiProfile + Aurora Redis Fabric (2026-10-24, uncommitted)
 
+- [x] SourbyMod (ML1) restored for Build 50: self-contained loader (no removed MT1 ModuleRegistry),
+  `onLoad` at the `sourby mods` stage, `onEnable` on `ServerLoadEvent(STARTUP)`, `onDisable` at shutdown;
+  descriptor tests + loader tests written, compile done, not executed by the agent.
+
 - [x] Build 50 prerelease identity: `sourbyBuild=50`, `release=pre`, display `Build 50@<short>PR!`
   (merah) dan `Build 50` (hijau) saat rilis; formatter tunggal di `BuildInfo`/`SourbyCraftColors.releaseStage`.
   Test case ditambahkan, belum dijalankan agen.

@@ -663,3 +663,58 @@ exists, the console banner and the join message appear, and **nothing is downloa
 against a production server.
 
 **Status:** READY FOR OWNER TEST
+---
+
+# 10. SourbyMod (ML1)
+
+`mods/*.jar` with `sourbymod.yml` at the root load at boot. Format: `docs/SOURBYMODS.md`.
+Lifecycle: `onLoad` in the `sourby mods` boot stage (before worlds), `onEnable` on
+`ServerLoadEvent(STARTUP)`, `onDisable` during shutdown. No Fabric/Forge support.
+
+### SM-001 — Load a mod, reject unsupported jars, isolate a broken mod
+
+**Priority:** P1. **Risk:** Medium (arbitrary code, same trust as a plugin).
+
+**Prerequisites:** a disposable server with a JDK 25; the server's compiled classes
+(`sourbycraft-server/build/classes/java/main`) or the build output directory.
+
+**Steps:**
+
+1. Create `/tmp/sm/ExampleMod.java`:
+
+```java
+package com.example;
+import dev.iyanz.sourbycraft.mod.ModContext;
+import dev.iyanz.sourbycraft.mod.SourbyMod;
+public class ExampleMod implements SourbyMod {
+    public void onLoad(ModContext ctx) { ctx.logger().info("onLoad " + ctx.modId()); }
+    public void onEnable() { System.out.println("SM onEnable"); }
+    public void onDisable() { System.out.println("SM onDisable"); }
+}
+```
+
+2. Compile and package:
+
+```bash
+javac -cp sourbycraft-server/build/classes/java/main -d /tmp/sm/classes /tmp/sm/ExampleMod.java
+printf 'id: example-mod\nname: Example Mod\nversion: 1.0.0\nmain: com.example.ExampleMod\napi: 1\n' > /tmp/sm/sourbymod.yml
+jar --create --file mods/example-mod.jar -C /tmp/sm/classes . -C /tmp/sm sourbymod.yml
+```
+
+3. Start the server. The log must contain `mods: example-mod@1.0.0 (1 loaded)` and the mod's
+   `onLoad` line **before** `Done (`. After startup, `SM onEnable` appears.
+4. Stop; `SM onDisable` appears before the process exits.
+5. Put a Fabric/Forge jar (no `sourbymod.yml`) in `mods/`, restart: one WARN naming the jar and
+   `Fabric/Forge mods are not supported`; the server still reaches `Done (`.
+6. Add a second jar with the same `id`, restart: the second is skipped with a duplicate-id WARN.
+7. Add a mod whose `onLoad` throws, restart: WARN naming the mod, the valid mod still loads, the
+   server reaches `Done (`.
+8. Remove the jars, restart: `mods: (0 loaded)`.
+
+**Expected:** only valid SourbyMods run; every rejection is one WARN; no jar can prevent the server
+from starting; `onDisable` runs in reverse load order.
+
+**Failure indicators:** a Fabric jar is loaded; a broken `onLoad` aborts the boot; `onEnable` runs
+before worlds/plugins exist; `onDisable` does not run; a classloader leak keeps the jar locked.
+
+**Status:** READY FOR OWNER TEST
