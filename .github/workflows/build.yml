@@ -775,7 +775,12 @@ jobs:
               && grep -q 'LEGACY_ENTITY_RETIRED_OK' server.log \
               && grep -q 'LEGACY_CONTEXT_CHAIN_OK' server.log \
               && grep -q 'LEGACY_CONTEXT_GLOBAL_ISOLATED_OK' server.log \
-              && grep -q 'LEGACY_CONTEXT_MOB_EVENT_OK' server.log; then
+              && grep -q 'LEGACY_CONTEXT_MOB_EVENT_OK' server.log \
+              && grep -q 'LEGACY_CURRENT_TICK_OK' server.log \
+              && grep -Eq 'LEGACY_RELAXED_SWEEP_(OK|REFUSED)' server.log \
+              && grep -Eq 'LEGACY_RELAXED_BLOCK_WRITE_(OK|REFUSED)' server.log \
+              && grep -Eq 'LEGACY_RELAXED_GLOBAL_CHUNK_(OK|REFUSED)' server.log \
+              && grep -Eq 'LEGACY_RELAXED_TELEPORT_JOIN_(OK|REFUSED)' server.log; then
               settled=1
               break
             fi
@@ -830,6 +835,22 @@ jobs:
             || { echo "a plain runTask from an explicit global-scheduler body inherited an entity anchor"; exit 1; }
           grep -q 'LEGACY_CONTEXT_MOB_EVENT_OK' server.log \
             || { echo "a non-player entity event anchored a legacy task"; exit 1; }
+          # Owner decision 2026-10-22: with mode = safe the region-ownership checks are relaxed by default
+          # (aurora.bridge.thread-checks). This boot runs the default, so the four relaxed probes must go
+          # through, the boot must say the server is not qualified, and nothing may be quarantined for it.
+          grep -q 'region-ownership checks are RELAXED' server.log \
+            || { echo "the relaxed-thread-checks boot WARN is missing"; exit 1; }
+          grep -q 'LEGACY_RELAXED_MODE effective=RELAXED' server.log \
+            || { echo "the legacy plugin did not see relaxed thread checks"; exit 1; }
+          grep -q 'LEGACY_CURRENT_TICK_OK' server.log \
+            || { echo "Bukkit.getCurrentTick failed off every region"; exit 1; }
+          for probe in LEGACY_RELAXED_SWEEP LEGACY_RELAXED_BLOCK_WRITE LEGACY_RELAXED_GLOBAL_CHUNK LEGACY_RELAXED_TELEPORT_JOIN; do
+            grep -q "${probe}_OK" server.log \
+              || { echo "$probe was refused although thread checks are relaxed"; grep "$probe" server.log; exit 1; }
+          done
+          if grep -q 'quarantined LegacyBridgeTest' server.log; then
+            echo "relaxed thread checks must count, not quarantine"; exit 1
+          fi
           if grep -q 'LEGACY_BRIDGE_TIMER_RAN_AFTER_CANCEL' server.log; then
             echo "a cancelled bridged timer kept running"; exit 1
           fi

@@ -36,6 +36,11 @@ quarantine-after = 3
 # LIVE. caller-region routes from a ticking caller's region; otherwise global.
 # global always uses the global region, where world access is refused.
 sync-route = "caller-region"
+# RESTART_REQUIRED, read early. Effective only while mode = "safe"; mode = "off" keeps checks enforced.
+# relaxed = advisory checks for every caller (LightingLuminol parity); bridged = advisory only in bridged
+# task bodies; enforced = refuse foreign access. relaxed/bridged are unsafe and unqualified (data races,
+# persisted corruption, item duplication, deadlocks possible). -Daurora.bridge.thread-checks= overrides this.
+thread-checks = "relaxed"
 
 [aurora.scheduler]
 # RESTART_REQUIRED. Governed lane budgets; these do not resize active executors.

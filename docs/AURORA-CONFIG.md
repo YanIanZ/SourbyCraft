@@ -22,6 +22,7 @@ This document describes **what branch `26.2` actually consumes now**. It is not 
 | `aurora.bridge.mode` | `off` / `safe`, default `off` | RESTART_REQUIRED | plugin loader admission via `AuroraBridge` (read from the TOML files directly, before `SourbyCraftBootstrap`) |
 | `aurora.bridge.quarantine-after` | integer ≥ 1 / `3` | LIVE | Aurora Bridge quarantine threshold |
 | `aurora.bridge.sync-route` | `caller-region` \| `global` / `caller-region` | LIVE | `BridgeRuntime.submit`, read per task |
+| `aurora.bridge.thread-checks` | `relaxed` \| `bridged` \| `enforced` / `"relaxed"` (owner decision 2026-10-22) | RESTART_REQUIRED, read early (`guards/ThreadChecks` class init; `-Daurora.bridge.thread-checks=` overrides); effective only while `mode = safe` | what a failed region-ownership check does ([aurora-plugin-bridge.md, Thread checks](architecture/aurora-plugin-bridge.md#thread-checks-owner-decision-2026-10-22)); relaxed = unsafe, unqualified |
 | `aurora.scheduler.bridge-io-threads` | integer ≥ 0 / `0` (= max(2, processors/4)) | RESTART_REQUIRED | Resource Governor `BRIDGE_IO` lane |
 | `aurora.scheduler.bridge-io-queue` | integer ≥ 1 / `256` | RESTART_REQUIRED | same |
 | `aurora.scheduler.storage-threads` | integer ≥ 0 / `1` (0 = 1) | RESTART_REQUIRED | Resource Governor `STORAGE` lane |

@@ -56,6 +56,15 @@ public final class OwnedTeleport {
     private static final LongAdder ASYNC = new LongAdder();
     private static final LongAdder REROUTED = new LongAdder();
     private static final LongAdder ABORTED = new LongAdder();
+    /** Relaxed thread checks: async teleports the caller waited for (LightingLuminol join semantics). */
+    private static final LongAdder JOINED = new LongAdder();
+    /** Of those, waits that gave up after {@link #JOIN_TIMEOUT_TICK_THREAD} / {@link #JOIN_TIMEOUT_OTHER}. */
+    private static final LongAdder JOIN_TIMEOUTS = new LongAdder();
+
+    /** A blocked tick thread is a stalled region (or the stalled global tick): bounded well under the region watchdog. */
+    static final long JOIN_TIMEOUT_TICK_THREAD = TimeUnit.SECONDS.toMillis(30L);
+    /** Threads that tick nothing may wait longer (a chunk load plus the destination's next tick). */
+    static final long JOIN_TIMEOUT_OTHER = TimeUnit.SECONDS.toMillis(60L);
 
     private OwnedTeleport() {}
 
@@ -99,10 +108,20 @@ public final class OwnedTeleport {
                                         final io.papermc.paper.entity.TeleportFlag... flags) {
         ASYNC.increment();
         final Entity handle = entity.getHandleRaw(); // raw: may run on any thread; only identity and ownership are used here
-        FALLBACK_LOG.record(CallerPlugin.find(), why(handle, to));
         final Location target = to.clone();
         final Set<Relative> relatives = FallbackMotion.relatives(flags);
         final TeleportCause finalCause = cause == null ? TeleportCause.UNKNOWN : cause;
+        // Adapted from LightingLuminol (GPL-3.0, Bacteriawa, 2026-06-06, paper patch 0002 CraftPlayer#teleport0:
+        // "return teleportAsync(location, cause).join();"): with relaxed thread checks the caller waits for the
+        // move instead of getting "not completed now". Owner decision 2026-10-22 "Tiru penuh LightingLuminol".
+        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED) {
+            final ServerLevel destination = ((CraftWorld) target.getWorld()).getHandle();
+            final boolean tickThread = RegionOwnership.current().isTickThread();
+            if (TeleportRoute.joinsWhenRelaxed(probe(handle, destination, new Vec3(target.getX(), target.getY(), target.getZ())), tickThread)) {
+                return joinAsync(entity, target, finalCause, relatives, tickThread);
+            }
+        }
+        FALLBACK_LOG.record(CallerPlugin.find(), why(handle, to));
         if (RegionOwnership.current().isTickThreadFor(handle)) {
             startAsync(handle, target, finalCause, relatives);
         } else {
@@ -112,16 +131,65 @@ public final class OwnedTeleport {
         return false;
     }
 
+    /**
+     * LightingLuminol's {@code teleportAsync(...).join()}, bounded. The Bukkit {@code teleportAsync} runs the move on
+     * the entity's own region (inline when the caller is that region) and completes on the destination's thread;
+     * this thread only waits. {@code true} when the entity moved, {@code false} when the move failed, the wait
+     * timed out (the move may still complete later) or the thread was interrupted.
+     */
+    private static boolean joinAsync(final CraftEntity entity, final Location target, final TeleportCause cause,
+                                     final Set<Relative> relatives, final boolean tickThread) {
+        JOINED.increment();
+        final long timeoutMillis = tickThread ? JOIN_TIMEOUT_TICK_THREAD : JOIN_TIMEOUT_OTHER;
+        final java.util.concurrent.CompletableFuture<Boolean> future = new java.util.concurrent.CompletableFuture<>();
+        final java.util.function.Consumer<Entity> move = owned -> {
+            try {
+                startAsync(owned, target, cause, relatives, future);
+            } catch (final Throwable failed) {
+                future.completeExceptionally(failed);
+                if (failed instanceof VirtualMachineError fatal) throw fatal;
+            }
+        };
+        final Entity handle = entity.getHandleRaw();
+        if (RegionOwnership.current().isTickThreadFor(handle)) {
+            move.accept(handle);
+        } else if (!entity.taskScheduler.schedule(move, retired -> future.complete(false), 1L)) {
+            future.complete(false);
+        }
+        try {
+            return Boolean.TRUE.equals(future.get(timeoutMillis, TimeUnit.MILLISECONDS));
+        } catch (final java.util.concurrent.TimeoutException timedOut) {
+            JOIN_TIMEOUTS.increment();
+            LOGGER.warn("Relaxed thread checks: {} waited {} ms for a teleport of {} to {} that has not completed; returning false "
+                + "(the move may still finish later)", Thread.currentThread().getName(), timeoutMillis,
+                entity.getUniqueId(), target);
+            return false;
+        } catch (final InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (final java.util.concurrent.ExecutionException failed) {
+            LOGGER.warn("Relaxed thread checks: a waited-for teleport of {} to {} failed", entity.getUniqueId(), target, failed.getCause());
+            return false;
+        }
+    }
+
     /** On the entity's region: Paper's dismount rule, the flags' velocity, then the engine's teleportAsync. */
     private static void startAsync(final Entity entity, final Location to, final TeleportCause cause, final Set<Relative> relatives) {
+        startAsync(entity, to, cause, relatives, null);
+    }
+
+    private static void startAsync(final Entity entity, final Location to, final TeleportCause cause, final Set<Relative> relatives,
+                                   final java.util.concurrent.CompletableFuture<Boolean> completion) {
         final ServerLevel destination = ((CraftWorld) to.getWorld()).getHandle();
         final Vec3 pos = new Vec3(to.getX(), to.getY(), to.getZ());
         final Vec3 velocity = FallbackMotion.velocity(PositionMoveRotation.of(entity), pos, to.getYaw(), to.getPitch(), relatives);
         if (entity.isPassenger()) {
             entity.stopRiding(); // Paper's sync teleport dismounts the entity it moves (passengers of it stay)
         }
-        entity.teleportAsync(destination, pos, to.getYaw(), to.getPitch(), velocity, cause,
-            Entity.TELEPORT_FLAG_LOAD_CHUNK | Entity.TELEPORT_FLAG_TELEPORT_PASSENGERS, null);
+        final boolean started = entity.teleportAsync(destination, pos, to.getYaw(), to.getPitch(), velocity, cause,
+            Entity.TELEPORT_FLAG_LOAD_CHUNK | Entity.TELEPORT_FLAG_TELEPORT_PASSENGERS,
+            completion == null ? null : moved -> completion.complete(true));
+        if (!started && completion != null) completion.complete(false);
     }
 
     private static String why(final Entity entity, final Location to) {
@@ -186,15 +254,23 @@ public final class OwnedTeleport {
                         PositionMoveRotation.of(entity), PositionMoveRotation.of(transition), transition.relatives());
                 }
                 if (entity.isPassenger()) entity.stopRiding();
-                entity.teleportAsync(destination, absolute[0].position(), absolute[0].yRot(), absolute[0].xRot(),
-                    absolute[0].deltaMovement(), transition.cause() == null ? TeleportCause.UNKNOWN : transition.cause(),
-                    Entity.TELEPORT_FLAG_LOAD_CHUNK | Entity.TELEPORT_FLAG_TELEPORT_PASSENGERS, null);
+                // Paper's PlayerTeleportEvent already ran for this call: the async route must not fire it again.
+                AsyncTeleportEvents.suppressPlayerTeleportEvent(() -> entity.teleportAsync(destination, absolute[0].position(),
+                    absolute[0].yRot(), absolute[0].xRot(), absolute[0].deltaMovement(),
+                    transition.cause() == null ? TeleportCause.UNKNOWN : transition.cause(),
+                    Entity.TELEPORT_FLAG_LOAD_CHUNK | Entity.TELEPORT_FLAG_TELEPORT_PASSENGERS, null));
                 return false;
             default:
                 ABORTED.increment();
                 return false;
         }
     }
+
+    /** Async teleports the caller waited for (relaxed thread checks only). */
+    public static long joinedCount() { return JOINED.sum(); }
+
+    /** Waits that timed out (relaxed thread checks only). */
+    public static long joinTimeoutCount() { return JOIN_TIMEOUTS.sum(); }
 
     /** Synchronous teleports admitted. */
     public static long syncCount() { return SYNC.sum(); }

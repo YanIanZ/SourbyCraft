@@ -44,13 +44,38 @@ public final class AuroraBridge {
 
     private AuroraBridge() {}
 
+    /** The bridge settings as the TOML files held them when first asked; read once, never creates the runtime. */
+    private static volatile AuroraConfig.Bridge earlySettings;
+    // ThreadChecks class initialization reads these settings while runtime() invokes ThreadChecks
+    // under AuroraBridge.class. A separate monitor prevents a class-initialization lock cycle.
+    private static final Object EARLY_SETTINGS_LOCK = new Object();
+
+    /**
+     * {@code aurora.bridge.*} as configured on disk, read once on first use (before the plugin scan, or earlier
+     * when the region-ownership checks ask: {@code guards/ThreadChecks}). Never creates the bridge runtime.
+     */
+    public static AuroraConfig.Bridge earlySettings() {
+        AuroraConfig.Bridge settings = earlySettings;
+        if (settings == null) {
+            synchronized (EARLY_SETTINGS_LOCK) {
+                settings = earlySettings;
+                if (settings == null) {
+                    settings = readEarly(AURORA_FILE, UNIFIED_FILE);
+                    earlySettings = settings;
+                }
+            }
+        }
+        return settings;
+    }
+
     static BridgeRuntime runtime() {
         BridgeRuntime current = runtime;
         if (current == null) {
             synchronized (AuroraBridge.class) {
                 current = runtime;
                 if (current == null) {
-                    final AuroraConfig.Bridge settings = readEarly(AURORA_FILE, UNIFIED_FILE);
+                    final AuroraConfig.Bridge settings = earlySettings();
+                    dev.iyanz.sourbycraft.guards.ThreadChecks.bootReport(SourbyLogger::warn, SourbyLogger::info);
                     earlyQuarantineAfter = settings.quarantineAfter();
                     earlySyncRoute = settings.syncRoute();
                     earlyMaxPendingTasks = settings.maxPendingTasksPerPlugin();
@@ -128,7 +153,7 @@ public final class AuroraBridge {
                 final var config = new com.electronwill.nightconfig.toml.TomlParser().parse(reader);
                 for (final String key : List.of(AuroraConfig.BRIDGE_MODE_KEY, AuroraConfig.BRIDGE_QUARANTINE_KEY,
                     AuroraConfig.BRIDGE_SYNC_ROUTE_KEY, AuroraConfig.BRIDGE_MAX_PENDING_KEY,
-                    AuroraConfig.BRIDGE_MAX_RUNNING_ASYNC_KEY)) {
+                    AuroraConfig.BRIDGE_MAX_RUNNING_ASYNC_KEY, AuroraConfig.BRIDGE_THREAD_CHECKS_KEY)) {
                     final Object value = config.get(key);
                     if (value != null) values.put(key, value);
                 }
@@ -417,6 +442,7 @@ public final class AuroraBridge {
     private static synchronized void resetRuntime() {
         runtime = null;
         contextActive = false;
+        earlySettings = null;
         earlyQuarantineAfter = AuroraConfig.Bridge.DEFAULT.quarantineAfter();
         earlySyncRoute = AuroraConfig.Bridge.DEFAULT.syncRoute();
         earlyMaxPendingTasks = AuroraConfig.Bridge.DEFAULT.maxPendingTasksPerPlugin();

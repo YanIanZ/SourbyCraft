@@ -80,6 +80,7 @@ public final class SourbyCraftConfig {
         java.util.Set<String> keys = new java.util.TreeSet<>();
         if (!beforeAurora.cpu().equals(afterAurora.cpu())) keys.add(AuroraConfig.CPU_CORES_KEY);
         if (beforeAurora.bridge().mode() != afterAurora.bridge().mode()) keys.add(AuroraConfig.BRIDGE_MODE_KEY);
+        if (beforeAurora.bridge().threadChecks() != afterAurora.bridge().threadChecks()) keys.add(AuroraConfig.BRIDGE_THREAD_CHECKS_KEY);
         if (!beforeAurora.scheduler().equals(afterAurora.scheduler())) keys.add("aurora.scheduler.*");
         if (!beforeAurora.diagnostics().stallRecorder().equals(afterAurora.diagnostics().stallRecorder())) {
             keys.add("aurora.diagnostics.stall-recorder.*");
@@ -349,6 +350,13 @@ public final class SourbyCraftConfig {
             "Where a bridged plugin's Bukkit sync task runs (LIVE). caller-region = on the region that was "
             + "ticking when it was scheduled (from a command or event), else the global region. global = always "
             + "the global region, where world access is refused. Ownership checks apply either way.");
+        seed(f, changed, AuroraConfig.BRIDGE_THREAD_CHECKS_KEY, "relaxed",
+            "Region-ownership checks while bridge mode = safe (RESTART_REQUIRED, read early). "
+            + "relaxed = advisory for every caller (LightingLuminol parity, owner decision 2026-10-22); "
+            + "bridged = advisory only inside bridged task bodies; enforced = refuse foreign access. "
+            + "With bridge mode = off checks stay enforced. relaxed/bridged are unsafe and unqualified: "
+            + "data races, persisted corruption, item duplication and deadlocks are possible. "
+            + "-Daurora.bridge.thread-checks= overrides this file.");
         seed(f, changed, AuroraConfig.BRIDGE_MAX_PENDING_KEY, 0,
             "Maximum pending bridged tasks per plugin (LIVE). 0 = unlimited, otherwise 1..100000. "
             + "New submissions above the limit are cancelled and diagnosed; existing tasks drain normally.");

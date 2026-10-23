@@ -64,7 +64,14 @@ class CanvasSourceCouplingTest(unittest.TestCase):
     # Feature patches that name a Canvas symbol, with the reason. Empty since Build 48: the
     # io.canvasmc plugin API was removed (owner decision 2026-10-21) and Paper feature 0014 names
     # dev.iyanz.sourbycraft.api.world.WorldUnloadResult by its simple name.
-    PATCH_APPROVED = []
+    PATCH_APPROVED = [
+        # MC feature 0080 (legacy PlayerTeleportEvent on the async teleport route, 2026-10-22): the
+        # cancelled-event cleanup mirrors the baseline's EntityTeleportAsyncEvent branch two lines
+        # above it, which clears the engine's plugin transfer state. The state is the engine's own;
+        # an owned service for it is the Stage F follow-up, not this fix.
+        "dev.iyanz.aurora.engine.threadedregions.entities.EntityRegionTransferState",
+        "dev.iyanz.aurora.engine.threadedregions.entities.EntityRegionTransferState.PluginTeleportAsyncState",
+    ]
 
     def test_integration_patches_add_no_live_canvas_calls(self):
         self.assertEqual(sorted(policy.canvas_patch_symbols(REPO)), sorted(self.PATCH_APPROVED),
@@ -254,6 +261,13 @@ class SchedulerCouplingTest(unittest.TestCase):
         # RegionTaskQueueData's volatile per-queue entry counts, read without the queue monitor.
         # Read-only; the view queues, runs and cancels nothing.
         "io.papermc.paper.threadedregions.RegionizedTaskQueue",
+        # compat/luminol (recorded 2026-10-22, owner decision "Tiru penuh LightingLuminol"): the
+        # ported ReferenceCountedRegionizedWorldDataPool hands a foreign thread the RegionizedWorldData
+        # of the region owning a chunk, with a ticket, while aurora.bridge.thread-checks is relaxed.
+        # It is an adapter by nature (it names the region data type it hands out) and is dead code on an
+        # enforced server (ThreadChecks.RELAXED_SCOPE is a static final).
+        "io.papermc.paper.threadedregions.RegionizedWorldData",
+        "RegionizedWorldData",
     }
 
     def test_the_backend_is_named_only_inside_the_adapters(self):
@@ -269,6 +283,10 @@ class SchedulerCouplingTest(unittest.TestCase):
             # Read-only diagnostics views (dependency-ledger.md section 1.2).
             "sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/perf/LiveSchedulerSource.java",
             "sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/perf/RegionLocator.java",
+            # The LightingLuminol world-data pool and its lease helper (relaxed thread checks, owner
+            # decision 2026-10-22): the fourth adapter, "give me the data of the region owning this chunk".
+            "sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/compat/luminol/RegionizedWorldDataPool.java",
+            "sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/compat/luminol/WorldDataAccess.java",
         }, "the region backend is named outside the adapters; route it through a contract")
 
     def test_sourby_code_reaches_the_scheduler_only_where_recorded(self):
@@ -290,6 +308,22 @@ class SchedulerCouplingTest(unittest.TestCase):
                 # Paper feature 0014: staged createWorld queues the spawn stages on the global tick,
                 # as the engine requires for world creation (same reason as AuroraWorldsService).
                 "io.papermc.paper.threadedregions.RegionizedServer.getInstance",
+                # MC feature 0078 / Paper feature 0029 (relaxed thread checks, owner decision 2026-10-22
+                # "Tiru penuh LightingLuminol"): the ServerChunkCache global-tick synchronous chunk load
+                # and the MainThreadExecutor poll ask which thread they are on and pump the right queue
+                # (isGlobalTickThread, getCurrentRegion, the region/data types in the local's declaration);
+                # CraftWorld#isChunkGenerated takes the synchronous branch on the global tick. Engine-internal
+                # by nature: these hunks live in the engine's own chunk-load path, mirroring LightingLuminol
+                # MC 0001, and are dead unless ThreadChecks.RELAXED (static final).
+                "io.papermc.paper.threadedregions.RegionizedServer.isGlobalTickThread",
+                "io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegion",
+                "io.papermc.paper.threadedregions.RegionizedWorldData",
+                "io.papermc.paper.threadedregions.ThreadedRegionizer.ThreadedRegion",
+                "io.papermc.paper.threadedregions.TickRegions.TickRegionData",
+                "io.papermc.paper.threadedregions.TickRegions.TickRegionSectionData",
+                "RegionizedServer",
+                "TickRegionScheduler",
+                "ThreadedRegionizer",
             },
             "a feature patch reaches into the region scheduler outside the recorded set")
 

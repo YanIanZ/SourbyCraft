@@ -103,6 +103,25 @@ message / scheduler handoff
 
 over shared mutable state and broad locking.
 
+### Owner decisions that override this rule
+
+Rules in this document bind every agent; only the owner can set one aside, and then only for the feature the
+decision names. Each such decision is recorded here verbatim, with its scope, so nobody later mistakes the
+exception for the rule.
+
+- **2026-10-22, Aurora Compatibility Bridge thread checks.** After being told the risks (data races, chunk
+  corruption persisted to disk, item dupes, deadlocks) the owner decided: **"Tiru penuh LightingLuminol"** --
+  make the bridge behave like LightingLuminol: legacy (non-folia-supported) plugins work because
+  thread-ownership checks are relaxed, as LightingLuminol does. Scope: the region-ownership checks
+  (`TickThread.ensureTickThread`, `RegionizedServer.ensureGlobalTickThread`, the `TickGuard` sites, the
+  `RegionizedWorldData` "not under this region's control" checks) consult `aurora.bridge.thread-checks`
+  (`guards/ThreadChecks`); the owner's default is `relaxed`, and it only takes effect while
+  `aurora.bridge.mode = safe` admits legacy plugins. Everything else in 2.3 stands: new SourbyCraft code is still
+  written region-local, and `enforced` restores the previous behaviour. **Truthfulness still applies:** a
+  server running relaxed checks is unsafe and unqualified, the boot log, `/ver`, `/sourbycraft config` and
+  `/perf plugins` say so, and no release note may call such a server stable.
+  Details: [aurora-plugin-bridge.md, "Thread checks"](architecture/aurora-plugin-bridge.md#thread-checks-owner-decision-2026-10-22).
+
 ## 2.4 Performance changes require evidence
 
 Each non-trivial optimization should answer:

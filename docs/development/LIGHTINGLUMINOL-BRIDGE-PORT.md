@@ -7,6 +7,48 @@ build or tests for this increment. Testing and acceptance are assigned to Claude
 by the user. Materialization is not evidence of plugin qualification, improved
 throughput, or release readiness.
 
+## Second port 2026-10-22c: relaxed thread checks (agent `fable-lightingluminol-compat`)
+
+Owner decision 2026-10-22, verbatim after the risks were stated: **"Tiru penuh LightingLuminol"**. The bridge
+now relaxes the region-ownership checks the way LightingLuminol's "Base Dirty Patches" do, as a setting
+(`aurora.bridge.thread-checks`, default `relaxed`, effective only with `mode = safe`), with the supporting pieces
+upstream needs ported and gated. Design, scope, honesty and what was deliberately not ported:
+[aurora-plugin-bridge.md, *Thread checks*](../architecture/aurora-plugin-bridge.md#thread-checks-owner-decision-2026-10-22).
+
+| Upstream file at the pinned revision | SourbyCraft treatment |
+| --- | --- |
+| [`paper-patches/features/0002-Base-Dirty-Patches.patch`](https://github.com/LuminolCustomArchive/LightingLuminol/blob/72d51c4d11b1ddfe70cde21f4736fdf660873cb3/lightingluminol-server/paper-patches/features/0002-Base-Dirty-Patches.patch) | `TickThread.ensureTickThread` bodies ask `guards/ThreadChecks.refuse` instead of being commented out; `ReferenceList`/`IteratorSafeOrderedReferenceSet` lock only while relaxed; `CraftServer#getCurrentTick` fallback moved into `RegionizedServer.getCurrentTick`; `CraftPlayer#teleport0` join became `OwnedTeleport.joinAsync` (bounded, skipped where it could deadlock); `CraftWorld#generateTree` / `CraftBlock#applyBoneMeal` use `WorldDataAccess` leases; the `CraftWorld` `ensureGlobalTickThread` removals are covered by the `RegionizedServer` check itself; `CraftScheduler#handle` and `CraftScoreboard` not ported |
+| [`minecraft-patches/features/0001-Base-Dirty-Patches.patch`](https://github.com/LuminolCustomArchive/LightingLuminol/blob/72d51c4d11b1ddfe70cde21f4736fdf660873cb3/lightingluminol-server/minecraft-patches/features/0001-Base-Dirty-Patches.patch) | Three SourbyCraft Minecraft feature patches: relaxed region-ownership checks (RegionizedServer, RegionizedWorldData, TickRegions, NearbyPlayers, EntityLookup, ServerChunkCache, ChunkMap, MinecraftServer), cross-region world data (`ServerLevel.sourbycraft$worldDataPool` + `WorldDataAccess` leases at the upstream call sites, plus `ScheduledTickAccess`), legacy teleport events (`Entity#teleportAsync`, portal waiter). `RegionizedServer#globalTick` `mainThreadHeartbeat` and the `Projectile` Luminol-config hunk not ported |
+| [`core/ReferenceCountedRegionizedWorldDataPool.java`](https://github.com/LuminolCustomArchive/LightingLuminol/blob/72d51c4d11b1ddfe70cde21f4736fdf660873cb3/lightingluminol-server/src/main/java/meow/bacteriawa/lightingluminol/core/ReferenceCountedRegionizedWorldDataPool.java) | Ported as `dev.iyanz.sourbycraft.compat.luminol.RegionizedWorldDataPool` (own ticket type, never returns `null`, `Lease` instead of `Tuple`) |
+
+Evidence for this increment is in the coordination entry `fable-lightingluminol-compat` and the PR; unit tests
+`ThreadChecksTest`, `AsyncTeleportEventsTest`, `TeleportRouteTest` (relaxed cases), `AuroraBridgeConfigTest`
+(thread-checks), `BridgeRuntimeTest` (relaxed accounting). Nothing here qualifies a plugin or the server.
+
+## Continuation 2026-10-23: lifecycle and teleport regressions
+
+The interrupted working tree was preserved before integration. Review found these faults in the pending
+port; none is an accepted consequence of relaxed ownership, and the fixes apply in enforced mode too:
+
+- Early settings used the runtime class monitor while `ThreadChecks` initialization read those settings.
+  Runtime initialization invokes `ThreadChecks` under that monitor: two first callers could deadlock.
+  Invariant: early settings can be read while another thread holds the runtime monitor. A separate settings
+  monitor removes the cycle; `AuroraBridgeEarlySettingsConcurrencyTest` timed out before the fix.
+- Teleport listeners can redirect across regions or worlds after the initial classification. Placement now
+  recomputes ownership against the final destination, rather than entering the original same-region path.
+- Detached portal players already name the original destination. Cancellation or redirection now retargets
+  every detached passenger's level before transforming and placing it (including the player's game-mode level).
+  If the portal loading screen already announced the old destination, the client receives the corrected dimension too.
+- Portal event locations now use resolved absolute movement, including relative rotation. The listener's
+  returned rotation is honored; the transition's velocity, flags, cause and post-transition callback are retained.
+- Waiting for an owned async fallback now uses the same motion-aware route as the non-waiting fallback,
+  retaining the synchronous caller's velocity flags. Retirement and refused scheduling complete the wait as false.
+
+`AsyncTeleportIntegrationTest` checks the compiled patch call order without initializing Minecraft's registries;
+all four integration regressions failed before the fixes. `AsyncTeleportEventsTest` additionally checks transition
+rotation and metadata. These checks are structural/unit evidence, not player portal gameplay or soak evidence.
+Final integrated build/boot evidence is recorded separately; no publication or plugin qualification is implied here.
+
 ## Status update 2026-10-22b (remaining local cases, agent `claude-luminol2`)
 
 Local functional evidence only, in worktree `sc-worktrees/claude-luminol2` (base `cc5d5ef1`, PR #18; not applied, nothing
@@ -217,8 +259,10 @@ branch `ver/26.1.2`. Original patch date: 2026-06-06.
 
 Upstream's entity redirect is also omitted: the native entity scheduler retains
 entity movement ownership, retirement callbacks and its nullable admission result.
-Thread-guard bypasses and blanket `folia-supported` admission changes are outside
-this port. Existing SAFE admission remains the only legacy admission path.
+Blanket `folia-supported` admission changes are outside this port; existing SAFE
+admission remains the only legacy admission path. The thread-guard bypasses were
+outside the first port and became the second port (2026-10-22c above) by owner
+decision, as a setting rather than a blanket removal.
 
 ## Integration
 

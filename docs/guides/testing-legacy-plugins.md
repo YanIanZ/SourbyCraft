@@ -85,6 +85,16 @@ tick rate is the one server-wide rate (1–10 000). A region's own pause from
 `getRegionThreadingTickRateManager()` still applies on top. The vanilla `/tick` command stays
 unregistered: `/tick query` reads main-loop tick times that do not exist under region threading.
 
+## 2b. Thread checks: relaxed by default (owner decision 2026-10-22)
+
+With `mode = "safe"` the region-ownership checks are **relaxed** unless `aurora.bridge.thread-checks` says
+`"enforced"` (or `"bridged"`: relaxed only inside bridged task bodies). Relaxed means a legacy plugin's
+cross-region access runs on the wrong thread and is only counted (`/perf plugins`: "Thread checks" and per-plugin
+"relaxed ownership hits"; `/plugins <name>`). Test both: the thing you are checking under `relaxed` is "does the
+plugin's flow complete", under `enforced` "what does it still refuse". Neither result qualifies the plugin, and a
+relaxed server must never be presented as stable (boot WARN, `/ver`). For a one-off run, `-Daurora.bridge.thread-checks=enforced`
+overrides the file. Details: [aurora-plugin-bridge.md, Thread checks](../architecture/aurora-plugin-bridge.md#thread-checks-owner-decision-2026-10-22).
+
 ## 3. Test it
 
 1. Start the server with the plugin in `plugins/`.

@@ -752,7 +752,7 @@
     {
       "id": "MinecraftServer#1",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/MinecraftServer.java",
-      "line": 485,
+      "line": 486,
       "method": "submit",
       "site": "public <V> CompletableFuture<V> submit(java.util.function.Supplier<V> task) { | @Override",
       "anchor": "if (true) {",
@@ -769,7 +769,7 @@
     {
       "id": "MinecraftServer#2",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/MinecraftServer.java",
-      "line": 493,
+      "line": 494,
       "method": "submit",
       "site": "public CompletableFuture<Void> submit(Runnable task) { | @Override",
       "anchor": "if (true) {",
@@ -786,7 +786,7 @@
     {
       "id": "MinecraftServer#3",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/MinecraftServer.java",
-      "line": 501,
+      "line": 502,
       "method": "schedule",
       "site": "public void schedule(TickTask task) { | @Override",
       "anchor": "if (true) {",
@@ -803,7 +803,7 @@
     {
       "id": "MinecraftServer#4",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/MinecraftServer.java",
-      "line": 509,
+      "line": 510,
       "method": "executeBlocking",
       "site": "public void executeBlocking(Runnable runnable) { | @Override",
       "anchor": "if (true) {",
@@ -820,7 +820,7 @@
     {
       "id": "MinecraftServer#5",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/MinecraftServer.java",
-      "line": 517,
+      "line": 518,
       "method": "execute",
       "site": "public void execute(Runnable runnable) { | @Override",
       "anchor": "if (true) {",
@@ -837,7 +837,7 @@
     {
       "id": "MinecraftServer#6",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/MinecraftServer.java",
-      "line": 925,
+      "line": 927,
       "method": "initWorld",
       "site": "} | zChunkOffset += dZChunk;",
       "anchor": "if (false && spawnBonusChest) { // Folia - region threading - too lazy to hack around this one",
@@ -854,7 +854,7 @@
     {
       "id": "MinecraftServer#7",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/MinecraftServer.java",
-      "line": 1115,
+      "line": 1121,
       "method": "stopServer",
       "site": "// Folia start - region threading | this.isSaving = true; // Canvas - region threading",
       "anchor": "if (true) {",
@@ -871,7 +871,7 @@
     {
       "id": "MinecraftServer#8",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/MinecraftServer.java",
-      "line": 1344,
+      "line": 1357,
       "method": "runServer",
       "site": "// Folia start - region threading | this.server.spark.enableBeforePlugins(); // Paper - spark",
       "anchor": "if (true) {",
@@ -888,7 +888,7 @@
     {
       "id": "MinecraftServer#9",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/MinecraftServer.java",
-      "line": 1443,
+      "line": 1457,
       "method": "runServer",
       "site": "this.onServerCrash(report); | }",
       "anchor": "} if (false) { // Canvas - region threading",
@@ -905,7 +905,7 @@
     {
       "id": "MinecraftServer#28",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/MinecraftServer.java",
-      "line": 1541,
+      "line": 1555,
       "method": "wrapRunnable",
       "site": "public TickTask wrapRunnable(Runnable runnable) { | // Paper start - anything that does try to post to main during watchdog crash, run on watchdog",
       "anchor": "throw dev.iyanz.sourbycraft.guards.RegionRefusal.SERVER_QUEUE.error(); // Folia - region threading",
@@ -922,7 +922,7 @@
     {
       "id": "MinecraftServer#29",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/MinecraftServer.java",
-      "line": 1546,
+      "line": 1560,
       "method": "shouldRun",
       "site": "protected boolean shouldRun(final TickTask task) { | @Override",
       "anchor": "throw dev.iyanz.sourbycraft.guards.RegionRefusal.SERVER_QUEUE.error(); // Folia - region threading",
@@ -939,7 +939,7 @@
     {
       "id": "MinecraftServer#30",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/MinecraftServer.java",
-      "line": 1551,
+      "line": 1565,
       "method": "pollTask",
       "site": "protected boolean pollTask() { | @Override",
       "anchor": "throw dev.iyanz.sourbycraft.guards.RegionRefusal.SERVER_QUEUE.error(); // Folia - region threading",
@@ -956,7 +956,7 @@
     {
       "id": "MinecraftServer#31",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/MinecraftServer.java",
-      "line": 1555,
+      "line": 1569,
       "method": "pollTaskInternal",
       "site": "private boolean pollTaskInternal() { | }",
       "anchor": "if (true) throw dev.iyanz.sourbycraft.guards.RegionRefusal.SERVER_QUEUE.error(); // Folia - region threading",
@@ -973,7 +973,7 @@
     {
       "id": "MinecraftServer#32",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/MinecraftServer.java",
-      "line": 1575,
+      "line": 1589,
       "method": "doRunTask",
       "site": "protected void doRunTask(final TickTask task) { | @Override",
       "anchor": "throw dev.iyanz.sourbycraft.guards.RegionRefusal.SERVER_QUEUE.error(); // Folia - region threading",
@@ -990,7 +990,7 @@
     {
       "id": "MinecraftServer#15",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/MinecraftServer.java",
-      "line": 1628,
+      "line": 1642,
       "method": "isPaused",
       "site": "this.removeDisabledPluginsBlockingSleep(); // Paper - API to allow/disallow tick sleeping | int emptyTickThreshold = this.pauseWhenEmptySeconds() * 20;",
       "anchor": "if (false && emptyTickThreshold > 0) { // Folia - region threading - this is complicated to implement, and even if done correctly is messy",
@@ -1007,7 +1007,7 @@
     {
       "id": "MinecraftServer#16",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/MinecraftServer.java",
-      "line": 1717,
+      "line": 1731,
       "method": "isPaused",
       "site": "// Canvas end - region threading | }",
       "anchor": "if (false && nano - this.lastServerStatus >= STATUS_EXPIRE_TIME_NANOS) { // Folia - region threading",
@@ -1024,7 +1024,7 @@
     {
       "id": "MinecraftServer#17",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/MinecraftServer.java",
-      "line": 1734,
+      "line": 1748,
       "method": "isPaused",
       "site": "} | this.playerList.saveAll(playerSaveInterval);",
       "anchor": "if (false && fullSave) { // Folia - region threading - don't auto save level data",
@@ -1041,7 +1041,7 @@
     {
       "id": "MinecraftServer#33",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/MinecraftServer.java",
-      "line": 1761,
+      "line": 1775,
       "method": "processPacketsAndTick",
       "site": "this.runAllTasksAtTickStart(); // Paper - improve tick loop | // Paper - improve tick loop - moved into runAllTasksAtTickStart",
       "anchor": "if (true) throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_LOOP.error(); // Folia - region threading",
@@ -1058,7 +1058,7 @@
     {
       "id": "MinecraftServer#19",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/MinecraftServer.java",
-      "line": 1861,
+      "line": 1875,
       "method": "tickChildren",
       "site": "// this.getFunctions().tick(); // Folia - region threading - TODO Purge functions | // io.papermc.paper.adventure.providers.ClickCallbackProviderImpl.DIALOG_CLICK_MANAGER.handleQueue(this.tickCount); // Paper // Folia - region threading - moved",
       "anchor": "if (false && this.tickRateManager.runsNormally()) { // Folia - region threading - move to global tick",
@@ -1075,7 +1075,7 @@
     {
       "id": "MinecraftServer#20",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/MinecraftServer.java",
-      "line": 1873,
+      "line": 1887,
       "method": "tickChildren",
       "site": "} | // Paper end - per-world time",
       "anchor": "if (true) { // Folia - region threading",
@@ -1092,7 +1092,7 @@
     {
       "id": "MinecraftServer#21",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/MinecraftServer.java",
-      "line": 1879,
+      "line": 1893,
       "method": "tickChildren",
       "site": "// Run tasks that are waiting on processing | // CraftBukkit start",
       "anchor": "if (false) while (!this.processQueue.isEmpty()) { // Folia - region threading",
@@ -1109,7 +1109,7 @@
     {
       "id": "MinecraftServer#22",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/MinecraftServer.java",
-      "line": 1904,
+      "line": 1918,
       "method": "tickChildren",
       "site": "// this.isIteratingOverLevels = true; // Paper - Throw exception on world create while being ticked | // Folia start - region threading",
       "anchor": "if (true) { ServerLevel level = region.world;",
@@ -1126,7 +1126,7 @@
     {
       "id": "MinecraftServer#34",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/MinecraftServer.java",
-      "line": 1976,
+      "line": 1990,
       "method": "addTickable",
       "site": "public void addTickable(final Runnable tickable) { | }",
       "anchor": "throw dev.iyanz.sourbycraft.guards.RegionRefusal.ADD_TICKABLE.error(); // Canvas - region threading",
@@ -1141,26 +1141,9 @@
       "test": "RegionRefusalTest, GuardsPatchShapeTest (sonnet-guards, Paper 0019 / MC 0061)"
     },
     {
-      "id": "MinecraftServer#35",
-      "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/MinecraftServer.java",
-      "line": 2279,
-      "method": "getTickCount",
-      "site": "public int getTickCount() { | }",
-      "anchor": "throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_COUNT.error(); // Folia - region threading",
-      "nth": 1,
-      "detector": "B",
-      "origin": "Folia",
-      "patch": "sourbycraft-server/minecraft-patches/sources/net/minecraft/server/MinecraftServer.java.patch",
-      "kind": "API-REFUSED",
-      "effect": "MinecraftServer.getTickCount() throws; internal callers were rerouted (0 remain). NMS plugins reading the server tick count fail.",
-      "decision": "KEEP-OWNED",
-      "note": "Owned refusal message since 2026-10-21 (sonnet-guards: Paper feature 0019 / Minecraft feature 0061, dev.iyanz.sourbycraft.guards.RegionRefusal names the alternative instead of 'Unsupported in region threading'); the refusal itself is unchanged. Previous entry MinecraftServer#24. KEEP-OWNED. Invariant: there is no single server tick count; each region has its own and the global tick has another (Bukkit.getCurrentTick reports the current region's). Follow-up: owned message.",
-      "test": "RegionRefusalTest, GuardsPatchShapeTest (sonnet-guards, Paper 0019 / MC 0061)"
-    },
-    {
       "id": "MinecraftServer#25",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/MinecraftServer.java",
-      "line": 2316,
+      "line": 2330,
       "method": "invalidateStatus",
       "site": "// Folia start - region threading | public void invalidateStatus() {",
       "anchor": "if (true) {",
@@ -1177,7 +1160,7 @@
     {
       "id": "MinecraftServer#36",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/MinecraftServer.java",
-      "line": 2338,
+      "line": 2352,
       "method": "executeIfPossible",
       "site": "public void executeIfPossible(final Runnable command) { | @Override",
       "anchor": "if (true) throw dev.iyanz.sourbycraft.guards.RegionRefusal.SERVER_QUEUE.error(); // Folia - region threading",
@@ -1194,7 +1177,7 @@
     {
       "id": "MinecraftServer#27",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/MinecraftServer.java",
-      "line": 3163,
+      "line": 3177,
       "method": "isTickPaused",
       "site": "public boolean isTickPaused() { | // Paper start - API to check if the server is sleeping",
       "anchor": "return false; // Folia - region threading",
@@ -1313,7 +1296,7 @@
     {
       "id": "ChunkMap#3",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/level/ChunkMap.java",
-      "line": 1131,
+      "line": 1138,
       "method": "forEachEntityTrackedBy",
       "site": "public void forEachEntityTrackedBy(final ServerPlayer player, final Consumer<Entity> consumer) { | }",
       "anchor": "throw new UnsupportedOperationException(\"Unsupported in region threading\"); // Folia - region threading",
@@ -1331,7 +1314,7 @@
     {
       "id": "ServerChunkCache#1",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/level/ServerChunkCache.java",
-      "line": 353,
+      "line": 362,
       "method": "getChunkFuture",
       "site": "public CompletableFuture<ChunkResult<ChunkAccess>> getChunkFuture(final int x, final int z, final ChunkStatus targetStatus, final boolean loadOrGenerate) { | }",
       "anchor": "if (true) throw new UnsupportedOperationException(\"Unsupported in region threading\"); // Folia - region threading",
@@ -1348,7 +1331,7 @@
     {
       "id": "ServerChunkCache#2",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/level/ServerChunkCache.java",
-      "line": 808,
+      "line": 819,
       "method": "onChunkReadyToSend",
       "site": "if (chunk.hasChangesToBroadcast()) { | public void onChunkReadyToSend(final ChunkHolder chunk) {",
       "anchor": "throw new UnsupportedOperationException(\"Unsupported in region threadin\"); // Folia - region threading",
@@ -1365,7 +1348,7 @@
     {
       "id": "ServerChunkCache#3",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/level/ServerChunkCache.java",
-      "line": 840,
+      "line": 851,
       "method": "submit",
       "site": "public <V> CompletableFuture<V> submit(Supplier<V> task) { | @Override",
       "anchor": "if (true) {",
@@ -1382,7 +1365,7 @@
     {
       "id": "ServerChunkCache#4",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/level/ServerChunkCache.java",
-      "line": 848,
+      "line": 859,
       "method": "submit",
       "site": "public CompletableFuture<Void> submit(Runnable task) { | @Override",
       "anchor": "if (true) {",
@@ -1399,7 +1382,7 @@
     {
       "id": "ServerChunkCache#5",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/level/ServerChunkCache.java",
-      "line": 856,
+      "line": 867,
       "method": "schedule",
       "site": "public void schedule(Runnable runnable) { | @Override",
       "anchor": "if (true) {",
@@ -1416,7 +1399,7 @@
     {
       "id": "ServerChunkCache#6",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/level/ServerChunkCache.java",
-      "line": 864,
+      "line": 875,
       "method": "executeBlocking",
       "site": "public void executeBlocking(Runnable runnable) { | @Override",
       "anchor": "if (true) {",
@@ -1433,7 +1416,7 @@
     {
       "id": "ServerChunkCache#7",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/level/ServerChunkCache.java",
-      "line": 872,
+      "line": 883,
       "method": "execute",
       "site": "public void execute(Runnable runnable) { | @Override",
       "anchor": "if (true) {",
@@ -1450,7 +1433,7 @@
     {
       "id": "ServerChunkCache#8",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/level/ServerChunkCache.java",
-      "line": 880,
+      "line": 891,
       "method": "executeIfPossible",
       "site": "public void executeIfPossible(Runnable runnable) { | @Override",
       "anchor": "if (true) {",
@@ -1467,7 +1450,7 @@
     {
       "id": "ServerChunkCache#9",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/level/ServerChunkCache.java",
-      "line": 889,
+      "line": 900,
       "method": "doRunTask",
       "site": "protected void doRunTask(final Runnable task) { | @Override",
       "anchor": "throw new UnsupportedOperationException(\"Unsupported in region threading\"); // Folia - region threading",
@@ -1484,7 +1467,7 @@
     {
       "id": "ServerLevel#1",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/level/ServerLevel.java",
-      "line": 512,
+      "line": 511,
       "method": "getLoadedChunks",
       "site": "public final ca.spottedleaf.moonrise.common.list.ReferenceList<LevelChunk> moonrise$getLoadedChunks() { | @Override",
       "anchor": "throw new UnsupportedOperationException(\"Unsupported in region threading\"); // Folia - region threading",
@@ -1501,7 +1484,7 @@
     {
       "id": "ServerLevel#2",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/level/ServerLevel.java",
-      "line": 517,
+      "line": 516,
       "method": "getTickingChunks",
       "site": "public final ca.spottedleaf.moonrise.common.list.ReferenceList<LevelChunk> moonrise$getTickingChunks() { | @Override",
       "anchor": "throw new UnsupportedOperationException(\"Unsupported in region threading\"); // Folia - region threading",
@@ -1518,7 +1501,7 @@
     {
       "id": "ServerLevel#3",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/level/ServerLevel.java",
-      "line": 522,
+      "line": 521,
       "method": "getEntityTickingChunks",
       "site": "public final ca.spottedleaf.moonrise.common.list.ReferenceList<LevelChunk> moonrise$getEntityTickingChunks() { | @Override",
       "anchor": "throw new UnsupportedOperationException(\"Unsupported in region threading\"); // Folia - region threading",
@@ -1535,7 +1518,7 @@
     {
       "id": "ServerLevel#4",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/level/ServerLevel.java",
-      "line": 552,
+      "line": 551,
       "method": "getPlayerTickingChunks",
       "site": "public final ca.spottedleaf.moonrise.common.list.ReferenceList<LevelChunk> moonrise$getPlayerTickingChunks() { | @Override",
       "anchor": "throw new UnsupportedOperationException(\"Unsupported in region threading\"); // Folia - region threading",
@@ -1552,7 +1535,7 @@
     {
       "id": "ServerLevel#5",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/level/ServerLevel.java",
-      "line": 1525,
+      "line": 1528,
       "method": "getCurrentlyTickingEntities",
       "site": "public static List<Entity> getCurrentlyTickingEntities() { | // Folia - region threading",
       "anchor": "throw new UnsupportedOperationException(\"Unsupported in region threading\"); // Folia - region threading",
@@ -1569,7 +1552,7 @@
     {
       "id": "ServerLevel#6",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/level/ServerLevel.java",
-      "line": 2038,
+      "line": 2044,
       "method": "sendBlockUpdated",
       "site": "final io.papermc.paper.threadedregions.RegionizedWorldData regionizedWorldData = this.getCurrentWorldData(); // Folia - region threading | public void sendBlockUpdated(final BlockPos pos, final BlockState old, final BlockState current, final @Block.UpdateFlags int updateFlags) {",
       "anchor": "if (false && this.isUpdatingNavigations) { // Folia - region threading",
@@ -1586,7 +1569,7 @@
     {
       "id": "ServerLevel#7",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/level/ServerLevel.java",
-      "line": 2736,
+      "line": 2757,
       "method": "dumpBlockEntityTickers",
       "site": "CsvOutput csvOutput = CsvOutput.builder().addColumn(\"x\").addColumn(\"y\").addColumn(\"z\").addColumn(\"type\").build(output); | private void dumpBlockEntityTickers(final Writer output) throws IOException {",
       "anchor": "if (false) { TickingBlockEntity ticker = null; // Folia - region threading",
@@ -1603,7 +1586,7 @@
     {
       "id": "ServerLevel#8",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/server/level/ServerLevel.java",
-      "line": 3204,
+      "line": 3237,
       "method": "updateLagCompensationTick",
       "site": "public void updateLagCompensationTick() { | }",
       "anchor": "throw new UnsupportedOperationException(\"Unsupported in region threading\"); // Folia - region threading",
@@ -1757,7 +1740,7 @@
     {
       "id": "Entity#7",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/world/entity/Entity.java",
-      "line": 5560,
+      "line": 5588,
       "method": "teleport",
       "site": "// Folia start - region threading | public @Nullable Entity teleport(TeleportTransition transition) { // Paper - remove param final",
       "anchor": "if (true) {",
@@ -1859,7 +1842,7 @@
     {
       "id": "Level#1",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/world/level/Level.java",
-      "line": 1376,
+      "line": 1380,
       "method": "getBlockStateFromEmptyChunk",
       "site": "final Runnable callback) { | final ca.spottedleaf.concurrentutil.util.Priority priority,",
       "anchor": "if (!(this instanceof ServerLevel serverLevel)) throw new UnsupportedOperationException();",
@@ -2019,8 +2002,8 @@
       "sites": 201,
       "kind": "OWNERSHIP-CHECK",
       "decision": "KEEP-OWNED",
-      "note": "KEEP-OWNED. The region ownership invariant itself: code that mutates an entity/chunk/world slice must run on the thread that owns it; violation throws IllegalStateException (not configurable). SourbyCraft adopts this as its correctness rule (DEVELOPMENT.md: region ownership outranks throughput) and adds its own checks in the same style (feature 0016 cross-region block test, SourbyReply.hopFor). 201 marked sites; Paper's own unmarked TickThread checks (70 more) are Paper's. The count is pinned here; the behaviour is pinned by ScratchReentrancyTest/SourbyReplyTest only at SourbyCraft's own call sites. 2026-10-22: CraftWorld#getChunkAt(x, z) gained a branch before its site (paper 0028, guards/OffThreadChunkLoad): a thread that is not a TickThread waits for the chunk as on Paper (bounded 30 s); every tick thread still hits this site, so the count is unchanged.",
-      "test": "count pinned by this manifest; per-site tests missing; OffThreadChunkLoadTest (getChunkAt off-thread branch + paper 0028 shape)"
+      "note": "KEEP-OWNED. The region ownership invariant itself: code that mutates an entity/chunk/world slice must run on the thread that owns it; violation throws IllegalStateException -- since 2026-10-22 only when guards/ThreadChecks says so (aurora.bridge.thread-checks, owner decision \"Tiru penuh LightingLuminol\"; relaxed by default while the bridge admits plugins, then the hit is counted and the access proceeds; ledger section 9). SourbyCraft adopts this as its correctness rule (DEVELOPMENT.md: region ownership outranks throughput) and adds its own checks in the same style (feature 0016 cross-region block test, SourbyReply.hopFor). 201 marked sites; Paper's own unmarked TickThread checks (70 more) are Paper's. The count is pinned here; the behaviour is pinned by ScratchReentrancyTest/SourbyReplyTest only at SourbyCraft's own call sites. Paper 0028 retains the bounded 30-second chunk-load wait for non-tick threads (guards/OffThreadChunkLoad); tick-thread ownership refusals follow ThreadChecks.",
+      "test": "count pinned by this manifest; per-site tests missing; ThreadChecksTest and OffThreadChunkLoadTest"
     },
     {
       "id": "F-TICKTHREAD-IS",
@@ -2039,7 +2022,7 @@
       "sites": 17,
       "kind": "OWNERSHIP-CHECK",
       "decision": "KEEP-OWNED",
-      "note": "KEEP-OWNED. Global state (scoreboards, world list, status, time) is owned by the global tick; SourbyCraft's own code honours it (AuroraWorldsService creates worlds on the global tick; TickGuard.ensureGlobalOrStartup for startup-time exceptions). 2026-10-22: the 12 CraftWorld world-settings sites (setTime, setFullTime, setStorm, setWeatherDuration, setThundering, setThunderDuration, setClearWeatherDuration, setHardcore, setTicksPerSpawns, setSpawnLimit, setGameRuleValue, setGameRule) moved to guards/WorldSettingsOwner (paper 0025): before the region scheduler starts the startup thread owns them, as on Paper (plugins applying per-world settings at enable, e.g. Multiverse-Core 5.8.1); after it starts the global tick rule is unchanged. Force-loaded chunks and world metadata stay global-tick-only.",
+      "note": "KEEP-OWNED. Global state (scoreboards, world list, status, time) is owned by the global tick; SourbyCraft's own code honours it (AuroraWorldsService creates worlds on the global tick; TickGuard.ensureGlobalOrStartup for startup-time exceptions). 2026-10-22: the 12 CraftWorld world-settings sites (setTime, setFullTime, setStorm, setWeatherDuration, setThundering, setThunderDuration, setClearWeatherDuration, setHardcore, setTicksPerSpawns, setSpawnLimit, setGameRuleValue, setGameRule) moved to guards/WorldSettingsOwner (paper 0025): before the region scheduler starts the startup thread owns them, as on Paper (plugins applying per-world settings at enable, e.g. Multiverse-Core 5.8.1); after it starts the global tick rule is unchanged. Force-loaded chunks and world metadata stay global-tick-only. Since MC 0078 the refusal asks guards/ThreadChecks first (ledger section 9).",
       "test": "count pinned by this manifest; AuroraWorldsService tests for the owned callers; WorldSettingsOwnerTest (decision + paper 0025 shape)"
     },
     {
@@ -2049,7 +2032,7 @@
       "sites": 17,
       "kind": "OWNERSHIP-CHECK",
       "decision": "KEEP-OWNED",
-      "note": "KEEP-OWNED and already SourbyCraft-shaped: TickGuard honours region-scheduler.guard-severity, whose default SourbyCraft changed from Canvas's THROW to LOG (pinned by scripts/test_patch_policy.py), and with LOG a hit inside a bridged plugin's task counts toward that plugin's quarantine (GuardViolations, ViolationClassifierTest). The class is @Deprecated(forRemoval) pending Paper#13924; when that lands the 17 sites move to the Paper API and this family is re-decided.",
+      "note": "KEEP-OWNED and already SourbyCraft-shaped: TickGuard honours region-scheduler.guard-severity, whose default SourbyCraft changed from Canvas's THROW to LOG (pinned by scripts/test_patch_policy.py), and with LOG a hit inside a bridged plugin's task counts toward that plugin's quarantine (GuardViolations, ViolationClassifierTest). The class is @Deprecated(forRemoval) pending Paper#13924; when that lands the 17 sites move to the Paper API and this family is re-decided. With relaxed thread checks (2026-10-22) a hit is a counted relaxed ownership hit, never a quarantine (ledger section 9).",
       "test": "scripts/test_patch_policy.py (LOG default), ViolationClassifierTest, bridge GuardViolations tests"
     },
     {

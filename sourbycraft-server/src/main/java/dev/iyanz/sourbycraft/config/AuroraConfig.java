@@ -19,6 +19,7 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
     public static final String BRIDGE_MODE_KEY = "aurora.bridge.mode";
     public static final String BRIDGE_QUARANTINE_KEY = "aurora.bridge.quarantine-after";
     public static final String BRIDGE_SYNC_ROUTE_KEY = "aurora.bridge.sync-route";
+    public static final String BRIDGE_THREAD_CHECKS_KEY = "aurora.bridge.thread-checks";
     public static final String BRIDGE_MAX_PENDING_KEY = "aurora.bridge.max-pending-tasks-per-plugin";
     public static final String BRIDGE_MAX_RUNNING_ASYNC_KEY = "aurora.bridge.max-running-async-tasks-per-plugin";
     public static final String BRIDGE_IO_THREADS_KEY = "aurora.scheduler.bridge-io-threads";
@@ -48,6 +49,8 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
     public static final Setting BRIDGE_QUARANTINE = new Setting(BRIDGE_QUARANTINE_KEY, Lifecycle.LIVE);
     // Read when each task is scheduled.
     public static final Setting BRIDGE_SYNC_ROUTE = new Setting(BRIDGE_SYNC_ROUTE_KEY, Lifecycle.LIVE);
+    // Resolved once when the ownership checks first run (class init of guards/ThreadChecks), before any plugin loads.
+    public static final Setting BRIDGE_THREAD_CHECKS = new Setting(BRIDGE_THREAD_CHECKS_KEY, Lifecycle.RESTART_REQUIRED);
     public static final Setting BRIDGE_MAX_PENDING = new Setting(BRIDGE_MAX_PENDING_KEY, Lifecycle.LIVE);
     public static final Setting BRIDGE_MAX_RUNNING_ASYNC = new Setting(BRIDGE_MAX_RUNNING_ASYNC_KEY, Lifecycle.LIVE);
     // Governed lanes are created once with their budget and never resized.
@@ -157,10 +160,19 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
      * @param syncRoute where a legacy "sync" task runs
      * @param maxPendingTasksPerPlugin pending task limit; 0 preserves unlimited admission
      * @param maxRunningAsyncTasksPerPlugin running async callback limit; 0 preserves overlap
+     * @param threadChecks what the region-ownership checks do when they fail ({@link ThreadChecks}); owner
+     *     decision 2026-10-22 ("Tiru penuh LightingLuminol"): the default is {@link ThreadChecks#RELAXED},
+     *     which only takes effect while {@code mode} admits plugins
      */
     public record Bridge(BridgeMode mode, int quarantineAfter, SyncRoute syncRoute,
-                         int maxPendingTasksPerPlugin, int maxRunningAsyncTasksPerPlugin) {
-        public static final Bridge DEFAULT = new Bridge(BridgeMode.OFF, 3, SyncRoute.CALLER_REGION, 0, 0);
+                         int maxPendingTasksPerPlugin, int maxRunningAsyncTasksPerPlugin, ThreadChecks threadChecks) {
+        public static final Bridge DEFAULT = new Bridge(BridgeMode.OFF, 3, SyncRoute.CALLER_REGION, 0, 0, ThreadChecks.RELAXED);
+
+        /** Existing callers keep the default thread-check mode. */
+        public Bridge(final BridgeMode mode, final int quarantineAfter, final SyncRoute syncRoute,
+                      final int maxPendingTasksPerPlugin, final int maxRunningAsyncTasksPerPlugin) {
+            this(mode, quarantineAfter, syncRoute, maxPendingTasksPerPlugin, maxRunningAsyncTasksPerPlugin, ThreadChecks.RELAXED);
+        }
 
         /** Existing callers retain the unlimited task/async admission contract. */
         public Bridge(final BridgeMode mode, final int quarantineAfter, final SyncRoute syncRoute) {
@@ -175,6 +187,7 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
         public Bridge {
             Objects.requireNonNull(mode, "mode");
             Objects.requireNonNull(syncRoute, "syncRoute");
+            Objects.requireNonNull(threadChecks, "threadChecks");
             if (quarantineAfter < 1) {
                 throw new IllegalArgumentException("quarantineAfter must be at least 1: " + quarantineAfter);
             }
@@ -199,6 +212,47 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
     public enum SyncRoute {
         CALLER_REGION,
         GLOBAL
+    }
+
+    /**
+     * What a failed region-ownership check does ({@code aurora.bridge.thread-checks}). Adapted from
+     * LightingLuminol (GPL-3.0, Bacteriawa, 2026-06-06; paper patch 0002 and minecraft patch 0001 "Base Dirty
+     * Patches" at revision 72d51c4d), where every {@code TickThread.ensureTickThread} and
+     * {@code RegionizedServer.ensureGlobalTickThread} body is commented out unconditionally. Owner decision
+     * 2026-10-22 (verbatim): "Tiru penuh LightingLuminol". It overrides the default "never weaken region
+     * ownership" rule for this feature only; a server running {@link #RELAXED} or {@link #BRIDGED} is unsafe
+     * (data races, chunk corruption that reaches disk, item duplication, deadlocks are possible) and is not
+     * qualified. {@code docs/architecture/aurora-plugin-bridge.md}, "Thread checks".
+     *
+     * <p>Whichever value is configured, it only takes effect while {@link BridgeMode#SAFE} admits legacy
+     * plugins: with the bridge off there is nothing to relax for, and the checks stay enforced.</p>
+     */
+    public enum ThreadChecks {
+        /** The checks throw, as the region-threading base does. SourbyCraft's behaviour before 2026-10-22. */
+        ENFORCED,
+        /**
+         * The checks do not throw while a bridged plugin's task body runs on the calling thread; everywhere
+         * else they throw. Narrower than LightingLuminol: event handlers and commands of a legacy plugin run
+         * outside a bridged body and stay enforced.
+         */
+        BRIDGED,
+        /** LightingLuminol's scope: the checks never throw, for every caller. The owner's default. */
+        RELAXED;
+
+        /** Parses a configured value (any case, trimmed); {@code null} when unknown. */
+        public static ThreadChecks parse(final Object value) {
+            if (!(value instanceof String text)) return null;
+            return switch (text.trim().toLowerCase(java.util.Locale.ROOT)) {
+                case "enforced" -> ENFORCED;
+                case "bridged" -> BRIDGED;
+                case "relaxed" -> RELAXED;
+                default -> null;
+            };
+        }
+
+        public String configValue() {
+            return this.name().toLowerCase(java.util.Locale.ROOT);
+        }
     }
 
     /** Whether the bridge admits plugins that do not declare region-threading support. */
@@ -410,6 +464,18 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
             }
         }
 
+        ThreadChecks threadChecks = DEFAULT.bridge().threadChecks();
+        final Object checksValue = values.get(BRIDGE_THREAD_CHECKS_KEY);
+        if (checksValue != null) {
+            final ThreadChecks parsedChecks = ThreadChecks.parse(checksValue);
+            if (parsedChecks != null) {
+                threadChecks = parsedChecks;
+            } else {
+                // A typo keeps the owner's default; it is reported so the operator sees the value was not what they typed.
+                invalid.add(BRIDGE_THREAD_CHECKS_KEY);
+            }
+        }
+
         final int maxPendingTasks = intSetting(values, BRIDGE_MAX_PENDING_KEY, 0, 0, invalid);
         final int maxRunningAsyncTasks = intSetting(values, BRIDGE_MAX_RUNNING_ASYNC_KEY, 0, 0, invalid);
         final int bridgeIoThreads = intSetting(values, BRIDGE_IO_THREADS_KEY, Scheduler.DEFAULT.bridgeIoThreads(), 0, invalid);
@@ -453,7 +519,7 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
         // discards everything, because then nothing underneath it can be trusted.
         return new Parsed(new AuroraConfig(new Entity(asyncPathfinding), new Diagnostics(laneSampling, chunkGenerationMetrics,
                 new StallRecorder(stallEnabled, stallAfter, stallRepeat, stallMaxDumps, stallKeepFiles)),
-            new Cpu(cores), new Bridge(bridgeMode, quarantineAfter, syncRoute, maxPendingTasks, maxRunningAsyncTasks),
+            new Cpu(cores), new Bridge(bridgeMode, quarantineAfter, syncRoute, maxPendingTasks, maxRunningAsyncTasks, threadChecks),
             new Scheduler(bridgeIoThreads, bridgeIoQueue, storageThreads, storageQueue), new Network(networkCounters),
             new World(commandBlocks, tickFunctions)),
             List.copyOf(invalid), deprecated);
