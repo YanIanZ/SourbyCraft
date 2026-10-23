@@ -80,6 +80,8 @@ public final class SourbyCraftBootstrap {
         catch (Throwable failure) { SourbyLogger.error("GC sampler shutdown failed", failure); }
         try { dev.iyanz.sourbycraft.perf.AsyncPathProcessor.shutdown(); }
         catch (Throwable failure) { SourbyLogger.error("Path worker shutdown failed", failure); }
+        try { dev.iyanz.sourbycraft.abysslink.AbyssLinkRuntime.close(); }
+        catch (Throwable failure) { SourbyLogger.error("AbyssLink shutdown failed", failure); }
         try { VirtualExecutor.shutdown(); }
         catch (Throwable failure) { SourbyLogger.error("I/O shutdown failed", failure); }
         try { dev.iyanz.sourbycraft.execution.ResourceGovernor.GLOBAL.shutdown(10_000L); }
@@ -187,6 +189,8 @@ public final class SourbyCraftBootstrap {
             VirtualExecutor.init();
         });
 
+        stage("abysslink", dev.iyanz.sourbycraft.abysslink.AbyssLinkRuntime::start);
+
         stage("auto updater", () -> {
             AutoUpdateSettings.startUpdater();
         });
@@ -261,7 +265,7 @@ public final class SourbyCraftBootstrap {
     static synchronized int failureCountForTesting() { return failureCount; }
 
     /** Stages the engine brings up, in order; the denominator of the boot bar. */
-    private static final int TOTAL_STAGES = 15;
+    private static final int TOTAL_STAGES = 16;
     private static int stageCount;
     private static int failureCount;
     private static final java.util.List<dev.iyanz.sourbycraft.brand.AuroraBoot.Stage> progress = new java.util.ArrayList<>();

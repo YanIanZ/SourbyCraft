@@ -257,3 +257,7 @@ Owner decision 2026-10-21. The new name wins when both are present; the old one 
 
 The engine configuration **file names** were renamed in Build 49 with the migration of §7 (they
 were kept in Build 48). The per-world `canvas-patch.yml` is not renamed.
+
+## AbyssLink YAML (new native service)
+
+The optional AbyssLink client uses `sourbycraft_config/aurora.yml`, under `aurora.abysslink`, default disabled; all keys require restart. `AuroraKeys.ABYSSLINK_KEYS` is part of the YAML key table, so the seeder writes those keys and their comments. See [AbyssLink setup](abysslink/INTEGRATION.md).

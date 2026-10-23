@@ -207,4 +207,70 @@ class PingCommandTest {
             "the answer follows the placeholder: " + all);
         assertEquals(1, all.split("Location: unavailable", -1).length - 1, all);
     }
+    private static dev.iyanz.sourbycraft.abysslink.AbyssLinkRuntime leases() throws Exception {
+        var constructor=dev.iyanz.sourbycraft.abysslink.AbyssLinkRuntime.class.getDeclaredConstructor();
+        constructor.setAccessible(true);return constructor.newInstance();
+    }
+    private static void join(dev.iyanz.sourbycraft.abysslink.AbyssLinkRuntime runtime,Player player) {
+        runtime.joined(new org.bukkit.event.player.PlayerJoinEvent(player,net.kyori.adventure.text.Component.empty()));
+    }
+    private static void quit(dev.iyanz.sourbycraft.abysslink.AbyssLinkRuntime runtime,Player player) {
+        runtime.quit(new org.bukkit.event.player.PlayerQuitEvent(player,net.kyori.adventure.text.Component.empty()));
+    }
+
+    @Test void nativeSnapshotsTargetThenHopsBackToDistinctSender() throws Exception {
+        var probe=new ReplyProbe();var target=player(probe,"Bob",35,"fabric");
+        when(target.getUniqueId()).thenReturn(java.util.UUID.randomUUID());when(target.isOnline()).thenReturn(true);
+        var sender=probe.sender(BlockCommandSender.class,true);var runtime=leases();join(runtime,target);
+        var targetTasks=new java.util.ArrayList<Runnable>();var senderTasks=new java.util.ArrayList<Runnable>();
+        var onTarget=new java.util.concurrent.atomic.AtomicBoolean();
+        when(target.getPing()).thenAnswer(invocation -> {assertTrue(onTarget.get(),"player read outside target owner");return 35;});
+        var pending=new java.util.concurrent.CompletableFuture<java.util.Optional<dev.iyanz.sourbycraft.abysslink.AbyssLinkClient.Sample>>();
+        var command=new PingCommand("ping",INLINE,p -> {assertTrue(onTarget.get());return () -> "Local network";},
+            (sink,task) -> senderTasks.add(task),(p,task) -> targetTasks.add(task),id -> pending,true);
+        try {
+            withServer(serverWith(target),() -> command.execute(sender,"ping",new String[]{"Bob"}));
+            org.mockito.Mockito.verify(target,org.mockito.Mockito.never()).getPing();
+            assertTrue(probe.received().isEmpty());
+            onTarget.set(true);targetTasks.removeFirst().run();onTarget.set(false);
+            pending.complete(java.util.Optional.empty());assertTrue(probe.received().isEmpty());
+            senderTasks.removeFirst().run();senderTasks.removeFirst().run();
+            assertTrue(plainReceived(probe.received()).contains("35ms"));
+        }finally{quit(runtime,target);}
+    }
+
+    @Test void nativeDisconnectedTargetAndSenderSuppressStaleReplies() throws Exception {
+        for(boolean targetLeaves:new boolean[]{true,false}) {
+            var probe=new ReplyProbe();var target=player(probe,"Bob",35,null);var sender=player(probe,"Alice",20,null);
+            for(var p:List.of(target,sender)){when(p.getUniqueId()).thenReturn(java.util.UUID.randomUUID());when(p.isOnline()).thenReturn(true);}
+            var runtime=leases();join(runtime,target);join(runtime,sender);
+            var replies=new java.util.ArrayList<Runnable>();
+            var pending=new java.util.concurrent.CompletableFuture<java.util.Optional<dev.iyanz.sourbycraft.abysslink.AbyssLinkClient.Sample>>();
+            var command=new PingCommand("ping",INLINE,p -> () -> null,(sink,task) -> replies.add(task),
+                (p,task) -> task.run(),id -> pending,true);
+            try {
+                withServer(serverWith(target),() -> command.execute(sender,"ping",new String[]{"Bob"}));
+                quit(runtime,targetLeaves?target:sender);pending.complete(java.util.Optional.empty());
+                replies.removeFirst().run();assertTrue(probe.received().isEmpty(),"stale reply after disconnect");
+            }finally{quit(runtime,target);quit(runtime,sender);}
+        }
+    }
+
+    @Test void proxyResultIsPrimaryAndFailureUsesLabelledBackendFallback() throws Exception {
+        for(boolean available:new boolean[]{true,false}) {
+            var probe=new ReplyProbe();var target=player(probe,"Bob",72,"vanilla");
+            var id=java.util.UUID.randomUUID();when(target.getUniqueId()).thenReturn(id);
+            var sender=probe.sender(ConsoleCommandSender.class,true);
+            var pending=new java.util.concurrent.CompletableFuture<java.util.Optional<dev.iyanz.sourbycraft.abysslink.AbyssLinkClient.Sample>>();
+            var command=new PingCommand("ping",INLINE,p -> () -> null,probe,(p,task) -> task.run(),uuid -> pending,false);
+            withServer(serverWith(target),() -> command.execute(sender,"ping",new String[]{"Bob"}));
+            if(available)pending.complete(java.util.Optional.of(new dev.iyanz.sourbycraft.abysslink.AbyssLinkClient.Sample(id,15,System.currentTimeMillis())));
+            else pending.completeExceptionally(new java.io.IOException("proxy unavailable"));
+            String text=plainReceived(probe.received());
+            assertTrue(text.contains(available?"Client → Leviathan ping: ":"Backend latency: "),text);
+            assertTrue(text.contains(available?"15ms":"72ms"),text);
+            assertFalse(text.contains("87ms"),"never add control/backend measurements to proxy ping");
+        }
+    }
+
 }

@@ -95,3 +95,40 @@ aurora:
     # vanilla chunk save). When it passes, no further commit is attempted, Redis connections are cut, every
     # unconfirmed storage is logged and the stop ends with AWF-SHUTDOWN-INCOMPLETE and exit status 70.
     shutdown-deadline-ms: 30000
+  abysslink:
+    # RESTART_REQUIRED. Default false. Optional native Leviathan control client; failure never blocks startup.
+    enabled: false
+    # RESTART_REQUIRED. Default "localhost". Leviathan TCP listener host.
+    host: "localhost"
+    # RESTART_REQUIRED. Default 25580. Leviathan TCP listener port.
+    port: 25580
+    # RESTART_REQUIRED. Default "sourbycraft". Unique backend node bound to the client certificate by Leviathan.
+    node-id: "sourbycraft"
+    # RESTART_REQUIRED. Default true. Verified TLS is mandatory; false is rejected.
+    tls: true
+    # RESTART_REQUIRED. Default "localhost". Expected DNS/IP certificate SAN; HTTPS endpoint identification is enforced.
+    authenticated-identity: "localhost"
+    # RESTART_REQUIRED. Default "". PEM CA path, or empty for JVM trust roots.
+    trust-certificate: ""
+    # RESTART_REQUIRED. Default "". Backend PEM certificate chain, required when enabled.
+    client-certificate: ""
+    # RESTART_REQUIRED. Default "". Backend PEM private-key path; protect with filesystem permissions.
+    client-key: ""
+    # RESTART_REQUIRED. Default 500. Minimum retry delay, with bounded exponential jitter.
+    reconnect-min-ms: 500
+    # RESTART_REQUIRED. Default 30000. Maximum retry delay.
+    reconnect-max-ms: 30000
+    # RESTART_REQUIRED. Default 5000. Expected proxy heartbeat interval; backend echoes only. Match the proxy cadence; liveness expires after three intervals plus timeout.
+    heartbeat-ms: 5000
+    # RESTART_REQUIRED. Default 750. Bounded handshake and ping timeout, 100-2000 milliseconds.
+    timeout-ms: 750
+    # RESTART_REQUIRED. Default 250. Short ping/miss cache; zero disables caching.
+    ping-cache-ms: 250
+    # RESTART_REQUIRED. Default 32. Hard cap for ping requests and cache entries, 1-256.
+    max-pending-requests: 32
+    # RESTART_REQUIRED. Default 10000. Health sampling interval; unchanged reports suppressed, load reduces cadence.
+    telemetry-ms: 10000
+    # RESTART_REQUIRED. Default true. Bounded aggregate guard signals; no player addresses or arbitrary commands.
+    threat-reporting: true
+    # RESTART_REQUIRED. Default 2000. Reject older/future proxy samples; clocks must be synchronized.
+    max-sample-age-ms: 2000
