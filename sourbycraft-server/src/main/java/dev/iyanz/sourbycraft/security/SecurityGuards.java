@@ -251,6 +251,8 @@ public final class SecurityGuards {
     }
 
     boolean inPacket() { return active.get() != null; }
+    /** Configured forwarding is an operator prerequisite, never proof of a control-plane player attachment. */
+    public boolean proxyForwardingConfigured() { return settings.proxy().bungee() || settings.proxy().velocity(); }
     public long violations(Limit limit) { return counters.get(limit.ordinal()); }
 
     /** Each limit counts at most one violation per packet; global per-limit log budget. */

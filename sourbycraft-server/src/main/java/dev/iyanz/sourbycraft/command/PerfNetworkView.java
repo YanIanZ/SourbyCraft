@@ -29,6 +29,16 @@ final class PerfNetworkView implements PerfView {
         add(lines, "Total bytes in / out", bytes(totals.bytesIn()) + " / " + bytes(totals.bytesOut()));
         add(lines, "Total packets in / out", count(totals.packetsIn()) + " / " + count(totals.packetsOut()));
         add(lines, "Connections opened", count(totals.connections()));
+        final var control = dev.iyanz.sourbycraft.abysslink.AbyssLinkRuntime.client();
+        add(lines, "AbyssLink", dev.iyanz.sourbycraft.abysslink.AbyssLinkRuntime.status());
+        if (control != null) {
+            final var metrics = control.metrics.snapshot();
+            add(lines, "Control frames in / out", count(metrics.framesIn()) + " / " + count(metrics.framesOut()));
+            add(lines, "Control bytes in / out", bytes(metrics.bytesIn()) + " / " + bytes(metrics.bytesOut()) + " (frame bytes, excluding TLS)");
+            add(lines, "Control pending / cap", control.pendingCount() + " / " + control.settingsForDiagnostics().maxPendingRequests());
+            add(lines, "Control timeouts / rejected / backpressure", metrics.timeouts() + " / " + metrics.rejected() + " / " + metrics.backpressure());
+            add(lines, "Control RTT", metrics.rttNanos() == 0 ? "unavailable" : TpsCommand.value(metrics.rttNanos() / 1_000_000.0, 2) + " ms (not player ping)");
+        }
         PerfTelemetryRows.renderConnectionQueues(lines);
     }
 }

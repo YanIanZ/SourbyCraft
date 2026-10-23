@@ -20,8 +20,7 @@ import org.junit.jupiter.api.io.TempDir;
 /**
  * The {@code aurora.toml} key table against the typed parsers: a file seeded from it parses to
  * {@link AuroraConfig#DEFAULT} and {@link AwfSettings#DEFAULT}, every documented lifecycle matches
- * the {@link AuroraConfig.Setting} the code declares, and the paths are the Build 48 ones (nothing
- * was renamed inside this file).
+ * the {@link AuroraConfig.Setting} the code declares, and the path set is the documented one.
  */
 class AuroraKeysTest {
 
@@ -87,7 +86,7 @@ class AuroraKeysTest {
     }
 
     @Test
-    void thePathsAreTheBuild48OnesAndTheTableIsComplete() {
+    void thePathsAreTheDocumentedOnesAndTheTableIsComplete() {
         final Set<String> paths = new HashSet<>(AuroraKeys.paths());
         assertEquals(AuroraKeys.KEYS.size(), paths.size(), "duplicate path");
         final Set<String> expected = new HashSet<>(List.of(
@@ -102,6 +101,7 @@ class AuroraKeysTest {
             AwfSettings.COMMIT_INTERVAL_KEY, AwfSettings.RESIDENT_CHUNKS_KEY, AwfSettings.RETAINED_GENERATIONS_KEY,
             AwfSettings.COMMIT_ATTEMPTS_KEY, AwfSettings.DELTA_GENERATIONS_KEY, AwfSettings.COMMIT_DIRTY_BYTES_KEY,
             AwfSettings.SHUTDOWN_DEADLINE_KEY));
+        for (final ConfigKey key : AuroraKeys.ABYSSLINK_KEYS) expected.add(key.path());
         assertEquals(expected, paths);
         assertEquals(List.of(AuroraConfig.LEGACY_ASYNC_PATH_KEY), AuroraKeys.ASYNC_PATHFINDING.legacyPaths());
         assertTrue(AuroraKeys.owns("aurora.cpu.cores"));

@@ -76,8 +76,12 @@ public final class GeoUtil {
      * (local / private IP, DB missing, or address not in the DB). Never throws.
      */
     public static String lookup(Player player) {
+        return lookup(player.getAddress());
+    }
+
+    /** Immutable address captured on the owning entity thread; database I/O stays off that thread. */
+    public static String lookup(InetSocketAddress sock) {
         try {
-            InetSocketAddress sock = player.getAddress();
             if (sock == null || sock.getAddress() == null) return null;
             InetAddress addr = sock.getAddress();
             if (addr.isLoopbackAddress() || addr.isSiteLocalAddress()
