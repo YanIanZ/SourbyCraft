@@ -120,10 +120,9 @@ class BootstrapPluginSettingsTest {
     }
 
     @Test
-    void aByteOrderMarkLaterInTheFileMakesItUnparseable() throws IOException {
-        // U+FEFF later in the file is not a BOM; a real TOML parser refuses the key, and provisioning
-        // fails closed rather than guessing what the line meant.
-        assertFalse(on("[protocollib]\n\uFEFFauto-provision = false\n", "protocollib", true));
+    void onlyTheFirstLinesByteOrderMarkIsStripped() throws IOException {
+        // U+FEFF later in the file is not a BOM; the key stays unrecognised and the fallback applies.
+        assertTrue(on("[protocollib]\n\uFEFFauto-provision = false\n", "protocollib", true));
     }
 
     @Test
@@ -132,7 +131,7 @@ class BootstrapPluginSettingsTest {
         boolean[] result = new boolean[1];
         String err = captureErr(() -> result[0] = BootstrapPluginSettings.enabled(cfg, "protocollib", true));
         assertFalse(result[0], "an unparseable value must not silently install");
-        assertTrue(err.contains("Cannot read plugin provisioning settings"), err);
+        assertTrue(err.contains("Invalid protocollib.auto-provision"), err);
     }
 
     @Test
@@ -203,7 +202,7 @@ class BootstrapPluginSettingsTest {
     }
 
     @Test
-    void anUnparseableBuild49ValueDisablesInstallationAndNamesTheFile() throws IOException {
+    void anInvalidBuild49ValueDisablesInstallationAndNamesTheKey() throws IOException {
         Path cfg = toml("[plugins.protocollib]\nauto-provision = maybe\n");
         java.io.PrintStream previous = System.err;
         java.io.ByteArrayOutputStream captured = new java.io.ByteArrayOutputStream();
@@ -213,7 +212,59 @@ class BootstrapPluginSettingsTest {
         } finally {
             System.setErr(previous);
         }
-        assertTrue(captured.toString().contains("Cannot read plugin provisioning settings"), captured.toString());
-        assertTrue(captured.toString().contains("g.toml"), captured.toString());
+        assertTrue(captured.toString().contains("Invalid plugins.protocollib.auto-provision"), captured.toString());
+    }
+
+    // ---------------------------------------------------------------- YAML (the current file)
+
+    private Path yaml(String body) throws IOException {
+        return Files.writeString(this.dir.resolve("g.yml"), body);
+    }
+
+    private boolean onYaml(String body, String group, boolean fallback) throws IOException {
+        return BootstrapPluginSettings.enabled(yaml(body), group, fallback);
+    }
+
+    @Test
+    void theYamlNestedTablesAreRead() throws IOException {
+        final String body = "plugins:\n  protocollib:\n    auto-provision: false\n"
+            + "  viaversion:\n    auto-provision: true\n";
+        assertFalse(onYaml(body, "protocollib", true));
+        assertTrue(onYaml(body, "viaversion", false));
+        assertTrue(onYaml(body, "viaversion", true), "the YAML file is read, not the fallback");
+    }
+
+    @Test
+    void theYamlLegacyTableAndDottedKeyAreRead() throws IOException {
+        assertFalse(onYaml("protocollib:\n  auto-provision: false\n", "protocollib", true));
+        assertFalse(onYaml("protocollib.auto-provision: false\n", "protocollib", true));
+        assertFalse(onYaml("plugins.protocollib.auto-provision: false\n", "protocollib", true));
+        assertTrue(onYaml("plugins:\n  viaversion:\n    auto-provision: false\n", "protocollib", true));
+    }
+
+    @Test
+    void theYamlBuild49SpellingWins() throws IOException {
+        assertTrue(onYaml("protocollib:\n  auto-provision: false\nplugins:\n  protocollib:\n    auto-provision: true\n",
+            "protocollib", false));
+    }
+
+    @Test
+    void aYamlValueThatIsNotABooleanDisablesInstallation() throws IOException {
+        boolean[] result = new boolean[] {true};
+        String err = captureErr(() -> {
+            try {
+                result[0] = BootstrapPluginSettings.enabled(yaml("plugins:\n  protocollib:\n    auto-provision: \"true\"\n"),
+                    "protocollib", true);
+            } catch (IOException failure) {
+                throw new RuntimeException(failure);
+            }
+        });
+        assertFalse(result[0]);
+        assertTrue(err.contains("Invalid plugins.protocollib.auto-provision"), err);
+    }
+
+    @Test
+    void aYamlFileWithAByteOrderMarkIsRead() throws IOException {
+        assertFalse(onYaml("\uFEFFplugins:\n  protocollib:\n    auto-provision: false\n", "protocollib", true));
     }
 }
