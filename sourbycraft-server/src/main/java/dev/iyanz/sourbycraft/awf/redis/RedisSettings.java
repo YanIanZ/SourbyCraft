@@ -111,8 +111,9 @@ public record RedisSettings(String uri, String keyPrefix, int poolSize, int time
                     if (value != null) values.put(key, value);
                 }
             } catch (final Exception unreadable) {
-                SourbyLogger.warn("Aurora World Fabric could not read " + file + " for the Redis backend ("
-                    + unreadable.getMessage() + "); using the Redis defaults");
+                SourbyLogger.warn("Aurora World Fabric could not read "
+                    + dev.iyanz.sourbycraft.config.ConfigParseErrors.describe(file, unreadable)
+                    + " for the Redis backend; using the Redis defaults");
             }
         }
         final Parsed parsed = parse(values, System.getenv(URI_ENV));

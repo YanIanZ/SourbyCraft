@@ -238,8 +238,9 @@ public record AwfSettings(Set<String> worlds, Set<String> export, String backend
                     if (value != null) values.put(key, value);
                 }
             } catch (final Exception unreadable) {
-                SourbyLogger.warn("Aurora World Fabric could not read " + file + " (" + unreadable.getMessage()
-                    + "); no world is opened through AWF this run");
+                SourbyLogger.warn("Aurora World Fabric could not read "
+                    + dev.iyanz.sourbycraft.config.ConfigParseErrors.describe(file, unreadable)
+                    + "; no world is opened through AWF this run");
                 return DEFAULT;
             }
         }

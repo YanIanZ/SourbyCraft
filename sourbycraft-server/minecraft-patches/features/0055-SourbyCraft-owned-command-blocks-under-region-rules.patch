@@ -166,10 +166,10 @@ index 5e4a4e0c6247f6417cd5c0570876348aaa5fe233..c725276d7414780cfb50566b213d41a8
          entityLevel.canvas$loadOrRunAtChunksAsync(
              // just set radius to 0, nobody cares about surrounding blocks
 diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
-index efa2c506897817e08d92bd1e123349b731eb0cdf..bdc979af86e7b95d85728c7b28f6162084df02b7 100644
+index 4e4f6387515b187d54fa72384ab8b2b1e9b870dd..27ebe1da09b7bdd39c29e8b92cc0a6e0336e2c03 100644
 --- a/net/minecraft/server/level/ServerLevel.java
 +++ b/net/minecraft/server/level/ServerLevel.java
-@@ -3012,7 +3012,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+@@ -3010,7 +3010,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
      }
  
      public boolean isCommandBlockEnabled() {

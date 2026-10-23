@@ -7,10 +7,10 @@ Subject: [PATCH] SourbyCraft - end platform portal event and tickable block
 EndPlatformFeature fires PortalCreateEvent(END_PLATFORM) only when an entity caused the platform and this thread owns it (EndPlatformEvents.shouldFire); world generation still builds it silently. TickRegions.RegionStats publishes each region's ticking block entity count at the end of its tick so World#getTickableTileEntityCount can sum it.
 
 diff --git a/io/papermc/paper/threadedregions/TickRegions.java b/io/papermc/paper/threadedregions/TickRegions.java
-index 1681226c682606c6ba3aa75440b545b747994b20..3ac4ab7f6b92e1cb018ef91c3a6f7238b2e48dd0 100644
+index 73defcd1fa82b453c938b9f49913a27c83e3231b..04b2ec9a0d43ec8a51b8acf2cb2ef0740765af25 100644
 --- a/io/papermc/paper/threadedregions/TickRegions.java
 +++ b/io/papermc/paper/threadedregions/TickRegions.java
-@@ -221,6 +221,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+@@ -191,6 +191,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
          private final AtomicInteger entityCount = new AtomicInteger();
          private final AtomicInteger playerCount = new AtomicInteger();
          private final AtomicInteger chunkCount = new AtomicInteger();
@@ -18,7 +18,7 @@ index 1681226c682606c6ba3aa75440b545b747994b20..3ac4ab7f6b92e1cb018ef91c3a6f7238
  
          public int getEntityCount() {
              return this.entityCount.get();
-@@ -234,6 +235,17 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+@@ -204,6 +205,17 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
              return this.chunkCount.get();
          }
  

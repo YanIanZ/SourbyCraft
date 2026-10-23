@@ -6,7 +6,7 @@ Subject: [PATCH] SourbyCraft - unloaded chunks are not loaded for the
 
 
 diff --git a/dev/iyanz/aurora/level/SnapshotPathRegion.java b/dev/iyanz/aurora/level/SnapshotPathRegion.java
-index 512b655ab551c575062c4f76753fa61c9b469346..bb3b253e4269fb2e833f83be93b0868f942db4ac 100644
+index efcb7f5f4a926ea6546bccfa53c7a0af653187a2..d869103f3ca913f0645ba51a15f50d2168c53068 100644
 --- a/dev/iyanz/aurora/level/SnapshotPathRegion.java
 +++ b/dev/iyanz/aurora/level/SnapshotPathRegion.java
 @@ -54,7 +54,9 @@ import org.jspecify.annotations.Nullable;

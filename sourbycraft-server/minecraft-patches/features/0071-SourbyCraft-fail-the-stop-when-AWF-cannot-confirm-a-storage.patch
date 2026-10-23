@@ -13,10 +13,10 @@ sees the stop did not save everything. With no AWF storage open it
 returns 0 and nothing changes.
 
 diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
-index c7908321bd0dcca8158393895aecfdabe83e6ea6..087a7a5b92199925f34110b7ca97795f86363cab 100644
+index f6332288d3aa311e2ed911324850f606f443b237..a32d4c59630f8c0b22201c6d9d831249a1ce82ba 100644
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
-@@ -1174,7 +1174,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1173,7 +1173,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
          LOGGER.info("Waiting for all RegionFile I/O tasks to complete...");
          ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.flush((MinecraftServer)(Object)this);
          LOGGER.info("All RegionFile I/O tasks to complete");

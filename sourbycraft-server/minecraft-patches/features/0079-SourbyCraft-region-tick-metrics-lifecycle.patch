@@ -17,7 +17,7 @@ index b325336584a632ab4ffffb82bb4fc58c47cac941..8225af108c22c01a0e64e436f99f4b5d
          MinecraftServer.getServer().removeLevel(this.level);
          MinecraftServer.getServer().server.worlds.remove(this.level.getWorld().getName().toLowerCase(java.util.Locale.ROOT));
 diff --git a/io/papermc/paper/threadedregions/TickRegions.java b/io/papermc/paper/threadedregions/TickRegions.java
-index 04b2ec9a0d43ec8a51b8acf2cb2ef0740765af25..98214ae8895244ec9e77bb22052c3debbae7aa1a 100644
+index e2af89e63abaafe243c8657ecf8502661fb10d8b..83ecb544b155cf598f9fa2389b4b9fa411282fe8 100644
 --- a/io/papermc/paper/threadedregions/TickRegions.java
 +++ b/io/papermc/paper/threadedregions/TickRegions.java
 @@ -136,6 +136,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic

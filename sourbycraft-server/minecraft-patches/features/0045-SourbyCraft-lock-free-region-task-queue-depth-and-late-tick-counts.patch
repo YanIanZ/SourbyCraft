@@ -99,10 +99,10 @@ index 2ae2b9799bc3709dbea96f1d1cd86bf72b6d605c..3742543fdf7116d8689e1ee8f34137bf
                              break search_loop;
                          }
 diff --git a/io/papermc/paper/threadedregions/TickRegionScheduler.java b/io/papermc/paper/threadedregions/TickRegionScheduler.java
-index d9b53333108add6e6d873e1472e1dedb52beaf99..26a8e3d4b02278af9d7397fc9bf3c83cd4c7b0d0 100644
+index f0760e0548f30a622d0d0db1f8e6340d43357717..2181ef868952458aa99d0630db723fca60741aa8 100644
 --- a/io/papermc/paper/threadedregions/TickRegionScheduler.java
 +++ b/io/papermc/paper/threadedregions/TickRegionScheduler.java
-@@ -88,6 +88,58 @@ public final class TickRegionScheduler {
+@@ -87,6 +87,58 @@ public final class TickRegionScheduler {
          return DEFAULT_TICK_TIME_NANOS;
      }
      // Canvas end - region threading
@@ -161,7 +161,7 @@ index d9b53333108add6e6d873e1472e1dedb52beaf99..26a8e3d4b02278af9d7397fc9bf3c83c
      // Folia start - watchdog
      public static final FoliaWatchdogThread WATCHDOG_THREAD = new FoliaWatchdogThread();
      static {
-@@ -583,6 +635,7 @@ public final class TickRegionScheduler {
+@@ -582,6 +634,7 @@ public final class TickRegionScheduler {
  
              final long scheduledStart = this.getScheduledStart();
              final long scheduledEnd = scheduledStart + deadlineFuture; // Canvas - region threading

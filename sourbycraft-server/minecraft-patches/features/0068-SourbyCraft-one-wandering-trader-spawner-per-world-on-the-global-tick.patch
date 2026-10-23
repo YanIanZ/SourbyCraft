@@ -41,10 +41,10 @@ index 9061c5d95d7c1898b6cfe1ca7814d81e8dc25d16..33a849ce24fe16ea5e742ea5478fef29
      public static final class VillageSiegeState {
          public boolean hasSetupSiege;
 diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
-index bdc979af86e7b95d85728c7b28f6162084df02b7..d4aac8594842d2ed5c98e92115180849efae128a 100644
+index 27ebe1da09b7bdd39c29e8b92cc0a6e0336e2c03..f7be9043d724f794ed82ef8d234585f9040e3941 100644
 --- a/net/minecraft/server/level/ServerLevel.java
 +++ b/net/minecraft/server/level/ServerLevel.java
-@@ -1029,6 +1029,10 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+@@ -1027,6 +1027,10 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
          }
      }
  
