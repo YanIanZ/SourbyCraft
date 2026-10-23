@@ -5,7 +5,7 @@ Subject: [PATCH] SourbyCraft - always complete a world unload's callback
 
 
 diff --git a/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java b/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java
-index a02c2e7563ee1b102873452613d446c3d83b448b..ac9669706b5ba1e62fe98d8e69af1c17e54574db 100644
+index cbd4b1c002808a2deda700a1a6cec36d458f7151..b6be665b27fbd0a7bce198b52c9793a164a6a07a 100644
 --- a/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java
 +++ b/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java
 @@ -57,6 +57,12 @@ public class WorldShutdownThread extends RegionShutdownThread {
@@ -21,7 +21,7 @@ index a02c2e7563ee1b102873452613d446c3d83b448b..ac9669706b5ba1e62fe98d8e69af1c17
          LOGGER.info("Awaiting termination of {} regions", getWorldName());
          final List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>>
              regions = theWaiter.get();
-@@ -198,8 +204,7 @@ public class WorldShutdownThread extends RegionShutdownThread {
+@@ -196,8 +202,7 @@ public class WorldShutdownThread extends RegionShutdownThread {
          MinecraftServer.getServer().server.worlds.remove(this.level.getWorld().getName().toLowerCase(java.util.Locale.ROOT));
  
          LOGGER.info("Completed {} unload", getWorldName());

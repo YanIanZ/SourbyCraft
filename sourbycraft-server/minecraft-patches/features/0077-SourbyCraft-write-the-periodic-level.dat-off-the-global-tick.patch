@@ -6,7 +6,7 @@ Subject: [PATCH] SourbyCraft - write the periodic level.dat off the global
 
 
 diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
-index 7327ca578a57c7425c505d204e4ac7694ce52900..5c892f1d27898eb9ae085f33c8428d690e27f14a 100644
+index 25d702c1f2c4d049f66730ffdbde7d4066aa89fc..7c2f049ff2c6adadf3e2f2702206fed963ac182a 100644
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
 @@ -1028,6 +1028,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa

@@ -7,7 +7,7 @@ Subject: [PATCH] SourbyCraft - fail loudly when work is queued on the
 MinecraftServer.processQueue is only polled inside a block region threading never runs, so anything added to it (Spigot /restart, Bukkit conversations, sync chat and pre-login events) silently never executed. The field is now dev.iyanz.sourbycraft.guards.UndrainedQueue: add/offer throw an owned UnsupportedOperationException naming the caller and log it at ERROR once per caller; reads report an empty queue.
 
 diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
-index 65a83fd0a0b765106e64744de0370290ae64eebd..bfc3088469ec4b7e7863d55d38ce49a04430ed2f 100644
+index 6fcda40db695b91263463312ef90bb5da8c833fa..88aeabe594cc4071b9b20754665faeb5c0193e64 100644
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
 @@ -540,6 +540,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa

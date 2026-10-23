@@ -18,10 +18,10 @@ index 9ac76fb70913bde4158d0eaa048c235a9996adc6..9061c5d95d7c1898b6cfe1ca7814d81e
      public NaturalSpawner.@Nullable SpawnState lastSpawnState;
      public boolean shouldSignal = true;
 diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
-index 9abf69e0e4ee8b18f77abfb2488ce19526f4014c..efa2c506897817e08d92bd1e123349b731eb0cdf 100644
+index 0737efe5954543f9ab2af2d965fa5f14d4f47119..4e4f6387515b187d54fa72384ab8b2b1e9b870dd 100644
 --- a/net/minecraft/server/level/ServerLevel.java
 +++ b/net/minecraft/server/level/ServerLevel.java
-@@ -936,6 +936,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+@@ -934,6 +934,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
              }
  
              io.papermc.paper.entity.activation.ActivationRange.activateEntities(this); // Paper - EAR
@@ -29,7 +29,7 @@ index 9abf69e0e4ee8b18f77abfb2488ce19526f4014c..efa2c506897817e08d92bd1e123349b7
              regionizedWorldData // Folia - region threading
                  .forEachTickingEntity( // Folia - region threading
                      entity -> {
-@@ -953,12 +954,14 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+@@ -951,12 +952,14 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
                                          entity.stopRiding();
                                      }
  

@@ -48,10 +48,10 @@ index 25db7b8b85f8717ad626f9033e57e83dc55fa7ce..9c431704db5e41445138b04511edf9d1
              } finally {
                  this.ticketLockArea.unlock(ticketLock);
 diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
-index 9c26108e00de6bcceb5a79523b66de0d7a97320a..d94888a011a1ed6d85fda10f1136105afa60a717 100644
+index f1d82e4c5b8368ba141fcf93f07de5057bfb45da..4b8664f0ad5323aec35f598187dc6c71a0b77811 100644
 --- a/io/papermc/paper/threadedregions/RegionizedServer.java
 +++ b/io/papermc/paper/threadedregions/RegionizedServer.java
-@@ -456,6 +456,9 @@ public final class RegionizedServer {
+@@ -465,6 +465,9 @@ public final class RegionizedServer {
                      toSave.add(GameRuleMap.class);
                  }
  
