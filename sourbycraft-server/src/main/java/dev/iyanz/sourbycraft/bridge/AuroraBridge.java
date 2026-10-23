@@ -158,8 +158,8 @@ public final class AuroraBridge {
                     if (value != null) values.put(key, value);
                 }
             } catch (final Exception unreadable) {
-                bootWarn("Aurora Bridge could not read " + file + " (" + unreadable.getMessage()
-                    + "); the bridge stays off for this run");
+                bootWarn("Aurora Bridge could not read " + dev.iyanz.sourbycraft.config.ConfigParseErrors.describe(file, unreadable)
+                    + "; fix that line or delete the file to reseed the defaults, because the bridge stays off this run");
                 return AuroraConfig.Bridge.DEFAULT;
             }
         }

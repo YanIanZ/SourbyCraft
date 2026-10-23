@@ -4,6 +4,7 @@ import com.electronwill.nightconfig.core.file.CommentedFileConfig;
 import com.electronwill.nightconfig.core.file.FileNotFoundAction;
 import dev.iyanz.sourbycraft.util.SourbyLogger;
 import dev.iyanz.sourbycraft.config.AuroraConfig;
+import dev.iyanz.sourbycraft.config.ConfigParseErrors;
 import dev.iyanz.sourbycraft.config.ConfigSnapshot;
 
 import java.nio.file.Files;
@@ -224,7 +225,7 @@ public final class SourbyCraftConfig {
         try {
             f.load();
         } catch (Throwable t) {
-            return new ReloadReport(false, List.of("Could not read " + CONFIG_PATH + ": " + t.getMessage()));
+            return new ReloadReport(false, List.of("Could not read " + ConfigParseErrors.describe(CONFIG_PATH, t)));
         }
         // A reload never writes defaults back to an existing file, including after a failed initial save.
         newFile = false;
@@ -233,7 +234,7 @@ public final class SourbyCraftConfig {
         else try {
             engineFile.load();
         } catch (Throwable t) {
-            return new ReloadReport(false, List.of("Could not read " + AURORA_PATH + ": " + t.getMessage(),
+            return new ReloadReport(false, List.of("Could not read " + ConfigParseErrors.describe(AURORA_PATH, t),
                 "No new config snapshot published; runtime retains its previously loaded settings."));
         }
         // Missing utility defaults are seeded in memory exactly as at boot; existing disk bytes stay unchanged.
@@ -439,8 +440,8 @@ public final class SourbyCraftConfig {
             f.load();
             AURORA_FILE = f;
         } catch (Throwable t) {
-            SourbyLogger.error("could not open sourbycraft_config/aurora.toml; Aurora settings "
-                + "will be read from the unified file and its defaults", t);
+            SourbyLogger.error("could not open " + ConfigParseErrors.describe(AURORA_PATH, t)
+                + "; Aurora settings are read from the unified file and its defaults", t);
         }
         return AURORA_FILE;
     }
@@ -460,8 +461,8 @@ public final class SourbyCraftConfig {
             f.load();
             FILE = f;
         } catch (Throwable t) {
-            SourbyLogger.error("could not open sourbycraft_config/sourbycraft_global_config.toml; "
-                + "every read will fall back to its default", t);
+            SourbyLogger.error("could not open " + ConfigParseErrors.describe(path, t)
+                + "; every read falls back to its default", t);
         }
         return FILE;
     }
