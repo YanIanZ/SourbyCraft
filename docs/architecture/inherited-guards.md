@@ -79,12 +79,6 @@ Every number below is generated; the test fails when it drifts from the manifest
 
 <!-- summary:end -->
 
-<!-- summary:end -->
-
-<!-- summary:end -->
-
-<!-- summary:end -->
-
 **Kinds**: `FEATURE-DISABLED` (a vanilla/Paper feature is off), `API-REFUSED` (a Bukkit, Paper or NMS
 entry point throws), `OWNERSHIP-CHECK` (a region-ownership assertion), `DEGRADED` (works, with
 something lost), `REROUTED` (behaviour kept through a region-safe path; listed because the scanner
