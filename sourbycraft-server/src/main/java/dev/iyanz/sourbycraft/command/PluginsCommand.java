@@ -138,6 +138,9 @@ public class PluginsCommand extends Command {
                 sender.sendMessage(UiPanel.row("Scheduler redirects / owner handoffs", stats.schedulerRedirects() + " / " + stats.ownerHandoffs()));
                 sender.sendMessage(UiPanel.row("Rejected / fatal operations", stats.rejectedOperations() + " / " + stats.fatalViolations()));
                 sender.sendMessage(UiPanel.row("Quarantined", stats.quarantined() ? "yes" : "no"));
+                if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) {
+                    sender.sendMessage(UiPanel.row("Relaxed ownership hits (thread-checks)", Long.toString(stats.relaxedOwnershipHits())));
+                }
                 var load = AuroraBridge.taskLoad(plugin);
                 if (load != null) {
                     sender.sendMessage(UiPanel.row("Pending tasks / limit", load.pending() + " / "

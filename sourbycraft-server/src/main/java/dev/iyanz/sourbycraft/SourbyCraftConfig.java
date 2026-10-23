@@ -97,6 +97,7 @@ public final class SourbyCraftConfig {
         java.util.Set<String> keys = new java.util.TreeSet<>();
         if (!beforeAurora.cpu().equals(afterAurora.cpu())) keys.add(AuroraConfig.CPU_CORES_KEY);
         if (beforeAurora.bridge().mode() != afterAurora.bridge().mode()) keys.add(AuroraConfig.BRIDGE_MODE_KEY);
+        if (beforeAurora.bridge().threadChecks() != afterAurora.bridge().threadChecks()) keys.add(AuroraConfig.BRIDGE_THREAD_CHECKS_KEY);
         if (!beforeAurora.scheduler().equals(afterAurora.scheduler())) keys.add("aurora.scheduler.*");
         if (!beforeAurora.diagnostics().stallRecorder().equals(afterAurora.diagnostics().stallRecorder())) {
             keys.add("aurora.diagnostics.stall-recorder.*");

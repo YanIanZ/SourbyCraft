@@ -58,6 +58,29 @@ public final class TeleportRoute {
     }
 
     /**
+     * Relaxed thread checks ({@code aurora.bridge.thread-checks = relaxed}, owner decision 2026-10-22): whether an
+     * {@link Route#ASYNC} teleport waits for its result the way LightingLuminol's {@code CraftPlayer#teleport0}
+     * does ({@code teleportAsync(location, cause).join()}, paper patch 0002 at revision 72d51c4d). The move itself
+     * stays {@code teleportAsync} -- a correct region transfer -- only the caller blocks until it completes.
+     *
+     * <p>Deviation from LightingLuminol, to avoid Folia#280: a tick thread only waits when it owns the entity and
+     * the destination is loaded in a region it does not own (so its completion needs another thread, never this
+     * one). A tick thread whose destination is unloaded (the chunk's region may be created and merged into this
+     * one, whose tick is blocked) schedules and returns {@code false} as before. Threads that tick nothing
+     * (async plugin threads) always wait; the global tick thread waits too, as in LightingLuminol, which stalls
+     * the global tick for the duration.</p>
+     *
+     * @param probe the same probe as {@link #decide}; only asked once the caller owns the entity
+     * @param tickThread whether the calling thread ticks regions (a region or the global tick thread)
+     */
+    public static boolean joinsWhenRelaxed(final Probe probe, final boolean tickThread) {
+        if (!tickThread) {
+            return true;
+        }
+        return probe.callerOwnsEntity() && !probe.callerOwnsDestination() && probe.destinationLoaded();
+    }
+
+    /**
      * Paper's player-only precondition (no connection: {@code false}), asked only when the caller
      * owns the player; off its region nothing of the player is read and the route schedules.
      */

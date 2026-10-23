@@ -32,11 +32,17 @@ final class PerfPluginsView implements PerfView {
         }
         add(lines, "Plugins by state", summary.toString());
         add(lines, "Aurora Bridge mode", String.valueOf(dev.iyanz.sourbycraft.bridge.AuroraBridge.runtimeMode()).toLowerCase(Locale.ROOT));
+        add(lines, "Thread checks", dev.iyanz.sourbycraft.guards.ThreadChecks.describe()
+            + (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE
+                ? "; relaxed hits " + dev.iyanz.sourbycraft.guards.ThreadChecks.relaxedHits()
+                    + " (outside bridged bodies " + dev.iyanz.sourbycraft.guards.ThreadChecks.relaxedHitsOutsideBridge() + ")"
+                : ""));
         renderSlowestStartups(lines, dev.iyanz.sourbycraft.startup.PluginTimings.GLOBAL);
         for (final var stats : dev.iyanz.sourbycraft.bridge.AuroraBridge.allStats()) {
             add(lines, stats.plugin() + " redirects / handoffs / rejected / violations",
                 stats.schedulerRedirects() + " / " + stats.ownerHandoffs() + " / " + stats.rejectedOperations()
-                    + " / " + stats.fatalViolations() + (stats.quarantined() ? " (quarantined)" : ""));
+                    + " / " + stats.fatalViolations() + (stats.quarantined() ? " (quarantined)" : "")
+                    + (stats.relaxedOwnershipHits() > 0 ? "; relaxed ownership hits " + stats.relaxedOwnershipHits() : ""));
             final var region = stats.bodyTimes().region();
             final var global = stats.bodyTimes().global();
             add(lines, stats.plugin() + " sync body total / p99 (region; global)", region.count() + global.count() == 0

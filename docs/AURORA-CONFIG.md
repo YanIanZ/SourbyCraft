@@ -86,6 +86,7 @@ The paths are unchanged since Build 48 ([example](config-examples/aurora.toml)).
 | `aurora.bridge.mode` | `off` \| `safe` / `"off"` | RESTART_REQUIRED, read early (`AuroraBridge.readEarly`, before the plugin scan) | plugin admission ([aurora-plugin-bridge.md](architecture/aurora-plugin-bridge.md)) |
 | `aurora.bridge.quarantine-after` | integer ≥ 1 / `3` | LIVE | bridge quarantine threshold |
 | `aurora.bridge.sync-route` | `caller-region` \| `global` / `"caller-region"` | LIVE | `BridgeRuntime.submit`, read per task |
+| `aurora.bridge.thread-checks` | `relaxed` \| `bridged` \| `enforced` / `"relaxed"` (owner decision 2026-10-22) | RESTART_REQUIRED, read early (`guards/ThreadChecks` class init; `-Daurora.bridge.thread-checks=` overrides); effective only while `mode = safe` | what a failed region-ownership check does ([aurora-plugin-bridge.md, Thread checks](architecture/aurora-plugin-bridge.md#thread-checks-owner-decision-2026-10-22)); relaxed = unsafe, unqualified |
 | `aurora.bridge.max-pending-tasks-per-plugin` | 0 (unlimited) or 1..100000 / `0` | LIVE | pending-task admission per plugin |
 | `aurora.bridge.max-running-async-tasks-per-plugin` | 0 (unlimited) or 1..100000 / `0` | LIVE | running async callbacks per plugin |
 | `aurora.scheduler.bridge-io-threads` | integer ≥ 0 / `0` (= max(2, processors/4)) | RESTART_REQUIRED | Resource Governor `BRIDGE_IO` lane |

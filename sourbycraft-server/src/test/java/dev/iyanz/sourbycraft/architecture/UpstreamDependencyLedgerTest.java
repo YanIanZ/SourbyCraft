@@ -58,6 +58,10 @@ public class UpstreamDependencyLedgerTest {
         // Features 0021/0053: isolate Moonrise storage records and NMS AWF routing (§1.2).
         "dev/iyanz/sourbycraft/awf/RegionFileStorageHooks.java",
         "dev/iyanz/sourbycraft/config/upstream/CanvasConfigBridge.java",
+        // Relaxed thread checks (owner decision 2026-10-22, §1.2): LightingLuminol's world-data pool hands a
+        // foreign thread the RegionizedWorldData of the region owning a chunk; MC 0085 / Paper 0029 lease it.
+        "dev/iyanz/sourbycraft/compat/luminol/RegionizedWorldDataPool.java",
+        "dev/iyanz/sourbycraft/compat/luminol/WorldDataAccess.java",
         "dev/iyanz/sourbycraft/awf/world/AuroraWorldsService.java",
         // /perf scheduler: reads the region scheduler's published/racy fields lock-free (§1.2).
         "dev/iyanz/sourbycraft/perf/LiveSchedulerSource.java",
@@ -192,7 +196,11 @@ public class UpstreamDependencyLedgerTest {
         "dev/iyanz/sourbycraft/perf/RegionTickDataView.java",
         "patch 0013: the region handle's TickData windows; a TickData subclass, so TickTime/TickReportData are the contract",
         "dev/iyanz/sourbycraft/awf/RegionFileStorageHooks.java",
-        "patches 0021/0053: RegionFileStorage delegates each method here; Moonrise ReadData/WriteData are the contract");
+        "patches 0021/0053: RegionFileStorage delegates each method here; Moonrise ReadData/WriteData are the contract",
+        "dev/iyanz/sourbycraft/compat/luminol/RegionizedWorldDataPool.java",
+        "patches MC 0085 / Paper 0029: the ported LightingLuminol pool behind WorldDataAccess leases; RegionizedWorldData is the contract the patched sites already hold",
+        "dev/iyanz/sourbycraft/compat/luminol/WorldDataAccess.java",
+        "patches MC 0085 / Paper 0029: the lease the patched sites open; it hands out the same RegionizedWorldData the base's getCurrentWorldData() did");
 
     private static final Pattern IMPLEMENTS =
         Pattern.compile("\\bclass\\s+\\w+\\s+implements\\s+([\\w.]+)");

@@ -1,0 +1,400 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Fri, 23 Oct 2026 00:00:38 +0700
+Subject: [PATCH] SourbyCraft - relaxed thread checks (LightingLuminol)
+
+Owner decision 2026-10-22 "Tiru penuh LightingLuminol". Adapted from LightingLuminol (GPL-3.0, Bacteriawa, revision 72d51c4d, paper patch 0002 "Base Dirty Patches"), where every TickThread.ensureTickThread body is commented out unconditionally: here all eight overloads keep their check and ask guards/ThreadChecks.refuse before logging and throwing (aurora.bridge.thread-checks: relaxed by default while aurora.bridge.mode admits plugins, bridged, enforced). ReferenceList and IteratorSafeOrderedReferenceSet lock only while checks are relaxed (static final, folded away otherwise; LightingLuminol synchronized every method); CraftWorld#generateTree and CraftBlock#applyBoneMeal take the chunk's own region data through WorldDataAccess leases; CraftWorld#isChunkGenerated lets the global tick take the synchronous branch while relaxed. CraftServer#getCurrentTick and CraftPlayer#teleport0 need no change here: RegionizedServer.getCurrentTick (MC 0084) and OwnedTeleport.joinAsync carry those parts of the port. A relaxed server is unsafe and unqualified.
+
+diff --git a/src/main/java/ca/spottedleaf/moonrise/common/list/IteratorSafeOrderedReferenceSet.java b/src/main/java/ca/spottedleaf/moonrise/common/list/IteratorSafeOrderedReferenceSet.java
+index ece6db7b9a0dfd535141c0c756947c4898140503..73b2387bd321058460e1287f72f8838de141e179 100644
+--- a/src/main/java/ca/spottedleaf/moonrise/common/list/IteratorSafeOrderedReferenceSet.java
++++ b/src/main/java/ca/spottedleaf/moonrise/common/list/IteratorSafeOrderedReferenceSet.java
+@@ -99,6 +99,11 @@ public final class IteratorSafeOrderedReferenceSet<E> {
+     }
+ 
+     public int createRawIterator() {
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (this) { return this.createRawIterator0(); } } // SourbyCraft - relaxed thread checks: LightingLuminol paper 0002 made every IteratorSafeOrderedReferenceSet method synchronized; here only while checks are relaxed (static final, folded away otherwise)
++        return this.createRawIterator0();
++    }
++
++    private int createRawIterator0() {
+         ++this.iteratorCount;
+         if (this.indexMap.isEmpty()) {
+             return Integer.MAX_VALUE;
+@@ -108,6 +113,11 @@ public final class IteratorSafeOrderedReferenceSet<E> {
+     }
+ 
+     public int advanceRawIterator(final int index) {
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (this) { return this.advanceRawIterator0(index); } } // SourbyCraft - relaxed thread checks: LightingLuminol paper 0002 made every IteratorSafeOrderedReferenceSet method synchronized; here only while checks are relaxed (static final, folded away otherwise)
++        return this.advanceRawIterator0(index);
++    }
++
++    private int advanceRawIterator0(final int index) {
+         final E[] elements = this.listElements;
+         int ret = index + 1;
+         for (int len = this.listSize; ret < len; ++ret) {
+@@ -120,6 +130,11 @@ public final class IteratorSafeOrderedReferenceSet<E> {
+     }
+ 
+     public void finishRawIterator() {
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (this) { this.finishRawIterator0(); return; } } // SourbyCraft - relaxed thread checks: LightingLuminol paper 0002 made every IteratorSafeOrderedReferenceSet method synchronized; here only while checks are relaxed (static final, folded away otherwise)
++        this.finishRawIterator0();
++    }
++
++    private void finishRawIterator0() {
+         if (--this.iteratorCount == 0) {
+             if (this.getFragFactor() >= this.maxFragFactor) {
+                 this.defrag();
+@@ -128,6 +143,11 @@ public final class IteratorSafeOrderedReferenceSet<E> {
+     }
+ 
+     public boolean remove(final E element) {
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (this) { return this.remove0(element); } } // SourbyCraft - relaxed thread checks: LightingLuminol paper 0002 made every IteratorSafeOrderedReferenceSet method synchronized; here only while checks are relaxed (static final, folded away otherwise)
++        return this.remove0(element);
++    }
++
++    private boolean remove0(final E element) {
+         final int index = this.indexMap.removeInt(element);
+         if (index >= 0) {
+             if (this.firstInvalidIndex < 0 || index < this.firstInvalidIndex) {
+@@ -147,10 +167,20 @@ public final class IteratorSafeOrderedReferenceSet<E> {
+     }
+ 
+     public boolean contains(final E element) {
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (this) { return this.contains0(element); } } // SourbyCraft - relaxed thread checks: LightingLuminol paper 0002 made every IteratorSafeOrderedReferenceSet method synchronized; here only while checks are relaxed (static final, folded away otherwise)
++        return this.contains0(element);
++    }
++
++    private boolean contains0(final E element) {
+         return this.indexMap.containsKey(element);
+     }
+ 
+     public boolean add(final E element) {
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (this) { return this.add0(element); } } // SourbyCraft - relaxed thread checks: LightingLuminol paper 0002 made every IteratorSafeOrderedReferenceSet method synchronized; here only while checks are relaxed (static final, folded away otherwise)
++        return this.add0(element);
++    }
++
++    private boolean add0(final E element) {
+         final int listSize = this.listSize;
+ 
+         final int previous = this.indexMap.putIfAbsent(element, listSize);
+@@ -226,6 +256,11 @@ public final class IteratorSafeOrderedReferenceSet<E> {
+     }
+ 
+     public int size() {
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (this) { return this.size0(); } } // SourbyCraft - relaxed thread checks: LightingLuminol paper 0002 made every IteratorSafeOrderedReferenceSet method synchronized; here only while checks are relaxed (static final, folded away otherwise)
++        return this.size0();
++    }
++
++    private int size0() {
+         // always returns the correct amount - listSize can be different
+         return this.indexMap.size();
+     }
+@@ -235,6 +270,11 @@ public final class IteratorSafeOrderedReferenceSet<E> {
+     }
+ 
+     public IteratorSafeOrderedReferenceSet.Iterator<E> iterator(final int flags) {
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (this) { return this.iterator0(flags); } } // SourbyCraft - relaxed thread checks: LightingLuminol paper 0002 made every IteratorSafeOrderedReferenceSet method synchronized; here only while checks are relaxed (static final, folded away otherwise)
++        return this.iterator0(flags);
++    }
++
++    private IteratorSafeOrderedReferenceSet.Iterator<E> iterator0(final int flags) {
+         ++this.iteratorCount;
+         return new BaseIterator<>(this, true, (flags & ITERATOR_FLAG_SEE_ADDITIONS) != 0 ? Integer.MAX_VALUE : this.listSize);
+     }
+@@ -243,6 +283,11 @@ public final class IteratorSafeOrderedReferenceSet<E> {
+         return this.unsafeIterator(0);
+     }
+     public java.util.Iterator<E> unsafeIterator(final int flags) {
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (this) { return this.unsafeIterator0(flags); } } // SourbyCraft - relaxed thread checks: LightingLuminol paper 0002 made every IteratorSafeOrderedReferenceSet method synchronized; here only while checks are relaxed (static final, folded away otherwise)
++        return this.unsafeIterator0(flags);
++    }
++
++    private java.util.Iterator<E> unsafeIterator0(final int flags) {
+         return new BaseIterator<>(this, false, (flags & ITERATOR_FLAG_SEE_ADDITIONS) != 0 ? Integer.MAX_VALUE : this.listSize);
+     }
+ 
+@@ -270,6 +315,11 @@ public final class IteratorSafeOrderedReferenceSet<E> {
+ 
+         @Override
+         public boolean hasNext() {
++            if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (this.set) { return this.hasNext0(); } } // SourbyCraft - relaxed thread checks (LightingLuminol paper 0002 synchronized the iterator; the set is the shared state)
++            return this.hasNext0();
++        }
++
++        private boolean hasNext0() {
+             if (this.finished) {
+                 return false;
+             }
+@@ -294,6 +344,11 @@ public final class IteratorSafeOrderedReferenceSet<E> {
+ 
+         @Override
+         public E next() {
++            if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (this.set) { return this.next0(); } } // SourbyCraft - relaxed thread checks (LightingLuminol paper 0002 synchronized the iterator; the set is the shared state)
++            return this.next0();
++        }
++
++        private E next0() {
+             if (!this.hasNext()) {
+                 throw new NoSuchElementException();
+             }
+@@ -307,6 +362,11 @@ public final class IteratorSafeOrderedReferenceSet<E> {
+ 
+         @Override
+         public void remove() {
++            if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (this.set) { this.remove0(); return; } } // SourbyCraft - relaxed thread checks (LightingLuminol paper 0002 synchronized the iterator; the set is the shared state)
++            this.remove0();
++        }
++
++        private void remove0() {
+             final E lastReturned = this.lastReturned;
+             if (lastReturned == null) {
+                 throw new IllegalStateException();
+@@ -317,6 +377,11 @@ public final class IteratorSafeOrderedReferenceSet<E> {
+ 
+         @Override
+         public void finishedIterating() {
++            if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (this.set) { this.finishedIterating0(); return; } } // SourbyCraft - relaxed thread checks (LightingLuminol paper 0002 synchronized the iterator; the set is the shared state)
++            this.finishedIterating0();
++        }
++
++        private void finishedIterating0() {
+             if (this.finished || !this.canFinish) {
+                 throw new IllegalStateException();
+             }
+diff --git a/src/main/java/ca/spottedleaf/moonrise/common/list/ReferenceList.java b/src/main/java/ca/spottedleaf/moonrise/common/list/ReferenceList.java
+index dbed418c2715627a69c31e364f702080b0b1ca9a..1d8c9f510b22116fd161e44c47743a767724f6ab 100644
+--- a/src/main/java/ca/spottedleaf/moonrise/common/list/ReferenceList.java
++++ b/src/main/java/ca/spottedleaf/moonrise/common/list/ReferenceList.java
+@@ -34,14 +34,29 @@ public final class ReferenceList<E> implements Iterable<E> {
+     }
+ 
+     public int size() {
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (this) { return this.size0(); } } // SourbyCraft - relaxed thread checks: LightingLuminol paper 0002 made every ReferenceList method synchronized; here only while checks are relaxed (static final, folded away otherwise)
++        return this.size0();
++    }
++
++    private int size0() {
+         return this.count;
+     }
+ 
+     public boolean contains(final E obj) {
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (this) { return this.contains0(obj); } } // SourbyCraft - relaxed thread checks: LightingLuminol paper 0002 made every ReferenceList method synchronized; here only while checks are relaxed (static final, folded away otherwise)
++        return this.contains0(obj);
++    }
++
++    private boolean contains0(final E obj) {
+         return this.referenceToIndex.containsKey(obj);
+     }
+ 
+     public boolean remove(final E obj) {
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (this) { return this.remove0(obj); } } // SourbyCraft - relaxed thread checks: LightingLuminol paper 0002 made every ReferenceList method synchronized; here only while checks are relaxed (static final, folded away otherwise)
++        return this.remove0(obj);
++    }
++
++    private boolean remove0(final E obj) {
+         final int index = this.referenceToIndex.removeInt(obj);
+         if (index == Integer.MIN_VALUE) {
+             return false;
+@@ -68,6 +83,11 @@ public final class ReferenceList<E> implements Iterable<E> {
+     }
+ 
+     public boolean add(final E obj) {
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (this) { return this.add0(obj); } } // SourbyCraft - relaxed thread checks: LightingLuminol paper 0002 made every ReferenceList method synchronized; here only while checks are relaxed (static final, folded away otherwise)
++        return this.add0(obj);
++    }
++
++    private boolean add0(final E obj) {
+         final int count = this.count;
+         final int currIndex = this.referenceToIndex.putIfAbsent(obj, count);
+ 
+@@ -89,6 +109,11 @@ public final class ReferenceList<E> implements Iterable<E> {
+     }
+ 
+     public E getChecked(final int index) {
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (this) { return this.getChecked0(index); } } // SourbyCraft - relaxed thread checks: LightingLuminol paper 0002 made every ReferenceList method synchronized; here only while checks are relaxed (static final, folded away otherwise)
++        return this.getChecked0(index);
++    }
++
++    private E getChecked0(final int index) {
+         if (index < 0 || index >= this.count) {
+             throw new IndexOutOfBoundsException("Index: " + index + " is out of bounds, size: " + this.count);
+         }
+@@ -96,10 +121,20 @@ public final class ReferenceList<E> implements Iterable<E> {
+     }
+ 
+     public E getUnchecked(final int index) {
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (this) { return this.getUnchecked0(index); } } // SourbyCraft - relaxed thread checks: LightingLuminol paper 0002 made every ReferenceList method synchronized; here only while checks are relaxed (static final, folded away otherwise)
++        return this.getUnchecked0(index);
++    }
++
++    private E getUnchecked0(final int index) {
+         return this.references[index];
+     }
+ 
+     public Object[] getRawData() {
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (this) { return this.getRawData0(); } } // SourbyCraft - relaxed thread checks: LightingLuminol paper 0002 made every ReferenceList method synchronized; here only while checks are relaxed (static final, folded away otherwise)
++        return this.getRawData0();
++    }
++
++    private Object[] getRawData0() {
+         return this.references;
+     }
+ 
+@@ -108,6 +143,11 @@ public final class ReferenceList<E> implements Iterable<E> {
+     }
+ 
+     public void clear() {
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (this) { this.clear0(); return; } } // SourbyCraft - relaxed thread checks: LightingLuminol paper 0002 made every ReferenceList method synchronized; here only while checks are relaxed (static final, folded away otherwise)
++        this.clear0();
++    }
++
++    private void clear0() {
+         this.referenceToIndex.clear();
+         Arrays.fill(this.references, 0, this.count, null);
+         this.count = 0;
+@@ -121,11 +161,17 @@ public final class ReferenceList<E> implements Iterable<E> {
+ 
+             @Override
+             public boolean hasNext() {
++                if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (ReferenceList.this) { return this.current < ReferenceList.this.count; } } // SourbyCraft - relaxed thread checks (LightingLuminol paper 0002)
+                 return this.current < ReferenceList.this.count;
+             }
+ 
+             @Override
+             public E next() {
++                if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) { synchronized (ReferenceList.this) { return this.next0(); } } // SourbyCraft - relaxed thread checks (LightingLuminol paper 0002)
++                return this.next0();
++            }
++
++            private E next0() { // SourbyCraft - relaxed thread checks
+                 if (this.current >= ReferenceList.this.count) {
+                     throw new NoSuchElementException();
+                 }
+diff --git a/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java b/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
+index dc4f93b0cd6b64405ebf368e7f200eafc32509e4..1d10eb2c7ce5fc3d3c7fbc2d148381e4cf1bf605 100644
+--- a/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
++++ b/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
+@@ -136,6 +136,7 @@ public class TickThread extends Thread {
+     @Deprecated
+     public static void ensureTickThread(final String reason) {
+         if (!isTickThread()) {
++            if (!dev.iyanz.sourbycraft.guards.ThreadChecks.refuse(reason)) return; // SourbyCraft - relaxed thread checks (aurora.bridge.thread-checks); adapted from LightingLuminol paper 0002 TickThread, where every body below is commented out
+             LOGGER.error("Thread failed main thread check: " + reason + ", context=" + getThreadContext(), new ThreadViolationException()); // Canvas - region threading
+             throw new IllegalStateException(reason);
+         }
+@@ -145,6 +146,7 @@ public class TickThread extends Thread {
+         if (!isTickThreadFor(world, pos)) {
+             final String ex = "Thread failed main thread check: " +
+                                reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", block_pos=" + pos;
++            if (!dev.iyanz.sourbycraft.guards.ThreadChecks.refuse(ex)) return; // SourbyCraft - relaxed thread checks
+             LOGGER.error(ex, new ThreadViolationException()); // Canvas - region threading
+             throw new IllegalStateException(ex);
+         }
+@@ -154,6 +156,7 @@ public class TickThread extends Thread {
+         if (!isTickThreadFor(world, pos, blockRadius)) {
+             final String ex = "Thread failed main thread check: " +
+                 reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", block_pos=" + pos + ", block_radius=" + blockRadius;
++            if (!dev.iyanz.sourbycraft.guards.ThreadChecks.refuse(ex)) return; // SourbyCraft - relaxed thread checks
+             LOGGER.error(ex, new ThreadViolationException()); // Canvas - region threading
+             throw new IllegalStateException(ex);
+         }
+@@ -163,6 +166,7 @@ public class TickThread extends Thread {
+         if (!isTickThreadFor(world, pos)) {
+             final String ex = "Thread failed main thread check: " +
+                 reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", chunk_pos=" + pos;
++            if (!dev.iyanz.sourbycraft.guards.ThreadChecks.refuse(ex)) return; // SourbyCraft - relaxed thread checks
+             LOGGER.error(ex, new ThreadViolationException()); // Canvas - region threading
+             throw new IllegalStateException(ex);
+         }
+@@ -172,6 +176,7 @@ public class TickThread extends Thread {
+         if (!isTickThreadFor(world, chunkX, chunkZ)) {
+             final String ex = "Thread failed main thread check: " +
+                 reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", chunk_pos=" + new ChunkPos(chunkX, chunkZ);
++            if (!dev.iyanz.sourbycraft.guards.ThreadChecks.refuse(ex)) return; // SourbyCraft - relaxed thread checks
+             LOGGER.error(ex, new ThreadViolationException()); // Canvas - region threading
+             throw new IllegalStateException(ex);
+         }
+@@ -182,6 +187,7 @@ public class TickThread extends Thread {
+             final String ex = "Thread failed main thread check: " +
+             // Canvas start - region threading
+                 reason + ", context=" + getThreadContext() + ", entity=" + getEntityContext(entity);
++            if (!dev.iyanz.sourbycraft.guards.ThreadChecks.refuse(ex)) return; // SourbyCraft - relaxed thread checks
+             LOGGER.error(ex, new ThreadViolationException());
+             // Canvas end - region threading
+             throw new IllegalStateException(ex);
+@@ -192,6 +198,7 @@ public class TickThread extends Thread {
+         if (!isTickThreadFor(world, aabb)) {
+             final String ex = "Thread failed main thread check: " +
+                 reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", aabb=" + aabb;
++            if (!dev.iyanz.sourbycraft.guards.ThreadChecks.refuse(ex)) return; // SourbyCraft - relaxed thread checks
+             LOGGER.error(ex, new ThreadViolationException()); // Canvas - region threading
+             throw new IllegalStateException(ex);
+         }
+@@ -201,6 +208,7 @@ public class TickThread extends Thread {
+         if (!isTickThreadFor(world, blockX, blockZ)) {
+             final String ex = "Thread failed main thread check: " +
+                 reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", block_pos=" + new Vec3(blockX, 0.0, blockZ);
++            if (!dev.iyanz.sourbycraft.guards.ThreadChecks.refuse(ex)) return; // SourbyCraft - relaxed thread checks
+             LOGGER.error(ex, new ThreadViolationException()); // Canvas - region threading
+             throw new IllegalStateException(ex);
+         }
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftWorld.java b/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
+index 1ff85a5457f210ba374f3a2ea1bfadd379ea939b..93fd232b59742d3aa378a7b7f4d69063353d5d4c 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
+@@ -402,7 +402,7 @@ public class CraftWorld extends CraftRegionAccessor implements World {
+     @Override
+     public boolean isChunkGenerated(int x, int z) {
+         // Paper start - Fix this method
+-        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.getHandle(), x, z)) { // Folia - region threading
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.getHandle(), x, z) && !(dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED && io.papermc.paper.threadedregions.RegionizedServer.isGlobalTickThread())) { // Folia - region threading // SourbyCraft - relaxed thread checks: the global tick takes the synchronous branch (LightingLuminol paper 0002)
+             return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                 return CraftWorld.this.isChunkGenerated(x, z);
+             }, (run) -> { io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueChunkTask(this.getHandle(), x, z, run);}).join(); // Folia - region threading
+@@ -745,11 +745,12 @@ public class CraftWorld extends CraftRegionAccessor implements World {
+     @Override
+     public boolean generateTree(Location loc, TreeType type, BlockChangeDelegate delegate) {
+         ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.world, loc.getX(), loc.getZ(), "Cannot generate tree asynchronously"); // Folia - region threading
+-        final io.papermc.paper.threadedregions.RegionizedWorldData worldData = world.getCurrentWorldData(); // Folia - region threading
+-        worldData.captureTreeGeneration = true; // Folia - region threading
+-        worldData.captureBlockStates = true; // Folia - region threading
+         List<org.bukkit.craftbukkit.block.CraftBlockState> capturedBlockStates;
+         boolean grownTree;
++        try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(this.world, loc.getBlockX() >> 4, loc.getBlockZ() >> 4)) { // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol paper 0002 worldDataPool)
++        final io.papermc.paper.threadedregions.RegionizedWorldData worldData = lease.data(); // Folia - region threading
++        worldData.captureTreeGeneration = true; // Folia - region threading
++        worldData.captureBlockStates = true; // Folia - region threading
+         try {
+             grownTree = this.generateTree(loc, type);
+         } finally {
+@@ -759,6 +760,7 @@ public class CraftWorld extends CraftRegionAccessor implements World {
+             capturedBlockStates = new ArrayList<>(worldData.capturedBlockStates.values()); // Folia - region threading
+             worldData.capturedBlockStates.clear(); // Folia - region threading
+         }
++        } // SourbyCraft - relaxed thread checks
+         if (grownTree) { // Copy block data to delegate
+             for (CraftBlockState snapshot : capturedBlockStates) {
+                 BlockPos position = snapshot.getPosition();
+diff --git a/src/main/java/org/bukkit/craftbukkit/block/CraftBlock.java b/src/main/java/org/bukkit/craftbukkit/block/CraftBlock.java
+index c51db188f2b05d39c1346c2f2c33ca289b773026..351bfd6ba2d368af507c23983292db70ef211590 100644
+--- a/src/main/java/org/bukkit/craftbukkit/block/CraftBlock.java
++++ b/src/main/java/org/bukkit/craftbukkit/block/CraftBlock.java
+@@ -568,7 +568,8 @@ public class CraftBlock implements Block {
+         ServerLevel world = this.getCraftWorld().getHandle();
+         UseOnContext context = new UseOnContext(world, null, InteractionHand.MAIN_HAND, Items.BONE_MEAL.getDefaultInstance(), new BlockHitResult(Vec3.ZERO, direction, this.getPosition(), false));
+ 
+-        final io.papermc.paper.threadedregions.RegionizedWorldData worldData = world.getCurrentWorldData(); // Folia - region threading
++        try (var lease = dev.iyanz.sourbycraft.compat.luminol.WorldDataAccess.at(world, this.position)) { // SourbyCraft - relaxed thread checks: the chunk's own region (LightingLuminol paper 0002 worldDataPool)
++        final io.papermc.paper.threadedregions.RegionizedWorldData worldData = lease.data(); // Folia - region threading
+         // SPIGOT-6895: Call StructureGrowEvent and BlockFertilizeEvent
+         List<org.bukkit.craftbukkit.block.CraftBlockState> capturedBlockStates;
+         worldData.captureTreeGeneration = true; // Folia - region threading
+@@ -607,6 +608,7 @@ public class CraftBlock implements Block {
+         }
+ 
+         return result instanceof InteractionResult.Success && (event == null || !event.isCancelled());
++        } // SourbyCraft - relaxed thread checks (lease)
+     }
+ 
+     @Override
