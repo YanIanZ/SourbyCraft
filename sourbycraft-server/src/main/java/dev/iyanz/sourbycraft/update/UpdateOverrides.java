@@ -21,6 +21,9 @@ import java.util.Set;
  *       remote host. A value that is set but not acceptable is an error: the check does nothing
  *       (it does not fall back to GitHub). Asset URLs come from the listing itself, exactly as on
  *       GitHub.</li>
+ *   <li>While {@value #API_BASE_PROPERTY} is set, release assets may also be fetched over plain
+ *       {@code http} from a loopback host ({@link #assetUrlAllowed}); otherwise every asset URL must be
+ *       {@code https}.</li>
  *   <li>{@value #KEY_FILE_PROPERTY}: PEM/base64 Ed25519 public key file that turns signature and
  *       manifest enforcement ON for a build that ships no {@code META-INF/sourbycraft-release.pub}.
  *       It can only add enforcement: when the build ships its own key the property is ignored
@@ -73,5 +76,29 @@ final class UpdateOverrides {
             throw new IllegalArgumentException(API_BASE_PROPERTY + " must not carry a path");
         }
         return scheme + "://" + host + (uri.getPort() >= 0 ? ":" + uri.getPort() : "") + "/repos/";
+    }
+
+    /** Whether a release asset may be downloaded from {@code url} in this JVM; see {@link #assetUrlAllowed(String, String)}. */
+    static boolean assetUrlAllowed(String url) {
+        return assetUrlAllowed(url, System.getProperty(API_BASE_PROPERTY));
+    }
+
+    /**
+     * {@code https} always; plain {@code http} only on a loopback host and only while the
+     * {@value #API_BASE_PROPERTY} override is set ({@code override} non-blank). Anything else,
+     * including an unparseable URL, is refused.
+     */
+    static boolean assetUrlAllowed(String url, @Nullable String override) {
+        final URI uri;
+        try {
+            uri = new URI(url);
+        } catch (URISyntaxException e) {
+            return false;
+        }
+        final String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+        if (scheme.equals("https")) return true;
+        if (!scheme.equals("http") || override == null || override.isBlank()) return false;
+        final String host = uri.getHost() == null ? "" : uri.getHost().toLowerCase(Locale.ROOT);
+        return LOOPBACK_HOSTS.contains(host);
     }
 }

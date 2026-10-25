@@ -14,6 +14,7 @@ import org.bukkit.event.server.ServerLoadEvent;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Plain config surface for the SourbyCraft auto-updater (F1-8), replacing the archived Folia
@@ -31,14 +32,17 @@ import java.util.List;
  * <p><b>Reloadability</b> (verified against the consumers): {@code apply-mode}, {@code repository},
  * {@code channel}, {@code allow-prerelease}, {@code restart-mode} and {@code restart-delay-seconds}
  * are read by {@link SourbyUpdater#check} on every check, so after {@code /sourbycraft reload} the
- * next check uses the new value (LIVE). {@code enabled}, {@code check-times} and
- * {@code check-interval-minutes} shape the schedule {@link SourbyUpdater#start()} builds once at
- * boot, and {@code apply-mode=off} skips that schedule entirely, so turning the updater on or off,
- * or changing its cadence, is RESTART_REQUIRED. {@code /update status} therefore shows the interval the
- * running schedule uses and, when a reload changed it, the pending one ({@link #intervalSummary}).
+ * next check uses the new value (LIVE); switching {@code apply-mode} to {@code off} makes every later
+ * check end at once. {@code enabled}, {@code check-times} and {@code check-interval-minutes} shape
+ * the schedule {@link SourbyUpdater#start()} builds once at boot, and a boot with
+ * {@code apply-mode=off} builds no schedule, so turning the updater on (or back from {@code off}),
+ * turning {@code enabled} off, or changing its cadence is RESTART_REQUIRED. {@code /update status}
+ * therefore shows the interval the running schedule uses and, when a reload changed it, the pending
+ * one ({@link #intervalSummary}).
  *
- * <p>{@link #startUpdater()} also runs the {@link UpdateRollbackGuard} boot step before anything
- * else, even when the updater is disabled: a rollback owed from an earlier apply must still happen.
+ * <p>{@link #runBootGuard()} is the {@link UpdateRollbackGuard} boot step. {@code SourbyCraftBootstrap.init()}
+ * calls it before its first stage, even when the updater is disabled: a rollback owed from an earlier
+ * apply must still happen, and a new jar that fails in any later stage must leave the phase behind.
  */
 public final class AutoUpdateSettings {
 
@@ -54,6 +58,7 @@ public final class AutoUpdateSettings {
     public static volatile boolean viaAutoUpdate = true;
 
     private static volatile SourbyUpdater instance;
+    private static final AtomicBoolean BOOT_GUARD_RAN = new AtomicBoolean(false);
 
     private AutoUpdateSettings() {}
 
@@ -111,11 +116,10 @@ public final class AutoUpdateSettings {
     }
 
     /**
-     * Run the rollback-guard boot step, then start (or restart) the updater. The guard runs even
-     * when the updater is disabled; the scheduler part is a no-op when disabled. Idempotent.
+     * Start (or restart) the updater's schedule; a no-op when disabled. The rollback guard is not
+     * part of this: {@link #runBootGuard()} has already run at the start of the bootstrap.
      */
     public static void startUpdater() {
-        runBootGuard();
         if (!enabled) return;
         if (instance == null) instance = new SourbyUpdater();
         instance.start();
@@ -125,9 +129,13 @@ public final class AutoUpdateSettings {
      * Advance {@link UpdateRollbackGuard} for this boot and, on the first boot after an apply, arm
      * the ready listener. Ready is {@link ServerLoadEvent} {@code STARTUP}: worlds loaded and plugins
      * enabled, fired immediately before the server accepts connections and shortly before the
-     * {@code Done (} line. Everything here is logged loudly and never throws into the boot.
+     * {@code Done (} line; a startup during which a stop was requested is not ready and confirms
+     * nothing. Called once, first thing in {@code SourbyCraftBootstrap.init()}; a second call in the
+     * same process does nothing, since advancing the phase twice would restore the jar this boot
+     * runs. Everything here is logged loudly and never throws into the boot.
      */
-    private static void runBootGuard() {
+    public static void runBootGuard() {
+        if (!BOOT_GUARD_RAN.compareAndSet(false, true)) return;
         final UpdateRollbackGuard guard = UpdateRollbackGuard.SERVER;
         try {
             final UpdateRollbackGuard.BootDecision decision = guard.onBoot();
@@ -142,6 +150,12 @@ public final class AutoUpdateSettings {
                         @EventHandler(priority = EventPriority.MONITOR)
                         public void onLoad(final ServerLoadEvent event) {
                             if (event.getType() != ServerLoadEvent.LoadType.STARTUP) return;
+                            if (stopHeldDuringStartup()) {
+                                SourbyLogger.warn("auto-updater: a stop was requested while " + tag + " was starting; the "
+                                    + "update is NOT confirmed. The rollback phase stays BOOTING, so the next boot "
+                                    + "restores " + prev + ".");
+                                return;
+                            }
                             guard.onReady();
                             SourbyLogger.info("auto-updater: " + tag + " reached ready; update confirmed ("
                                 + prev + " stays on disk until the next apply).");
@@ -168,6 +182,15 @@ public final class AutoUpdateSettings {
         } catch (final Throwable failure) {
             SourbyLogger.error("auto-updater: rollback guard failed at boot", failure);
         }
+    }
+
+    /**
+     * True when a stop requested during startup is being held until startup ends (MC patch 0076):
+     * {@code ServerLoadEvent STARTUP} still fires, but the server never opens.
+     */
+    private static boolean stopHeldDuringStartup() {
+        final net.minecraft.server.MinecraftServer server = net.minecraft.server.MinecraftServer.getServer();
+        return server != null && server.startupStopGate.stopHeld();
     }
 
     private static void loud(final String... lines) {

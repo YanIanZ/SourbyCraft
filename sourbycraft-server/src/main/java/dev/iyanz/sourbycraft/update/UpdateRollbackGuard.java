@@ -14,16 +14,21 @@ import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
+import java.util.zip.ZipInputStream;
 
 /**
  * Keeps the previous launch jar across an update and restores it when the first boot on the new
  * jar never reaches the ready point (audit SEC-3). Pure file logic over one directory so it is
- * unit-tested with a temporary directory; the Bukkit glue (boot stage + ready listener) lives in
- * {@link AutoUpdateSettings#startUpdater()}.
+ * unit-tested with a temporary directory; the Bukkit glue (boot step + ready listener) lives in
+ * {@link AutoUpdateSettings#runBootGuard()}.
  *
  * <p><b>Mechanism.</b> One small properties file, {@code auto_update/}{@value #STATE_FILE}, carries
  * a phase:
@@ -31,7 +36,8 @@ import java.util.Properties;
  *   <li>{@link UpdateApplier} copies the launch jar to {@code <jar>}{@value #PREV_SUFFIX}, records
  *       {@link Phase#APPLIED} with the tag, both paths and the SHA-256 of {@code .prev}, and only
  *       then swaps; a failed record aborts the apply, a failed swap puts the earlier record back.</li>
- *   <li>The next boot's updater stage ({@link #onBoot()}) sees {@code APPLIED}, moves the phase to
+ *   <li>The next boot ({@link #onBoot()}, the first thing {@code SourbyCraftBootstrap.init()} does,
+ *       before any of its stages) sees {@code APPLIED}, moves the phase to
  *       {@link Phase#BOOTING} and asks the caller to watch for ready
  *       ({@link BootDecision#AWAIT_READY}). Ready is Bukkit's {@code ServerLoadEvent STARTUP}: worlds
  *       loaded and plugins enabled, fired right before the server accepts connections and a few
@@ -41,7 +47,10 @@ import java.util.Properties;
  *       launch jar, checks that file's SHA-256, renames it over the launch jar, records
  *       {@link Phase#ROLLED_BACK} and the updater is <em>held</em>: {@link #isHeld()} stays true, and
  *       {@link SourbyUpdater#check} refuses every check and apply, until an operator clears it
- *       ({@link #clearHold()}, {@code /update resume}).</li>
+ *       ({@link #clearHold()}, {@code /update resume}). When the restored jar says it is older than
+ *       Build 49 it reads the TOML files and {@code config/canvas-*.yml} that the first boot on the
+ *       new jar renamed to {@code *.migrated}; the newest such copy of each
+ *       ({@link #PRE_49_CONFIG_FILES}) is copied back unless that file exists again.</li>
  * </ol>
  *
  * <p><b>Limits, stated plainly.</b>
@@ -52,10 +61,16 @@ import java.util.Properties;
  *   <li>"Did not reach ready" is inferred from the phase file alone. A boot the operator stopped
  *       on purpose before ready, a kill by the host, or a crash unrelated to the update all look the
  *       same and trigger the restore. The restore is conservative, not a diagnosis.</li>
- *   <li>A crash before the SourbyCraft bootstrap stage runs (launcher, library download, class
- *       loading) leaves the phase at {@code APPLIED}; the next boot treats itself as the first one
- *       after the apply, so this server-side guard cannot recover that failure. SourbyClip 3.1.4+
- *       can recover before server code loads when its own guard is reached.</li>
+ *   <li>A crash before {@code SourbyCraftBootstrap.init()} runs (launcher, library download, class
+ *       loading, Minecraft/Paper startup up to the SourbyCraft hook in {@code DedicatedServer#initServer})
+ *       leaves the phase at {@code APPLIED}; the next boot treats itself as the first one after the
+ *       apply, so this server-side guard cannot recover that failure. SourbyClip 3.1.4+ can recover
+ *       before server code loads when its own guard is reached.</li>
+ *   <li>The configuration put back for a pre-Build-49 jar is the copy the migration kept, so a value
+ *       changed in the new YAML files during the failed boots is not carried back. The YAML files stay
+ *       where they are, and a later upgrade reads them (the YAML file wins) rather than the restored
+ *       old ones. A restored jar whose build number cannot be read gets no configuration back (noted in
+ *       the state file); neither does a restore done by the launcher.</li>
  *   <li>The state file, {@code applied.tag} and {@code .prev} are plain files next to the jar; an
  *       operator can delete them. {@code applied.tag} is deliberately left in place after a rollback
  *       so the rolled-back tag is not offered again automatically.</li>
@@ -67,6 +82,19 @@ public final class UpdateRollbackGuard {
     public static final String STATE_FILE = "rollback.state";
     /** Suffix of the kept previous launch jar. */
     public static final String PREV_SUFFIX = ".prev";
+    /** The first build that reads the YAML configuration files and {@code config/aurora-*.yml}. */
+    static final BuildVersion FIRST_YAML_BUILD = BuildVersion.parse("49");
+    /**
+     * Files, relative to the server directory, that a jar older than Build 49 reads and that the
+     * Build 49 migrations rename to {@code <name>.migrated} ({@code .migrated.N} when taken).
+     */
+    static final List<String> PRE_49_CONFIG_FILES = List.of(
+        "sourbycraft_config/sourbycraft_global_config.toml",
+        "sourbycraft_config/aurora.toml",
+        "config/canvas-server.yml",
+        "config/canvas-worlds.yml");
+    private static final String BUILD_PROPERTIES = "META-INF/sourbycraft-build.properties";
+    private static final int MAX_SMALL_ENTRY_BYTES = 64 * 1024;
 
     /** The guard over the server's {@code auto_update} directory. */
     public static final UpdateRollbackGuard SERVER = new UpdateRollbackGuard(Path.of("auto_update"));
@@ -288,11 +316,13 @@ public final class UpdateRollbackGuard {
                     return BootDecision.RESTORE_FAILED;
                 }
             }
+            BuildVersion restoredBuild = buildNumberOf(part);
             copyPermissions(launch, part);
             moveReplacing(part, launch);
             part = null;
             writeQuietly(with(s, Phase.ROLLED_BACK, "the boot after applying it did not reach ready; "
-                + prev.getFileName() + " was copied back over " + launch.getFileName()));
+                + prev.getFileName() + " was copied back over " + launch.getFileName()
+                + restorePre49Configs(restoredBuild)));
             return BootDecision.RESTORED;
         } catch (IOException e) {
             writeQuietly(with(s, Phase.RESTORE_FAILED, "copy of " + prev + " over " + launch + " failed: " + e.getMessage()));
@@ -308,13 +338,114 @@ public final class UpdateRollbackGuard {
         }
     }
 
-    /** A temp file is created owner-only; give the restored jar the launch jar's POSIX mode. */
-    private static void copyPermissions(Path from, Path to) {
+    /** A temp file is created owner-only; give the restored (or newly applied) jar the launch jar's POSIX mode. */
+    static void copyPermissions(Path from, Path to) {
         try {
             Files.setPosixFilePermissions(to, Files.getPosixFilePermissions(from));
         } catch (UnsupportedOperationException | IOException ignored) {
             // non-POSIX file system, or the launch jar is gone: keep the default mode
         }
+    }
+
+    /**
+     * For a restored jar older than {@link #FIRST_YAML_BUILD}: copy the newest {@code .migrated} copy
+     * of each {@link #PRE_49_CONFIG_FILES} entry back to its old name when that name is free again.
+     * Never overwrites a file. Returns the note appended to the rollback record ("" when nothing applies).
+     */
+    private String restorePre49Configs(BuildVersion restored) {
+        if (restored.isUnknown()) {
+            return "; the restored jar's build number could not be read, so no pre-Build-49 configuration was restored";
+        }
+        if (restored.compareTo(FIRST_YAML_BUILD) >= 0) return "";
+        Path serverDir = dir.toAbsolutePath().getParent();
+        if (serverDir == null) return "";
+        List<String> copied = new ArrayList<>();
+        List<String> failed = new ArrayList<>();
+        for (String name : PRE_49_CONFIG_FILES) {
+            Path target = serverDir.resolve(name);
+            if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) continue;
+            Path backup = newestMigratedCopy(target);
+            if (backup == null) continue;
+            try {
+                Files.copy(backup, target, StandardCopyOption.COPY_ATTRIBUTES, LinkOption.NOFOLLOW_LINKS);
+                copied.add(name + " (from " + backup.getFileName() + ")");
+            } catch (IOException e) {
+                failed.add(name + " (" + e.getMessage() + ")");
+            }
+        }
+        String note = "";
+        if (!copied.isEmpty()) {
+            SourbyLogger.warn("auto-updater: the restored jar is Build " + restored + ", older than Build 49; put back "
+                + String.join(", ", copied) + " so it finds the configuration it reads.");
+            note += "; pre-Build-49 configuration put back: " + String.join(", ", copied);
+        }
+        if (!failed.isEmpty()) {
+            SourbyLogger.error("auto-updater: the restored jar is Build " + restored + " and could not get its old "
+                + "configuration back: " + String.join(", ", failed) + ". Copy the newest <file>.migrated back by hand "
+                + "before the next restart, or it starts from defaults.");
+            note += "; could NOT put back: " + String.join(", ", failed);
+        }
+        return note;
+    }
+
+    /** {@code <file>.migrated.N} with the highest N, else {@code <file>.migrated}, else {@code null}. */
+    private static @Nullable Path newestMigratedCopy(Path file) {
+        Path newest = null;
+        Path first = file.resolveSibling(file.getFileName() + ".migrated");
+        if (Files.isRegularFile(first, LinkOption.NOFOLLOW_LINKS)) newest = first;
+        // ConfigFormatMigration numbers from .2, the engine and layout migrations from .1.
+        for (int n = 1; n <= 64; n++) {
+            Path candidate = file.resolveSibling(file.getFileName() + ".migrated." + n);
+            if (Files.isRegularFile(candidate, LinkOption.NOFOLLOW_LINKS)) newest = candidate;
+        }
+        return newest;
+    }
+
+    /**
+     * {@code buildNumber} from a jar's {@value #BUILD_PROPERTIES}: at the top level of a server jar,
+     * or inside the server jar a paperclip launcher jar names in {@code META-INF/versions.list}.
+     * {@link BuildVersion#UNKNOWN} when neither can be read.
+     */
+    static BuildVersion buildNumberOf(Path jar) {
+        try (ZipFile zip = new ZipFile(jar.toFile())) {
+            ZipEntry direct = zip.getEntry(BUILD_PROPERTIES);
+            if (direct != null) {
+                try (InputStream in = zip.getInputStream(direct)) {
+                    return buildNumberFrom(in);
+                }
+            }
+            ZipEntry list = zip.getEntry("META-INF/versions.list");
+            if (list == null) return BuildVersion.UNKNOWN;
+            String listing;
+            try (InputStream in = zip.getInputStream(list)) {
+                byte[] data = in.readNBytes(MAX_SMALL_ENTRY_BYTES + 1);
+                if (data.length > MAX_SMALL_ENTRY_BYTES) return BuildVersion.UNKNOWN;
+                listing = new String(data, java.nio.charset.StandardCharsets.UTF_8);
+            }
+            for (String line : listing.split("\\R")) {
+                String[] row = line.split("\t");
+                if (row.length < 3) continue;
+                ZipEntry server = zip.getEntry("META-INF/versions/" + row[2].trim());
+                if (server == null) return BuildVersion.UNKNOWN;
+                try (ZipInputStream nested = new ZipInputStream(zip.getInputStream(server))) {
+                    for (ZipEntry entry; (entry = nested.getNextEntry()) != null; ) {
+                        if (BUILD_PROPERTIES.equals(entry.getName())) return buildNumberFrom(nested);
+                    }
+                }
+                return BuildVersion.UNKNOWN;
+            }
+            return BuildVersion.UNKNOWN;
+        } catch (IOException | RuntimeException e) {
+            return BuildVersion.UNKNOWN;
+        }
+    }
+
+    private static BuildVersion buildNumberFrom(InputStream in) throws IOException {
+        byte[] data = in.readNBytes(MAX_SMALL_ENTRY_BYTES + 1);
+        if (data.length > MAX_SMALL_ENTRY_BYTES) return BuildVersion.UNKNOWN;
+        Properties p = new Properties();
+        p.load(new java.io.ByteArrayInputStream(data));
+        return BuildVersion.parse(p.getProperty("buildNumber"));
     }
 
     private static String sha256(Path file) throws IOException {

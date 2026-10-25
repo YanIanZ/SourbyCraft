@@ -89,7 +89,8 @@ public final class UtilityKeys {
         "Release channel to track: REL, DEV or EXP. Blank = this build's own channel. Applies at the next check.",
         "misc.auto_update.channel");
     public static final ConfigKey UPDATER_APPLY_MODE = key("updater.apply-mode", "notify", AuroraConfig.Lifecycle.LIVE,
-        "notify = log and tell operators; stage = download, verify and swap at the next restart; auto = download, "
+        "notify = log and tell operators; stage = download and verify only (a restart does not install it; "
+            + "/update apply does); auto = download, "
             + "verify, swap the launch jar and self-restart (keeps <jar>.prev and restores it if the next boot fails); "
             + "off = no checks. A release for another Minecraft version is never staged. Applies at the next check; "
             + "/update apply forces one auto run.",
@@ -102,8 +103,9 @@ public final class UtilityKeys {
         "Also poll every N minutes; 0 = only the daily check-times. The schedule is built once at boot.",
         "misc.auto_update.check_interval_minutes");
     public static final ConfigKey UPDATER_RESTART_MODE = key("updater.restart-mode", "auto", AuroraConfig.Lifecycle.LIVE,
-        "How apply-mode = auto restarts after the swap: auto (Pterodactyl detected -> exit 70, else spigot), spigot, "
-            + "exit or stop. Applies at the next check.",
+        "How apply-mode = auto restarts after the swap: auto (Pterodactyl detected -> exit 70, else stop), exit "
+            + "(exit code 70) or stop (exit code 0; something outside must start the server again). spigot is a stop: "
+            + "its restart-script cannot run under region threading. Applies at the next check.",
         "misc.auto_update.restart_mode");
     public static final ConfigKey UPDATER_RESTART_DELAY_SECONDS = key("updater.restart-delay-seconds", 60, AuroraConfig.Lifecycle.LIVE,
         "Warning window broadcast to players before an automatic restart; at least 5. Applies at the next check.",
@@ -112,8 +114,8 @@ public final class UtilityKeys {
         "Whether GitHub prereleases on the tracked channel are eligible. Applies at the next check.",
         "misc.auto_update.allow_prerelease");
     public static final ConfigKey UPDATER_VIA_AUTO_UPDATE = key("updater.via-auto-update", true, AuroraConfig.Lifecycle.LIVE,
-        "Also keep the auto-provisioned ViaVersion and ViaBackwards current on the same cadence "
-            + "(needs plugins.viaversion.auto-provision). Applies at the next check.",
+        "On the updater's schedule, reinstall the reviewed ViaVersion/ViaBackwards pin when it is missing; it never "
+            + "upgrades them (needs plugins.viaversion.auto-provision and a running updater schedule). Applies at the next check.",
         "misc.auto_update.via_auto_update");
 
     /** Every key, in file order. */

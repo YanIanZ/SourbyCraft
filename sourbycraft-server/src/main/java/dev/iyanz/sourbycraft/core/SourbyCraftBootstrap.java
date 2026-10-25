@@ -107,6 +107,11 @@ public final class SourbyCraftBootstrap {
         if (started) return;
         started = true;
 
+        // The update rollback guard before every stage: a new jar that fails or hangs in any of them
+        // must leave the BOOTING phase behind so the next boot restores the previous jar. File I/O
+        // only; it logs its own errors and never throws.
+        AutoUpdateSettings.runBootGuard();
+
         AuroraRuntime.transition(AuroraRuntime.State.BOOTSTRAPPING);
         AuroraRuntime.transition(AuroraRuntime.State.STARTING);
         final Plugin owner = MinecraftInternalPlugin.INSTANCE;
