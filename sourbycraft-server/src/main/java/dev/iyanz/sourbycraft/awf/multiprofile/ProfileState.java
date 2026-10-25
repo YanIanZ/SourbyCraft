@@ -19,7 +19,9 @@ import java.util.Objects;
  * registered adapter with its own version.</p>
  *
  * @param schema codec schema version
- * @param inventory main inventory slots (opaque item bytes, slot = index in the main inventory)
+ * @param inventory main inventory slots (opaque item bytes, slot = index in the hotbar and storage,
+ *     {@code 0..35}); a snapshot written before Build 50 also holds armor in slots {@code 36..39} and
+ *     the off-hand in slot {@code 40}
  * @param armor armor slots
  * @param offhand off-hand slot
  * @param enderChest ender-chest slots
@@ -29,9 +31,9 @@ import java.util.Objects;
  * @param food food level
  * @param saturation saturation
  * @param effects active potion effects
- * @param spawn bed/anchor spawn location
- * @param returnPoint last safe location used when a target world is unavailable
- * @param adapters plugin adapter id to its versioned bytes
+ * @param spawn the respawn point (bed, anchor or one a plugin set), as stored without validating it
+ * @param returnPoint the player's location when the state was captured; a switch moves them there
+ * @param adapters plugin adapter key ({@code id:version}) to its bytes
  */
 public record ProfileState(int schema, List<Item> inventory, List<Item> armor, List<Item> offhand,
                            List<Item> enderChest, int level, float experience, double health, int food,
@@ -42,6 +44,19 @@ public record ProfileState(int schema, List<Item> inventory, List<Item> armor, L
     public static final int MAX_ITEMS = 256;
     public static final int MAX_EFFECTS = 64;
     public static final int MAX_ADAPTERS = 32;
+    /** Longest adapter key ({@code id:version}). */
+    public static final int MAX_ADAPTER_KEY = 64;
+    /** Bytes one adapter entry may hold. */
+    public static final int MAX_ADAPTER_BYTES = 2 * 1024 * 1024;
+    /**
+     * Bytes all adapter entries of one state may hold together, so that adapters alone never push a
+     * state past the 8 MiB snapshot limit; the rest is left for items.
+     */
+    public static final int MAX_ADAPTER_TOTAL = 6 * 1024 * 1024;
+    /** Duration of an effect that does not run out ({@code PotionEffect.INFINITE_DURATION}). */
+    public static final int INFINITE_DURATION = -1;
+    /** Highest amplifier the server stores for an effect (vanilla saves it as an unsigned byte). */
+    public static final int MAX_AMPLIFIER = 255;
 
     /** One opaque encoded item at a slot. The bytes are never interpreted by the core. */
     public record Item(int slot, byte[] data) {
@@ -59,14 +74,18 @@ public record ProfileState(int schema, List<Item> inventory, List<Item> armor, L
         }
     }
 
-    /** One potion effect, with the type key instead of a registry object. */
+    /**
+     * One potion effect, with the type key instead of a registry object. The duration is in ticks, or
+     * {@link #INFINITE_DURATION} for an effect that does not run out; the amplifier is
+     * {@code 0..}{@link #MAX_AMPLIFIER}.
+     */
     public record Effect(String typeKey, int durationTicks, int amplifier, boolean ambient, boolean particles,
                          boolean icon) {
         public Effect {
             Objects.requireNonNull(typeKey, "typeKey");
             if (!typeKey.matches("[a-z0-9_.:/-]{1,64}")) throw new IllegalArgumentException("effect key: " + typeKey);
-            if (durationTicks < 0 || durationTicks > 1_000_000) throw new IllegalArgumentException("duration");
-            if (amplifier < 0 || amplifier > 255) throw new IllegalArgumentException("amplifier");
+            if (durationTicks < INFINITE_DURATION) throw new IllegalArgumentException("duration " + durationTicks);
+            if (amplifier < 0 || amplifier > MAX_AMPLIFIER) throw new IllegalArgumentException("amplifier " + amplifier);
         }
     }
 
@@ -93,8 +112,10 @@ public record ProfileState(int schema, List<Item> inventory, List<Item> armor, L
         if (adapters.size() > MAX_ADAPTERS) throw new IllegalArgumentException("too many adapters");
         final Map<String, byte[]> copy = new LinkedHashMap<>();
         adapters.forEach((key, value) -> {
-            if (key == null || !key.matches("[a-z0-9_.:-]{1,64}")) throw new IllegalArgumentException("adapter id: " + key);
-            if (value == null || value.length > 2 * 1024 * 1024) throw new IllegalArgumentException("adapter state");
+            if (key == null || !key.matches("[a-z0-9_.:-]{1," + MAX_ADAPTER_KEY + "}")) {
+                throw new IllegalArgumentException("adapter id: " + key);
+            }
+            if (value == null || value.length > MAX_ADAPTER_BYTES) throw new IllegalArgumentException("adapter state");
             copy.put(key, value.clone());
         });
         adapters = java.util.Collections.unmodifiableMap(copy);
@@ -115,6 +136,13 @@ public record ProfileState(int schema, List<Item> inventory, List<Item> armor, L
         final Map<String, byte[]> copy = new LinkedHashMap<>();
         this.adapters.forEach((key, value) -> copy.put(key, value.clone()));
         return java.util.Collections.unmodifiableMap(copy);
+    }
+
+    /** This state with its adapter entries replaced. */
+    public ProfileState withAdapters(final Map<String, byte[]> replacement) {
+        return new ProfileState(this.schema, this.inventory, this.armor, this.offhand, this.enderChest, this.level,
+            this.experience, this.health, this.food, this.saturation, this.effects, this.spawn, this.returnPoint,
+            replacement);
     }
 
     public static ProfileState empty() {

@@ -34,6 +34,8 @@ public enum ProfileErrorCode {
     IO_FAILURE,
     /** The request was invalid (bad type, missing field, too much metadata). */
     INVALID_REQUEST,
+    /** The player's state exceeds the 8 MiB snapshot limit; nothing was stored. */
+    STATE_TOO_LARGE,
     /** An unexpected failure; the transition journal has the detail. */
     INTERNAL_ERROR
 }

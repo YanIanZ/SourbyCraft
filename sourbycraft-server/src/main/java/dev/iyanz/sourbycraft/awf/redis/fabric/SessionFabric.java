@@ -14,7 +14,8 @@ import java.util.UUID;
  * epoch is carried into every durable write, and a write path checks {@link #valid} (session, owner,
  * epoch and remaining TTL) before it commits. That check and a separate write are two steps, so a
  * store that must never accept a stale writer has to compare the epoch in the same atomic step as
- * the write.</p>
+ * the write: the MultiProfile Redis repository ({@code RedisProfileRepository}) reads this hash
+ * inside each of its write scripts, with {@link #key} and {@link #session} naming what it compares.</p>
  *
  * <p><b>Keys</b> (under the fabric namespace):</p>
  * <ul>
@@ -182,10 +183,11 @@ public final class SessionFabric {
     }
 
     /**
-     * The session field: one claim of one process ({@code node/incarnation/owner}); the profile id
-     * alone is shared by all nodes, and the node id alone by every process that shares it.
+     * The session field of a claim this instance made: one claim of one process
+     * ({@code node/incarnation/owner}); the profile id alone is shared by all nodes, and the node id
+     * alone by every process that shares it.
      */
-    String session(final String node, final UUID owner) {
+    public String session(final String node, final UUID owner) {
         return node + "/" + this.incarnation + "/" + owner;
     }
 
@@ -248,6 +250,35 @@ public final class SessionFabric {
         return ok;
     }
 
+    /**
+     * {@link #refresh} for many claims of this instance in one pipeline (one round trip while Redis
+     * has the script cached). The results are in the order of {@code claims}. An error reply for any
+     * claim fails the whole call: which claims were renewed is then unknown, so a caller keeps every
+     * claim and retries, it drops none.
+     */
+    public List<Boolean> refreshAll(final List<OwnerClaim> claims) throws IOException {
+        if (claims.isEmpty()) return List.of();
+        final String ttl = Long.toString(this.ttlSeconds * 1000L);
+        final List<Object[]> calls = new java.util.ArrayList<>(claims.size());
+        for (final OwnerClaim claim : claims) {
+            final UUID owner = UUID.fromString(claim.owner());
+            calls.add(new Object[] {1, key(UUID.fromString(claim.id())), session(claim.node(), owner), owner.toString(),
+                Long.toString(claim.fence()), ttl});
+        }
+        final List<Object> replies = this.client.evalPipeline(REFRESH, calls);
+        if (replies.size() != claims.size()) throw new IOException("session refresh returned a malformed reply");
+        final List<Boolean> renewed = new java.util.ArrayList<>(replies.size());
+        for (final Object reply : replies) {
+            if (RedisReplies.isError(reply)) {
+                throw new IOException("session refresh failed: " + RedisReplies.errorText(reply));
+            }
+            final boolean ok = RedisReplies.number(reply, 0L) == 1L;
+            if (!ok) this.metrics.leaseRenewFailure();
+            renewed.add(ok);
+        }
+        return List.copyOf(renewed);
+    }
+
     /** Whether the claim is still held and unexpired. */
     public boolean valid(final UUID profileId, final String node, final UUID owner, final long epoch)
         throws IOException {
@@ -268,9 +299,27 @@ public final class SessionFabric {
 
     /** The current holder, or {@code null} when no session record exists. Never extends anything. */
     public OwnerClaim holder(final UUID profileId) throws IOException {
-        final String key = key(profileId);
-        final List<Object> reply = RedisReplies.list(this.client.call("HMGET", key, "node", "owner", "epoch", "expiresAt"));
-        if (reply.size() < 4) return null;
+        final List<Object> reply = RedisReplies.list(this.client.call("HMGET", key(profileId), "node", "owner", "epoch",
+            "expiresAt", "incarnation"));
+        return holderOf(profileId, reply);
+    }
+
+    /**
+     * The current holder when it is another process, or {@code null} when no session record exists or
+     * this process holds it. A process with this node id but another incarnation (a restarted server,
+     * or a second server sharing the id) is another process; a record without an incarnation (written
+     * before Build 50) is never this process's.
+     */
+    public OwnerClaim foreignHolder(final UUID profileId) throws IOException {
+        final List<Object> reply = RedisReplies.list(this.client.call("HMGET", key(profileId), "node", "owner", "epoch",
+            "expiresAt", "incarnation"));
+        final OwnerClaim holder = holderOf(profileId, reply);
+        if (holder == null || this.incarnation.equals(RedisReplies.text(reply.get(4)))) return null;
+        return holder;
+    }
+
+    private static OwnerClaim holderOf(final UUID profileId, final List<Object> reply) {
+        if (reply.size() < 5) return null;
         final String node = RedisReplies.text(reply.get(0));
         final String owner = RedisReplies.text(reply.get(1));
         final long epoch = RedisReplies.number(reply.get(2), 0L);

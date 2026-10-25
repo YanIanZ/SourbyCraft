@@ -4,6 +4,12 @@ package dev.iyanz.sourbycraft.awf.multiprofile;
  * Which categories a profile owns. A category that is off is neither captured nor applied, so the
  * data stays in the server's vanilla player file; that is a deliberate, documented limitation rather
  * than a silent half-isolation.
+ *
+ * <p>Advancements, statistics and the recipe book are <strong>not</strong> isolated, whatever these
+ * flags say: they stay in the vanilla player files and are shared by every profile of a player. The
+ * Bukkit API can only restore advancements by awarding their criteria again, which grants their
+ * rewards and announces them again on every switch, so no built-in adapter is provided. A plugin can
+ * store them in its own {@code ProfileStateAdapter} and decide itself how to restore them.</p>
  */
 public record ProfileIsolation(boolean inventory, boolean armor, boolean enderChest, boolean experience,
                                boolean health, boolean food, boolean potionEffects, boolean location) {

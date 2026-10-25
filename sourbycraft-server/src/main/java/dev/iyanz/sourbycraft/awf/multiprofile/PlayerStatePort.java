@@ -45,8 +45,14 @@ public interface PlayerStatePort {
     /** Teleports the player; completes when the destination is loaded and the move was accepted. */
     CompletableFuture<Void> teleport(UUID playerId, ProfileState.Location location);
 
-    /** A short reason why {@link #capture} or {@link #apply} cannot run, or {@code null}. */
-    default String unavailable(final UUID playerId) {
-        return online(playerId) ? null : "the player is not online";
+    /**
+     * The state a snapshot stores for {@code captured}: its own adapter entries, followed by those of
+     * {@code previous} (the profile's last stored state) that no adapter registered on this boot
+     * accounts for, so a plugin that is missing on this boot does not lose its data at the next save.
+     * Called on the engine's I/O worker; reads no player. This default has no adapter registry, so it
+     * keeps every previous entry whose id the capture does not hold.
+     */
+    default ProfileState carryAdapters(final ProfileState captured, final ProfileState previous) {
+        return captured.withAdapters(new ProfileStateAdapters().carryForward(captured.adapters(), previous.adapters()));
     }
 }

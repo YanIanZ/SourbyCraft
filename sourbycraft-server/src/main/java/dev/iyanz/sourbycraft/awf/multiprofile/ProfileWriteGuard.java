@@ -18,7 +18,8 @@ import dev.iyanz.sourbycraft.awf.redis.fabric.OwnerClaim;
  * <p>The repository is the authoritative commit point, so the comparison belongs there rather than
  * in the caller. An implementation backed by a shared store must verify that the claim still holds
  * the profile and that the stored revision equals {@code expectedRevision} in the same atomic step as
- * the write, and refuse otherwise. {@link FileProfileRepository} compares the revision under its own
+ * the write, and refuse otherwise: {@link RedisProfileRepository} checks both inside the one Lua
+ * script that applies the write. {@link FileProfileRepository} compares the revision under its own
  * lock and does not check the claim; its documentation says why that is not a distributed fence.</p>
  *
  * @param claim the claim the write is made under, or {@code null}

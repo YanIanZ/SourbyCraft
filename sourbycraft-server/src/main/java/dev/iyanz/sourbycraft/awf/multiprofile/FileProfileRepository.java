@@ -1,11 +1,6 @@
 package dev.iyanz.sourbycraft.awf.multiprofile;
 
 import dev.iyanz.sourbycraft.util.SourbyLogger;
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
-import java.io.EOFException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
@@ -19,13 +14,10 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.FileTime;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -48,8 +40,9 @@ import java.util.UUID;
  * transitions/*.corrupt                 journals that could not be read, set aside
  * </pre>
  *
- * <p>Each file is a framed record: magic, format, type, revision, payload length, payload and the
- * SHA-256 of the payload. Writes go to a temporary file in the same directory, are forced to disk,
+ * <p>Each file is a framed record ({@link ProfileRecords}, the format {@link RedisProfileRepository}
+ * stores too): magic, format, type, revision, payload length, payload and the SHA-256 of the
+ * payload. Writes go to a temporary file in the same directory, are forced to disk,
  * then atomically renamed; a crash therefore leaves either the old or the new record, never a torn
  * one. An unreadable profile, account or snapshot raises {@link IOException} naming the file instead
  * of being ignored — silently dropping a profile would destroy the only copy of a player's state. An
@@ -69,18 +62,14 @@ import java.util.UUID;
  */
 public final class FileProfileRepository implements ProfileRepository {
 
-    private static final int MAGIC = 0x41574652; // "AWFR"
-    private static final int FORMAT = 1;
-    private static final byte TYPE_ACCOUNT = 1;
-    private static final byte TYPE_PROFILE = 2;
-    private static final byte TYPE_BINDING = 3;
-    private static final byte TYPE_SNAPSHOT = 4;
-    private static final byte TYPE_TRANSITION = 5;
-    private static final int MAX_PAYLOAD = ProfileSnapshot.MAX_STATE_BYTES + 64 * 1024;
-    /** Version of the trailer Build 50 appends to a journal (from-fence, incarnation). */
-    private static final int TRANSITION_TRAILER = 1;
+    private static final byte TYPE_ACCOUNT = ProfileRecords.TYPE_ACCOUNT;
+    private static final byte TYPE_PROFILE = ProfileRecords.TYPE_PROFILE;
+    private static final byte TYPE_BINDING = ProfileRecords.TYPE_BINDING;
+    private static final byte TYPE_SNAPSHOT = ProfileRecords.TYPE_SNAPSHOT;
+    private static final byte TYPE_TRANSITION = ProfileRecords.TYPE_TRANSITION;
+    private static final int MAX_PAYLOAD = ProfileRecords.MAX_PAYLOAD;
     /** Terminal journals kept per player; older ones are deleted when a newer one is written. */
-    private static final int TERMINAL_JOURNALS_KEPT = 5;
+    static final int TERMINAL_JOURNALS_KEPT = 5;
     private static final String LOCK_FILE = "repository.lock";
     private static final String CORRUPT = ".corrupt";
 
@@ -161,21 +150,15 @@ public final class FileProfileRepository implements ProfileRepository {
     }
 
     @Override
+    public String describe() {
+        return "file " + this.root;
+    }
+
+    @Override
     public synchronized PlayerAccount loadAccount(final UUID playerId, final int defaultSlots) throws IOException {
         final Path file = accountFile(playerId);
         if (!Files.isRegularFile(file)) return PlayerAccount.empty(playerId, defaultSlots);
-        final Frame frame = read(file, TYPE_ACCOUNT);
-        try (DataInputStream in = new DataInputStream(new ByteArrayInputStream(frame.payload))) {
-            final UUID stored = uuid(in);
-            final int slots = in.readInt();
-            final boolean hasActive = in.readBoolean();
-            final UUID active = hasActive ? uuid(in) : null;
-            final int count = bounded(in.readInt(), PlayerAccount.MAX_SLOTS, "account profiles");
-            final List<UUID> ids = new ArrayList<>(count);
-            for (int i = 0; i < count; i++) ids.add(uuid(in));
-            if (!stored.equals(playerId)) throw new IOException("account file " + file + " holds " + stored);
-            return new PlayerAccount(playerId, ids, active, slots, frame.revision);
-        }
+        return ProfileRecords.account(read(file, TYPE_ACCOUNT), playerId, file.toString());
     }
 
     /** Unguarded write, for tests and offline tools; the engine always passes a guard. */
@@ -188,18 +171,9 @@ public final class FileProfileRepository implements ProfileRepository {
         final Path file = accountFile(account.playerId());
         if (guard.expectedRevision() != ProfileWriteGuard.ANY) {
             // An account that was never stored is what loadAccount returns: revision 0.
-            guard.check("account " + account.playerId(), Files.isRegularFile(file) ? read(file, TYPE_ACCOUNT).revision : 0L);
+            guard.check("account " + account.playerId(), Files.isRegularFile(file) ? read(file, TYPE_ACCOUNT).revision() : 0L);
         }
-        final ByteArrayOutputStream buffer = new ByteArrayOutputStream(128);
-        try (DataOutputStream out = new DataOutputStream(buffer)) {
-            uuid(out, account.playerId());
-            out.writeInt(account.slotLimit());
-            out.writeBoolean(account.activeProfile() != null);
-            if (account.activeProfile() != null) uuid(out, account.activeProfile());
-            out.writeInt(account.profileIds().size());
-            for (final UUID id : account.profileIds()) uuid(out, id);
-        }
-        write(file, TYPE_ACCOUNT, account.revision(), buffer.toByteArray());
+        write(file, TYPE_ACCOUNT, account.revision(), ProfileRecords.accountPayload(account));
     }
 
     @Override
@@ -235,20 +209,7 @@ public final class FileProfileRepository implements ProfileRepository {
     public synchronized Optional<ProfileWorldBinding> binding(final UUID profileId) throws IOException {
         final Path file = this.bindings.resolve(profileId + ".awfp");
         if (!Files.isRegularFile(file)) return Optional.empty();
-        final Frame frame = read(file, TYPE_BINDING);
-        try (DataInputStream in = new DataInputStream(new ByteArrayInputStream(frame.payload))) {
-            final UUID stored = uuid(in);
-            final int count = bounded(in.readInt(), ProfileWorldBinding.MAX_WORLDS, "binding worlds");
-            final Map<String, ProfileWorldRole> worlds = new LinkedHashMap<>();
-            for (int i = 0; i < count; i++) {
-                final String world = text(in);
-                final int role = in.readUnsignedByte();
-                if (role >= ProfileWorldRole.values().length) throw new IOException("binding role " + role + " in " + file);
-                worlds.put(world, ProfileWorldRole.values()[role]);
-            }
-            final String template = text(in);
-            return Optional.of(new ProfileWorldBinding(stored, worlds, template.isEmpty() ? null : template));
-        }
+        return Optional.of(ProfileRecords.binding(read(file, TYPE_BINDING), file.toString()));
     }
 
     /** Unguarded write, for tests and offline tools; the engine always passes a guard. */
@@ -258,17 +219,7 @@ public final class FileProfileRepository implements ProfileRepository {
 
     @Override
     public synchronized void saveBinding(final ProfileWorldBinding binding, final ProfileWriteGuard guard) throws IOException {
-        final ByteArrayOutputStream buffer = new ByteArrayOutputStream(128);
-        try (DataOutputStream out = new DataOutputStream(buffer)) {
-            uuid(out, binding.profileId());
-            out.writeInt(binding.worlds().size());
-            for (final Map.Entry<String, ProfileWorldRole> entry : binding.worlds().entrySet()) {
-                text(out, entry.getKey());
-                out.writeByte(entry.getValue().ordinal());
-            }
-            text(out, binding.template() == null ? "" : binding.template());
-        }
-        write(this.bindings.resolve(binding.profileId() + ".awfp"), TYPE_BINDING, 1L, buffer.toByteArray());
+        write(this.bindings.resolve(binding.profileId() + ".awfp"), TYPE_BINDING, 1L, ProfileRecords.bindingPayload(binding));
     }
 
     @Override
@@ -342,7 +293,7 @@ public final class FileProfileRepository implements ProfileRepository {
             // reset). That archive may be the only copy of what the player had, so it is kept aside.
             Files.move(file, this.accounts.resolve(playerId + ".legacy." + System.currentTimeMillis() + ".awfp"));
         }
-        write(file, TYPE_SNAPSHOT, snapshot.revision(), snapshotPayload(snapshot));
+        write(file, TYPE_SNAPSHOT, snapshot.revision(), ProfileRecords.snapshotPayload(snapshot));
     }
 
     @Override
@@ -407,32 +358,10 @@ public final class FileProfileRepository implements ProfileRepository {
     @Override
     public synchronized void saveTransition(final ProfileTransition transition, final ProfileWriteGuard guard)
         throws IOException {
-        final ByteArrayOutputStream buffer = new ByteArrayOutputStream(256);
-        try (DataOutputStream out = new DataOutputStream(buffer)) {
-            uuid(out, transition.transitionId());
-            uuid(out, transition.playerId());
-            out.writeBoolean(transition.fromProfile() != null);
-            if (transition.fromProfile() != null) uuid(out, transition.fromProfile());
-            uuid(out, transition.toProfile());
-            out.writeByte(transition.phase().ordinal());
-            out.writeLong(transition.deadlineMillis());
-            out.writeBoolean(transition.fromSnapshotId() != null);
-            if (transition.fromSnapshotId() != null) uuid(out, transition.fromSnapshotId());
-            out.writeBoolean(transition.toSnapshotId() != null);
-            if (transition.toSnapshotId() != null) uuid(out, transition.toSnapshotId());
-            // Earlier builds recorded one fence here: the target claim's.
-            out.writeLong(transition.toFence());
-            text(out, transition.failure() == null ? "" : transition.failure());
-            out.writeLong(transition.updatedAtMillis());
-            // Trailer: earlier builds stop reading before it, so they still read this journal.
-            out.writeByte(TRANSITION_TRAILER);
-            out.writeLong(transition.fromFence());
-            text(out, transition.incarnation() == null ? "" : transition.incarnation());
-        }
         final UUID transitionId = transition.transitionId();
         final Path file = this.journalFiles.getOrDefault(transitionId,
             this.transitions.resolve(transition.playerId() + "." + transitionId + ".awfp"));
-        write(file, TYPE_TRANSITION, 1L, buffer.toByteArray());
+        write(file, TYPE_TRANSITION, 1L, ProfileRecords.transitionPayload(transition));
         index(transitionId, transition.playerId(), file);
         if (transition.terminal()) pruneTerminalJournals(transition.playerId());
     }
@@ -464,6 +393,61 @@ public final class FileProfileRepository implements ProfileRepository {
     public synchronized void deleteProfileData(final UUID profileId, final ProfileWriteGuard guard) throws IOException {
         Files.deleteIfExists(this.bindings.resolve(profileId + ".awfp"));
         deleteRecursively(this.snapshots.resolve(profileId.toString()));
+    }
+
+    // ------------------------------------------------------------------ listing, for the repository migration
+
+    /** Every stored account, by player id; files that are not {@code <uuid>.awfp} are skipped. */
+    public synchronized List<UUID> accountIds() throws IOException {
+        return idsIn(this.accounts);
+    }
+
+    /** Every stored profile record, tombstones included. */
+    public synchronized List<UUID> profileIds() throws IOException {
+        return idsIn(this.profiles);
+    }
+
+    /** Every snapshot of a profile, oldest first in {@link #latestSnapshot}'s order, checksum-verified. */
+    public synchronized List<ProfileSnapshot> snapshots(final UUID profileId) throws IOException {
+        final List<ProfileSnapshot> found = new ArrayList<>();
+        for (final Path file : snapshotFiles(profileId)) found.add(readSnapshot(file, profileId));
+        return List.copyOf(found);
+    }
+
+    /**
+     * Every archived pre-profile state of a player, oldest first; the last one is
+     * {@link #legacySnapshot}. Checksum-verified.
+     */
+    public synchronized List<ProfileSnapshot> legacySnapshots(final UUID playerId) throws IOException {
+        final Map<Long, Path> earlier = new java.util.TreeMap<>();
+        try (DirectoryStream<Path> files = Files.newDirectoryStream(this.accounts, playerId + ".legacy.*.awfp")) {
+            for (final Path file : files) {
+                final String name = file.getFileName().toString();
+                final String millis = name.substring((playerId + ".legacy.").length(), name.length() - ".awfp".length());
+                try {
+                    earlier.put(Long.parseLong(millis), file);
+                } catch (final NumberFormatException notAnArchive) {
+                    // Not written by this repository; left alone.
+                }
+            }
+        }
+        final List<ProfileSnapshot> found = new ArrayList<>();
+        for (final Path file : earlier.values()) found.add(readSnapshot(file, playerId));
+        legacySnapshot(playerId).ifPresent(found::add);
+        return List.copyOf(found);
+    }
+
+    private static List<UUID> idsIn(final Path directory) throws IOException {
+        final List<UUID> ids = new ArrayList<>();
+        try (DirectoryStream<Path> files = Files.newDirectoryStream(directory, "*.awfp")) {
+            for (final Path file : files) {
+                final String name = file.getFileName().toString();
+                final UUID id = uuidOrNull(name.substring(0, name.length() - ".awfp".length()));
+                if (id != null) ids.add(id);
+            }
+        }
+        ids.sort(Comparator.naturalOrder());
+        return ids;
     }
 
     /**
@@ -664,23 +648,7 @@ public final class FileProfileRepository implements ProfileRepository {
         final Path directory = this.snapshots.resolve(snapshot.profileId().toString());
         Files.createDirectories(directory);
         write(directory.resolve(snapshot.revision() + "-" + snapshot.snapshotId() + ".awfp"), TYPE_SNAPSHOT,
-            snapshot.revision(), snapshotPayload(snapshot));
-    }
-
-    private static byte[] snapshotPayload(final ProfileSnapshot snapshot) throws IOException {
-        final ByteArrayOutputStream buffer = new ByteArrayOutputStream(snapshot.size() + 128);
-        try (DataOutputStream out = new DataOutputStream(buffer)) {
-            uuid(out, snapshot.profileId());
-            uuid(out, snapshot.snapshotId());
-            out.writeInt(snapshot.schemaVersion());
-            out.writeLong(snapshot.revision());
-            text(out, snapshot.checksum());
-            out.writeLong(snapshot.createdAtMillis());
-            final byte[] state = snapshot.state();
-            out.writeInt(state.length);
-            out.write(state);
-        }
-        return buffer.toByteArray();
+            snapshot.revision(), ProfileRecords.snapshotPayload(snapshot));
     }
 
     // ------------------------------------------------------------------ records
@@ -697,93 +665,24 @@ public final class FileProfileRepository implements ProfileRepository {
         if (guard.expectedRevision() == ProfileWriteGuard.ANY) return;
         final Path file = this.profiles.resolve(profileId + ".awfp");
         guard.check("profile " + profileId,
-            Files.isRegularFile(file) ? read(file, TYPE_PROFILE).revision : ProfileWriteGuard.ABSENT);
+            Files.isRegularFile(file) ? read(file, TYPE_PROFILE).revision() : ProfileWriteGuard.ABSENT);
     }
 
     private void writeProfile(final AuroraProfile profile) throws IOException {
-        final ByteArrayOutputStream buffer = new ByteArrayOutputStream(256);
-        try (DataOutputStream out = new DataOutputStream(buffer)) {
-            uuid(out, profile.id());
-            uuid(out, profile.accountId());
-            text(out, profile.type());
-            out.writeLong(profile.createdAtMillis());
-            out.writeLong(profile.revision());
-            out.writeByte(profile.status().ordinal());
-            out.writeInt(profile.metadata().size());
-            for (final Map.Entry<String, String> entry : profile.metadata().entrySet()) {
-                text(out, entry.getKey());
-                text(out, entry.getValue());
-            }
-        }
-        write(this.profiles.resolve(profile.id() + ".awfp"), TYPE_PROFILE, profile.revision(), buffer.toByteArray());
+        write(this.profiles.resolve(profile.id() + ".awfp"), TYPE_PROFILE, profile.revision(),
+            ProfileRecords.profilePayload(profile));
     }
 
     private AuroraProfile readProfile(final Path file, final UUID expected) throws IOException {
-        final Frame frame = read(file, TYPE_PROFILE);
-        try (DataInputStream in = new DataInputStream(new ByteArrayInputStream(frame.payload))) {
-            final UUID id = uuid(in);
-            final UUID account = uuid(in);
-            final String type = text(in);
-            final long created = in.readLong();
-            final long revision = in.readLong();
-            final int status = in.readUnsignedByte();
-            if (status >= ProfileStatus.values().length) throw new IOException("profile status " + status + " in " + file);
-            final int metadata = bounded(in.readInt(), AuroraProfile.MAX_METADATA, "profile metadata");
-            final Map<String, String> values = new LinkedHashMap<>();
-            for (int i = 0; i < metadata; i++) values.put(text(in), text(in));
-            if (!id.equals(expected)) throw new IOException("profile file " + file + " holds " + id);
-            return new AuroraProfile(id, account, type, values, created, revision, ProfileStatus.values()[status]);
-        }
+        return ProfileRecords.profile(read(file, TYPE_PROFILE), expected, file.toString());
     }
 
     private ProfileSnapshot readSnapshot(final Path file, final UUID profileId) throws IOException {
-        final Frame frame = read(file, TYPE_SNAPSHOT);
-        try (DataInputStream in = new DataInputStream(new ByteArrayInputStream(frame.payload))) {
-            final UUID storedProfile = uuid(in);
-            final UUID snapshotId = uuid(in);
-            final int schema = in.readInt();
-            final long revision = in.readLong();
-            final String checksum = text(in);
-            final long createdAt = in.readLong();
-            final int length = in.readInt();
-            if (length < 1 || length > ProfileSnapshot.MAX_STATE_BYTES) throw new IOException("snapshot length " + length);
-            final byte[] state = in.readNBytes(length);
-            if (state.length != length) throw new EOFException("snapshot truncated: " + file);
-            if (!storedProfile.equals(profileId)) throw new IOException("snapshot " + file + " belongs to " + storedProfile);
-            final String actual = ProfileStateCodec.checksum(state);
-            if (!actual.equals(checksum)) throw new IOException("snapshot checksum mismatch in " + file);
-            return new ProfileSnapshot(profileId, snapshotId, schema, revision, state, checksum, createdAt);
-        }
+        return ProfileRecords.snapshot(read(file, TYPE_SNAPSHOT), profileId, file.toString());
     }
 
     private ProfileTransition readTransition(final Path file) throws IOException {
-        final Frame frame = read(file, TYPE_TRANSITION);
-        try (DataInputStream in = new DataInputStream(new ByteArrayInputStream(frame.payload))) {
-            final UUID id = uuid(in);
-            final UUID player = uuid(in);
-            final UUID from = in.readBoolean() ? uuid(in) : null;
-            final UUID to = uuid(in);
-            final int phase = in.readUnsignedByte();
-            if (phase >= TransitionPhase.values().length) throw new IOException("transition phase " + phase + " in " + file);
-            final long deadline = in.readLong();
-            final UUID fromSnapshot = in.readBoolean() ? uuid(in) : null;
-            final UUID toSnapshot = in.readBoolean() ? uuid(in) : null;
-            final long toFence = in.readLong();
-            final String failure = text(in);
-            final long updated = in.readLong();
-            long fromFence = 0L;
-            String incarnation = null;
-            // A journal of an earlier build ends here; its one fence is the target fence.
-            if (in.available() > 0 && in.readUnsignedByte() >= TRANSITION_TRAILER) {
-                fromFence = in.readLong();
-                final String issuedBy = text(in);
-                incarnation = issuedBy.isEmpty() ? null : issuedBy;
-            }
-            return new ProfileTransition(id, player, from, to, TransitionPhase.values()[phase], deadline, fromSnapshot,
-                toSnapshot, fromFence, toFence, incarnation, failure.isEmpty() ? null : failure, updated);
-        } catch (final IllegalArgumentException invalid) {
-            throw new IOException("transition journal " + file + " is invalid: " + invalid.getMessage(), invalid);
-        }
+        return ProfileRecords.transition(read(file, TYPE_TRANSITION), file.toString());
     }
 
     /**
@@ -849,20 +748,9 @@ public final class FileProfileRepository implements ProfileRepository {
         }
     }
 
-    private record Frame(byte type, long revision, byte[] payload) {}
-
     private void write(final Path file, final byte type, final long revision, final byte[] payload) throws IOException {
-        if (payload.length > MAX_PAYLOAD) throw new IOException("record " + file.getFileName() + " is too large: " + payload.length);
-        final byte[] digest = sha256(payload);
-        final ByteBuffer buffer = ByteBuffer.allocate(4 + 1 + 1 + 8 + 4 + payload.length + 32);
-        buffer.putInt(MAGIC);
-        buffer.put((byte) FORMAT);
-        buffer.put(type);
-        buffer.putLong(revision);
-        buffer.putInt(payload.length);
-        buffer.put(payload);
-        buffer.put(digest);
-        buffer.flip();
+        final ByteBuffer buffer = ByteBuffer.wrap(ProfileRecords.frame(type, revision, payload,
+            file.getFileName().toString()));
         // Unique per write, so an interrupted write never collides with the next one.
         final Path temporary = file.resolveSibling(file.getFileName() + "." + UUID.randomUUID() + ".tmp");
         try (FileChannel channel = FileChannel.open(temporary, StandardOpenOption.CREATE,
@@ -878,7 +766,7 @@ public final class FileProfileRepository implements ProfileRepository {
         forceDirectory(file.getParent());
     }
 
-    private Frame read(final Path file, final byte expectedType) throws IOException {
+    private ProfileRecords.Frame read(final Path file, final byte expectedType) throws IOException {
         final long size = Files.size(file);
         if (size > MAX_PAYLOAD + 64L) {
             throw new IOException("record " + file + " is " + size + " bytes; the limit is " + MAX_PAYLOAD);
@@ -887,27 +775,7 @@ public final class FileProfileRepository implements ProfileRepository {
         try (var input = Files.newInputStream(file)) {
             bytes = input.readNBytes(MAX_PAYLOAD + 65);
         }
-        if (bytes.length > MAX_PAYLOAD + 64) throw new IOException("record " + file + " exceeds the size limit");
-        if (bytes.length < 4 + 1 + 1 + 8 + 4 + 32) throw new IOException("record " + file + " is truncated");
-        final ByteBuffer buffer = ByteBuffer.wrap(bytes);
-        if (buffer.getInt() != MAGIC) throw new IOException("record " + file + " has no AWF profile magic");
-        final int format = buffer.get() & 0xFF;
-        if (format != FORMAT) throw new IOException("record " + file + " has format " + format);
-        final byte type = buffer.get();
-        if (type != expectedType) throw new IOException("record " + file + " has type " + type + ", expected " + expectedType);
-        final long revision = buffer.getLong();
-        final int length = buffer.getInt();
-        if (length < 0 || length > MAX_PAYLOAD || buffer.remaining() != length + 32) {
-            throw new IOException("record " + file + " has an invalid length");
-        }
-        final byte[] payload = new byte[length];
-        buffer.get(payload);
-        final byte[] digest = new byte[32];
-        buffer.get(digest);
-        if (!MessageDigest.isEqual(digest, sha256(payload))) {
-            throw new IOException("record " + file + " fails its checksum");
-        }
-        return new Frame(type, revision, payload);
+        return ProfileRecords.unframe(bytes, expectedType, file.toString());
     }
 
     private static void forceDirectory(final Path directory) {
@@ -917,42 +785,6 @@ public final class FileProfileRepository implements ProfileRepository {
         } catch (final IOException | RuntimeException notSupported) {
             // Best effort: the rename itself is already durable on the filesystems SourbyCraft targets.
         }
-    }
-
-    private static byte[] sha256(final byte[] data) {
-        try {
-            return MessageDigest.getInstance("SHA-256").digest(data);
-        } catch (final NoSuchAlgorithmException impossible) {
-            throw new IllegalStateException("the JDK has no SHA-256", impossible);
-        }
-    }
-
-    private static void uuid(final DataOutputStream out, final UUID value) throws IOException {
-        out.writeLong(value.getMostSignificantBits());
-        out.writeLong(value.getLeastSignificantBits());
-    }
-
-    private static UUID uuid(final DataInputStream in) throws IOException {
-        return new UUID(in.readLong(), in.readLong());
-    }
-
-    private static void text(final DataOutputStream out, final String text) throws IOException {
-        final byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
-        out.writeInt(bytes.length);
-        out.write(bytes);
-    }
-
-    private static String text(final DataInputStream in) throws IOException {
-        final int length = in.readInt();
-        if (length < 0 || length > 4096) throw new IOException("text length " + length);
-        final byte[] bytes = in.readNBytes(length);
-        if (bytes.length != length) throw new EOFException("text truncated");
-        return new String(bytes, StandardCharsets.UTF_8);
-    }
-
-    private static int bounded(final int value, final int max, final String what) throws IOException {
-        if (value < 0 || value > max) throw new IOException(what + " count " + value);
-        return value;
     }
 
     private static void deleteRecursively(final Path directory) throws IOException {

@@ -16,9 +16,25 @@ import java.util.UUID;
  * <p>Every mutation takes a {@link ProfileWriteGuard}: the claim the caller validated and the
  * revision it read. The repository is the authoritative commit, so an implementation shared between
  * servers must verify both atomically with the write and refuse otherwise. The file implementation
- * compares revisions locally and is not a distributed fence.</p>
+ * compares revisions locally and is not a distributed fence; {@link RedisProfileRepository} checks
+ * claim and revision inside the one Lua script that applies each write.</p>
  */
 public interface ProfileRepository extends AutoCloseable {
+
+    /** Short description for logs and {@code /awf multiprofile status}; does no I/O and holds no credentials. */
+    default String describe() {
+        return getClass().getSimpleName();
+    }
+
+    /**
+     * Whether a mutation that failed with an {@link IOException} may still have been applied: a
+     * remote store can run a write and lose the reply. A caller that must know the outcome (the
+     * switch commit) has to establish it before it compensates. A local store's failed write wrote
+     * nothing.
+     */
+    default boolean remote() {
+        return false;
+    }
 
     /** The account, or an empty account (revision 0) with {@code defaultSlots} when none is stored. */
     PlayerAccount loadAccount(UUID playerId, int defaultSlots) throws IOException;

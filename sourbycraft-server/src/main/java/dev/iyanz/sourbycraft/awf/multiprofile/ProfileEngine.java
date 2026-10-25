@@ -49,6 +49,11 @@ import java.util.concurrent.atomic.AtomicReference;
  * switch forward. A crash can therefore leave a journal entry, never two authoritative profiles. The
  * applied target state itself lives in the player's vanilla playerdata, which the server saves at
  * its own autosave and quit; a crash after the commit and before that save is not covered here.</p>
+ *
+ * <p>Every repository write carries the claim it is made under ({@link ProfileWriteGuard}). A shared
+ * repository ({@link RedisProfileRepository}) refuses it atomically when that claim no longer holds
+ * the profile; with a remote repository a commit whose reply is lost is settled from the account,
+ * behind a fresh claim, before anything is rolled back.</p>
  */
 public final class ProfileEngine {
 
@@ -73,6 +78,8 @@ public final class ProfileEngine {
     private final ConcurrentHashMap<UUID, OwnerClaim> sessionClaims = new ConcurrentHashMap<>();
     /** Players who quit mid-switch; their adopted claim is released when the switch ends. */
     private final java.util.Set<UUID> releaseOnSwitchEnd = ConcurrentHashMap.newKeySet();
+    /** Running switches; the heartbeat renews the claims they hold until they end. */
+    private final java.util.Set<SwitchRun> runs = ConcurrentHashMap.newKeySet();
     private final ConcurrentHashMap<String, Long> worldUse = new ConcurrentHashMap<>();
     private final AtomicInteger pendingIo = new AtomicInteger();
     private volatile IdleSweep lastIdleSweep;
@@ -179,20 +186,59 @@ public final class ProfileEngine {
                     + profile.accountId() + "; the profile cannot be deleted");
             }
             requireNoPendingJournal(profile.accountId());
-            final OwnerClaim holder = this.ownership.holder(profileId).join();
-            if (holder != null && !holder.node().equals(this.nodeId)) {
-                throw error(ProfileErrorCode.OWNERSHIP_CONFLICT, "profile " + profileId + " is owned by " + holder.node());
-            }
+            // Checked before the administrative claim: the active profile may carry this process's session
+            // claim, which a claim of its own would supersede. The account revision read here is the one
+            // the write expects, so a change in between is still refused.
             final PlayerAccount account = this.repository.loadAccount(profile.accountId(), this.settings.defaultSlots());
             if (profileId.equals(account.activeProfile())) {
                 throw error(ProfileErrorCode.PROFILE_LOCKED, "the active profile cannot be deleted; switch away first");
             }
-            this.repository.saveProfile(profile.withStatus(ProfileStatus.DELETED),
-                ProfileWriteGuard.of(null, profile.revision()));
-            this.repository.saveAccount(account.withoutProfile(profileId), ProfileWriteGuard.of(null, account.revision()));
-            this.repository.deleteProfileData(profileId, ProfileWriteGuard.UNGUARDED);
-            return true;
+            final OwnerClaim admin = adminClaim(profileId);
+            try {
+                this.repository.saveProfile(profile.withStatus(ProfileStatus.DELETED),
+                    ProfileWriteGuard.of(admin, profile.revision()));
+                this.repository.saveAccount(account.withoutProfile(profileId), ProfileWriteGuard.of(admin, account.revision()));
+                this.repository.deleteProfileData(profileId, ProfileWriteGuard.claimed(admin));
+                return true;
+            } finally {
+                releaseAdminClaim(admin);
+            }
         });
+    }
+
+    /**
+     * The claim an administrative write on an inactive profile is made under. With distributed
+     * ownership and fencing it is a short claim of its own, so the repository fences those writes and a
+     * profile another process holds (a switch to it, a recovery) is refused; the caller releases it with
+     * {@link #releaseAdminClaim}. Otherwise no claim is taken ({@code null}), after checking that no
+     * other process holds the profile. Runs inside an I/O step, which no other step of this engine
+     * interleaves with, and the callers first refuse an account with a running switch and the account's
+     * active profile (the one a session claim is on), so the claim never replaces one this process uses.
+     */
+    private OwnerClaim adminClaim(final UUID profileId) {
+        if (this.ownership.distributed() && this.settings.coordination().fencingEnabled()) {
+            final ClaimResult claimed = this.ownership.claim(profileId, this.nodeId, UUID.randomUUID()).join();
+            if (!claimed.granted()) {
+                throw error(ProfileErrorCode.OWNERSHIP_CONFLICT, "profile " + profileId + " is held by "
+                    + (claimed.claim() == null ? "another node" : claimed.claim().node()));
+            }
+            return claimed.claim();
+        }
+        final OwnerClaim foreign = this.ownership.foreignHolder(profileId).join();
+        if (foreign != null) {
+            throw error(ProfileErrorCode.OWNERSHIP_CONFLICT, "profile " + profileId + " is owned by " + foreign.node());
+        }
+        return null;
+    }
+
+    private void releaseAdminClaim(final OwnerClaim claim) {
+        if (claim == null) return;
+        try {
+            this.ownership.release(claim).join();
+        } catch (final RuntimeException failed) {
+            SourbyLogger.warn("AWF MultiProfile: releasing an administrative claim on " + claim.id() + " failed ("
+                + messageOf(failed) + "); it expires on its own");
+        }
     }
 
     /**
@@ -216,7 +262,12 @@ public final class ProfileEngine {
             }
             final ProfileStatus next = locked ? ProfileStatus.LOCKED : ProfileStatus.ACTIVE;
             if (profile.status() != next) {
-                this.repository.saveProfile(profile.withHold(next), ProfileWriteGuard.of(null, profile.revision()));
+                final OwnerClaim admin = adminClaim(profileId);
+                try {
+                    this.repository.saveProfile(profile.withHold(next), ProfileWriteGuard.of(admin, profile.revision()));
+                } finally {
+                    releaseAdminClaim(admin);
+                }
             }
             return null;
         });
@@ -287,7 +338,11 @@ public final class ProfileEngine {
         }
         final UUID ownerToken = UUID.randomUUID();
         final SwitchRun run = new SwitchRun(journal, start.account(), start.target(), ownerToken, began);
-        return run.execute().whenComplete((result, failed) -> transitionEnded(playerId, journal.transitionId()));
+        this.runs.add(run);
+        return run.execute().whenComplete((result, failed) -> {
+            this.runs.remove(run);
+            transitionEnded(playerId, journal.transitionId());
+        });
     }
 
     /**
@@ -393,9 +448,10 @@ public final class ProfileEngine {
             }
             return session;
         }
-        final OwnerClaim holder = this.ownership.holder(profile.id()).join();
-        if (holder != null && !holder.node().equals(this.nodeId)) {
-            throw error(ProfileErrorCode.OWNERSHIP_CONFLICT, "profile " + profile.id() + " is owned by " + holder.node());
+        // Another process, not merely another node id: a restarted server or a duplicate id shares it.
+        final OwnerClaim foreign = this.ownership.foreignHolder(profile.id()).join();
+        if (foreign != null) {
+            throw error(ProfileErrorCode.OWNERSHIP_CONFLICT, "profile " + profile.id() + " is owned by " + foreign.node());
         }
         if (this.ownership.distributed() && this.settings.coordination().fencingEnabled()) {
             throw error(ProfileErrorCode.OWNERSHIP_CONFLICT, "profile " + profile.id()
@@ -434,8 +490,13 @@ public final class ProfileEngine {
             }
             final Map<String, ProfileWorldRole> roles = new java.util.LinkedHashMap<>();
             request.worlds().forEach((world, role) -> roles.put(world, ProfileWorldRole.valueOf(role.name())));
-            this.repository.saveBinding(new ProfileWorldBinding(profile.id(), roles, request.template()),
-                ProfileWriteGuard.UNGUARDED);
+            final ProfileWorldBinding binding = new ProfileWorldBinding(profile.id(), roles, request.template());
+            final OwnerClaim admin = adminClaim(profile.id());
+            try {
+                this.repository.saveBinding(binding, ProfileWriteGuard.claimed(admin));
+            } finally {
+                releaseAdminClaim(admin);
+            }
             return null;
         });
     }
@@ -457,6 +518,30 @@ public final class ProfileEngine {
         return io(() -> this.ownership.holder(profileId).join()).thenApply(claim -> Optional.ofNullable(claim)
             .map(found -> new ProfileOwner(found.node(), Math.max(1L, found.epoch()), found.expiresAtMillis(),
                 this.ownership.distributed())));
+    }
+
+    /**
+     * Operator recovery for a profile that another process still holds (a crashed server whose claim
+     * has not expired): takes the claim over only when its fence is exactly {@code expectedFence} (the
+     * epoch {@code /awf multiprofile owner} shows) and releases it at once. The profile is then free, and
+     * every write the old holder makes under its claim is refused by the fenced repository. Refused when
+     * nobody else holds the profile, which includes a player online on this server (let them quit).
+     */
+    public CompletableFuture<Boolean> reclaim(final UUID profileId, final long expectedFence) {
+        if (!this.settings.enabled()) return failed(ProfileErrorCode.DISABLED, "AWF MultiProfile is disabled");
+        return io(() -> {
+            if (this.ownership.foreignHolder(profileId).join() == null) {
+                throw error(ProfileErrorCode.INVALID_REQUEST, "profile " + profileId
+                    + " is not held by another process; there is nothing to reclaim");
+            }
+            final ClaimResult taken = this.ownership.reclaim(profileId, expectedFence, this.nodeId, UUID.randomUUID()).join();
+            if (!taken.granted()) {
+                throw error(ProfileErrorCode.STALE_STATE, "the claim on " + profileId + " is no longer at fence "
+                    + expectedFence + "; look it up again with /awf multiprofile owner");
+            }
+            this.ownership.release(taken.claim()).join();
+            return true;
+        });
     }
 
     /** Releases a claim on the engine's I/O lane; used by the join/quit listener. */
@@ -525,39 +610,193 @@ public final class ProfileEngine {
         this.releaseOnSwitchEnd.remove(playerId);
     }
 
-    /** Renews every live session claim; returns how many are still held. */
+    /**
+     * Makes the active profile's bound worlds ready for a player who just joined, and returns the
+     * player to the profile when the join left them outside its worlds: profile worlds are not loaded
+     * at startup, so a player whose last location was in one is placed elsewhere by the server. The
+     * player is moved only with {@code isolation.location} on, only while no journal of the account is
+     * pending, only when they are in none of the profile's worlds and one of those was not loaded, and
+     * only to a destination inside them: the last location of the profile's latest snapshot, or the
+     * spawn of its PRIMARY world when that snapshot holds no location. A last location outside the
+     * bound worlds moves nobody. The latest snapshot can be older than the player's last session (no
+     * quit snapshot is written at shutdown), and then so is that location.
+     *
+     * <p>The whole preparation is bounded by {@code switching.timeout-ms}; once it timed out it issues
+     * no teleport. The teleport itself runs under a switch reservation ({@link #switchInProgress}), so
+     * no switch interleaves with it, and only after the account was read again and still names the
+     * same active profile with no pending journal: a switch that ran while the worlds loaded wins.
+     * Completes {@code true} when the player was moved; never fails, a failure is logged.</p>
+     *
+     * @param joinedWorld the world the player is in, read at join on the thread that owns the player
+     */
+    public CompletableFuture<Boolean> prepareActive(final UUID playerId, final String joinedWorld) {
+        if (!this.settings.enabled() || this.closed) return CompletableFuture.completedFuture(false);
+        final AtomicBoolean ended = new AtomicBoolean();
+        final String current = joinedWorld.toLowerCase(java.util.Locale.ROOT);
+        return io(() -> joinTarget(playerId, current))
+            .thenCompose(target -> target == null ? CompletableFuture.completedFuture(false)
+                : this.worlds.ensureReady(target.binding()).thenCompose(ready -> returnToProfile(playerId, target, ended)))
+            .orTimeout(this.settings.switching().timeoutMillis(), TimeUnit.MILLISECONDS)
+            .handle((moved, failed) -> {
+                ended.set(true);
+                if (failed == null) return moved;
+                SourbyLogger.warn("AWF MultiProfile: preparing the active profile of " + playerId + " on join failed: "
+                    + (unwrapCompletion(failed) instanceof TimeoutException
+                        ? "it did not finish within switching.timeout-ms" : messageOf(failed)));
+                return false;
+            });
+    }
+
+    /** What {@link #prepareActive} makes ready, and where it moves the player. */
+    private record JoinTarget(UUID profile, ProfileWorldBinding binding, ProfileState.Location destination,
+                              String primary) {}
+
+    /** Reads the active profile's binding and the join destination; runs inside an I/O step. */
+    private JoinTarget joinTarget(final UUID playerId, final String current) throws IOException {
+        final PlayerAccount account = this.repository.loadAccount(playerId, this.settings.defaultSlots());
+        final UUID profile = account.activeProfile();
+        if (profile == null) return null;
+        final ProfileWorldBinding binding = this.repository.binding(profile).orElse(null);
+        if (binding == null || binding.isEmpty()) return null;
+        binding.worlds().keySet().forEach(this::touch);
+        final java.util.Set<String> bound = binding.worlds().keySet();
+        final boolean placedOutside = !bound.contains(current)
+            && bound.stream().anyMatch(world -> !this.worlds.loaded(world));
+        if (!placedOutside || !this.settings.isolation().location() || pendingJournal(playerId)) {
+            return new JoinTarget(profile, binding, null, null);
+        }
+        final ProfileState.Location last = this.repository.latestSnapshot(profile)
+            .map(snapshot -> ProfileStateCodec.decode(snapshot.state()).returnPoint())
+            .orElse(null);
+        if (last == null) return new JoinTarget(profile, binding, null, primaryWorld(binding));
+        return new JoinTarget(profile, binding, bound.contains(last.world()) ? last : null, null);
+    }
+
+    /**
+     * Teleports a joined player to the {@link JoinTarget} destination once its worlds are ready, under a
+     * switch reservation that ends with the teleport (bounded by {@code switching.timeout-ms}).
+     */
+    private CompletableFuture<Boolean> returnToProfile(final UUID playerId, final JoinTarget target,
+                                                       final AtomicBoolean ended) {
+        if (target.destination() == null && target.primary() == null) return CompletableFuture.completedFuture(false);
+        // A preparation that already timed out, or a player who left, is not moved.
+        if (ended.get() || this.closed || !this.players.online(playerId)) return CompletableFuture.completedFuture(false);
+        final UUID reservation = UUID.randomUUID();
+        if (this.switches.putIfAbsent(playerId, reservation) != null) {
+            // A switch or a recovery runs; it decides where the player goes.
+            return CompletableFuture.completedFuture(false);
+        }
+        return io(() -> target.profile().equals(this.repository.loadAccount(playerId, this.settings.defaultSlots())
+                .activeProfile()) && !pendingJournal(playerId))
+            .thenCompose(unchanged -> {
+                if (!unchanged || ended.get() || !this.players.online(playerId)) {
+                    return CompletableFuture.completedFuture(false);
+                }
+                final ProfileState.Location destination = target.destination() != null ? target.destination()
+                    : this.worlds.spawnOf(target.primary());
+                if (destination == null) {
+                    return CompletableFuture.<Boolean>failedFuture(error(ProfileErrorCode.WORLD_UNAVAILABLE,
+                        "the PRIMARY world '" + target.primary() + "' is not loaded"));
+                }
+                return this.players.teleport(playerId, destination).thenApply(moved -> true);
+            })
+            .orTimeout(this.settings.switching().timeoutMillis(), TimeUnit.MILLISECONDS)
+            .whenComplete((moved, failed) -> transitionEnded(playerId, reservation));
+    }
+
+    /** Whether the account has an incomplete journal; runs inside an I/O step. */
+    private boolean pendingJournal(final UUID playerId) throws IOException {
+        for (final ProfileTransition transition : this.repository.transitionsFor(playerId)) {
+            if (!transition.terminal()) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Renews every live session claim and the claims running switches hold, in one batch
+     * ({@link ProfileOwnership#renewAll}); returns how many session claims are held afterwards. A
+     * session claim whose renewal failed while no switch or recovery runs for its player is claimed
+     * again when the player is still online here (see {@link #reclaimSession}), otherwise dropped. When
+     * the provider call fails, nothing is dropped and every claim is retried on the next heartbeat.
+     */
     public CompletableFuture<Integer> renewSessions() {
-        if (this.sessionClaims.isEmpty()) return CompletableFuture.completedFuture(0);
-        final List<Map.Entry<UUID, OwnerClaim>> claims = List.copyOf(this.sessionClaims.entrySet());
+        final List<Map.Entry<UUID, OwnerClaim>> sessions = List.copyOf(this.sessionClaims.entrySet());
+        final List<OwnerClaim> batch = new ArrayList<>(sessions.size() + 2 * this.runs.size());
+        for (final Map.Entry<UUID, OwnerClaim> entry : sessions) batch.add(entry.getValue());
+        // A running switch's claims are renewed too, so a switch that takes longer than the lease keeps
+        // them; their results are not acted on, the switch's fenced writes check them.
+        for (final SwitchRun run : this.runs) run.heldClaims(batch);
+        if (batch.isEmpty()) return CompletableFuture.completedFuture(0);
         return io(() -> {
-            int renewed = 0;
-            for (final Map.Entry<UUID, OwnerClaim> entry : claims) {
-                try {
-                    final OwnerClaim claim = entry.getValue();
-                    if (this.ownership.renew(claim).join()) {
-                        renewed++;
-                    } else if (!this.switches.containsKey(entry.getKey())
-                        && this.sessionClaims.remove(entry.getKey(), claim)) {
-                        // While a switch or recovery runs, it may have superseded this claim; a switch
-                        // installs its own claim when it ends, and one still invalid afterwards is
-                        // dropped on a later heartbeat. Otherwise the claim lapsed or was taken over;
-                        // kept, it would fail every save and repeat this warning on every heartbeat.
-                        SourbyLogger.warn("AWF MultiProfile: the session claim of " + entry.getKey()
-                            + " is no longer valid and was dropped; the player's next join claims the profile again");
-                    }
-                } catch (final RuntimeException failed) {
-                    // One provider serves every claim; if it is unreachable, stop instead of paying
-                    // one timeout per player on the heartbeat thread.
-                    SourbyLogger.warn("AWF MultiProfile: session renewal failed for " + entry.getKey()
-                        + "; the remaining claims are retried on the next heartbeat: " + messageOf(failed));
-                    break;
+            final List<Boolean> renewed;
+            try {
+                renewed = this.ownership.renewAll(batch).join();
+            } catch (final RuntimeException failed) {
+                // One provider serves every claim: a failure says nothing about any single claim, and
+                // paying one timeout per player on the I/O lane would only delay the next heartbeat.
+                SourbyLogger.warn("AWF MultiProfile: session renewal failed; every claim is retried on the next"
+                    + " heartbeat: " + messageOf(failed));
+                return 0;
+            }
+            int held = 0;
+            for (int i = 0; i < sessions.size(); i++) {
+                final UUID playerId = sessions.get(i).getKey();
+                final OwnerClaim claim = sessions.get(i).getValue();
+                if (i < renewed.size() && renewed.get(i)) {
+                    held++;
+                } else if (!this.switches.containsKey(playerId) && reclaimSession(playerId, claim)) {
+                    // While a switch or recovery runs it may have superseded this claim; a switch
+                    // installs its own claim when it ends, and one still invalid afterwards is handled
+                    // on a later heartbeat.
+                    held++;
                 }
             }
-            return renewed;
+            return held;
         });
     }
 
-    /** Whether a switch is running for the player. */
+    /**
+     * A session claim that could not be renewed while no switch or recovery runs for its player. When
+     * the player is still online here the profile is claimed again: a claim that only lapsed (nobody
+     * took the profile) is taken over with a new fence, and writes made under the old claim stay
+     * refused. When another process holds the profile now, or the player is gone, the claim is dropped:
+     * kept, it would fail every save and warn on every heartbeat. Runs inside an I/O step.
+     */
+    private boolean reclaimSession(final UUID playerId, final OwnerClaim lapsed) {
+        final OwnerClaim recorded = this.sessionClaims.get(playerId);
+        if (!lapsed.equals(recorded)) {
+            // A switch that ended since the batch was built installed its own claim (possibly on this same
+            // profile, which a claim made here would supersede), or the player quit: nothing to re-claim.
+            return recorded != null;
+        }
+        if (this.players.online(playerId)) {
+            final ClaimResult claimed = this.ownership.claim(UUID.fromString(lapsed.id()), this.nodeId,
+                UUID.randomUUID()).join();
+            if (claimed.granted()) {
+                if (this.sessionClaims.replace(playerId, lapsed, claimed.claim())) {
+                    SourbyLogger.warn("AWF MultiProfile: the session claim of " + playerId + " on " + lapsed.id()
+                        + " lapsed and was claimed again (fence " + lapsed.fence() + " -> " + claimed.claim().fence() + ")");
+                    return true;
+                }
+                // The player quit, or a switch installed its claim, in the meantime: this one is nobody's.
+                this.ownership.release(claimed.claim()).join();
+                return false;
+            }
+            if (this.sessionClaims.remove(playerId, lapsed)) {
+                SourbyLogger.warn("AWF MultiProfile: the session claim of " + playerId + " on " + lapsed.id()
+                    + " was taken over by " + (claimed.claim() == null ? "another node" : claimed.claim().node())
+                    + " and was dropped; saves for this player are refused until their next join claims it again");
+            }
+            return false;
+        }
+        if (this.sessionClaims.remove(playerId, lapsed)) {
+            SourbyLogger.warn("AWF MultiProfile: the session claim of " + playerId + " is no longer valid and was"
+                + " dropped; the player's next join claims the profile again");
+        }
+        return false;
+    }
+
+    /** Whether a switch, a recovery or the teleport of a join preparation ({@link #prepareActive}) runs for the player. */
     public boolean switchInProgress(final UUID playerId) {
         return this.switches.containsKey(playerId);
     }
@@ -590,7 +829,10 @@ public final class ProfileEngine {
         this.sessionClaims.clear();
     }
 
-    /** Records that a bound world was used, for idle unloading. */
+    /**
+     * Records that a world bound to a profile was used, for idle unloading. Only binding worlds are
+     * passed here, so the sweep never tracks a world no profile is bound to.
+     */
     public void touch(final String world) {
         this.worldUse.put(world, System.nanoTime());
         this.worlds.touch(world);
@@ -604,7 +846,14 @@ public final class ProfileEngine {
         return this.lastIdleSweep;
     }
 
-    /** Unloads bound worlds that have been idle beyond the configured time; completes with how many unloaded. */
+    /**
+     * Unloads bound worlds that have been idle beyond the configured time; completes with how many
+     * unloaded. Only worlds a binding touched are tracked, and only AWF worlds are unloaded
+     * ({@link ProfileWorldPort#managed}; never the server's main world): an idle entry for another
+     * world, or for a world that is no longer loaded, is dropped (a later switch or join touches it
+     * again). A world with a player inside counts as used: it is touched again and skipped, so an
+     * occupied world is neither saved nor reported.
+     */
     public CompletableFuture<Integer> sweepIdleWorlds() {
         if (!this.settings.enabled() || this.settings.worlds().idleUnloadSeconds() <= 0) {
             return CompletableFuture.completedFuture(0);
@@ -613,7 +862,14 @@ public final class ProfileEngine {
         final long now = System.nanoTime();
         final List<String> idle = new ArrayList<>();
         this.worldUse.forEach((world, used) -> {
-            if (now - used >= idleNanos && this.worlds.loaded(world)) idle.add(world);
+            if (now - used < idleNanos) return;
+            if (!this.worlds.managed(world) || !this.worlds.loaded(world)) {
+                this.worldUse.remove(world, used);
+            } else if (this.worlds.occupied(world)) {
+                this.worldUse.replace(world, used, now);
+            } else {
+                idle.add(world);
+            }
         });
         if (idle.isEmpty()) return CompletableFuture.completedFuture(0);
         final AtomicInteger unloaded = new AtomicInteger();
@@ -622,6 +878,11 @@ public final class ProfileEngine {
         for (final String world : idle) {
             final long usedAt = this.worldUse.getOrDefault(world, 0L);
             chain = chain.thenCompose(ignored -> {
+                // A player may have entered since the scan: still in use, not an unload failure.
+                if (this.worlds.occupied(world)) {
+                    this.worldUse.replace(world, usedAt, System.nanoTime());
+                    return CompletableFuture.completedFuture(null);
+                }
                 // A switch may have touched the world since the scan; a conditional remove keeps
                 // that touch, so the world is not unloaded under the teleport and is swept later.
                 if (!this.worldUse.remove(world, usedAt)) return CompletableFuture.completedFuture(null);
@@ -698,13 +959,23 @@ public final class ProfileEngine {
         if (!forward && !journal.targetMayBeApplied()) {
             // The switch stopped before the target state was handed to the player, and the account
             // still names the previous profile: the player's own state is authoritative. Applying the
-            // old snapshot would revert whatever happened since, so nothing is applied.
-            return io(() -> {
-                this.repository.deleteTransition(transitionId, ProfileWriteGuard.UNGUARDED);
+            // old snapshot would revert whatever happened since, so nothing is applied. With
+            // distributed ownership the removal is fenced by a claim on the target: a switch that is
+            // still running on another node holds that claim, so its journal is not removed under it.
+            final CompletableFuture<OwnerClaim> fence = this.ownership.distributed()
+                ? claimForRecovery(journal.toProfile(), journal.toFence(), journal)
+                : CompletableFuture.completedFuture(null);
+            return fence.thenCompose(claim -> io(() -> {
+                this.repository.deleteTransition(transitionId, ProfileWriteGuard.claimed(claim));
                 return null;
-            }).thenApply(ignored -> failure(ProfileErrorCode.RECOVERED, "transition " + transitionId + " stopped at "
-                + journal.phase() + ", before the target state was applied; journal removed, nothing changed",
-                null, began));
+            }).handle((removed, failed) -> releaseRecoveryClaim(claim, journal.playerId()).thenApply(released -> {
+                if (failed != null) {
+                    throw failed instanceof CompletionException completion ? completion : new CompletionException(failed);
+                }
+                return removed;
+            })).thenCompose(settled -> settled)).thenApply(ignored -> failure(ProfileErrorCode.RECOVERED, "transition "
+                + transitionId + " stopped at " + journal.phase() + ", before the target state was applied; journal"
+                + " removed, nothing changed", null, began));
         }
         final UUID contact = forward ? journal.toProfile() : journal.fromProfile();
         final long recordedFence = forward ? journal.toFence() : journal.fromFence();
@@ -717,7 +988,7 @@ public final class ProfileEngine {
                     .thenApply(profile -> ProfileSwitchResult.success(profile.orElse(null), transitionId,
                         System.currentTimeMillis() - began))
                 : rollbackTo(recovery, began, claim);
-            return outcome.handle((result, failed) -> releaseRecoveryClaim(claim).thenApply(released -> {
+            return outcome.handle((result, failed) -> releaseRecoveryClaim(claim, journal.playerId()).thenApply(released -> {
                 if (failed != null) {
                     throw failed instanceof CompletionException completion ? completion : new CompletionException(failed);
                 }
@@ -732,6 +1003,10 @@ public final class ProfileEngine {
      * the journal was written). Fences are compared only when they are comparable: issued by the same
      * provider incarnation, or for a journal of an earlier build (no incarnation) only by a provider
      * whose counters survive a restart.
+     *
+     * <p>When the player's own session claim on this node is on that profile and still valid, it is
+     * used as it is: claiming again would replace its owner token (same process) and leave the
+     * session with a claim that no longer validates. {@link #releaseRecoveryClaim} keeps it.</p>
      */
     private CompletableFuture<OwnerClaim> claimForRecovery(final UUID profileId, final long recordedFence,
                                                            final ProfileTransition journal) {
@@ -741,6 +1016,10 @@ public final class ProfileEngine {
         final boolean comparable = journal.incarnation() == null
             ? this.ownership.distributed() : journal.incarnation().equals(this.ownership.incarnation());
         return io(() -> {
+            final OwnerClaim session = this.sessionClaims.get(journal.playerId());
+            if (session != null && session.id().equals(profileId.toString()) && this.ownership.validate(session).join()) {
+                return session;
+            }
             final ClaimResult claimed = this.ownership.claim(profileId, this.nodeId, UUID.randomUUID()).join();
             if (!claimed.granted()) {
                 throw error(ProfileErrorCode.OWNERSHIP_CONFLICT, "profile " + profileId + " is held by "
@@ -757,8 +1036,9 @@ public final class ProfileEngine {
         });
     }
 
-    private CompletableFuture<Void> releaseRecoveryClaim(final OwnerClaim claim) {
-        if (claim == null) return CompletableFuture.completedFuture(null);
+    /** Releases a claim {@link #claimForRecovery} took; the player's session claim it borrowed is kept. */
+    private CompletableFuture<Void> releaseRecoveryClaim(final OwnerClaim claim, final UUID playerId) {
+        if (claim == null || claim.equals(this.sessionClaims.get(playerId))) return CompletableFuture.completedFuture(null);
         return this.<Void>io(() -> {
             this.ownership.release(claim).join();
             return null;
@@ -871,6 +1151,7 @@ public final class ProfileEngine {
     public void close() {
         this.closed = true;
         this.switches.clear();
+        this.runs.clear();
         this.frozen.clear();
         this.sessionClaims.clear();
         this.releaseOnSwitchEnd.clear();
@@ -903,6 +1184,13 @@ public final class ProfileEngine {
         private volatile ProfileState previousState;
         /** Compensation left the journal {@code RECOVERING}: the rollback has not completed. */
         private volatile boolean rollbackPending;
+        /**
+         * The account revision the commit expected, when its write failed on a remote repository and so
+         * may still have been applied; {@code -1} otherwise. Compensation settles it first.
+         */
+        private volatile long uncertainCommit = -1L;
+        /** The target's world binding as {@link #worldReady} read it; {@code null} when it has none. */
+        private volatile ProfileWorldBinding targetBinding;
 
         private SwitchRun(final ProfileTransition journal, final PlayerAccount account, final AuroraProfile target,
                           final UUID ownerToken, final long began) {
@@ -915,6 +1203,14 @@ public final class ProfileEngine {
 
         private UUID playerId() {
             return this.account.playerId();
+        }
+
+        /** Adds the claims this run holds right now (target, previous profile) for the heartbeat. */
+        private void heldClaims(final List<OwnerClaim> into) {
+            final OwnerClaim target = this.claim.get();
+            if (target != null) into.add(target);
+            final OwnerClaim previous = this.previousClaim.get();
+            if (previous != null) into.add(previous);
         }
 
         private CompletableFuture<ProfileSwitchResult> execute() {
@@ -940,24 +1236,7 @@ public final class ProfileEngine {
             chain = chain.thenCompose(ignored -> capturePrevious());
             chain = chain.thenCompose(ignored -> applyTarget());
             chain = chain.thenCompose(ignored -> commit());
-            // After the commit point a failure is not a rollback: the account already names the target.
-            chain = chain.thenCompose(ignored -> releasePrevious().handle((released, failed) -> {
-                if (failed != null) {
-                    SourbyLogger.warn("AWF MultiProfile: releasing the previous profile failed after commit: "
-                        + messageOf(failed));
-                }
-                return (Void) null;
-            }));
-            chain = chain.thenCompose(ignored -> ProfileEngine.this.<Void>io(() -> {
-                ProfileEngine.this.repository.deleteTransition(this.journal.get().transitionId(), journalGuard());
-                return null;
-            }).handle((deleted, failed) -> {
-                if (failed != null) {
-                    // The journal still says COMMITTING, so the next join completes it forward.
-                    SourbyLogger.warn("AWF MultiProfile: could not remove a completed journal: " + messageOf(failed));
-                }
-                return (Void) null;
-            }));
+            chain = chain.thenCompose(ignored -> afterCommit());
             return chain.handle((ignored, failed) -> {
                     this.failure = failed;
                     return failed;
@@ -1055,6 +1334,7 @@ public final class ProfileEngine {
             return bounded(io(() -> ProfileEngine.this.repository.binding(this.target.id()).orElse(null))
                 .thenCompose(binding -> {
                     if (binding == null || binding.isEmpty()) return CompletableFuture.completedFuture(null);
+                    this.targetBinding = binding;
                     binding.worlds().keySet().forEach(ProfileEngine.this::touch);
                     return ProfileEngine.this.worlds.ensureReady(binding).exceptionallyCompose(failed ->
                         CompletableFuture.failedFuture(error(ProfileErrorCode.WORLD_UNAVAILABLE,
@@ -1076,18 +1356,68 @@ public final class ProfileEngine {
                 return snapshot.map(ProfileSnapshot::state).map(ProfileStateCodec::decode).orElseGet(ProfileState::empty);
             }).thenCompose(state -> phase(TransitionPhase.APPLYING_TARGET).thenApply(written -> state))
                 .thenCompose(state -> {
-                    if (state.spawn() != null) ProfileEngine.this.touch(state.spawn().world());
                     this.targetApplyStarted.set(true);
                     return bounded(ProfileEngine.this.players.apply(playerId(), state,
                             ProfileEngine.this.settings.isolation(), this.abandoned::get), "applying the target state")
-                        .thenCompose(ignored -> {
-                            final ProfileState.Location destination = state.spawn() != null ? state.spawn()
-                                : state.returnPoint();
-                            if (destination == null) return CompletableFuture.completedFuture(null);
-                            return phase(TransitionPhase.TELEPORTING).thenCompose(teleporting ->
-                                bounded(ProfileEngine.this.players.teleport(playerId(), destination),
-                                    "teleporting the player"));
-                        });
+                        .thenCompose(ignored -> moveToTarget(state));
+                });
+        }
+
+        /**
+         * Moves the player into the target profile: to its last location, else its respawn point, else
+         * the spawn of its PRIMARY bound world, which is also where a profile without a stored location
+         * (a new one) goes. A destination that cannot be reached (its world is not loaded, the teleport
+         * is refused) falls back to the next one with a warning; when none is left, the last failure
+         * fails the switch. When the profile stores no location and its PRIMARY world's spawn is not
+         * known, the player stays where they are, with a warning, as with every new profile before Build
+         * 50. With {@code isolation.location} off the profile owns no location and the player stays where
+         * they are.
+         */
+        private CompletableFuture<Void> moveToTarget(final ProfileState state) {
+            if (!ProfileEngine.this.settings.isolation().location()) return CompletableFuture.completedFuture(null);
+            final List<ProfileState.Location> stored = new ArrayList<>(2);
+            if (state.returnPoint() != null) stored.add(state.returnPoint());
+            if (state.spawn() != null && !state.spawn().equals(state.returnPoint())) stored.add(state.spawn());
+            final ProfileWorldBinding binding = this.targetBinding;
+            final String primary = primaryWorld(binding);
+            if (stored.isEmpty()) {
+                if (primary == null) return CompletableFuture.completedFuture(null);
+                if (ProfileEngine.this.worlds.spawnOf(primary) == null) {
+                    // Nothing of the profile's own state is left unapplied: the PRIMARY spawn is only where a
+                    // profile without a location is placed, so a port that does not know it (or a world
+                    // unloaded since it was made ready) does not fail a switch that applied everything else.
+                    SourbyLogger.warn("AWF MultiProfile: switch " + this.journal.get().transitionId() + ": the spawn of"
+                        + " the PRIMARY world '" + primary + "' is not known (the world is not loaded); " + playerId()
+                        + " stays where they are");
+                    return CompletableFuture.completedFuture(null);
+                }
+            }
+            // Keep the bound worlds from being idle-unloaded under the teleport.
+            if (binding != null) binding.worlds().keySet().forEach(ProfileEngine.this::touch);
+            return phase(TransitionPhase.TELEPORTING).thenCompose(written -> teleportFrom(stored, 0, primary));
+        }
+
+        /** Tries {@code destinations} from {@code index} on, then the PRIMARY world's spawn when there is one. */
+        private CompletableFuture<Void> teleportFrom(final List<ProfileState.Location> destinations, final int index,
+                                                     final String primary) {
+            if (index == destinations.size()) {
+                // Reached only with a PRIMARY world: without one, the last stored destination's failure ends the chain.
+                final ProfileState.Location spawn = ProfileEngine.this.worlds.spawnOf(primary);
+                if (spawn == null) {
+                    return failed(ProfileErrorCode.WORLD_UNAVAILABLE, "the PRIMARY world '" + primary + "' is not loaded");
+                }
+                return bounded(ProfileEngine.this.players.teleport(playerId(), spawn), "teleporting the player");
+            }
+            final ProfileState.Location destination = destinations.get(index);
+            return bounded(ProfileEngine.this.players.teleport(playerId(), destination), "teleporting the player")
+                .exceptionallyCompose(failed -> {
+                    final boolean last = index + 1 == destinations.size() && primary == null;
+                    if (last || codeOf(failed) == ProfileErrorCode.TIMEOUT) return CompletableFuture.failedFuture(failed);
+                    SourbyLogger.warn("AWF MultiProfile: switch " + this.journal.get().transitionId() + " could not move "
+                        + playerId() + " into world '" + destination.world() + "' (" + messageOf(failed) + "); trying "
+                        + (index + 1 < destinations.size() ? "the profile's respawn point"
+                            : "the spawn of its PRIMARY world '" + primary + "'"));
+                    return teleportFrom(destinations, index + 1, primary);
                 });
         }
 
@@ -1101,14 +1431,102 @@ public final class ProfileEngine {
                 }
                 final PlayerAccount current = ProfileEngine.this.repository.loadAccount(playerId(),
                     ProfileEngine.this.settings.defaultSlots());
-                ProfileEngine.this.repository.saveAccount(current.withActive(this.target.id()),
-                    ProfileWriteGuard.of(held, current.revision()));
+                try {
+                    ProfileEngine.this.repository.saveAccount(current.withActive(this.target.id()),
+                        ProfileWriteGuard.of(held, current.revision()));
+                } catch (final IOException lost) {
+                    // A remote repository may have run the commit and lost the reply: rolling the
+                    // player back now could leave the account naming the target under the previous
+                    // state. Compensation establishes the outcome first.
+                    if (ProfileEngine.this.repository.remote()) this.uncertainCommit = current.revision();
+                    throw lost;
+                }
                 this.commitPoint.set(true);
                 // The switch owns the target claim from here on; quit and shutdown must release
                 // this one, not the claim the previous profile had at join time.
                 if (held != null) ProfileEngine.this.sessionClaims.put(playerId(), held);
                 return null;
             }));
+        }
+
+        /** After the commit point a failure is not a rollback: the account already names the target. */
+        private CompletableFuture<Void> afterCommit() {
+            return releasePrevious().handle((released, failed) -> {
+                if (failed != null) {
+                    SourbyLogger.warn("AWF MultiProfile: releasing the previous profile failed after commit: "
+                        + messageOf(failed));
+                }
+                return (Void) null;
+            }).thenCompose(ignored -> ProfileEngine.this.<Void>io(() -> {
+                ProfileEngine.this.repository.deleteTransition(this.journal.get().transitionId(), journalGuard());
+                return null;
+            }).handle((deleted, failed) -> {
+                if (failed != null) {
+                    // The journal still says COMMITTING, so the next join completes it forward.
+                    SourbyLogger.warn("AWF MultiProfile: could not remove a completed journal: " + messageOf(failed));
+                }
+                return (Void) null;
+            }));
+        }
+
+        /**
+         * The commit's write failed on a remote repository, so it may have been applied. Claiming the
+         * target again with a new owner token supersedes the claim the commit was sent under, and the
+         * repository fences on that token, so a commit still on its way can no longer apply; the
+         * account read after that decides. Applied: the switch is complete and finishes as committed.
+         * Not applied: the usual compensation. When the claim or the read fails too, the outcome stays
+         * unknown ({@link #leaveUnknown}).
+         */
+        private CompletableFuture<Void> settleCommit(final Throwable failed) {
+            final long expected = this.uncertainCommit;
+            this.uncertainCommit = -1L;
+            return ProfileEngine.this.<Boolean>io(() -> {
+                final ClaimResult barrier = ProfileEngine.this.ownership
+                    .claim(this.target.id(), ProfileEngine.this.nodeId, UUID.randomUUID()).join();
+                this.claim.set(barrier.granted() ? barrier.claim() : null);
+                final PlayerAccount account = ProfileEngine.this.repository.loadAccount(playerId(),
+                    ProfileEngine.this.settings.defaultSlots());
+                return this.target.id().equals(account.activeProfile()) && account.revision() > expected;
+            }).handle((applied, unknown) -> {
+                if (unknown != null) return leaveUnknown(failed, unknown);
+                if (applied) return completeCommitted();
+                return compensate(failed);
+            }).thenCompose(next -> next);
+        }
+
+        /** The lost commit was applied: finish exactly as the switch does after a commit. */
+        private CompletableFuture<Void> completeCommitted() {
+            this.commitPoint.set(true);
+            final OwnerClaim held = this.claim.get();
+            if (held != null) {
+                ProfileEngine.this.sessionClaims.put(playerId(), held);
+            } else {
+                // The recorded claim is still the one on the profile just left; kept, the heartbeat would
+                // claim that profile again although the account no longer names it.
+                ProfileEngine.this.sessionClaims.remove(playerId());
+            }
+            SourbyLogger.warn("AWF MultiProfile: switch " + this.journal.get().transitionId() + " lost the reply of its"
+                + " commit, but the account shows it was applied; the switch completed"
+                + (held == null ? ", and another node holds the target now, so this player's saves are refused until"
+                    + " they join again" : ""));
+            return afterCommit();
+        }
+
+        /**
+         * Neither the claim nor the account could be read after a lost commit reply: the outcome is
+         * unknown. Nothing is rolled back, because the account may already name the target; the player
+         * keeps the state they have, and the journal is left pending, which refuses their saves and
+         * switches until recovery decides from the account (forward when it names the target, back to the
+         * rollback point otherwise). The target claim is kept until its lease ends.
+         */
+        private CompletableFuture<Void> leaveUnknown(final Throwable failed, final Throwable unknown) {
+            if (ProfileEngine.this.metrics != null) ProfileEngine.this.metrics.profileFailure();
+            adoptPreviousClaim();
+            this.rollbackPending = true;
+            final String reason = messageOf(failed) + "; whether the commit was applied is unknown (" + messageOf(unknown)
+                + "), so nothing was rolled back and recovery decides from the account";
+            SourbyLogger.error("AWF MultiProfile: switch " + this.journal.get().transitionId() + ": " + reason);
+            return record(this.journal.get().recovering(reason));
         }
 
         private CompletableFuture<Void> releasePrevious() {
@@ -1168,6 +1586,7 @@ public final class ProfileEngine {
                     + " failed after its commit (" + reason + "); recovery completes it");
                 return CompletableFuture.completedFuture(null);
             }
+            if (this.uncertainCommit >= 0L) return settleCommit(failed);
             if (ProfileEngine.this.metrics != null) ProfileEngine.this.metrics.profileFailure();
             final Map<String, String> recovery = Map.of("player", playerId().toString(),
                 "transition", this.journal.get().transitionId().toString(), "reason", truncate(reason));
@@ -1297,18 +1716,49 @@ public final class ProfileEngine {
     /**
      * Publishes a snapshot at {@code revision + 1} and the profile record bumped to it. The guard
      * carries the revision read here, so the repository refuses the publish if another writer moved
-     * the profile on in between.
+     * the profile on in between. The state keeps the adapter entries of the profile's latest snapshot
+     * that the capture does not account for ({@link #withCarriedAdapters}).
      */
     private ProfileSnapshot writeSnapshotFor(final UUID profileId, final ProfileState state, final OwnerClaim claim)
         throws IOException {
         final AuroraProfile profile = this.repository.profile(profileId)
             .orElseThrow(() -> error(ProfileErrorCode.PROFILE_NOT_FOUND, "no profile " + profileId));
-        final byte[] encoded = encode(profileId, state);
+        final byte[] encoded = encode(profileId, withCarriedAdapters(profileId, state));
         final ProfileSnapshot snapshot = new ProfileSnapshot(profileId, UUID.randomUUID(), ProfileState.SCHEMA,
             profile.revision() + 1, encoded, ProfileStateCodec.checksum(encoded), System.currentTimeMillis());
         this.repository.publishSnapshot(profile.nextRevision(), snapshot, SNAPSHOTS_KEPT,
             ProfileWriteGuard.of(claim, profile.revision()));
         return snapshot;
+    }
+
+    /**
+     * The captured state with the adapter entries of the profile's latest snapshot that no adapter
+     * registered on this boot accounts for ({@link PlayerStatePort#carryAdapters}), so the data of a
+     * plugin that is missing on this boot survives the save. Runs inside an I/O step. When the latest
+     * snapshot cannot be read, the capture is stored as it is, with a warning: the entries only that
+     * snapshot held are then not kept, and the save is not refused for it.
+     */
+    private ProfileState withCarriedAdapters(final UUID profileId, final ProfileState state) {
+        final ProfileState previous;
+        try {
+            final Optional<ProfileSnapshot> latest = this.repository.latestSnapshot(profileId);
+            if (latest.isEmpty()) return state;
+            previous = ProfileStateCodec.decode(latest.get().state());
+        } catch (final IOException | IllegalArgumentException unreadable) {
+            SourbyLogger.warn("AWF MultiProfile: the latest snapshot of " + profileId + " could not be read ("
+                + unreadable.getMessage() + "); adapter data only it held is not kept in the new snapshot");
+            return state;
+        }
+        return previous.adapters().isEmpty() ? state : this.players.carryAdapters(state, previous);
+    }
+
+    /** The first world the binding gives the PRIMARY role, or {@code null}. */
+    private static String primaryWorld(final ProfileWorldBinding binding) {
+        if (binding == null) return null;
+        for (final Map.Entry<String, ProfileWorldRole> entry : binding.worlds().entrySet()) {
+            if (entry.getValue() == ProfileWorldRole.PRIMARY) return entry.getKey();
+        }
+        return null;
     }
 
     /** Archives the state a player had before their first profile; the first switch's rollback point. */
@@ -1323,13 +1773,16 @@ public final class ProfileEngine {
         return snapshot;
     }
 
-    /** Encodes a state; one too large to store is the request's problem, reported with its size. */
+    /**
+     * Encodes a state. The codec's only encoding refusal is the size limit, so one too large to store is
+     * {@link ProfileErrorCode#STATE_TOO_LARGE}, reported with its size.
+     */
     private static byte[] encode(final UUID owner, final ProfileState state) {
         try {
             return ProfileStateCodec.encode(state);
         } catch (final ProfileStateCodec.ProfileStateFormatException tooLarge) {
             SourbyLogger.warn("AWF MultiProfile: the state of " + owner + " cannot be stored: " + tooLarge.getMessage());
-            throw error(ProfileErrorCode.INVALID_REQUEST, "the profile state cannot be stored: " + tooLarge.getMessage());
+            throw error(ProfileErrorCode.STATE_TOO_LARGE, "the profile state cannot be stored: " + tooLarge.getMessage());
         }
     }
 
@@ -1474,7 +1927,7 @@ public final class ProfileEngine {
         if (failed == null) return ProfileErrorCode.RECOVERY_REQUIRED;
         final ProfileErrorCode code = codeOf(failed);
         return switch (code) {
-            case STALE_STATE, OWNERSHIP_CONFLICT, WORLD_UNAVAILABLE, PLAYER_OFFLINE, INVALID_REQUEST,
+            case STALE_STATE, OWNERSHIP_CONFLICT, WORLD_UNAVAILABLE, PLAYER_OFFLINE, INVALID_REQUEST, STATE_TOO_LARGE,
                  PROFILE_NOT_FOUND, NOT_OWNED, PROFILE_LOCKED, SWITCHING_DISABLED, DISABLED, TIMEOUT -> code;
             default -> ProfileErrorCode.RECOVERY_REQUIRED;
         };

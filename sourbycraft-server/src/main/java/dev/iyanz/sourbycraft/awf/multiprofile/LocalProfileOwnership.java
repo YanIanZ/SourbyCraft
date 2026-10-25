@@ -125,6 +125,13 @@ public final class LocalProfileOwnership implements ProfileOwnership {
         return lease.claim();
     }
 
+    /** Claims live in this process only, so a holder under another node id is the only foreign one. */
+    @Override
+    public CompletableFuture<OwnerClaim> foreignHolder(final UUID profileId) {
+        final OwnerClaim holder = holderNow(profileId);
+        return CompletableFuture.completedFuture(holder == null || holder.node().equals(this.nodeId) ? null : holder);
+    }
+
     /** Every live lease, for admin diagnostics. */
     public Map<UUID, OwnerClaim> live() {
         final Map<UUID, OwnerClaim> live = new java.util.LinkedHashMap<>();

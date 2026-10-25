@@ -60,6 +60,27 @@ public interface AuroraProfiles {
 
     CompletableFuture<List<ProfileWorldRef>> getProfileWorlds(UUID profileId);
 
+    /**
+     * Puts an inactive profile on administrative hold ({@code locked}: still listed, switching to it is
+     * refused) or releases it. The active profile cannot be locked, and the call is refused during an
+     * account transition or while a transition journal of the account is pending. The plugin must
+     * authorize player requests itself. Default failure preserves compatibility with alternative service
+     * implementations built before this API was added.
+     */
+    default CompletableFuture<Void> setProfileLocked(UUID profileId, boolean locked) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("profile locking unavailable"));
+    }
+
+    /**
+     * Sets how many profiles an account may own, between 1 and the server's {@code max-slots}; completes
+     * with the new limit. Profiles beyond a lowered limit are kept, only creating more is refused. Default
+     * failure preserves compatibility with alternative service implementations built before this API was
+     * added.
+     */
+    default CompletableFuture<Integer> setProfileSlotLimit(UUID accountId, int slots) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("profile slot limits unavailable"));
+    }
+
     /** Which node owns the profile, if any. */
     CompletableFuture<Optional<ProfileOwner>> resolveProfileOwnership(UUID profileId);
 
