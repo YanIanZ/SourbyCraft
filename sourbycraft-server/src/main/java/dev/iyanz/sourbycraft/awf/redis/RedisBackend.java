@@ -317,28 +317,41 @@ public final class RedisBackend implements AwfBackend {
         return fields;
     }
 
-    /** Waits for the last write to reach Redis's append-only file, if configured and possible. */
-    void awaitDurable() throws IOException {
-        if (!this.waitForAof) return;
-        // The commit already ran on Redis: a deadline here leaves its durability unknown, never "not applied".
-        final int waitMillis;
-        try {
-            waitMillis = this.client.remainingTimeoutMillis();
-        } catch (final dev.iyanz.sourbycraft.awf.AwfDeadlineExceeded passed) {
-            throw new dev.iyanz.sourbycraft.awf.AwfDeadlineExceeded("the AWF shutdown deadline passed after Redis ran the"
-                + " commit and before it confirmed the append-only file write", true, passed);
-        }
-        try {
-            final Object reply = this.client.call("WAITAOF", "1", "0", Integer.toString(waitMillis));
-            if (reply instanceof List<?> counts && !counts.isEmpty() && counts.getFirst() instanceof Long local && local < 1) {
-                throw new IOException("Redis did not write the commit to its append-only file within "
-                    + waitMillis + " ms");
-            }
-        } catch (final RedisClient.RedisError unsupported) {
+    /**
+     * How long the {@code WAITAOF} sent behind a commit may wait, or {@code 0} when commits are
+     * acknowledged from memory ({@code wait-for-aof} off, or found unsupported). Half the time a call
+     * may still take ({@link RedisClient#remainingTimeoutMillis}, cut by the shutdown deadline), so
+     * Redis answers before the connection's read timeout ends. Called before the commit is sent.
+     *
+     * @throws dev.iyanz.sourbycraft.awf.AwfDeadlineExceeded once the shutdown deadline has passed;
+     *     nothing was sent
+     */
+    int aofWaitMillis() throws IOException {
+        if (!this.waitForAof) return 0;
+        return Math.max(1, this.client.remainingTimeoutMillis() / 2);
+    }
+
+    /** {@code WAITAOF 1 0 <millis>}: one local append-only file write, no replica. */
+    static Object[] waitAof(final int millis) {
+        return new Object[] {"WAITAOF", "1", "0", Integer.toString(millis)};
+    }
+
+    /**
+     * Applies the reply of the {@code WAITAOF} that ran behind a commit on the same connection, after
+     * Redis applied the commit: confirmed returns; not confirmed within {@code waitMillis} throws; an
+     * error reply (no append-only file, or Redis older than 7.2) is logged once, and from then on
+     * commits are acknowledged from Redis's memory.
+     */
+    void confirmDurable(final Object reply, final int waitMillis) throws IOException {
+        if (reply instanceof RedisClient.RedisError unsupported) {
             this.waitForAof = false;
             SourbyLogger.warn("Redis cannot confirm writes to its append-only file (" + unsupported.getMessage()
                 + "); AWF commits are acknowledged from Redis's memory and are as durable as its persistence"
                 + " settings. Enable appendonly on Redis 7.2+, or set aurora.awf.redis.wait-for-aof = false.");
+            return;
+        }
+        if (reply instanceof List<?> counts && !counts.isEmpty() && counts.getFirst() instanceof Long local && local < 1) {
+            throw new IOException("Redis did not write the commit to its append-only file within " + waitMillis + " ms");
         }
     }
 

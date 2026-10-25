@@ -1024,6 +1024,10 @@ public class AwfCommand extends Command {
                     final java.util.UUID id = uuidArg(s, args, action.equals("sessions") ? "profile uuid" : "object uuid");
                     if (id == null) return;
                     final String kind = action.equals("sessions") ? "session" : "profile";
+                    // MultiProfile claims live in the session fabric; no runtime code writes a coordination claim
+                    // of kind "profile", so "ownership" shows only a claim made by code calling CoordinationFabric.
+                    final String label = kind.equals("session") ? ""
+                        : "coordination claim (API-only; profiles: /awf multiprofile owner): ";
                     dev.iyanz.sourbycraft.util.VirtualExecutor.supply(() -> kind.equals("session")
                         ? fabric.sessions().holder(id)
                         : fabric.coordination().current("profile", id.toString())
@@ -1032,13 +1036,13 @@ public class AwfCommand extends Command {
                             redisFailed(s, failed);
                             return;
                         }
-                        if (claim == null) s.sendMessage(UiPanel.row(id.toString(), "unowned"));
-                        else s.sendMessage(UiPanel.row(id.toString(), "node " + claim.node() + ", epoch/fence "
+                        if (claim == null) s.sendMessage(UiPanel.row(id.toString(), label + "unowned"));
+                        else s.sendMessage(UiPanel.row(id.toString(), label + "node " + claim.node() + ", epoch/fence "
                             + claim.fence() + ", expires " + claim.expiresAtMillis()));
                     }));
                 }
                 default -> s.sendMessage(text("Usage: /awf redis <status|pools|sessions <profile>|events|"
-                    + "ownership <profile>|health>", SourbyCraftColors.WARNING));
+                    + "ownership <uuid> (coordination claim, API-only)|health>", SourbyCraftColors.WARNING));
             }
         }));
     }

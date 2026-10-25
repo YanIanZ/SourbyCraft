@@ -84,7 +84,16 @@ public interface AuroraProfiles {
     /** Which node owns the profile, if any. */
     CompletableFuture<Optional<ProfileOwner>> resolveProfileOwnership(UUID profileId);
 
-    /** Registers a plugin adapter; replaces an existing adapter with the same id from that plugin. */
+    /**
+     * Registers the plugin's adapter, or replaces the one that plugin registered under the same id.
+     * {@link ProfileStateAdapter#version()} is read once, here; a plugin that changes it registers again.
+     *
+     * @throws IllegalArgumentException when the id is malformed, its {@code id:version} key is longer
+     *     than 64 characters, the version is below 1, another enabled plugin registered the id, or 32
+     *     adapters are registered already and the id is not one of them
+     * @throws ProfileOperationException with {@link ProfileErrorCode#INVALID_REQUEST} when the plugin is
+     *     not enabled
+     */
     void registerProfileStateAdapter(Plugin plugin, ProfileStateAdapter adapter);
 
     void unregisterProfileStateAdapter(Plugin plugin, String adapterId);

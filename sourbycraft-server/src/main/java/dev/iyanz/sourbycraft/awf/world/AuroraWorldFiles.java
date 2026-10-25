@@ -29,8 +29,11 @@ import java.util.Map;
  * <p>{@code plugin-data} ({@link #PLUGIN_DATA}) is the world's persistent data container as base64
  * of the gzip-compressed NBT compound. Only {@link #convertSlime} writes it, from the Slime world's
  * {@code BukkitValues}, and only when it fits in one metadata value; {@link #export} does not (the
- * world's own container is not read). It is optional: a file without it has no plugin data, and a
- * build that does not know the key ignores it, as every reader ignores keys it does not use.</p>
+ * world's own container is not read). {@link dev.iyanz.sourbycraft.api.world.AuroraWorlds#importWorld}
+ * (and {@code /awf import}) merges it into the new world's persistent data container once the world
+ * is created ({@code AuroraWorldsService.importWorldInternal}, with
+ * {@link SlimeImporter#restorePluginData}). It is optional: a file without it has no plugin data, and
+ * a build that does not know the key ignores it, as every reader ignores keys it does not use.</p>
  *
  * <p>The {@code /awf} command reads files from {@link #IMPORTS} and writes them to
  * {@link #EXPORTS} only ({@link #confine}); the {@link dev.iyanz.sourbycraft.api.world.AuroraWorlds}
@@ -271,7 +274,8 @@ public final class AuroraWorldFiles {
             final java.util.List<String> dropped = converted.world().dropped(encodedPluginData != null);
             if (!dropped.isEmpty()) {
                 dev.iyanz.sourbycraft.util.SourbyLogger.warn("Aurora World Fabric: converting " + source
-                    + " did not keep " + dropped + " (not representable in AWF yet"
+                    + " did not keep " + dropped + " (not representable in AWF yet, or a value that does not fit,"
+                    + " such as a spawn outside the world"
                     + (pluginData != null && encodedPluginData == null ? "; the world's plugin data is larger than one"
                         + " .awf metadata value holds" : "") + ")");
             }

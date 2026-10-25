@@ -435,6 +435,29 @@ public class RedisClient implements AutoCloseable {
         return replies;
     }
 
+    /**
+     * {@link #eval} followed by one more command in the same pipeline, so both run on one
+     * connection, in that order: for a command about that connection's own writes, such as
+     * {@code WAITAOF}, which waits only for the last write of the connection it runs on. When Redis
+     * does not have the script cached ({@code NOSCRIPT}: the script did not run, so the follow-up
+     * concerned none of it), both are sent again with {@code EVAL} in a second pipeline. An error
+     * reply of the script is thrown as {@link RedisError}; the follow-up's reply is returned as a
+     * value, an error reply included.
+     *
+     * @param keysAndArgs {@code numkeys}, the keys, then the arguments, as for {@code EVAL}
+     * @param then the follow-up command, as for {@link #call}
+     * @return the script's reply, then the follow-up's
+     */
+    public List<Object> evalThen(final String script, final Object[] keysAndArgs, final Object[] then)
+        throws IOException {
+        List<Object> replies = pipeline(List.<Object[]>of(command("EVALSHA", sha1(script), keysAndArgs), then));
+        if (noScript(replies.getFirst())) {
+            replies = pipeline(List.<Object[]>of(command("EVAL", script, keysAndArgs), then));
+        }
+        if (replies.getFirst() instanceof RedisError error) throw new RedisError(error.getMessage());
+        return replies;
+    }
+
     private static Object[] command(final String name, final String script, final Object[] keysAndArgs) {
         final Object[] command = new Object[keysAndArgs.length + 2];
         command[0] = name;
