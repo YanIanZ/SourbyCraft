@@ -35,7 +35,7 @@ index 0b5fab274d9471472ffe81dead60e4d0906b0f31..0461856c593da513a7e9796160d4f805
              this.hasDelayedRecomputation = true;
          } else if (this.targetPos != null) {
 +            // SourbyCraft start - async pathfinding: offload the periodic recompute off the region thread
-+            // (perf/AsyncPathRecompute; flag perf.ai.async-pathfinding, default off)
++            // (perf/AsyncPathRecompute; flag aurora.entity.async-pathfinding, default off; a declined offload runs the synchronous recompute below)
 +            if (dev.iyanz.sourbycraft.perf.AsyncPathProcessor.isEnabled()
 +                && dev.iyanz.sourbycraft.perf.AsyncPathRecompute.offload(this, this.mob, this.level, this.targetPos, this.reachRange)) {
 +                this.timeLastRecompute = this.tick; // Folia - region threading

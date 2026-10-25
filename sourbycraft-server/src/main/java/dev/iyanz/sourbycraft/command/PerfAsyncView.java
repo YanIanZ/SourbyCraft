@@ -10,10 +10,14 @@ import net.kyori.adventure.text.Component;
 /**
  * {@code /perf async}: what the async-path pool has been doing, when it is on.
  *
- * <p>Saturation is visible as refused work. Periodic path recomputes are deliberately dropped
- * when the queue is full so the mob keeps its current path rather than forcing CPU-bound A*
- * back onto the region thread. The inline counter is retained only for compatibility with
- * older telemetry and should stay zero.</p>
+ * <p>Saturation is visible as declined offloads: the navigation asks the pool for room before it
+ * builds a snapshot, and a full queue or a stopping pool declines there. Refused counts the rarer
+ * submission the pool still turned away after that check (another region filled the queue in
+ * between, or a shutdown raced it). Neither drops the recompute: the region thread runs the
+ * vanilla synchronous recompute for that slot, so a rising count means the pool is at capacity
+ * for this workload and the region thread is doing that A* itself. Applied and discarded say
+ * what became of finished solves on the owner. The inline counter is retained only for
+ * compatibility with older telemetry and should stay zero.</p>
  */
 final class PerfAsyncView implements PerfView {
 
@@ -42,15 +46,25 @@ final class PerfAsyncView implements PerfView {
                 + " / " + count(stats.poolSize()));
         add(lines, "Legacy caller-run solves", count(stats.inline())
             + (stats.inline() > 0 ? "  — unexpected on this build" : ""));
-        add(lines, "Refused (saturation / shutdown)", count(stats.refused()));
+        // Both fall back to the synchronous recompute on the region thread; see the class javadoc.
+        add(lines, "Declined, pool full / stopping (ran sync)", count(stats.declined()));
+        add(lines, "Refused at submit (ran sync)", count(stats.refused()));
+        // Finished solves as the owner found them. Results whose entity was removed or unloaded
+        // before delivery are in neither row.
+        add(lines, "Results applied", count(stats.applied()));
+        add(lines, "Results discarded (entity / path / generation / no path)",
+            count(stats.staleSubject()) + " / " + count(stats.stalePath()) + " / "
+                + count(stats.staleGeneration()) + " / " + count(stats.noPath()));
         final var types = dev.iyanz.sourbycraft.perf.AsyncPathTypeStats.top(TOP_TYPES);
         if (types.isEmpty()) {
             add(lines, "Top mob types", "none yet");
         } else {
-            // Busiest first by admitted + refused; "other" folds every type past the tracking cap.
+            // Busiest first by admitted + refused + declined; "other" folds every type past the
+            // tracking cap.
             for (final var type : types) {
                 add(lines, "  " + type.type(), "admitted " + count(type.admitted())
-                    + " / solved " + count(type.solved()) + " / refused " + count(type.refused()));
+                    + " / solved " + count(type.solved()) + " / refused " + count(type.refused())
+                    + " / declined " + count(type.declined()));
             }
         }
     }

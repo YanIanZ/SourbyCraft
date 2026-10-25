@@ -4,6 +4,7 @@ import com.destroystokyo.paper.event.entity.EntityPathfindEvent;
 import com.google.common.collect.ImmutableSet;
 import dev.iyanz.aurora.level.SnapshotPathRegion;
 import dev.iyanz.sourbycraft.execution.RegionOwnerHandoff;
+import dev.iyanz.sourbycraft.execution.region.RegionOwnership;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import net.minecraft.core.BlockPos;
@@ -23,8 +24,8 @@ import org.jspecify.annotations.Nullable;
  * The periodic path recompute, offloaded off the region thread (minecraft feature patch 0006).
  *
  * <p>{@code PathNavigation.recomputePath} calls {@link #offload} once, behind
- * {@link AsyncPathProcessor#isEnabled()} ({@code perf.ai.async-pathfinding}, default off), so with the
- * flag off the recompute is the vanilla synchronous one and this class is never entered. Everything
+ * {@link AsyncPathProcessor#isEnabled()} ({@code aurora.entity.async-pathfinding}, default off), so with
+ * the flag off the recompute is the vanilla synchronous one and this class is never entered. Everything
  * else that used to be written inside {@code PathNavigation} lives here: the admission checks, the
  * {@code EntityPathfindEvent}, the immutable block and mob snapshots, the submission and the
  * owner-thread delivery with its staleness checks. The navigation keeps only what has to touch its
@@ -32,10 +33,15 @@ import org.jspecify.annotations.Nullable;
  * reads ({@code sourbyMaxPathLength}, {@code sourbyVisitedNodesMultiplier}) and the write of an
  * accepted result ({@code sourbyApplyAsyncPath}).</p>
  *
- * <p>Setup runs on the region thread that owns the mob. Only the A* solve runs on the worker pool, and
- * it holds neither the level nor the mob: block reads come from the {@link SnapshotPathRegion}, mob
- * reads from the {@link MobPathSnapshot} (audit ENG-8). The mob keeps its current path until the
- * result lands, which is applied back on the mob's own region thread through its owner handoff.</p>
+ * <p>Setup runs on the region thread that owns the mob; {@link #offload} declines on any other thread.
+ * Only the A* solve runs on the worker pool, and it holds neither the level nor the mob: block reads
+ * come from the {@link SnapshotPathRegion}, mob reads from the {@link MobPathSnapshot} (audit ENG-8).
+ * The owner handoff is built on the owner before the submission, so the completing worker only
+ * schedules the delivery. Once a solve is admitted the mob keeps its current path until the result
+ * lands, which is applied back on the mob's own region thread through that handoff. Every declined
+ * offload, including a full or stopping pool, leaves the caller to run the vanilla synchronous
+ * recompute for that slot; {@code /perf async} counts capacity declines as {@code declined} and a
+ * refused submission as {@code refused}.</p>
  */
 public final class AsyncPathRecompute {
 
@@ -62,10 +68,22 @@ public final class AsyncPathRecompute {
      *
      * @return {@code true} when a solve was submitted (the caller marks the recompute done and keeps
      *         the current path meanwhile); {@code false} when the caller must run the vanilla
-     *         synchronous recompute now
+     *         synchronous recompute now: the calling thread does not own the mob, there is no live
+     *         path or a solve is already pending, the solve would write the mob, the mob is below
+     *         the world, the pool has no capacity (counted as declined), the target is outside the
+     *         border or the pathfind event was cancelled, or the submission was refused (counted
+     *         as refused)
      */
     public static boolean offload(final PathNavigation navigation, final Mob mob, final Level level,
                                   final BlockPos targetPos, final int reachRange) {
+        // Everything below reads the live mob, fires a Bukkit event, draws from the mob's random and
+        // writes the navigation's pending flag, so it runs only on the mob's owner. A caller that
+        // does not own it (with relaxed thread checks, a block update from a foreign thread
+        // recomputes the navigations of the region that owns the block) gets the synchronous
+        // recompute it would have run with the feature off.
+        if (!RegionOwnership.current().isTickThreadFor(mob)) {
+            return false;
+        }
         // Only when the mob already has a live path to keep following meanwhile, and no solve of
         // this navigation is in flight.
         final Path current = navigation.getPath();
@@ -82,8 +100,10 @@ public final class AsyncPathRecompute {
         }
         // Ask the pool for room before firing the event and paying for the snapshot: a declined
         // offload leaves the caller's synchronous recompute to run this slot, so a full pool
-        // never costs a snapshot and never leaves the mob on its stale path.
+        // never costs a snapshot and never leaves the mob on its stale path. The decline is
+        // counted under the mob's type, so saturation shows in /perf async.
         if (!AsyncPathProcessor.hasCapacity()) {
+            AsyncPathProcessor.noteDeclined(MobPathSnapshot.typeKey(mob));
             return false;
         }
         // EntityPathfindEvent must fire on the region thread (Bukkit event), same as createPath.
@@ -111,9 +131,13 @@ public final class AsyncPathRecompute {
         // invalidation identity cannot see: a stop() that finds the path already null.
         final Path requested = navigation.getPath();
         final int requestedGeneration = navigation.sourbyNavigationGeneration();
+        // Built here, on the owner: it reads the mob's Bukkit entity, which the completing worker
+        // must not touch. The worker's callback below only schedules the delivery through it.
+        final RegionOwnerHandoff handoff = RegionOwnerHandoff.forEntity(mob);
         navigation.sourbyAsyncPathPending = true;
+        // Attributed to the snapshot's entity type, with no per-thread hand-off (AsyncPathTypeStats).
         final CompletableFuture<Path> solving =
-            AsyncPathProcessor.trySubmit(() -> solver.findPath(snapshot, subject, targets, maxPathLength, reachRange, mult));
+            AsyncPathProcessor.trySubmit(subject, () -> solver.findPath(snapshot, subject, targets, maxPathLength, reachRange, mult));
         if (solving == null) {
             // Another region filled the pool since hasCapacity(): run the synchronous recompute
             // now instead of keeping the stale path. Rare; the pathfind event then fires twice.
@@ -121,13 +145,17 @@ public final class AsyncPathRecompute {
             return false;
         }
         solving.whenComplete((path, err) -> AsyncPathCompletion.deliver(
-            RegionOwnerHandoff.forEntity(mob),
+            handoff,
             owner -> deliver(navigation, mob, owner, requested, requestedGeneration, path, reachRange),
             () -> navigation.sourbyAsyncPathPending = false));
         return true;
     }
 
-    /** Applies a finished solve on the owner, if it is still the one the navigation asked for. */
+    /**
+     * Applies a finished solve on the owner, if it is still the one the navigation asked for, and
+     * counts the outcome ({@code /perf async} applied, or discarded by the first check that failed).
+     * A discarded result is not resubmitted.
+     */
     static void deliver(final PathNavigation navigation, final Mob mob, final Object owner,
                         final @Nullable Path requested, final int requestedGeneration,
                         final @Nullable Path path, final int reachRange) {
@@ -136,21 +164,27 @@ public final class AsyncPathRecompute {
         // navigation belongs to the entity that was replaced, and its level, position and target
         // are no longer the live ones.
         if (!AsyncPathValidity.sameSubject(owner, mob)) {
+            AsyncPathProcessor.noteDelivery(AsyncPathProcessor.Delivery.STALE_SUBJECT);
             return;
         }
         // Something replaced the path while this solve was running, so the result describes a
         // route the navigation is no longer taking. Applying it would overwrite a newer synchronous
         // recompute, undo a retarget, or resurrect a navigation that was stopped.
         if (!AsyncPathValidity.stillRequested(navigation.getPath(), requested)) {
+            AsyncPathProcessor.noteDelivery(AsyncPathProcessor.Delivery.STALE_PATH);
             return;
         }
         // A stop() that found the path already null (or any other invalidation) since the token
         // was taken: the path object cannot show it, the generation does.
         if (!AsyncPathValidity.sameGeneration(navigation.sourbyNavigationGeneration(), requestedGeneration)) {
+            AsyncPathProcessor.noteDelivery(AsyncPathProcessor.Delivery.STALE_GENERATION);
             return;
         }
         if (path != null && path.getTarget() != null) {
             navigation.sourbyApplyAsyncPath(path, reachRange);
+            AsyncPathProcessor.noteDelivery(AsyncPathProcessor.Delivery.APPLIED);
+        } else {
+            AsyncPathProcessor.noteDelivery(AsyncPathProcessor.Delivery.NO_PATH);
         }
     }
 
