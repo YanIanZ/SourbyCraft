@@ -40,6 +40,7 @@ public final class RedisFabric implements AutoCloseable {
     private volatile boolean closed;
 
     private RedisFabric(final FabricSettings settings, final RedisSettings redisSettings, final String nodeId,
+                        final String incarnation, final String previousIncarnation,
                         final Map<RedisWorkload, RedisClient> clients) {
         this.settings = settings;
         this.redisSettings = redisSettings;
@@ -48,7 +49,7 @@ public final class RedisFabric implements AutoCloseable {
         this.clients = clients;
         this.metrics = new FabricMetrics();
         this.sessions = new SessionFabric(clients.get(RedisWorkload.COORDINATION), this.prefix, this.metrics,
-            settings.sessions().ttlSeconds());
+            settings.sessions().ttlSeconds(), incarnation, previousIncarnation);
         this.coordination = new CoordinationFabric(clients.get(RedisWorkload.COORDINATION), this.prefix, this.metrics,
             settings.coordination().claimSeconds());
         this.events = new EventFabric(clients.get(RedisWorkload.EVENTS), this.prefix, this.metrics, settings.events());
@@ -79,19 +80,40 @@ public final class RedisFabric implements AutoCloseable {
     }
 
     /**
-     * Builds the fabric. No connection is opened here; the first call does that. An enabled fabric with
-     * every service disabled, or with unusable settings, is refused.
+     * Builds the fabric for this process's {@link NodeIdentity}: its node id, and its incarnation (and
+     * proven-stopped predecessor) for session claims. No connection is opened here; the first call
+     * does that. An enabled fabric with every service disabled, or with unusable settings (an invalid
+     * Redis URI included), is refused.
      *
      * @throws IllegalArgumentException when the settings cannot describe a usable fabric
      */
     public static RedisFabric start(final FabricSettings settings, final RedisSettings redisSettings,
+                                    final NodeIdentity identity) {
+        Objects.requireNonNull(identity, "identity");
+        return start(settings, redisSettings, identity.nodeId(), identity.incarnation(), identity.previousIncarnation());
+    }
+
+    /**
+     * {@link #start(FabricSettings, RedisSettings, NodeIdentity)} for an explicit node id, with this
+     * JVM's incarnation and no predecessor; reads no file.
+     */
+    public static RedisFabric start(final FabricSettings settings, final RedisSettings redisSettings,
                                     final String nodeId) {
+        return start(settings, redisSettings, nodeId, NodeIdentity.processIncarnation(), null);
+    }
+
+    private static RedisFabric start(final FabricSettings settings, final RedisSettings redisSettings,
+                                     final String nodeId, final String incarnation, final String previousIncarnation) {
         Objects.requireNonNull(settings, "settings");
         Objects.requireNonNull(redisSettings, "redisSettings");
         Objects.requireNonNull(nodeId, "nodeId");
         if (!settings.enabled()) throw new IllegalArgumentException("the Aurora Redis Fabric is disabled");
         if (!settings.anyService()) {
             throw new IllegalArgumentException("the Aurora Redis Fabric is enabled but every service is disabled");
+        }
+        if (redisSettings.invalidReason().isPresent()) {
+            throw new IllegalArgumentException("the Redis connection is misconfigured: "
+                + redisSettings.invalidReason().get());
         }
         if (running != null) {
             throw new IllegalStateException("the Aurora Redis Fabric is already running; close it before starting another");
@@ -103,7 +125,8 @@ public final class RedisFabric implements AutoCloseable {
             new RedisClient(endpoint, settings.pools().coordination(), redisSettings.timeoutMillis()));
         clients.put(RedisWorkload.EVENTS, new RedisClient(endpoint, settings.pools().events(), redisSettings.timeoutMillis()));
         clients.put(RedisWorkload.CONTROL, new RedisClient(endpoint, settings.pools().control(), redisSettings.timeoutMillis()));
-        final RedisFabric fabric = new RedisFabric(settings, redisSettings, nodeId, clients);
+        final RedisFabric fabric = new RedisFabric(settings, redisSettings, nodeId, incarnation, previousIncarnation,
+            clients);
         running = fabric;
         return fabric;
     }

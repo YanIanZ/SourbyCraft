@@ -15,8 +15,16 @@ import java.util.Objects;
  * only after its effect is durable, and records the event id first so a redelivery is suppressed.
  * Entries that no consumer acknowledges are reclaimed after an idle time, retried up to
  * {@code max-deliveries}, then copied to a dead-letter stream and acknowledged. The stream is trimmed
- * to an approximate length; when the backlog reaches that length, publishing is refused with
- * {@link FabricBackpressureException} instead of growing memory without bound.</p>
+ * to an approximate length ({@code XADD MAXLEN ~ retention}); trimming drops the oldest entries,
+ * which once acknowledged by every consumer group are only history, so a stream whose consumers keep
+ * up never stops accepting events. Publishing is refused with {@link FabricBackpressureException}
+ * when a group's unfinished entries ({@code XINFO GROUPS}: {@code lag}, not yet delivered, plus
+ * {@code pending}, delivered but not acknowledged) reach {@code retention}, or, with no group at
+ * all, when the stream holds {@code retention} entries, since nothing consumes it. The check and the
+ * {@code XADD} are separate calls, so concurrent publishers can overshoot it slightly. The bound is
+ * a count, not a position: an entry left pending while {@code retention} newer entries are published
+ * can still be trimmed before it is reclaimed; the reclaim idle time and delivery budget settle a
+ * pending entry (acknowledged or dead-lettered) long before that at ordinary rates.</p>
  *
  * <p>No command is executed remotely: an event carries data, and the consumer decides what to do with
  * it. There is no "run this command on node X" event.</p>
@@ -67,15 +75,18 @@ public final class EventFabric {
 
     /**
      * Publishes one event, trimmed to the retention window. Refuses with
-     * {@link FabricBackpressureException} when the stream already holds {@code retention} entries.
+     * {@link FabricBackpressureException} when a consumer group has {@code retention} unfinished
+     * entries, or when no group exists and the stream holds {@code retention} entries; see the class
+     * comment.
      */
     public void publish(final FabricEvent event) throws IOException {
-        final long backlog = backlog();
-        this.metrics.streamBacklog(backlog);
-        if (backlog >= this.settings.retention()) {
+        final long length = backlog();
+        final long unconsumed = length < this.settings.retention() ? length : unconsumed(length);
+        if (unconsumed >= this.settings.retention()) {
             this.metrics.backpressure();
-            throw new FabricBackpressureException("the AWF event stream holds " + backlog
-                + " entries (retention " + this.settings.retention() + "); the event was not published");
+            throw new FabricBackpressureException("the AWF event stream holds " + length + " entries, " + unconsumed
+                + " of them not yet consumed by a consumer group (retention " + this.settings.retention()
+                + "); the event was not published");
         }
         final List<Object> args = new ArrayList<>();
         args.add("XADD");
@@ -92,11 +103,57 @@ public final class EventFabric {
         this.metrics.eventPublished();
     }
 
-    /** Approximate stream length. */
+    /** Stream length ({@code XLEN}), acknowledged entries included; recorded as the stream-backlog metric. */
     public long backlog() throws IOException {
         final long length = RedisReplies.number(this.client.call("XLEN", stream()), 0L);
         this.metrics.streamBacklog(length);
         return length;
+    }
+
+    /**
+     * Unfinished entries per consumer group ({@code XINFO GROUPS}): {@code lag} (not yet delivered)
+     * plus {@code pending} (delivered, not acknowledged). A group whose lag Redis cannot compute (it
+     * reports none, for example after entries were deleted with {@code XDEL}, or before Redis 7.0)
+     * counts as {@code streamLength}, the safe bound. Empty when the stream has no group, does not
+     * exist, or Redis refuses {@code XINFO}.
+     */
+    public Map<String, Long> groupBacklogs(final long streamLength) throws IOException {
+        final Object reply;
+        try {
+            reply = this.client.call("XINFO", "GROUPS", stream());
+        } catch (final RedisClient.RedisError unknown) {
+            // No stream yet (ERR no such key), or XINFO not permitted: no group is known, so callers
+            // fall back to the stream length.
+            return Map.of();
+        }
+        final Map<String, Long> groups = new LinkedHashMap<>();
+        for (final Object row : RedisReplies.list(reply)) {
+            final Map<String, String> fields = RedisReplies.map(row);
+            final String name = fields.get("name");
+            if (name == null) continue;
+            final long pending = parse(fields.get("pending"), 0L);
+            final long lag = parse(fields.get("lag"), -1L);
+            groups.put(name, lag < 0L ? Math.max(streamLength, pending) : lag + pending);
+        }
+        return groups;
+    }
+
+    /** The most unfinished entries of any group, or {@code streamLength} when no group consumes the stream. */
+    private long unconsumed(final long streamLength) throws IOException {
+        final Map<String, Long> groups = groupBacklogs(streamLength);
+        if (groups.isEmpty()) return streamLength;
+        long most = 0L;
+        for (final long unfinished : groups.values()) most = Math.max(most, unfinished);
+        return most;
+    }
+
+    private static long parse(final String text, final long fallback) {
+        if (text == null) return fallback;
+        try {
+            return Long.parseLong(text);
+        } catch (final NumberFormatException malformed) {
+            return fallback;
+        }
     }
 
     /** Creates (idempotently) a consumer group that starts at the oldest retained entry. */
@@ -153,7 +210,8 @@ public final class EventFabric {
             for (final Entry entry : readNew()) {
                 if (handle(entry, handler)) acknowledged++;
             }
-            EventFabric.this.metrics.consumerLag(Math.max(0L, backlog()));
+            final long length = backlog();
+            EventFabric.this.metrics.consumerLag(groupBacklogs(length).getOrDefault(this.group, length));
             return acknowledged;
         }
 
