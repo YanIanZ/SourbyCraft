@@ -35,11 +35,14 @@ public final class WorldUnloadCompletion {
      * @param release must not throw; it is only reported if it does
      */
     public static void run(final Supplier<@Nullable UnloadTicket> ticket, final Runnable unload, final Runnable release) {
+        boolean releaseStarted = false;
         try {
             unload.run();
+            releaseStarted = true;
+            release.run();
         } catch (final Throwable failed) {
             try {
-                release.run();
+                if (!releaseStarted) release.run();
             } catch (final Throwable releaseFailed) {
                 failed.addSuppressed(releaseFailed);
             }
@@ -53,7 +56,6 @@ public final class WorldUnloadCompletion {
             }
             throw failed;
         }
-        release.run();
         Objects.requireNonNull(ticket.get(), "not propagated").callback().accept(WorldUnloadResult.SUCCESS);
     }
 }

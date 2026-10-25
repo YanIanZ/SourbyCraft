@@ -24,7 +24,7 @@ aurora:
   awf:
     multiprofile:
       enabled: true
-      mode: "standalone"          # standalone | distributed (distributed is EXPERIMENTAL)
+      mode: "standalone"          # standalone; distributed startup is refused in this candidate
       default-slots: 3
       max-slots: 8
       switching:
@@ -231,8 +231,10 @@ contents.
 
 ### MP-007 — Idle world unload
 
-**Status:** BLOCKED — profile-to-world binding is internal in Build 50; no public command can bind a
-world to a profile. The idle sweeper only acts on profiles that have a binding.
+**Status:** READY FOR OWNER TEST — public binding is now available. Follow
+[Tester Owner](../../tester%20owner.md) B50-09…12: bind an inactive profile, activate it,
+switch away, wait for idle unload, then inject one unload failure and verify a later retry.
+Use a short `worlds.idle-unload-seconds` on a disposable server. Unbind must not delete worlds.
 
 ---
 
@@ -248,7 +250,7 @@ world to a profile. The idle sweeper only acts on profiles that have a binding.
    (`jcmd <pid> Thread.print | grep AWF-profile`).
 4. Load a plugin that looks up `AuroraProfiles` in `onEnable`: it must see `null`.
 
-**Expected:** `AWF MultiProfile is disabled (aurora.awf.multiprofile.enabled: false)`; no directory,
+**Expected:** `AWF MultiProfile is unavailable; check aurora.awf.multiprofile.enabled and startup errors`; no directory,
 thread, listener or service.
 
 **Status:** READY FOR OWNER TEST
@@ -267,8 +269,8 @@ thread, listener or service.
 4. Finally all correct (`fabric.enabled: true`, provider `redis`, fencing `true`, reachable Redis).
 
 **Expected:** cases 1–3 fail the `awf multiprofile` boot stage with a message naming the missing
-requirement; the server still reaches `Done (` without the feature. Case 4 starts and logs
-`ownership redis session fabric`.
+requirement; the server still reaches `Done (` without the feature. Case 4 also refuses with the
+FILE repository / atomic fencing explanation; the service remains unregistered.
 
 **Failure indicators:** the stage reports success while the feature refused; local ownership runs in
 distributed mode.
@@ -279,10 +281,10 @@ distributed mode.
 
 ### MP-010 — Two-node ownership and takeover
 
-**Status:** BLOCKED — needs two servers (or containers), a shared Redis, and a load balancer or manual
-reconnect. Distributed mode stays **experimental and unqualified** until this runs.
+**Status:** BLOCKED BY IMPLEMENTATION — requires shared profile storage with atomic fenced writes
+before any two-node environment can qualify it. This candidate refuses distributed startup.
+The following is a future acceptance checklist, not a runnable feature claim:
 
-Checklist when the environment exists:
 
 - node A claims the profile; node B's join is refused while A is alive;
 - A is killed; B takes over after the lease and the epoch increases;

@@ -407,7 +407,11 @@ public final class FileProfileRepository implements ProfileRepository {
         if (size > MAX_PAYLOAD + 64L) {
             throw new IOException("record " + file + " is " + size + " bytes; the limit is " + MAX_PAYLOAD);
         }
-        final byte[] bytes = Files.readAllBytes(file);
+        final byte[] bytes;
+        try (var input = Files.newInputStream(file)) {
+            bytes = input.readNBytes(MAX_PAYLOAD + 65);
+        }
+        if (bytes.length > MAX_PAYLOAD + 64) throw new IOException("record " + file + " exceeds the size limit");
         if (bytes.length < 4 + 1 + 1 + 8 + 4 + 32) throw new IOException("record " + file + " is truncated");
         final ByteBuffer buffer = ByteBuffer.wrap(bytes);
         if (buffer.getInt() != MAGIC) throw new IOException("record " + file + " has no AWF profile magic");

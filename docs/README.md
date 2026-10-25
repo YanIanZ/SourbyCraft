@@ -110,3 +110,5 @@ Dated plans and specs from the v6–v12, UniverseSpigot and Folia-base eras (May
 formerly `docs/superpowers/`) were removed on 2026-10-13; recover them from git history if needed.
 
 - [AbyssLink native backend](abysslink/README.md) — optional mTLS control connection, YAML setup, Folia-safe ping fallback and verification scope.
+
+Build 50 candidate: [readiness and partial-work closure](releases/BUILD-50-READINESS.md) · [Tester Owner](tester%20owner.md). Manual qualification pending; distributed MultiProfile startup is refused until atomic fenced storage exists.

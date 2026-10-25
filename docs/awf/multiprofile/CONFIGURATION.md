@@ -13,7 +13,7 @@ table and that file drift.
 | Key | Default | Meaning |
 |---|---|---|
 | `enabled` | `false` | master switch; false creates nothing |
-| `mode` | `standalone` | `standalone` or `distributed` (experimental) |
+| `mode` | `standalone` | `standalone`; `distributed` is parsed but startup refuses until atomic fenced profile storage exists |
 | `default-slots` | `3` | slots for a new account |
 | `max-slots` | `8` | hard ceiling, 1–64 |
 | `switching.enabled` | `true` | allow switches |
@@ -78,3 +78,5 @@ Rollback: set `multiprofile.enabled: false` (and optionally `fabric.enabled: fal
 `awf/profiles` directory is left untouched; existing profiles and snapshots stay readable by the
 feature when it is re-enabled. Deleting that directory is the only destructive step and it is never
 performed automatically.
+
+Each standalone server must have its own exclusive profile directory. Redis ownership coordination does not make FILE snapshots a shared, atomically fenced repository.

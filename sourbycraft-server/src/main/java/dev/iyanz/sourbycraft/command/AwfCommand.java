@@ -512,7 +512,7 @@ public class AwfCommand extends Command {
         final dev.iyanz.sourbycraft.awf.multiprofile.ProfileEngine engine =
             dev.iyanz.sourbycraft.awf.multiprofile.ProfileRuntime.engineOrNull();
         if (engine == null) {
-            s.sendMessage(text("AWF MultiProfile is disabled (aurora.awf.multiprofile.enabled: false)",
+            s.sendMessage(text("AWF MultiProfile is unavailable; check aurora.awf.multiprofile.enabled and startup errors",
                 SourbyCraftColors.DANGER));
             return;
         }
@@ -640,6 +640,32 @@ public class AwfCommand extends Command {
                     s.sendMessage(UiPanel.row("metadata", info.metadata().toString()));
                 }));
             }
+            case "bind", "unbind" -> {
+                if (!s.hasPermission("sourbycraft.command.awf.multiprofile.admin")) {
+                    s.sendMessage(text("You do not have sourbycraft.command.awf.multiprofile.admin", SourbyCraftColors.DANGER));
+                    return;
+                }
+                final java.util.UUID profile = profileId(s, args);
+                if (profile == null) return;
+                if (action.equals("bind") && (args.length < 4 || args.length > 5)) {
+                    s.sendMessage(text("Usage: /awf multiprofile bind <profile-uuid> <world> [template]"
+                        + " (replaces the entire binding with one PRIMARY world)", SourbyCraftColors.WARNING));
+                    return;
+                }
+                try {
+                    final var request = new dev.iyanz.sourbycraft.api.profile.ProfileWorldBindingRequest(profile,
+                        action.equals("unbind") ? java.util.Map.of() : java.util.Map.of(args[3],
+                            dev.iyanz.sourbycraft.api.profile.ProfileWorldRole.PRIMARY),
+                        action.equals("bind") && args.length == 5 ? args[4] : null);
+                    engine.bindWorlds(request).whenComplete((ignored, failed) -> this.reply.accept(s, () -> {
+                        if (failed != null) { fail(s, failed); return; }
+                        s.sendMessage(text("Replaced world binding of " + profile
+                            + "; existing worlds were not deleted", SourbyCraftColors.SUCCESS));
+                    }));
+                } catch (final IllegalArgumentException invalid) {
+                    s.sendMessage(text(invalid.getMessage(), SourbyCraftColors.DANGER));
+                }
+            }
             case "recover" -> {
                 if (!s.hasPermission("sourbycraft.command.awf.multiprofile.admin")) {
                     s.sendMessage(text("You do not have sourbycraft.command.awf.multiprofile.admin",
@@ -660,7 +686,7 @@ public class AwfCommand extends Command {
                 }));
             }
             default -> s.sendMessage(text("Usage: /awf multiprofile <status|list <player>|create <player> [type]|"
-                + "switch <player> <profile-uuid>|inspect <profile>|recover <transition>>", SourbyCraftColors.WARNING));
+                + "switch <player> <profile-uuid>|bind <profile> <world> [template]|unbind <profile>|inspect <profile>|recover <transition>>", SourbyCraftColors.WARNING));
         }
     }
 

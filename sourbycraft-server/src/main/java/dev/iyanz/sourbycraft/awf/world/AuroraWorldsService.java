@@ -714,6 +714,9 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
         // Every region has handed its chunks to the storages; commit them off the region threads,
         // where AwfRegionStorage.flush waits until the commit is durable.
         return regions.completion().thenRunAsync(() -> {
+            // Region tickets are not a cross-region I/O barrier. Drain writes admitted by all
+            // tickets before taking the final AWF snapshot, on the I/O lane only.
+            ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.flush(level);
             for (final AwfRegionStorage storage : AwfEngine.storagesUnder(folder(name))) {
                 try {
                     storage.flush();

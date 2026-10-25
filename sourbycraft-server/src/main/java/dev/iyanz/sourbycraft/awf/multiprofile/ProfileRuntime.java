@@ -132,6 +132,11 @@ public final class ProfileRuntime {
             throw new IllegalStateException("mode: distributed requires coordination.fencing-enabled: true;"
                 + " without it a stale owner could commit");
         }
+        if (settings.distributed()) {
+            throw new IllegalStateException("distributed MultiProfile is unavailable in Build 50: the FILE profile"
+                + " repository cannot atomically fence writes with Redis ownership. Use mode: standalone with a"
+                + " directory exclusive to this server; two-node takeover is not supported yet.");
+        }
         final ProfileRepository repository = new FileProfileRepository(Path.of(settings.directory()));
         final ProfileOwnership ownership;
         if (settings.coordination().provider() == ProfileSettings.Provider.REDIS) {
@@ -380,6 +385,12 @@ public final class ProfileRuntime {
         @Override
         public CompletableFuture<Void> saveProfile(final UUID profileId) {
             return this.engine.save(profileId);
+        }
+
+        @Override
+        public CompletableFuture<Void> bindProfileWorlds(
+                final dev.iyanz.sourbycraft.api.profile.ProfileWorldBindingRequest request) {
+            return this.engine.bindWorlds(request);
         }
 
         @Override

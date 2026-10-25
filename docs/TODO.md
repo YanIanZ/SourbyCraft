@@ -17,6 +17,18 @@ Status: `[ ]` belum · `[-]` sebagian / perlu validasi · `[!]` terblokir keputu
 
 ---
 
+## Build 50 candidate handoff — 2026-10-25
+
+See [readiness / all partial workstreams](releases/BUILD-50-READINESS.md) and
+[Tester Owner](tester%20owner.md). Source fixes prepared, not built/tested in this session.
+
+- [-] AWF save I/O drain + unload final-commit confirmation (feature patch 0033); owner B50-01…04.
+- [-] MultiProfile account serialization, stale-capture revision/claim checks and recovery reservation; B50-05…08.
+- [-] Public world-binding API + admin bind/unbind and idle-unload retry/count; B50-09…12.
+- [-] Bounded profile-record reads; B50-14.
+- [ ] Distributed shared repository with atomic fenced writes: startup now refuses unsupported FILE mode; not completed by this refusal.
+- [ ] Owner candidate build, manual regression, soak and release decision; historical PASS does not qualify this tree.
+
 ## P0 — Mendesak (memblokir rilis stabil, legal, atau keamanan data)
 
 ### Rilis Build 47 — gate yang masih terbuka (audit 2026-10-07)
@@ -793,7 +805,7 @@ belum direncanakan, kecuali yang ditandai; hanya butir yang bertanda [x] sudah d
 - [x] Observability: manifest provenance build (tree hash, flag dirty, hash direktori patch) dicetak `/ver`
   — selesai 2026-10-20 (build-opus): hash direktori patch MC/Paper/API, manifest baseline, lock + pin toolchain, JDK toolchain di `sourbycraft-build.properties` (`provenance.*`) dan manifest (`Provenance-*`) dari satu provider; `/ver` bagian "Provenance" (`brand/BuildProvenance`); `verify_build_identity.py` cek kesesuaian + `--source-root` (CI); test_build_identity 23, BuildProvenanceTest 4, VerCommandTest 4; `docs/development/BUILD-PROVENANCE.md`
 
-## AWF MultiProfile + Aurora Redis Fabric (2026-10-24, uncommitted)
+## AWF MultiProfile + Aurora Redis Fabric (2026-10-24 history; current delta above)
 
 - [x] SourbyMod (ML1) restored for Build 50: self-contained loader (no removed MT1 ModuleRegistry),
   `onLoad` at the `sourby mods` stage, `onEnable` on `ServerLoadEvent(STARTUP)`, `onDisable` at shutdown;
@@ -828,15 +840,13 @@ Rincian: `docs/awf/multiprofile/`. Build 50 juga memperbaiki (belum diverifikasi
 - [ ] Owner menjalankan `docs/testing/owner/` (semua status masih READY FOR OWNER TEST/BLOCKED).
 
 Yang belum:
-- [ ] Binding dunia publik: `ProfileWorldBinding` masih internal (belum ada API untuk memasang template
-  ke profil). Konsumen harus lewat kode server sampai API itu ada; karena itu MP-007 (`worlds.idle-unload-seconds`)
-  BLOCKED untuk owner.
+- [-] Binding dunia publik: API `bindProfileWorlds` + admin bind/unbind ditambahkan 2026-10-25;
+  MP-007 sekarang siap diuji owner, belum lulus.
 - [ ] Distributed: kualifikasi multi-node (pemilik basi ditolak, takeover setelah node mati, Redis mati
   = tulis ditolak). Mode tetap **eksperimental**; MP-010 BLOCKED.
 - [ ] Benchmark 100/1.000/10.000 profil, switch bersamaan, latensi Redis, memori
   (`docs/awf/multiprofile/BENCHMARKS.md` — belum ada angka).
 - [ ] Adaptor isolasi untuk advancements/statistics/recipe-book dan inventory plugin.
 - [ ] Portal/proxy handoff memakai `RoutingFabric` (antarmuka ada, transport belum).
-- [ ] `/awf save` masih kembali saat save dijadwalkan, bukan saat semua chunk mencapai store (AWF-006);
-      `/awf unload` masih bisa melaporkan sukses saat commit akhir gagal (FR-005). Keduanya perlu
-      perbaikan engine sebelum dapat diklaim aman.
+- [-] AWF-006/FR-005: drain I/O eksplisit dan verifikasi konfirmasi close melalui patch 0033
+  ditambahkan 2026-10-25. Wajib retest owner; belum dapat diklaim aman/stabil.

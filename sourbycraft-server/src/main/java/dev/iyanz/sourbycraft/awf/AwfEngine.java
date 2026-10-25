@@ -327,6 +327,45 @@ public final class AwfEngine {
         return found.size();
     }
 
+    // Scoped to an unload; keeps closed handles long enough to verify commits even when the
+    // inherited chunk engine catches/logs their IOException. Removed in try-with-resources.
+    private static final java.util.concurrent.CopyOnWriteArrayList<CloseWatch> CLOSE_WATCHES =
+        new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    public static final class CloseWatch implements AutoCloseable {
+        private final Path root;
+        private final java.util.Set<AwfRegionStorage> observed = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+        private CloseWatch(final Path root) {
+            this.root = root.toAbsolutePath().normalize();
+        }
+
+        private void observe(final AwfRegionStorage storage) {
+            if (Path.of(storage.name()).startsWith(this.root)) this.observed.add(storage);
+        }
+
+        public void requireConfirmed() {
+            for (final AwfRegionStorage storage : this.observed) {
+                if (!storage.closeConfirmed()) {
+                    throw new IllegalStateException("AWF unload did not confirm final storage commit: " + storage.name());
+                }
+            }
+        }
+
+        @Override
+        public void close() {
+            CLOSE_WATCHES.remove(this);
+            this.observed.clear();
+        }
+    }
+
+    public static CloseWatch watchClose(final Path folder) {
+        final CloseWatch watch = new CloseWatch(folder);
+        CLOSE_WATCHES.add(watch);
+        storagesUnder(folder).forEach(watch::observe);
+        return watch;
+    }
+
     /** Every open storage whose folder lies under {@code folder}. */
     public static java.util.List<AwfRegionStorage> storagesUnder(final Path folder) {
         final AwfEngine current = global;
@@ -440,6 +479,7 @@ public final class AwfEngine {
             if (this.storages.putIfAbsent(name, storage) != null) {
                 throw new IOException("AWF storage " + name + " is already open");
             }
+            CLOSE_WATCHES.forEach(watch -> watch.observe(storage));
             return storage;
         } catch (final IOException | RuntimeException failed) {
             // Nothing will ever close a store whose storage was not registered.

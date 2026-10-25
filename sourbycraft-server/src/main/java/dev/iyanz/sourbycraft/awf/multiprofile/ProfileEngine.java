@@ -132,6 +132,9 @@ public final class ProfileEngine {
     public CompletableFuture<ProfileInfo> create(final ProfileRequest request) {
         if (!this.settings.enabled()) return failed(ProfileErrorCode.DISABLED, "AWF MultiProfile is disabled");
         return io(() -> {
+            if (this.switches.containsKey(request.accountId())) {
+                throw error(ProfileErrorCode.SWITCH_IN_PROGRESS, "account transition in progress");
+            }
             final PlayerAccount account = this.repository.loadAccount(request.accountId(), this.settings.defaultSlots());
             if (account.full() || account.profileIds().size() >= this.settings.maxSlots()) {
                 throw error(ProfileErrorCode.SLOT_LIMIT, "the account already owns " + account.profileIds().size()
@@ -214,8 +217,8 @@ public final class ProfileEngine {
                 throw error(ProfileErrorCode.RECOVERY_REQUIRED, "transition " + pending.get().transitionId()
                     + " is incomplete; run /awf multiprofile recover " + pending.get().transitionId());
             }
-            return new SwitchStart(account, target.get());
-        }).thenCompose(start -> begin(start, targetId, began))
+            return begin(new SwitchStart(account, target.get()), targetId, began);
+        }).thenCompose(result -> result)
             .exceptionally(failed -> failure(codeOf(failed), messageOf(failed), null, began));
     }
 
@@ -265,9 +268,14 @@ public final class ProfileEngine {
                 throw error(ProfileErrorCode.OWNERSHIP_CONFLICT, "profile " + profileId
                     + " has no ownership claim; distributed mode refuses to write without one");
             }
-            return profile;
-        }).thenCompose(profile -> this.players.capture(profile.accountId(), this.settings.isolation())
+            final PlayerAccount account = this.repository.loadAccount(profile.accountId(), this.settings.defaultSlots());
+            if (!profile.id().equals(account.activeProfile()) || profile.status() != ProfileStatus.ACTIVE) {
+                throw error(ProfileErrorCode.PROFILE_LOCKED, "only the active profile can be saved");
+            }
+            return new SaveStart(profile, account.revision(), holder);
+        }).thenCompose(start -> this.players.capture(start.profile().accountId(), this.settings.isolation())
             .thenCompose(state -> io(() -> {
+                final AuroraProfile profile = start.profile();
                 // The switch may have started while the player thread was capturing. Writing now
                 // would store the target's state under the profile being left, so it is refused.
                 if (this.switches.containsKey(profile.accountId())) {
@@ -276,9 +284,15 @@ public final class ProfileEngine {
                 }
                 final PlayerAccount current = this.repository.loadAccount(profile.accountId(),
                     this.settings.defaultSlots());
-                if (!profile.id().equals(current.activeProfile())) {
+                if (!profile.id().equals(current.activeProfile()) || current.revision() != start.accountRevision()) {
                     throw error(ProfileErrorCode.SWITCH_IN_PROGRESS, "the active profile changed while the state"
                         + " was captured; the snapshot was not written");
+                }
+                // Capture may outlive a lease or a switch away and back (ABA). Validate
+                // the exact captured claim again, not a replacement holder on this node.
+                if (start.claim() != null && this.settings.coordination().fencingEnabled()
+                    && !this.ownership.validate(start.claim()).join()) {
+                    throw error(ProfileErrorCode.OWNERSHIP_CONFLICT, "ownership expired during capture");
                 }
                 writeSnapshot(profile, state);
                 return null;
@@ -287,6 +301,31 @@ public final class ProfileEngine {
                 publish(FabricEventType.PROFILE_SAVE_COMPLETED, Map.of("profile", profileId.toString()));
                 return null;
             });
+    }
+
+    private record SaveStart(AuroraProfile profile, long accountRevision, OwnerClaim claim) {}
+
+    /** Replace an inactive profile's binding without creating, unloading or deleting worlds. */
+    public CompletableFuture<Void> bindWorlds(final dev.iyanz.sourbycraft.api.profile.ProfileWorldBindingRequest request) {
+        if (!this.settings.enabled()) return failed(ProfileErrorCode.DISABLED, "AWF MultiProfile is disabled");
+        return io(() -> {
+            final AuroraProfile profile = this.repository.profile(request.profileId())
+                .orElseThrow(() -> error(ProfileErrorCode.PROFILE_NOT_FOUND, "no profile " + request.profileId()));
+            final PlayerAccount account = this.repository.loadAccount(profile.accountId(), this.settings.defaultSlots());
+            if (this.switches.containsKey(profile.accountId())) {
+                throw error(ProfileErrorCode.SWITCH_IN_PROGRESS, "account transition in progress");
+            }
+            if (profile.status() != ProfileStatus.ACTIVE || profile.id().equals(account.activeProfile())) {
+                throw error(ProfileErrorCode.PROFILE_LOCKED, "only an inactive, non-deleted profile can be rebound");
+            }
+            if (this.ownership.holder(profile.id()).join() != null) {
+                throw error(ProfileErrorCode.OWNERSHIP_CONFLICT, "release the profile ownership before rebinding");
+            }
+            final Map<String, ProfileWorldRole> roles = new java.util.LinkedHashMap<>();
+            request.worlds().forEach((world, role) -> roles.put(world, ProfileWorldRole.valueOf(role.name())));
+            this.repository.saveBinding(new ProfileWorldBinding(profile.id(), roles, request.template()));
+            return null;
+        });
     }
 
     public CompletableFuture<List<ProfileWorldRef>> worlds(final UUID profileId) {
@@ -424,6 +463,7 @@ public final class ProfileEngine {
             if (now - used >= idleNanos && this.worlds.loaded(world)) idle.add(world);
         });
         if (idle.isEmpty()) return CompletableFuture.completedFuture(0);
+        final java.util.concurrent.atomic.AtomicInteger unloaded = new java.util.concurrent.atomic.AtomicInteger();
         CompletableFuture<Void> chain = CompletableFuture.completedFuture(null);
         for (final String world : idle) {
             final long usedAt = this.worldUse.getOrDefault(world, 0L);
@@ -431,13 +471,15 @@ public final class ProfileEngine {
                 // A switch may have touched the world since the scan; a conditional remove keeps
                 // that touch, so the world is not unloaded under the teleport and is swept later.
                 if (!this.worldUse.remove(world, usedAt)) return CompletableFuture.completedFuture(null);
-                return this.worlds.saveAndUnload(world).exceptionally(failed -> {
+                return this.worlds.saveAndUnload(world).thenRun(unloaded::incrementAndGet).exceptionally(failed -> {
+                    // Keep it eligible for a later retry; never overwrite a newer touch.
+                    this.worldUse.putIfAbsent(world, System.nanoTime());
                     SourbyLogger.warn("AWF MultiProfile: idle unload of '" + world + "' failed: " + messageOf(failed));
                     return null;
                 });
             });
         }
-        return chain.thenApply(ignored -> idle.size());
+        return chain.thenApply(ignored -> unloaded.get());
     }
 
     /**
@@ -460,53 +502,66 @@ public final class ProfileEngine {
         return io(() -> {
             final ProfileTransition journal = this.repository.transition(transitionId)
                 .orElseThrow(() -> error(ProfileErrorCode.PROFILE_NOT_FOUND, "no transition " + transitionId));
-            final PlayerAccount account = this.repository.loadAccount(journal.playerId(), this.settings.defaultSlots());
-            return new Recovery(journal, account);
-        }).thenCompose(recovery -> {
-            final ProfileTransition journal = recovery.journal();
-            if (journal.terminal()) {
-                if (journal.phase() == TransitionPhase.FAILED) {
-                    // A failed journal is an operator note, not a lock: forget it on request.
-                    return io(() -> {
-                        this.repository.deleteTransition(transitionId);
-                        return null;
-                    }).thenApply(ignored -> failure(ProfileErrorCode.RECOVERED,
-                        "failed journal " + transitionId + " removed; it recorded: " + journal.failure(), null, began));
-                }
-                return CompletableFuture.completedFuture(failure(ProfileErrorCode.INVALID_REQUEST,
-                    "transition " + transitionId + " is already " + journal.phase(), null, began));
+            if (this.switches.putIfAbsent(journal.playerId(), transitionId) != null) {
+                throw error(ProfileErrorCode.SWITCH_IN_PROGRESS, "account transition in progress");
             }
-            final boolean forward = journal.toProfile().equals(recovery.account().activeProfile());
-            final UUID contact = forward ? journal.toProfile() : journal.fromProfile();
-            return claimForRecovery(contact, journal).thenCompose(claim -> {
-                final CompletableFuture<ProfileSwitchResult> outcome = forward
-                    ? io(() -> {
-                        this.repository.saveTransition(journal.at(TransitionPhase.ACTIVE));
-                        this.repository.deleteTransition(transitionId);
-                        return (ProfileInfo) null;
-                    }).thenCompose(ignored -> get(journal.toProfile()))
-                        .thenApply(profile -> ProfileSwitchResult.success(profile.orElse(null), transitionId,
-                            System.currentTimeMillis() - began))
-                    : rollbackTo(recovery, began, claim);
-                return outcome.handleAsync((result, failed) -> {
-                    if (claim != null) {
-                        try {
-                            this.ownership.release(claim).join();
-                        } catch (final RuntimeException releaseFailed) {
-                            SourbyLogger.warn("AWF MultiProfile: releasing a recovery claim failed: "
-                                + releaseFailed.getMessage());
-                        }
-                    }
-                    if (failed != null) {
-                        throw failed instanceof CompletionException completion ? completion
-                            : new CompletionException(failed);
-                    }
-                    return result;
-                }, this.io);
+            try {
+                final PlayerAccount account = this.repository.loadAccount(journal.playerId(), this.settings.defaultSlots());
+                return new Recovery(journal, account);
+            } catch (final Throwable failed) {
+                this.switches.remove(journal.playerId(), transitionId);
+                throw failed;
+            }
+        }).thenCompose(recovery -> recoverReserved(recovery, transitionId, began)
+            .whenComplete((result, failed) -> this.switches.remove(recovery.journal().playerId(), transitionId)))
+            .exceptionally(failed -> {
+                if (this.metrics != null) this.metrics.profileFailure();
+                return failure(codeOf(failed), messageOf(failed), null, began);
             });
-        }).exceptionally(failed -> {
-            if (this.metrics != null) this.metrics.profileFailure();
-            return failure(codeOf(failed), messageOf(failed), null, began);
+    }
+
+    private CompletableFuture<ProfileSwitchResult> recoverReserved(final Recovery recovery,
+                                                                  final UUID transitionId, final long began) {
+        final ProfileTransition journal = recovery.journal();
+        if (journal.terminal()) {
+            if (journal.phase() == TransitionPhase.FAILED) {
+                // A failed journal is an operator note, not a lock: forget it on request.
+                return io(() -> {
+                    this.repository.deleteTransition(transitionId);
+                    return null;
+                }).thenApply(ignored -> failure(ProfileErrorCode.RECOVERED,
+                    "failed journal " + transitionId + " removed; it recorded: " + journal.failure(), null, began));
+            }
+            return CompletableFuture.completedFuture(failure(ProfileErrorCode.INVALID_REQUEST,
+                "transition " + transitionId + " is already " + journal.phase(), null, began));
+        }
+        final boolean forward = journal.toProfile().equals(recovery.account().activeProfile());
+        final UUID contact = forward ? journal.toProfile() : journal.fromProfile();
+        return claimForRecovery(contact, journal).thenCompose(claim -> {
+            final CompletableFuture<ProfileSwitchResult> outcome = forward
+                ? io(() -> {
+                    this.repository.saveTransition(journal.at(TransitionPhase.ACTIVE));
+                    this.repository.deleteTransition(transitionId);
+                    return (ProfileInfo) null;
+                }).thenCompose(ignored -> get(journal.toProfile()))
+                    .thenApply(profile -> ProfileSwitchResult.success(profile.orElse(null), transitionId,
+                        System.currentTimeMillis() - began))
+                : rollbackTo(recovery, began, claim);
+            return outcome.handleAsync((result, failed) -> {
+                if (claim != null) {
+                    try {
+                        this.ownership.release(claim).join();
+                    } catch (final RuntimeException releaseFailed) {
+                        SourbyLogger.warn("AWF MultiProfile: releasing a recovery claim failed: "
+                            + releaseFailed.getMessage());
+                    }
+                }
+                if (failed != null) {
+                    throw failed instanceof CompletionException completion ? completion
+                        : new CompletionException(failed);
+                }
+                return result;
+            }, this.io);
         });
     }
 
@@ -996,7 +1051,12 @@ public final class ProfileEngine {
             future = CompletableFuture.supplyAsync(() -> {
                 if (this.closed) throw error(ProfileErrorCode.INTERNAL_ERROR, "the profile engine is closed");
                 try {
-                    return work.get();
+                    // Repository read/modify/write and switch admission share one lock. This
+                    // runs only on bounded I/O workers, never on player/region threads.
+                    synchronized (this.revisionLock) {
+                        if (this.closed) throw error(ProfileErrorCode.INTERNAL_ERROR, "the profile engine is closed");
+                        return work.get();
+                    }
                 } catch (final ProfileOperationException expected) {
                     throw expected;
                 } catch (final IOException failed) {

@@ -1,5 +1,7 @@
 # SourbyCraft 26.2 release roadmap — Builds 47 to 50
 
+Current Build 50 closure: [BUILD-50-READINESS.md](BUILD-50-READINESS.md). The dated allocations below are historical; they do not close current code or evidence gaps.
+
 Status: PLAN (written 2026-10-21 from the tree at `c0ab0cc4` plus uncommitted work; nothing here is
 evidence that an item is done). Owner decision 2026-10-21, recorded in [docs/TODO.md](../TODO.md)
 *Keputusan owner*: "kita harus membagi menjadi 4 update, versi 47, 48 penyempurnaan, 49 full
