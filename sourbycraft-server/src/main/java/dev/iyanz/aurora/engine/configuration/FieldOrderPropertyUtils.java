@@ -144,7 +144,7 @@ public class FieldOrderPropertyUtils extends PropertyUtils {
                 if (bi == -1) bi = Integer.MAX_VALUE;
                 return Integer.compare(ai, bi);
             })
-            .map(abstractProperty -> abstractProperty instanceof KebabCaseProperty ? abstractProperty : new KebabCaseProperty(abstractProperty))
+            .map(abstractProperty -> abstractProperty instanceof KebabCaseProperty ? abstractProperty : new KebabCaseProperty(abstractProperty, type))
             .collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
@@ -160,6 +160,9 @@ public class FieldOrderPropertyUtils extends PropertyUtils {
 
     private static final class KebabCaseProperty extends GenericProperty {
 
+        private static final org.slf4j.Logger LOGGER = com.mojang.logging.LogUtils.getClassLogger();
+        /** Type and property names whose generic type could not be read; each is logged once. */
+        private static final Set<String> UNREADABLE_GENERIC_TYPES = java.util.concurrent.ConcurrentHashMap.newKeySet();
         private static final Field GENERIC_TYPE_FIELD;
 
         static {
@@ -173,8 +176,8 @@ public class FieldOrderPropertyUtils extends PropertyUtils {
 
         private final Property delegate;
 
-        KebabCaseProperty(final Property delegate) {
-            super(toKebabCase(delegate.getName()), delegate.getType(), resolveGenericType(delegate));
+        KebabCaseProperty(final Property delegate, final Class<?> owner) {
+            super(toKebabCase(delegate.getName()), delegate.getType(), resolveGenericType(delegate, owner));
             this.delegate = delegate;
         }
 
@@ -199,11 +202,16 @@ public class FieldOrderPropertyUtils extends PropertyUtils {
         }
 
         @Nullable
-        private static Type resolveGenericType(final Property delegate) {
+        private static Type resolveGenericType(final Property delegate, final Class<?> owner) {
             if (delegate instanceof GenericProperty) {
                 try {
                     return (Type) GENERIC_TYPE_FIELD.get(delegate);
-                } catch (final IllegalAccessException ignored) {
+                } catch (final IllegalAccessException denied) {
+                    // SourbyCraft - SnakeYAML then reads the property's elements untyped; say so once, not silently
+                    if (UNREADABLE_GENERIC_TYPES.add(owner.getName() + "#" + delegate.getName())) {
+                        LOGGER.warn("Could not read the generic type of config property '{}' on {}; its elements are read untyped",
+                            delegate.getName(), owner.getName(), denied);
+                    }
                 }
             }
             return null;

@@ -34,13 +34,30 @@ public final class ConfigFormatMigration {
     }
 
     /**
-     * The file to open for a logical YAML path: the YAML file when it exists, otherwise a converted
-     * legacy TOML file, otherwise the YAML path itself (a new install; seeding creates it).
+     * The file to open for a logical YAML path: the YAML file when it exists (a TOML file beside it is
+     * named in a WARN, {@link #warnIgnoredLegacy}), otherwise a converted legacy TOML file, otherwise the
+     * YAML path itself (a new install; seeding creates it).
      */
     public static Path choose(final Path yaml, final Path legacy) {
-        if (Files.isRegularFile(yaml)) return yaml;
+        if (Files.isRegularFile(yaml)) {
+            warnIgnoredLegacy(yaml, legacy);
+            return yaml;
+        }
         if (!Files.isRegularFile(legacy)) return yaml;
         return convert(yaml, legacy) ? yaml : legacy;
+    }
+
+    /**
+     * One WARN when both files exist. The YAML file always wins, so values written into the old TOML (by
+     * an operator following an outdated guide, say) would otherwise change nothing without a word.
+     *
+     * @return whether {@code legacy} is being ignored
+     */
+    public static boolean warnIgnoredLegacy(final Path yaml, final Path legacy) {
+        if (!Files.isRegularFile(yaml) || !Files.isRegularFile(legacy)) return false;
+        SourbyLogger.warn(legacy + " is ignored: " + yaml + " exists and always wins. Move any setting you still "
+            + "need into " + yaml.getFileName() + ", then delete or rename " + legacy.getFileName() + ".");
+        return true;
     }
 
     /** Converts {@code legacy} to {@code yaml} and renames the old file; {@code false} when it cannot. */

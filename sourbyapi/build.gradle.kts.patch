@@ -98,8 +98,8 @@
 +            url.set("https://github.com/YanIanZ/SourbyCraft")
 +            licenses {
 +                license {
-+                    // Paper API is MIT; the region-threading API additions are GPL-3.0.
-+                    name.set("GPL-3.0")
++                    // Paper API (from Bukkit) and the SourbyCraft additions are distributed under GPL-3.0-only (LICENSE.md).
++                    name.set("GPL-3.0-only")
 +                    url.set("https://www.gnu.org/licenses/gpl-3.0.html")
 +                    distribution.set("repo")
 +                }

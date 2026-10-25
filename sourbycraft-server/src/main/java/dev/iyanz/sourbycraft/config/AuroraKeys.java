@@ -1,6 +1,7 @@
 package dev.iyanz.sourbycraft.config;
 
 import dev.iyanz.sourbycraft.awf.AwfSettings;
+import dev.iyanz.sourbycraft.awf.redis.RedisSettings;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -8,8 +9,9 @@ import java.util.List;
  * Every key of {@code sourbycraft_config/aurora.yml}: path, default, lifecycle and the comment the
  * seeder writes beside it. The paths did not change in Build 49 (they were already grouped under
  * {@code [aurora.<service>]}); what changed is that the file gets a header and section comments, and
- * that Aurora keys an older deployment still kept in the utility TOML are moved here once
- * ({@link ConfigMigration}).
+ * that Aurora keys an older deployment still kept in the utility file are moved here once
+ * ({@link ConfigMigration}). {@link #UNSEEDED_PATHS} lists the keys read from this file that the seeder
+ * does not write.
  *
  * <p>The defaults are the typed ones: {@link AuroraConfig#DEFAULT} and {@link AwfSettings#DEFAULT}.
  * {@code AuroraKeysTest} parses a file seeded from this table and asserts it equals them, so the
@@ -100,7 +102,8 @@ public final class AuroraKeys {
     public static final ConfigKey BRIDGE_MAX_RUNNING_ASYNC = live(AuroraConfig.BRIDGE_MAX_RUNNING_ASYNC_KEY,
         AuroraConfig.Bridge.DEFAULT.maxRunningAsyncTasksPerPlugin(),
         "Maximum simultaneously running bridged async callbacks per plugin. 0 = unlimited, otherwise 1..100000. "
-            + "Over-limit callbacks cancel their task/timer and are diagnosed; running bodies drain normally. Rejection, "
+            + "Over the limit, a one-shot callback is cancelled and a repeating task skips that run and stays scheduled; "
+            + "both are diagnosed (rate-limited); running bodies drain normally. Rejection, "
             + "not a queue or a fairness guarantee.");
 
     // [aurora.scheduler]
@@ -141,9 +144,11 @@ public final class AuroraKeys {
             + "written to .mca, then the store is renamed to <folder>.awf.exported-<time> (kept, not deleted). A world "
             + "must not also be in worlds.");
     public static final ConfigKey AWF_BACKEND = restart(AwfSettings.BACKEND_KEY, AwfSettings.DEFAULT.backend(),
-        "file = a directory beside each region folder, the only backend shipped. Another name selects a backend "
-            + "registered by server-side code before worlds load; if it is not registered, listed worlds fail to load "
-            + "rather than falling back.");
+        "file = a directory beside each region folder. redis = the built-in Redis backend, configured by the "
+            + "aurora.awf.redis.* keys, which are not seeded (a uri written here would take precedence over the "
+            + "SOURBYCRAFT_AWF_REDIS_URI environment variable). Another name selects a backend registered by "
+            + "server-side code before worlds load; if it is not registered, listed worlds fail to load rather than "
+            + "falling back.");
     public static final ConfigKey AWF_PERSISTENCE = restart(AwfSettings.PERSISTENCE_KEY, "incremental",
         "Commit mode: incremental (new objects only), checkpoint (also re-verifies every referenced object), full "
             + "(rewrites every object).");
@@ -182,9 +187,11 @@ public final class AuroraKeys {
             "AWF MultiProfile. false = no profile directory, thread, listener or service registration; a plugin looking up "
                 + "AuroraProfiles gets null, as on a server without the feature. Read early, before the configuration loads."),
         restart("aurora.awf.multiprofile.mode", "standalone",
-            "standalone = one server, local ownership, no Redis. distributed = cross-node ownership through the Aurora Redis "
-                + "Fabric; refused at startup unless the fabric and a reachable Redis are configured. Distributed is "
-                + "EXPERIMENTAL: every durable profile write checks the ownership fence before it commits."),
+            "standalone = one server. distributed = several servers share profiles through the Aurora Redis Fabric; refused "
+                + "at startup unless repository: redis, coordination.provider: redis, fencing-enabled: true and a running "
+                + "fabric are configured. Distributed, like any repository: redis setup (nothing limits that one to one "
+                + "server), is EXPERIMENTAL (not yet qualified on two nodes; no proxy handoff): a profile write made under a "
+                + "session claim is refused atomically in Redis once that claim no longer holds the profile."),
         restart("aurora.awf.multiprofile.default-slots", 3,
             "Profiles a new account may own. 1-64, at most max-slots. Existing accounts keep the slot limit stored with them."),
         restart("aurora.awf.multiprofile.max-slots", 8,
@@ -197,9 +204,10 @@ public final class AuroraKeys {
             "true = a switch aborts when the previous profile's snapshot cannot be written durably (so a rollback point exists). "
                 + "false = continue without one; recovery then cannot restore the old state exactly."),
         restart("aurora.awf.multiprofile.isolation.inventory", true,
-            "Inventory slots belong to the profile (item components preserved through Paper's byte serialisation)."),
+            "The 36 hotbar and storage slots belong to the profile (item components preserved through Paper's byte "
+                + "serialisation); armor and off-hand are isolation.armor."),
         restart("aurora.awf.multiprofile.isolation.armor", true,
-            "Armor and off-hand belong to the profile."),
+            "Armor and off-hand belong to the profile. false = they stay with the player across switches."),
         restart("aurora.awf.multiprofile.isolation.ender-chest", true,
             "Ender chest contents belong to the profile."),
         restart("aurora.awf.multiprofile.isolation.experience", true,
@@ -209,22 +217,50 @@ public final class AuroraKeys {
         restart("aurora.awf.multiprofile.isolation.food", true,
             "Food level and saturation belong to the profile."),
         restart("aurora.awf.multiprofile.isolation.potion-effects", true,
-            "Active potion effects belong to the profile; an unknown effect key is skipped, never fatal."),
+            "Active potion effects belong to the profile, infinite ones included. An effect the profile cannot hold "
+                + "(amplifier above 255) or an unknown effect key is skipped with a warning, never fatal."),
         restart("aurora.awf.multiprofile.isolation.location", true,
-            "Spawn and last location belong to the profile and are used as the switch destination. Only AWF world names "
-                + "(lower-case [a-z0-9_-]) can be destinations."),
+            "The respawn point and last location belong to the profile: a switch sets the profile's respawn point as a "
+                + "forced one (it then also works on a free spot after its bed or anchor is gone, and an anchor uses no "
+                + "charge) or clears "
+                + "it, and moves the player to its last location, else its respawn point, else the spawn of its "
+                + "PRIMARY bound world (also where a new profile goes). A join outside the active profile's bound worlds, "
+                + "while one of them was unloaded, returns the player to the profile's last location in them, or to its "
+                + "PRIMARY world spawn when it stores none. Only AWF world names "
+                + "(lower-case [a-z0-9_-]) can be destinations. false = the player stays where they are."),
         restart("aurora.awf.multiprofile.worlds.idle-unload-seconds", 300,
-            "Save and unload a profile world after this long with no use (checked every 30 s, only when no player is inside). "
-                + "0 disables idle unloading."),
+            "Save and unload a world bound to a profile after this long with no use (checked every 30 s). A world with a "
+                + "player inside counts as used; only AWF worlds are unloaded, never the main world. 0 disables idle unloading."),
         restart("aurora.awf.multiprofile.coordination.provider", "local",
-            "local = process-local ownership; redis = the Aurora Redis Fabric session fabric. redis is required by mode: distributed."),
+            "local = process-local ownership; redis = the Aurora Redis Fabric session fabric. redis is required by mode: "
+                + "distributed and by repository: redis."),
         restart("aurora.awf.multiprofile.coordination.fencing-enabled", true,
             "Validate the ownership fence immediately before a durable profile commit. false is UNSAFE across nodes and is "
-                + "rejected in distributed mode."),
+                + "rejected in distributed mode and with repository: redis."),
         restart("aurora.awf.multiprofile.coordination.single-active-session", true,
             "Refuse a second live session for a profile owned elsewhere (the joining player is rejected, not the holder)."),
         restart("aurora.awf.multiprofile.directory", "awf/profiles",
-            "Relative directory for accounts, profiles, snapshots and transition journals. Created only when enabled."));
+            "Relative directory of the file repository (accounts, profiles, snapshots, transition journals). Created only "
+                + "when enabled. With repository: redis it is only read: while Redis is empty and this directory holds "
+                + "profiles, profile writes are refused until /awf multiprofile migrate-repository copies them."),
+        restart("aurora.awf.multiprofile.repository", "file",
+            "Where profiles, snapshots and journals live. file = the directory above, one server only (its lock refuses a "
+                + "second server). redis = the Aurora Redis Fabric (STORAGE pool, keys <prefix>fabric:mp:*): each write is "
+                + "one Lua script that atomically checks the writer's session claim (when the write carries one) and the "
+                + "record revision (when the record has one) before it writes. redis needs "
+                + "coordination.provider: redis, fencing-enabled: true, a running fabric and a Redis 7.0+ primary (no "
+                + "cluster); durability is Redis's (see redis.require-aof)."),
+        restart("aurora.awf.multiprofile.redis.require-aof", true,
+            "repository: redis only. true = refuse to start when Redis reports appendonly off (a Redis restart would lose "
+                + "every profile written since its last RDB snapshot). Even with AOF, appendfsync everysec can lose about "
+                + "1 s of acknowledged writes on a Redis crash, and a replica promoted on failover can lose acknowledged "
+                + "writes; one primary is the supported topology. false = start anyway."),
+        restart("aurora.awf.multiprofile.redis.wait-for-aof", true,
+            "repository: redis only. true = snapshot, account, profile and binding writes, and the journal write before a "
+                + "target state is applied, wait for WAITAOF (Redis 7.2+, up to half of aurora.awf.redis.timeout-ms); a "
+                + "write not confirmed in time is still applied, logged and counted in /awf multiprofile status. With "
+                + "appendfsync everysec each such write can take up to about 1 s longer. Unsupported by Redis: logged "
+                + "once, then acknowledged from memory."));
 
     // [aurora.awf.redis.fabric] — Aurora Redis Fabric (docs/awf/multiprofile/REDIS-FABRIC.md)
     public static final List<ConfigKey> AWF_REDIS_FABRIC_KEYS = List.of(
@@ -314,6 +350,15 @@ public final class AuroraKeys {
             java.util.stream.Stream.concat(AWF_MULTIPROFILE_KEYS.stream(),
                 java.util.stream.Stream.concat(AWF_REDIS_FABRIC_KEYS.stream(), ABYSSLINK_KEYS.stream()))).toList();
 
+    /**
+     * Keys read from this file that the seeder does not write: the AWF Redis backend's connection settings
+     * ({@link RedisSettings}, used when {@code backend = redis}). A seeded {@code uri} would take precedence over the
+     * {@code SOURBYCRAFT_AWF_REDIS_URI} environment variable that keeps a password out of the file, so none of them
+     * is written. All RESTART_REQUIRED: the backend is registered once, before worlds load.
+     */
+    public static final List<String> UNSEEDED_PATHS = List.of(RedisSettings.URI_KEY, RedisSettings.PREFIX_KEY,
+        RedisSettings.POOL_KEY, RedisSettings.TIMEOUT_KEY, RedisSettings.LEASE_KEY, RedisSettings.AOF_KEY);
+
     /** The file header, written as the comment of the {@code [aurora]} table. */
     public static final String HEADER = String.join("\n",
         "Aurora services (sourbycraft_config/aurora.yml) - Build 49 layout.",
@@ -361,7 +406,7 @@ public final class AuroraKeys {
         return null;
     }
 
-    /** Whether a flattened path belongs in {@code aurora.toml}: the {@code aurora.} namespace or a renamed Aurora key. */
+    /** Whether a flattened path belongs in {@code aurora.yml}: the {@code aurora.} namespace or a renamed Aurora key. */
     public static boolean owns(final String path) {
         if (path.startsWith("aurora.")) return true;
         for (final ConfigKey key : KEYS) {
@@ -370,7 +415,7 @@ public final class AuroraKeys {
         return false;
     }
 
-    /** Where a flattened path lands in {@code aurora.toml}: itself, or the current name of a renamed key. */
+    /** Where a flattened path lands in {@code aurora.yml}: itself, or the current name of a renamed key. */
     public static String currentPath(final String path) {
         for (final ConfigKey key : KEYS) {
             if (key.legacyPaths().contains(path)) return key.path();

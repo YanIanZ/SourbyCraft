@@ -7,6 +7,10 @@ import java.util.Objects;
 public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Bridge bridge, Scheduler scheduler,
                            Network network, World world) {
     public static final String ASYNC_PATH_KEY = "aurora.entity.async-pathfinding";
+    /**
+     * The pre-Build-49 name of {@link #ASYNC_PATH_KEY}. The boot migration still moves it to {@code aurora.yml}
+     * under the current name; since Build 50 {@link #parse} does not read it, only reports it.
+     */
     public static final String LEGACY_ASYNC_PATH_KEY = "perf.ai.async-pathfinding";
     public static final String LANE_SAMPLING_KEY = "aurora.diagnostics.lane-sampling";
     public static final String CHUNK_GENERATION_METRICS_KEY = "aurora.diagnostics.chunk-generation-metrics";
@@ -344,9 +348,15 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
             }
         }
     }
-    public enum Lifecycle { LIVE, RESTART_REQUIRED, IMMUTABLE_FOR_RUN }
+    public enum Lifecycle { LIVE, RESTART_REQUIRED }
     public record Setting(String key, Lifecycle lifecycle) {}
 
+    /**
+     * @param config         the settings, each invalid key at its default
+     * @param invalidKeys    keys whose value has the wrong type or range
+     * @param deprecatedKeys old key names that are set while their current name is not; since Build 50 they are
+     *                       ignored, so the current key's default applies
+     */
     public record Parsed(AuroraConfig config, List<String> invalidKeys, List<String> deprecatedKeys) {
         public Parsed {
             Objects.requireNonNull(config, "config");
@@ -357,16 +367,17 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
 
     public static Parsed parse(final ConfigSnapshot snapshot) {
         final var values = snapshot.values();
-        // Malformed namespace containers must not expose a legacy true underneath them.
+        // A malformed namespace container (a value where a table belongs): nothing is trusted, every setting is its default.
         for (final String parent : List.of("aurora", "aurora.entity", "aurora.diagnostics",
                                           "aurora.diagnostics.stall-recorder", "aurora.cpu", "aurora.bridge", "aurora.scheduler",
                                           "aurora.network", "aurora.world")) {
             if (values.containsKey(parent)) return new Parsed(DEFAULT, List.of(parent), List.of());
         }
-        final boolean modern = values.containsKey(ASYNC_PATH_KEY);
-        final String pathKey = modern ? ASYNC_PATH_KEY : LEGACY_ASYNC_PATH_KEY;
-        final Object pathValue = values.get(pathKey);
-        final List<String> deprecated = !modern && pathValue != null ? List.of(pathKey) : List.of();
+        // The old name is reported, never read: an operator whose file still says perf.ai.async-pathfinding
+        // (the migration could not rewrite it) gets the default, and a WARN naming the current key.
+        final Object pathValue = values.get(ASYNC_PATH_KEY);
+        final List<String> deprecated = pathValue == null && values.containsKey(LEGACY_ASYNC_PATH_KEY)
+            ? List.of(LEGACY_ASYNC_PATH_KEY) : List.of();
 
         final List<String> invalid = new java.util.ArrayList<>();
         boolean asyncPathfinding = DEFAULT.entity().asyncPathfinding();
@@ -374,7 +385,7 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
             if (pathValue instanceof Boolean enabled) {
                 asyncPathfinding = enabled;
             } else {
-                invalid.add(pathKey);
+                invalid.add(ASYNC_PATH_KEY);
             }
         }
 

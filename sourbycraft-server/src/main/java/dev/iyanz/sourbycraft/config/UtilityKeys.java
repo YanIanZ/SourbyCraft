@@ -18,8 +18,9 @@ import java.util.Map;
  * <p>Layout (file order): {@code [console]}, {@code [players]}, {@code [messages]},
  * {@code [plugins.viaversion]}, {@code [plugins.protocollib]}, {@code [updater]}. The old names
  * ({@code ui.*}, {@code branding.gc-advisor.enabled}, {@code sourbycraft.*}, {@code viaversion.*},
- * {@code protocollib.*}, {@code misc.auto_update.*}) are read until Build 50, with one WARN per key
- * per load, and rewritten to the new names once at boot.</p>
+ * {@code protocollib.*}, {@code misc.auto_update.*}) are rewritten to the new names once at boot and are
+ * not read since Build 50: one that is still in the file (the rewrite could not run) is ignored with one
+ * WARN per key per load.</p>
  */
 public final class UtilityKeys {
 
@@ -141,8 +142,9 @@ public final class UtilityKeys {
         "network limits in sourbycraft-security.yml. Reference: docs/AURORA-CONFIG.md.",
         "",
         "Build 49 migrated the previous layout ([ui], [branding], [sourbycraft], [viaversion], [protocollib],",
-        "[misc.auto_update]) once; the file as it was is kept beside this one as *.migrated. Old key names are",
-        "still read until Build 50, with one WARN per key.",
+        "[misc.auto_update]) once; the file as it was is kept beside this one as *.migrated. Since Build 50 an",
+        "old key name is not read: the migration renames it at boot when it can write this file; otherwise it",
+        "is ignored, with one WARN per key.",
         "");
 
     /** Table comments, in file order. */
