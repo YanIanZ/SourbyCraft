@@ -40,6 +40,8 @@ import static net.kyori.adventure.text.Component.text;
  *
  * <p>A check shares {@link SourbyUpdater#tryCheck}'s guard with the scheduled checks: while one runs,
  * {@code /update} answers that a check is already running instead of starting a second download.
+ * While the server is stopping or after a failed startup
+ * ({@link dev.iyanz.sourbycraft.core.AuroraRuntime#stopping()}), check and apply start nothing.
  *
  * <p>The check and the status read do network or disk I/O, so they run off-thread; the result goes back to the sender
  * through {@link SourbyReply#run}, the Folia-correct hop for that sender (a command block's reply
@@ -87,6 +89,11 @@ public class UpdateCommand extends Command {
     }
 
     private void runCheck(CommandSender s, SourbyUpdater.@org.jetbrains.annotations.Nullable ApplyMode override) {
+        if (dev.iyanz.sourbycraft.core.AuroraRuntime.stopping()) {
+            // No download, stage or swap starts while shutdown is in flight or after startup failed.
+            s.sendMessage(text("Update check not started: the server is stopping or failed to start.", SourbyCraftColors.DANGER));
+            return;
+        }
         SourbyUpdater updater = updaterSource.get();
         if (updater == null) {
             s.sendMessage(text("Updater unavailable (config module not loaded).", SourbyCraftColors.DANGER));

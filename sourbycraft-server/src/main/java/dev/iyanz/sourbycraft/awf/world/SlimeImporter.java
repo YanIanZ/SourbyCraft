@@ -433,7 +433,8 @@ public final class SlimeImporter {
     /**
      * Maps AdvancedSlimePaper's properties onto {@link dev.iyanz.sourbycraft.api.world.WorldProperties}
      * where the meaning is unambiguous, reading typed NBT values (a boolean is a byte, yaw a float):
-     * spawn needs {@code spawnX}, {@code spawnY} and {@code spawnZ} (yaw defaults to 0);
+     * spawn needs {@code spawnX}, {@code spawnY} and {@code spawnZ} (yaw defaults to 0) inside the
+     * world ({@link dev.iyanz.sourbycraft.api.world.WorldProperties.Spawn}'s limits);
      * {@code difficulty} must name a difficulty; {@code pvp}, {@code allowMonsters} and
      * {@code allowAnimals} must be numeric (0 false) or the text {@code true}/{@code false};
      * {@code defaultBiome} must be a namespaced key. Everything else, including a mapped key with a
@@ -468,8 +469,16 @@ public final class SlimeImporter {
         final Double y = number(props, "spawnY");
         final Double z = number(props, "spawnZ");
         final Double yaw = props.contains("spawnYaw") ? number(props, "spawnYaw") : Double.valueOf(0);
+        dev.iyanz.sourbycraft.api.world.WorldProperties.Spawn spawn = null;
         if (x != null && y != null && z != null && yaw != null) {
-            out = out.withSpawn(new dev.iyanz.sourbycraft.api.world.WorldProperties.Spawn(x, y, z, yaw.floatValue()));
+            try {
+                spawn = new dev.iyanz.sourbycraft.api.world.WorldProperties.Spawn(x, y, z, yaw.floatValue());
+            } catch (final IllegalArgumentException outsideTheWorld) {
+                // Not finite or outside the world: dropped like any other value that does not fit.
+            }
+        }
+        if (spawn != null) {
+            out = out.withSpawn(spawn);
         } else {
             for (final String key : List.of("spawnX", "spawnY", "spawnZ", "spawnYaw")) {
                 if (props.contains(key)) dropped.add("properties." + key);

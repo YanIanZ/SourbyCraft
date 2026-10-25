@@ -11,6 +11,8 @@ import java.util.Locale;
  * <pre>
  * SourbyCraft Build 48 - Aurora Nexus (DEV, 26.2@432d141) | Minecraft 26.2 | ready 16.5 s after JVM start (cold start; no previous profile) | 3 worlds | 1/1 plugins enabled | 22 configured threads on 8 processors
  * </pre>
+ * Not logged for a boot whose stop was asked for during startup: the server never opens, and
+ * {@code StartupTimeline} does not report it ready.
  *
  * @param release        {@link BuildInfo#releaseIdentity()}
  * @param minecraft      Minecraft version id

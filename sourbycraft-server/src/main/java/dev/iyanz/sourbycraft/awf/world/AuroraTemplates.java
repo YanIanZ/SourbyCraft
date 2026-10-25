@@ -2,6 +2,7 @@ package dev.iyanz.sourbycraft.awf.world;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonParseException;
 import dev.iyanz.sourbycraft.awf.AwfBackend;
 import dev.iyanz.sourbycraft.awf.AwfEngine;
@@ -10,6 +11,7 @@ import dev.iyanz.sourbycraft.awf.AwfStore;
 import dev.iyanz.sourbycraft.awf.AwfWorldStore;
 import dev.iyanz.sourbycraft.awf.Durability;
 import dev.iyanz.sourbycraft.awf.WorldRole;
+import dev.iyanz.sourbycraft.util.SourbyLogger;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -93,18 +95,42 @@ public final class AuroraTemplates {
         return Files.isRegularFile(folder(template).resolve(METADATA));
     }
 
-    /** What instances of the template are created with; the entry's name is the template's. */
+    /**
+     * What instances of the template are created with; the entry's name is the template's. A
+     * stored spawn outside the world (a template saved before Build 50) is dropped with a WARN on
+     * every read, as {@code template.json} is never rewritten
+     * ({@link AuroraWorldRegistry#dropInvalidSpawn}).
+     *
+     * @throws IOException when the file is malformed, empty or {@code null}, or holds other
+     *     properties a record constructor refuses
+     */
     public Optional<AuroraWorldRegistry.Entry> read(final String template) throws IOException {
         final Path file = folder(template).resolve(METADATA);
         if (!Files.isRegularFile(file)) return Optional.empty();
-        final AuroraWorldRegistry.Entry description;
+        final JsonElement stored;
         try {
-            description = GSON.fromJson(Files.readString(file, StandardCharsets.UTF_8), AuroraWorldRegistry.Entry.class);
+            stored = GSON.fromJson(Files.readString(file, StandardCharsets.UTF_8), JsonElement.class);
         } catch (final JsonParseException malformed) {
             throw new IOException(file + " is not a valid template description", malformed);
         }
         // An empty file (or a literal null) reads as null; save() always writes a description.
-        if (description == null) throw new IOException(file + " is empty or null, not a template description");
+        if (stored == null || stored.isJsonNull()) {
+            throw new IOException(file + " is empty or null, not a template description");
+        }
+        final Optional<String> droppedSpawn = AuroraWorldRegistry.dropInvalidSpawn(stored);
+        final AuroraWorldRegistry.Entry description;
+        try {
+            description = GSON.fromJson(stored, AuroraWorldRegistry.Entry.class);
+        } catch (final JsonParseException malformed) {
+            throw new IOException(file + " is not a valid template description", malformed);
+        } catch (final RuntimeException refused) {
+            // Gson wraps a record constructor's refusal in a plain RuntimeException.
+            throw new IOException(file + " holds invalid properties (" + AuroraWorldRegistry.refusal(refused) + ")",
+                refused);
+        }
+        droppedSpawn.ifPresent(reason -> SourbyLogger.warn("Aurora World Fabric: ignoring the stored spawn of"
+            + " template '" + template + "' in " + file + " (" + reason + "); worlds made from it get no spawn"
+            + " property"));
         return Optional.of(description);
     }
 

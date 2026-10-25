@@ -61,14 +61,14 @@ public final class SourbyCraftBootstrap {
      * STOPPED reports completion of this sequence, not proof that every service stopped successfully.
      */
     public static void close() {
-        // Before the first service goes down, so anything consulting acceptingWork() stops
-        // admitting during the window when shutdown is in flight and work is still arriving.
+        // Before the first service goes down, so anything consulting stopping() (such as /awf, /speedtest
+        // and the async path offload) refuses new work while shutdown is in flight and work is still arriving.
         AuroraRuntime.transition(AuroraRuntime.State.STOPPING);
-        // Before the first AWF wait of the shutdown (the storage lane draining below, then the region
-        // saves, the chunk I/O drain and AwfEngine.closeAll): one deadline for all of them.
         // Mods first: they may still need Bukkit and every SourbyCraft service below.
         try { dev.iyanz.sourbycraft.mod.ModLoader.shutdown(); }
         catch (Throwable failure) { SourbyLogger.error("SourbyMod shutdown failed", failure); }
+        // Before the first AWF wait of the shutdown (the storage lane draining below, then the region
+        // saves, the chunk I/O drain and AwfEngine.closeAll): one deadline for all of them.
         try { dev.iyanz.sourbycraft.awf.AwfEngine.beginShutdown(); }
         catch (Throwable failure) { SourbyLogger.error("AWF shutdown deadline could not start", failure); }
         try { dev.iyanz.sourbycraft.hud.HudBars.close(); }

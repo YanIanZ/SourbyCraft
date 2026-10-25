@@ -7,8 +7,10 @@ import java.util.List;
 import net.kyori.adventure.text.Component;
 
 /**
- * {@code /perf awf}: Aurora World Fabric storage rows. The row bodies were moved here verbatim
- * from {@code PerfCommand.renderAwf} (the hunk owned by the AWF work); output is unchanged.
+ * {@code /perf awf}: Aurora World Fabric storage rows. The row bodies were moved here from
+ * {@code PerfCommand.renderAwf} (the hunk owned by the AWF work); rows added since include
+ * {@code AWF loaded worlds}, each storage's {@code oldest dirty age} and the refused writes in the
+ * read-failure row.
  */
 final class PerfAwfView implements PerfView {
 

@@ -25,7 +25,12 @@ final class LiveIncidentSources implements IncidentDetector.Sources {
     public External read() {
         return new External(
             quietly(LiveIncidentSources::laneRejections, List.of()),
-            quietly(() -> AsyncPathProcessor.stats().refused(), -1L),
+            // Saturation mostly shows as declined (the offload checks capacity before it submits), as refused
+            // only when the queue fills between that check and the submission.
+            quietly(() -> {
+                final AsyncPathProcessor.PathStats stats = AsyncPathProcessor.stats();
+                return stats.refused() + stats.declined();
+            }, -1L),
             quietly(LiveIncidentSources::storagePending, List.of()),
             quietly(LiveIncidentSources::awfFailures, List.of()),
             quietly(LiveIncidentSources::bridgeViolations, List.of()));

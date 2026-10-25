@@ -24,6 +24,11 @@ import java.util.function.LongSupplier;
  *
  * <p>After expiry no new commit attempt starts. Nothing that missed the deadline is ever reported
  * as saved; see {@link AwfShutdownReport}.</p>
+ *
+ * <p>What the deadline cuts is lock waits, new commit attempts and Redis calls. A FILE commit that
+ * is already writing ({@code AwfWorldStore}, {@code GenerationStore} or {@code ObjectStore} writing
+ * its files and forcing them to disk) is not interrupted, so it can hold the stop past the
+ * deadline until it finishes.</p>
  */
 public final class AwfShutdownBudget {
 

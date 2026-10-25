@@ -2,8 +2,9 @@ package dev.iyanz.sourbycraft.awf.world;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
-import com.google.gson.reflect.TypeToken;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -122,34 +123,89 @@ public final class AuroraWorldRegistry {
      */
     private volatile Map<String, Entry> published = Map.of();
 
+    /**
+     * Reads {@code file} when it exists. A stored spawn outside the world is dropped with a WARN
+     * naming the world ({@link #dropInvalidSpawn}) on each read until a write leaves it out (at
+     * boot the AWF engine and the world service each read the file); it is no longer applied at
+     * load.
+     *
+     * @throws IOException when the file is malformed, empty or {@code null}, or an entry holds
+     *     other properties a record constructor refuses (save bounds with min above max)
+     */
     public AuroraWorldRegistry(final Path file) throws IOException {
         this.file = file;
         if (Files.isRegularFile(file)) {
-            final List<Entry> stored;
+            final JsonElement stored;
             try {
-                stored = GSON.fromJson(Files.readString(file, StandardCharsets.UTF_8),
-                    new TypeToken<List<Entry>>() { }.getType());
+                stored = GSON.fromJson(Files.readString(file, StandardCharsets.UTF_8), JsonElement.class);
             } catch (final JsonParseException malformed) {
                 throw new IOException(file + " is not a valid world list; fix or remove it", malformed);
             }
-            if (stored == null) {
-                // Gson reads an empty file, or a literal null, as null. This class always writes a list
-                // ("[]" when empty), so that is a damaged file; reading it as empty would drop every world.
+            if (stored == null || stored.isJsonNull()) {
+                // Gson reads an empty file as null and a literal null as JsonNull. This class always writes a
+                // list ("[]" when empty), so that is a damaged file; reading it as empty would drop every world.
                 throw new IOException(file + " is empty or null, not a world list (damaged by a crash?); restore it or"
                     + " remove it");
             }
-            for (final Entry entry : stored) {
-                if (entry == null) continue;
+            if (!stored.isJsonArray()) throw new IOException(file + " is not a valid world list; fix or remove it");
+            for (final JsonElement element : stored.getAsJsonArray()) {
+                if (element.isJsonNull()) continue;
+                final Optional<String> droppedSpawn = dropInvalidSpawn(element);
+                final Entry entry;
+                try {
+                    entry = GSON.fromJson(element, Entry.class);
+                } catch (final JsonParseException malformed) {
+                    throw new IOException(file + " is not a valid world list; fix or remove it", malformed);
+                } catch (final RuntimeException refused) {
+                    // Gson wraps a record constructor's refusal in a plain RuntimeException.
+                    throw new IOException(file + " holds a world entry with invalid properties (" + refusal(refused)
+                        + "); fix or remove it", refused);
+                }
                 final Optional<String> invalid = invalidName(entry.name());
                 if (invalid.isPresent()) {
                     dev.iyanz.sourbycraft.util.SourbyLogger.warn("Aurora World Fabric: ignoring the"
                         + " registry entry '" + entry.name() + "': " + invalid.get());
                     continue;
                 }
+                droppedSpawn.ifPresent(reason -> dev.iyanz.sourbycraft.util.SourbyLogger.warn("Aurora World Fabric:"
+                    + " ignoring the stored spawn of world '" + entry.name() + "' in " + file + " (" + reason + ");"
+                    + " it is no longer applied at load (set a new one with /awf set " + entry.name() + " spawn), and"
+                    + " the next write of the file leaves it out"));
                 this.entries.put(entry.name(), entry);
             }
         }
         this.published = snapshot();
+    }
+
+    /**
+     * Removes {@code properties.spawn} from a stored entry when
+     * {@link dev.iyanz.sourbycraft.api.world.WorldProperties.Spawn} refuses its values, and returns
+     * why; empty, the entry unchanged, otherwise. Build 50 started refusing a spawn outside the
+     * world, so a registry or template file written before then can hold one, and refusing the
+     * whole file would keep every AWF world from loading over one spawn. A spawn that is malformed
+     * rather than out of range (not numbers) stays, for the entry's own read to refuse.
+     */
+    static Optional<String> dropInvalidSpawn(final JsonElement entry) {
+        if (!(entry instanceof JsonObject object) || !(object.get("properties") instanceof JsonObject properties)) {
+            return Optional.empty();
+        }
+        final JsonElement spawn = properties.get("spawn");
+        if (spawn == null || spawn.isJsonNull()) return Optional.empty();
+        try {
+            GSON.fromJson(spawn, dev.iyanz.sourbycraft.api.world.WorldProperties.Spawn.class);
+            return Optional.empty();
+        } catch (final JsonParseException malformed) {
+            return Optional.empty();
+        } catch (final RuntimeException refused) {
+            properties.remove("spawn");
+            return Optional.of(refusal(refused));
+        }
+    }
+
+    /** A record constructor's own message, which Gson wraps as the cause of a plain RuntimeException. */
+    static String refusal(final RuntimeException refused) {
+        return refused.getCause() != null && refused.getCause().getMessage() != null
+            ? refused.getCause().getMessage() : refused.getMessage();
     }
 
     /** Why a name cannot be a world name, or empty when it can. */

@@ -179,7 +179,11 @@ public class AwfCommand extends Command {
                 worlds.unload(name, save).whenComplete((result, failed) -> this.reply.accept(s, () -> {
                     if (failed != null) fail(s, failed);
                     else if (result == dev.iyanz.sourbycraft.api.world.UnloadResult.SUCCESS) ok(s, "Unloaded " + name);
-                    else s.sendMessage(text("Could not unload " + name + ": " + result, SourbyCraftColors.DANGER));
+                    // The engine closes the storages after removing the world; a failed final commit there is FAILED.
+                    else if (result == dev.iyanz.sourbycraft.api.world.UnloadResult.FAILED && !worlds.isLoaded(name)) {
+                        s.sendMessage(text("Unloaded " + name + ", but AWF could not confirm its last commit (see the"
+                            + " server log)", SourbyCraftColors.WARNING));
+                    } else s.sendMessage(text("Could not unload " + name + ": " + result, SourbyCraftColors.DANGER));
                 }));
             }
             case "delete" -> {
@@ -575,6 +579,8 @@ public class AwfCommand extends Command {
                 s.sendMessage(UiPanel.row("mode", settings.mode().name().toLowerCase(Locale.ROOT)
                     + ", node " + engine.nodeId()));
                 s.sendMessage(UiPanel.row("ownership", engine.ownership().describe()));
+                // The repository reports what it found at startup and its counters; no I/O on this thread.
+                s.sendMessage(UiPanel.row("repository", engine.repository().describe()));
                 s.sendMessage(UiPanel.row("switching", settings.switching().enabled()
                     ? settings.switching().timeoutMillis() + " ms budget"
                     : "disabled"));
@@ -721,9 +727,9 @@ public class AwfCommand extends Command {
                 }
                 try {
                     final var request = new dev.iyanz.sourbycraft.api.profile.ProfileWorldBindingRequest(profile,
-                        action.equals("unbind") ? java.util.Map.of() : java.util.Map.of(args[3],
+                        action.equals("unbind") ? java.util.Map.of() : java.util.Map.of(args[3].toLowerCase(Locale.ROOT),
                             dev.iyanz.sourbycraft.api.profile.ProfileWorldRole.PRIMARY),
-                        action.equals("bind") && args.length == 5 ? args[4] : null);
+                        action.equals("bind") && args.length == 5 ? args[4].toLowerCase(Locale.ROOT) : null);
                     engine.bindWorlds(request).whenComplete((ignored, failed) -> this.reply.accept(s, () -> {
                         if (failed != null) { fail(s, failed); return; }
                         s.sendMessage(text("Replaced world binding of " + profile
@@ -799,9 +805,91 @@ public class AwfCommand extends Command {
                         + "; existing profiles above it are kept", SourbyCraftColors.SUCCESS));
                 }));
             }
+            case "owner" -> {
+                // The ownership provider's holder: with coordination.provider: redis, the session fabric's.
+                final java.util.UUID profile = profileId(s, args);
+                if (profile == null) return;
+                engine.owner(profile).whenComplete((owner, failed) -> this.reply.accept(s, () -> {
+                    if (failed != null) {
+                        fail(s, failed);
+                        return;
+                    }
+                    if (owner.isEmpty()) {
+                        s.sendMessage(UiPanel.row(profile.toString(), "unowned"));
+                        return;
+                    }
+                    final var holder = owner.get();
+                    s.sendMessage(UiPanel.row(profile.toString(), "node " + holder.node() + ", epoch " + holder.epoch()
+                        + (holder.expiresAtMillis() > 0L ? ", expires in "
+                            + Math.max(0L, (holder.expiresAtMillis() - System.currentTimeMillis()) / 1000L) + " s" : "")
+                        + (holder.distributed() ? " (session fabric)" : " (this process)")));
+                }));
+            }
+            case "reclaim" -> {
+                if (!s.hasPermission("sourbycraft.command.awf.multiprofile.admin")) {
+                    s.sendMessage(text("You do not have sourbycraft.command.awf.multiprofile.admin",
+                        SourbyCraftColors.DANGER));
+                    return;
+                }
+                final java.util.UUID profile = profileId(s, args);
+                if (profile == null) return;
+                final long epoch;
+                try {
+                    epoch = args.length == 4 ? Long.parseLong(args[3]) : -1L;
+                } catch (final NumberFormatException notANumber) {
+                    s.sendMessage(text("Not an epoch: " + args[3], SourbyCraftColors.DANGER));
+                    return;
+                }
+                if (epoch < 1L) {
+                    s.sendMessage(text("Usage: /awf multiprofile reclaim <profile-uuid> <epoch> (the epoch"
+                        + " /awf multiprofile owner shows; for a holder that is gone)", SourbyCraftColors.WARNING));
+                    return;
+                }
+                engine.reclaim(profile, epoch).whenComplete((ignored, failed) -> this.reply.accept(s, () -> {
+                    if (failed != null) {
+                        fail(s, failed);
+                        return;
+                    }
+                    s.sendMessage(text("Took over and released the claim on " + profile + " at epoch " + epoch
+                        + "; writes under the old claim are refused", SourbyCraftColors.SUCCESS));
+                }));
+            }
+            case "migrate-repository" -> {
+                if (!s.hasPermission("sourbycraft.command.awf.multiprofile.admin")) {
+                    s.sendMessage(text("You do not have sourbycraft.command.awf.multiprofile.admin",
+                        SourbyCraftColors.DANGER));
+                    return;
+                }
+                final dev.iyanz.sourbycraft.awf.multiprofile.ProfileRuntime runtime =
+                    dev.iyanz.sourbycraft.awf.multiprofile.ProfileRuntime.running();
+                if (runtime == null) {
+                    s.sendMessage(text("AWF MultiProfile is unavailable", SourbyCraftColors.DANGER));
+                    return;
+                }
+                if (args.length < 3 || !args[2].equalsIgnoreCase("confirm")) {
+                    s.sendMessage(text("Usage: /awf multiprofile migrate-repository confirm: copies "
+                        + engine.settings().directory() + " into the Redis repository once (refused when Redis already"
+                        + " holds profiles), verifies every record and keeps the directory unchanged", SourbyCraftColors.WARNING));
+                    return;
+                }
+                if (!org.bukkit.Bukkit.getOnlinePlayers().isEmpty()) {
+                    s.sendMessage(text("Refused: players are online. Run the migration with nobody online, right after"
+                        + " switching to repository: redis", SourbyCraftColors.DANGER));
+                    return;
+                }
+                s.sendMessage(text("Migrating...", SourbyCraftColors.DIM));
+                runtime.migrateFileRepository().whenComplete((summary, failed) -> this.reply.accept(s, () -> {
+                    if (failed != null) {
+                        fail(s, failed);
+                        return;
+                    }
+                    s.sendMessage(text("Migrated: " + summary, SourbyCraftColors.SUCCESS));
+                }));
+            }
             default -> s.sendMessage(text("Usage: /awf multiprofile <status|list <player>|create <player> [type]|"
                 + "switch <player> <profile-uuid>|bind <profile> <world> [template]|unbind <profile>|inspect <profile>|"
-                + "lock <profile>|unlock <profile>|slots <player> <n>|recover <transition>>", SourbyCraftColors.WARNING));
+                + "lock <profile>|unlock <profile>|slots <player> <n>|recover <transition>|owner <profile>|"
+                + "reclaim <profile> <epoch>|migrate-repository confirm>", SourbyCraftColors.WARNING));
         }
     }
 

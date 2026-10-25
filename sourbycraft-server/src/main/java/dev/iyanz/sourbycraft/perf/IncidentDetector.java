@@ -38,7 +38,9 @@ import java.util.Objects;
  *   <li>{@link Kind#HEAP_PRESSURE}: heap used at or above {@link #HEAP_PRESSURE_PERCENT} of the
  *       maximum (only when the maximum is defined).</li>
  *   <li>{@link Kind#LANE_REJECTED}: a Resource Governor lane's rejected counter grew (per lane).</li>
- *   <li>{@link Kind#ASYNC_PATH_REFUSED}: the async path pool's refused counter grew.</li>
+ *   <li>{@link Kind#ASYNC_PATH_REFUSED}: the async path pool refused or declined work: the sum of its
+ *       refused (turned away at submission) and declined (not offloaded after the capacity check)
+ *       counters grew. Saturation shows mostly as declined.</li>
  *   <li>{@link Kind#STORAGE_BACKLOG}: a world's pending Moonrise I/O tasks at or above
  *       {@link #STORAGE_BACKLOG_TASKS}.</li>
  *   <li>{@link Kind#AWF_COMMIT_FAILURE}: an AWF storage's failure counter grew (commit or read
@@ -69,7 +71,11 @@ public final class IncidentDetector {
     /** A gauge reading for one subject. */
     public record Gauge(String subject, long value) {}
 
-    /** Readings from subsystems outside the performance snapshot. Each list may be empty. */
+    /**
+     * Readings from subsystems outside the performance snapshot. Each list may be empty.
+     *
+     * @param asyncPathRefused the async path pool's refused plus declined offloads, or -1 when unavailable
+     */
     public record External(List<Counter> laneRejections, long asyncPathRefused, List<Gauge> storagePending,
                            List<Counter> awfFailures, List<Counter> bridgeFatalViolations) {
         public static final External NONE = new External(List.of(), -1L, List.of(), List.of(), List.of());

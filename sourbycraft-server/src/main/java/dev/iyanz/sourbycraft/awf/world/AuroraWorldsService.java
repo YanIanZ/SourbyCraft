@@ -328,7 +328,8 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
                 + " with POI, data version " + result.dataVersion() + ")");
             if (!fileWorld.dropped().isEmpty()) {
                 SourbyLogger.warn("Aurora World Fabric: importing " + file.getFileName() + " did not keep "
-                    + fileWorld.dropped() + " (not representable in AWF yet)");
+                    + fileWorld.dropped() + " (not representable in AWF yet, or a value that does not fit, such as a"
+                    + " spawn outside the world)");
             }
         });
         if (fileWorld.pluginData() == null) return created;
@@ -620,18 +621,33 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
 
     private CompletableFuture<World> importWorldInternal(final Path file, final String name, final boolean autoload) {
         final AuroraWorldRegistry.Entry entry;
+        final net.minecraft.nbt.CompoundTag pluginData;
         try (dev.iyanz.sourbycraft.awf.AwfWorldFile awf = dev.iyanz.sourbycraft.awf.AwfWorldFile.open(file)) {
             entry = AuroraWorldFiles.describe(awf, name, autoload);
+            // Decoded before anything is created, so a malformed value fails the import like malformed properties.
+            pluginData = AuroraWorldFiles.pluginData(awf.metadata());
         } catch (final IOException failed) {
             return CompletableFuture.failedFuture(failed);
         }
-        return start(entry, () -> {
+        final CompletableFuture<World> created = start(entry, () -> {
             final long started = System.nanoTime();
             try (dev.iyanz.sourbycraft.awf.AwfWorldFile awf = dev.iyanz.sourbycraft.awf.AwfWorldFile.open(file)) {
                 final var written = AuroraWorldFiles.importInto(awf, folder(name));
                 SourbyLogger.info("Aurora World Fabric: imported " + file.getFileName() + " as " + name + " " + written
                     + " in " + (System.nanoTime() - started) / 1_000_000 + " ms");
             }
+        });
+        if (pluginData == null) return created;
+        // As for a Slime import: start() completes on the global tick, where the world's container may be
+        // written; WorldLoadEvent has already fired, so a listener on it does not see the data yet.
+        return created.thenApply(world -> {
+            try {
+                SlimeImporter.restorePluginData(world.getPersistentDataContainer(), pluginData);
+            } catch (final IOException failed) {
+                SourbyLogger.warn("Aurora World Fabric: importing " + file.getFileName() + " did not restore the world's"
+                    + " plugin data (plugin-data): " + failed.getMessage());
+            }
+            return world;
         });
     }
 
