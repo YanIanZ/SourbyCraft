@@ -68,9 +68,11 @@ import java.util.TreeMap;
  * references) → {@link ObjectStore#sync} (one pass of forces over the new objects, then each moved
  * into place, then each touched directory forced once) → commit the index or delta as a new
  * generation, which is the single commit point → drop objects no retained generation references.
- * No index is forced before every object it references has been; a crash anywhere before the
- * generation commit leaves the previous generation authoritative, and the new objects are
- * unreferenced and are removed later. A delta's base is a committed generation that retention
+ * The steps after the commit point (this drop, and the generation store's deletion of unretained
+ * generations) never fail the commit: what they could not delete is logged and retried by the
+ * next commit. No index is forced before every object it references has been; a crash anywhere
+ * before the generation commit leaves the previous generation authoritative, and the new objects
+ * are unreferenced and are removed later. A delta's base is a committed generation that retention
  * keeps on disk as long as the delta is retained, and {@link GenerationStore#readBase} checks the
  * hash link, so a committed delta always replays against the manifest it was written against.</p>
  *
@@ -114,6 +116,8 @@ public final class AwfWorldStore implements AwfStore {
 
     private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger("SourbyCraft/AWF");
 
+    /** The store's directory, for log lines. */
+    private final Path root;
     private final GenerationStore generations;
     private final ObjectStore objects;
     private final WorldRole role;
@@ -132,13 +136,19 @@ public final class AwfWorldStore implements AwfStore {
      * memory so a commit neither re-reads the retained indexes nor scans the object directory.
      */
     private final java.util.ArrayDeque<Set<String>> retainedNames = new java.util.ArrayDeque<>();
-    /** Objects written by commits that failed before their generation committed. */
+    /**
+     * Objects written by commits that failed before their generation committed, and objects a
+     * collection after a commit could not delete; the next commit's collection checks them.
+     */
     private final Set<String> orphanCandidates = new HashSet<>();
+    /** Failed deletions in {@link #retainAndCollect}; guarded by this. */
+    private final GenerationStore.AfterCommitWarning collectWarning = new GenerationStore.AfterCommitWarning();
     /** Set by {@link #close}; guarded by this store's monitor. */
     private boolean closed;
 
-    private AwfWorldStore(final GenerationStore generations, final ObjectStore objects, final WorldRole role,
+    private AwfWorldStore(final Path root, final GenerationStore generations, final ObjectStore objects, final WorldRole role,
                           final int retainedGenerations, final Compaction compaction, final Resolved current) {
+        this.root = root;
         this.generations = generations;
         this.objects = objects;
         this.role = role;
@@ -191,12 +201,12 @@ public final class AwfWorldStore implements AwfStore {
                               final Compaction compaction) throws IOException {
         final GenerationStore generations = GenerationStore.open(root.resolve("generations-root"), role,
             retainedGenerations, hook, durability);
-        final ObjectStore objects = new ObjectStore(root.resolve("objects"), durability);
+        final ObjectStore objects = new ObjectStore(root.resolve("objects"), durability, role);
         final Map<Long, Resolved> resolved = new HashMap<>();
         final GenerationStore.Generation current = generations.read();
         // The current generation must replay; anything else fails the open, as before.
         final Resolved state = current == null ? Resolved.EMPTY : resolve(generations, current, resolved);
-        final AwfWorldStore store = new AwfWorldStore(generations, objects, role, retainedGenerations, compaction, state);
+        final AwfWorldStore store = new AwfWorldStore(root, generations, objects, role, retainedGenerations, compaction, state);
         for (final GenerationStore.Generation retained : generations.readRetained()) {
             try {
                 store.retainedNames.addLast(names(resolve(generations, retained, resolved).index));
@@ -460,10 +470,16 @@ public final class AwfWorldStore implements AwfStore {
      * After a commit: records the new generation's objects as retained and collects only what can
      * have become garbage, the objects of generations that just fell out of retention and those of
      * earlier failed commits, minus everything still retained. Returns how many objects it deleted.
+     *
+     * <p>Runs past the commit point, so it never throws: an object it cannot delete stays a
+     * candidate for the next commit, and the failure is logged (at most once a minute per store).
+     * Reporting the commit as failed would make the caller retry it, committing yet another
+     * generation.</p>
      */
-    private int retainAndCollect(final SortedMap<ChunkKey, String> committedIndex) throws IOException {
+    private int retainAndCollect(final SortedMap<ChunkKey, String> committedIndex) {
         this.retainedNames.addFirst(names(committedIndex));
         final Set<String> candidates = new HashSet<>(this.orphanCandidates);
+        this.orphanCandidates.clear();
         while (this.retainedNames.size() > this.retainedGenerations) {
             candidates.addAll(this.retainedNames.removeLast());
         }
@@ -471,11 +487,22 @@ public final class AwfWorldStore implements AwfStore {
         if (!candidates.isEmpty()) {
             final Set<String> live = new HashSet<>();
             this.retainedNames.forEach(live::addAll);
+            IOException firstFailure = null;
             for (final String name : candidates) {
-                if (!live.contains(name) && this.objects.delete(name)) removedObjects++;
+                if (live.contains(name)) continue;
+                try {
+                    if (this.objects.delete(name)) removedObjects++;
+                } catch (final IOException failed) {
+                    this.orphanCandidates.add(name);
+                    if (firstFailure == null) firstFailure = failed;
+                }
+            }
+            if (firstFailure != null) {
+                this.collectWarning.failed("AWF store " + this.root + " committed generation " + this.generation + ", but "
+                    + this.orphanCandidates.size() + " object(s) no retained generation references could not be deleted;"
+                    + " the commit stands and the next commit tries again", firstFailure);
             }
         }
-        this.orphanCandidates.clear();
         return removedObjects;
     }
 
@@ -604,13 +631,19 @@ public final class AwfWorldStore implements AwfStore {
         return delta.size();
     }
 
+    /**
+     * Parses index or delta lines. The value must be an object name (lower-case SHA-256 hex), a
+     * tombstone, or in a delta a drop: anything else, such as a path, makes the generation corrupt,
+     * so a store copied from elsewhere can never name a file outside its object directory.
+     */
     private static SortedMap<ChunkKey, String> decodeEntries(final byte[] bytes, final boolean delta) throws IOException {
         final SortedMap<ChunkKey, String> index = new TreeMap<>();
         for (final String line : new String(bytes, StandardCharsets.UTF_8).split("\n")) {
             if (line.isEmpty()) continue;
             final String[] parts = line.split(" ");
             try {
-                if (parts.length != 3 || !(parts[2].length() == 64 || TOMBSTONE.equals(parts[2]) || (delta && DROP.equals(parts[2])))) {
+                if (parts.length != 3 || !(ObjectStore.NAME.matcher(parts[2]).matches() || TOMBSTONE.equals(parts[2])
+                    || (delta && DROP.equals(parts[2])))) {
                     throw new NumberFormatException(line);
                 }
                 index.put(new ChunkKey(Integer.parseInt(parts[0]), Integer.parseInt(parts[1])), parts[2]);

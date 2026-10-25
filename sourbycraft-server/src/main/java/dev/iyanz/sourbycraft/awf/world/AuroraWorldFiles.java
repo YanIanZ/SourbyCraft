@@ -26,6 +26,12 @@ import java.util.Map;
  * as JSON, written when the world has any. A file without it (every file written before it was
  * added) imports with no properties, exactly as before.</p>
  *
+ * <p>{@code plugin-data} ({@link #PLUGIN_DATA}) is the world's persistent data container as base64
+ * of the gzip-compressed NBT compound. Only {@link #convertSlime} writes it, from the Slime world's
+ * {@code BukkitValues}, and only when it fits in one metadata value; {@link #export} does not (the
+ * world's own container is not read). It is optional: a file without it has no plugin data, and a
+ * build that does not know the key ignores it, as every reader ignores keys it does not use.</p>
+ *
  * <p>The {@code /awf} command reads files from {@link #IMPORTS} and writes them to
  * {@link #EXPORTS} only ({@link #confine}); the {@link dev.iyanz.sourbycraft.api.world.AuroraWorlds}
  * API takes any path, as a plugin has the file system anyway.</p>
@@ -35,6 +41,10 @@ public final class AuroraWorldFiles {
     public static final String FORMAT = "awf-world";
     /** Metadata key of the world's properties, as JSON. */
     static final String PROPERTIES = "properties";
+    /** Metadata key of the world's plugin data: base64 of the gzip-compressed NBT compound. */
+    static final String PLUGIN_DATA = "plugin-data";
+    /** The longest metadata value a file holds ({@code writeUTF}); base64 is one byte per character. */
+    static final int MAX_METADATA_VALUE = 65_535;
     private static final com.google.gson.Gson GSON = new com.google.gson.GsonBuilder().disableHtmlEscaping().create();
 
     /** What an export or a conversion wrote. */
@@ -196,6 +206,38 @@ public final class AuroraWorldFiles {
         }
     }
 
+    /**
+     * The {@link #PLUGIN_DATA} value for a world's plugin data, or {@code null} when it does not fit
+     * in one metadata value ({@value #MAX_METADATA_VALUE} base64 characters, about 48 KiB compressed).
+     */
+    static String encodePluginData(final net.minecraft.nbt.CompoundTag data) throws IOException {
+        final java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        try (java.io.DataOutputStream out = new java.io.DataOutputStream(new java.util.zip.GZIPOutputStream(bytes))) {
+            net.minecraft.nbt.NbtIo.write(data, out);
+        }
+        final String encoded = java.util.Base64.getEncoder().encodeToString(bytes.toByteArray());
+        return encoded.length() > MAX_METADATA_VALUE ? null : encoded;
+    }
+
+    /**
+     * The plugin data a file records, or {@code null} when it records none (every file written
+     * before the key existed, and every {@link #export}). Decoded within the Slime import's size
+     * limit ({@link SlimeImporter#MAX_BYTES_PROPERTY}). To be merged into the world's container with
+     * {@link SlimeImporter#restorePluginData} where the container may be written.
+     *
+     * @throws IOException when the value is not base64 of gzip-compressed NBT
+     */
+    static net.minecraft.nbt.CompoundTag pluginData(final Map<String, String> meta) throws IOException {
+        final String encoded = meta.get(PLUGIN_DATA);
+        if (encoded == null) return null;
+        try (java.io.InputStream in = new java.util.zip.GZIPInputStream(
+            new java.io.ByteArrayInputStream(java.util.Base64.getDecoder().decode(encoded)))) {
+            return SlimeImporter.decode(in);
+        } catch (final RuntimeException malformed) {          // not base64, an NBT reader's own exception
+            throw new IOException("the file's plugin data is not valid: " + malformed.getMessage(), malformed);
+        }
+    }
+
     /** Writes a file's chunks into a new world's stores on the configured backend. */
     static Map<String, Integer> importInto(final AwfWorldFile file, final Path worldFolder) throws IOException {
         final Map<String, ChunkSource> sources = new LinkedHashMap<>();
@@ -222,11 +264,16 @@ public final class AuroraWorldFiles {
             final dev.iyanz.sourbycraft.api.world.WorldProperties properties = converted.world().properties();
             final Map<String, String> meta = metadata(new AuroraWorldRegistry.Entry(source, environment, null,
                 "void", null, null, false, properties), "slime " + source);
-            // An .awf file does not carry a world's persistent data container yet, so the plugin data is dropped here.
-            final java.util.List<String> dropped = converted.world().dropped(false);
+            // The world's plugin data (BukkitValues) is kept under plugin-data when it fits in one value.
+            final net.minecraft.nbt.CompoundTag pluginData = converted.world().pluginData();
+            final String encodedPluginData = pluginData == null ? null : encodePluginData(pluginData);
+            if (encodedPluginData != null) meta.put(PLUGIN_DATA, encodedPluginData);
+            final java.util.List<String> dropped = converted.world().dropped(encodedPluginData != null);
             if (!dropped.isEmpty()) {
                 dev.iyanz.sourbycraft.util.SourbyLogger.warn("Aurora World Fabric: converting " + source
-                    + " did not keep " + dropped + " (not representable in AWF yet)");
+                    + " did not keep " + dropped + " (not representable in AWF yet"
+                    + (pluginData != null && encodedPluginData == null ? "; the world's plugin data is larger than one"
+                        + " .awf metadata value holds" : "") + ")");
             }
             meta.put("data-version", Integer.toString(converted.dataVersion()));
             writer.finish(meta);

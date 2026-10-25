@@ -34,9 +34,9 @@ import net.minecraft.nbt.Tag;
  *   <li><b>v13</b> ({@code 0x0D}): zlib (SourbyCraft's former writer) or zstd (AdvancedSlimePaper),
  *       told apart by the blob's magic. A flags byte after the data version (1 = POI, 2 = block
  *       ticks, 4 = fluid ticks saved, each then present per chunk after the heightmaps; unknown
- *       flags' values are skipped). A section starts with one flags byte (2 = sky light, 1 = block
- *       light follows). Entities are a bare list or, as ASP writes them, a compound holding
- *       {@code entities}.</li>
+ *       flags' values are skipped and the flags reported as dropped). A section starts with one
+ *       flags byte (2 = sky light, 1 = block light follows). Entities are a bare list or, as ASP
+ *       writes them, a compound holding {@code entities}.</li>
  *   <li><b>v12</b> ({@code 0x0C}): zstd, no flags byte, no POI or ticks. A section starts with two
  *       booleans (block light, sky light). Entities are a list under {@code entities} in a
  *       compound. zstd comes from the engine's runtime libraries.</li>
@@ -59,6 +59,7 @@ public final class SlimeImporter {
     private static final int FLAG_POI = 1;
     private static final int FLAG_BLOCK_TICKS = 2;
     private static final int FLAG_FLUID_TICKS = 4;
+    private static final int KNOWN_FLAGS = FLAG_POI | FLAG_BLOCK_TICKS | FLAG_FLUID_TICKS;
     /**
      * JVM property: the largest Slime file, decompressed blob or NBT value an import accepts, in
      * bytes (default {@value #DEFAULT_MAX_BYTES}, 256 MiB). Read at each import, so it applies to
@@ -114,8 +115,10 @@ public final class SlimeImporter {
      *
      * @param worldExtra the world's extra data compound (AdvancedSlimePaper keeps its
      *     {@code properties} and the world's {@code BukkitValues} here); empty when the file has none
+     * @param unknownFlags the v13 flag bits this reader does not know; their per-chunk values were
+     *     skipped. 0 for v12 and for a file with known flags only
      */
-    record SlimeFile(int dataVersion, List<SlimeChunk> chunks, CompoundTag worldExtra) {
+    record SlimeFile(int dataVersion, List<SlimeChunk> chunks, CompoundTag worldExtra, int unknownFlags) {
 
         /** AdvancedSlimePaper's world properties ({@code spawnX}, {@code difficulty}, ...) as text. */
         Map<String, String> properties() {
@@ -137,9 +140,10 @@ public final class SlimeImporter {
      *     dev.iyanz.sourbycraft.api.world.WorldProperties}; {@code NONE} when none do
      * @param pluginData the world's {@code BukkitValues} compound (its persistent data container, keyed
      *     {@code namespace:key}); {@code null} when the file has none or it is not a compound
-     * @param dropped what the import does not keep, as {@code properties.<key>} and
-     *     {@code extra.<key>}; empty when nothing is dropped. The plugin data is not listed here: a
-     *     consumer that cannot keep it asks {@link #dropped(boolean)}
+     * @param dropped what the import does not keep, as {@code properties.<key>},
+     *     {@code extra.<key>} and {@code chunk-flags.0x<bit>} (a v13 chunk flag newer than this
+     *     reader, whose per-chunk values were skipped); empty when nothing is dropped. The plugin
+     *     data is not listed here: a consumer that cannot keep it asks {@link #dropped(boolean)}
      */
     public record WorldData(dev.iyanz.sourbycraft.api.world.WorldProperties properties, CompoundTag pluginData,
                             List<String> dropped) {
@@ -224,7 +228,8 @@ public final class SlimeImporter {
             final CompoundTag poiTag = poiTag(chunk, parsed.dataVersion());
             if (poiTag != null) poi.put(key, encode(poiTag));
         }
-        return new Converted(region, entities, poi, parsed.dataVersion(), worldData(parsed.worldExtra()));
+        return new Converted(region, entities, poi, parsed.dataVersion(),
+            worldData(parsed.worldExtra(), parsed.unknownFlags()));
     }
 
     static SlimeFile read(final byte[] file) throws IOException {
@@ -267,8 +272,9 @@ public final class SlimeImporter {
             final CompoundTag poi = (flags & FLAG_POI) != 0 ? compound(chunks) : null;
             final CompoundTag blockTicks = (flags & FLAG_BLOCK_TICKS) != 0 ? compound(chunks) : null;
             final CompoundTag fluidTicks = (flags & FLAG_FLUID_TICKS) != 0 ? compound(chunks) : null;
-            // Flags newer than this reader: each adds one length-prefixed value, skipped (as ASP does).
-            for (int unknown = Integer.bitCount(flags & ~(FLAG_POI | FLAG_BLOCK_TICKS | FLAG_FLUID_TICKS)); unknown > 0; unknown--) {
+            // Flags newer than this reader: each adds one length-prefixed value, skipped (as ASP does)
+            // and reported once per file through WorldData.dropped().
+            for (int unknown = Integer.bitCount(flags & ~KNOWN_FLAGS); unknown > 0; unknown--) {
                 lengthPrefixed(chunks);
             }
             final CompoundTag tileEntities = compound(chunks);
@@ -276,7 +282,7 @@ public final class SlimeImporter {
             final CompoundTag extra = compound(chunks);
             out.add(new SlimeChunk(x, z, sections, heightmaps, poi, blockTicks, fluidTicks, tileEntities, entities, extra));
         }
-        return new SlimeFile(dataVersion, out, worldExtra);
+        return new SlimeFile(dataVersion, out, worldExtra, flags & ~KNOWN_FLAGS);
     }
 
     /** The chunk NBT the engine writes for a full chunk, without light. */
@@ -408,13 +414,13 @@ public final class SlimeImporter {
                 throw new IOException("Slime format version " + version + " is not supported; versions 12 and 13 are");
             }
             in.readInt();                                  // data version
-            if (version == V13) in.readByte();             // flags
+            final int flags = version == V13 ? in.readByte() & 0xFF : 0;
             final int compressedLength = in.readInt();
             final int length = in.readInt();
             checkLength("compressed blob", compressedLength);
             checkLength("blob", length);
             in.skipNBytes(compressedLength);
-            return worldData(worldExtra(in));
+            return worldData(worldExtra(in), flags & ~KNOWN_FLAGS);
         } catch (final java.io.EOFException truncated) {
             throw new IOException("Slime file " + file + " is truncated", truncated);
         }
@@ -435,7 +441,19 @@ public final class SlimeImporter {
      * {@code BukkitValues} compound (the world's plugin data) becomes {@link WorldData#pluginData()}.
      */
     static WorldData worldData(final CompoundTag extra) {
+        return worldData(extra, 0);
+    }
+
+    /**
+     * As {@link #worldData(CompoundTag)}, also listing each of {@code unknownFlags} (v13 chunk flag
+     * bits this reader skipped) as {@code chunk-flags.0x<bit>}, so the one WARN an import or a
+     * conversion logs for what it dropped names them.
+     */
+    static WorldData worldData(final CompoundTag extra, final int unknownFlags) {
         final List<String> dropped = new ArrayList<>();
+        for (int bits = unknownFlags; bits != 0; bits &= bits - 1) {
+            dropped.add("chunk-flags.0x" + Integer.toHexString(Integer.lowestOneBit(bits)));
+        }
         final CompoundTag props = extra.getCompoundOrEmpty("properties");
         final CompoundTag pluginData = extra.get("BukkitValues") instanceof CompoundTag values ? values : null;
         for (final String key : new java.util.TreeSet<>(extra.keySet())) {
@@ -518,6 +536,11 @@ public final class SlimeImporter {
     private static CompoundTag compound(final DataInputStream in) throws IOException {
         final byte[] bytes = lengthPrefixed(in);
         return bytes == null ? null : nbt(() -> NbtIo.read(new DataInputStream(new ByteArrayInputStream(bytes)), accounter()));
+    }
+
+    /** Reads one NBT compound, as {@link #encode} writes it, within the {@link #maxBytes()} limit. */
+    static CompoundTag decode(final java.io.InputStream in) throws IOException {
+        return nbt(() -> NbtIo.read(new DataInputStream(in), accounter()));
     }
 
     private interface NbtRead<T> {
