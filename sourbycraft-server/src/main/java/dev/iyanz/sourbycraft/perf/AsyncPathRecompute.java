@@ -40,8 +40,9 @@ import org.jspecify.annotations.Nullable;
  * schedules the delivery. Once a solve is admitted the mob keeps its current path until the result
  * lands, which is applied back on the mob's own region thread through that handoff. Every declined
  * offload, including a full or stopping pool, leaves the caller to run the vanilla synchronous
- * recompute for that slot; {@code /perf async} counts capacity declines as {@code declined} and a
- * refused submission as {@code refused}.</p>
+ * recompute for that slot; {@code /perf async} counts capacity declines as {@code declined}, a
+ * refused submission as {@code refused}, and a finished solve that never reached the mob's owner as
+ * {@code retired}.</p>
  */
 public final class AsyncPathRecompute {
 
@@ -144,10 +145,13 @@ public final class AsyncPathRecompute {
             navigation.sourbyAsyncPathPending = false;
             return false;
         }
+        // A result that never reaches the owner (the mob was removed or unloaded first, or the handoff
+        // was refused) is counted as retired.
         solving.whenComplete((path, err) -> AsyncPathCompletion.deliver(
             handoff,
             owner -> deliver(navigation, mob, owner, requested, requestedGeneration, path, reachRange),
-            () -> navigation.sourbyAsyncPathPending = false));
+            () -> navigation.sourbyAsyncPathPending = false,
+            () -> AsyncPathProcessor.noteDelivery(AsyncPathProcessor.Delivery.RETIRED)));
         return true;
     }
 

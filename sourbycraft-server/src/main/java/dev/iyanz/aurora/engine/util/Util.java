@@ -35,12 +35,9 @@ import org.jspecify.annotations.Nullable;
 import static net.kyori.adventure.text.Component.text;
 
 /**
- * Generic utilities for Canvas
+ * Generic utilities for the Aurora region engine (inherited from Canvas).
  */
 public class Util {
-    /**
-     * The API client for the {@code canvas} project slug
-     */
 
     private static final ThreadLocal<XoroshiroRandomSource> XOROSHIRO = ThreadLocal.withInitial(() -> new XoroshiroRandomSource(0L, 0L));
     private static final ThreadLocal<SingleThreadedRandomSource> SIMPLE = ThreadLocal.withInitial(() -> new SingleThreadedRandomSource(0L));

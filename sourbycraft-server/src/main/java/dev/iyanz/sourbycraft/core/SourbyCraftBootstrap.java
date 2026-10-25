@@ -97,9 +97,11 @@ public final class SourbyCraftBootstrap {
     }
 
     /**
-     * Starts metrics, network counters, configuration, the stall recorder, plugin config provisioning, branding,
-     * diagnostics, the startup index, commands, listeners, player-slot settings, I/O workers, the
-     * updater and GC sampling, in that order.
+     * Prints the Engine section rule, then runs the boot stages in this order: metrics
+     * runtime, network counters, configuration, SourbyMods, stall recorder, Aurora Redis fabric, AuroraWorlds,
+     * AWF MultiProfile, plugin config provisioning, JVM advisor, plugin diagnostics, startup index, commands,
+     * messages (join/leave broadcasts and MOTD), player slots, I/O virtual executor, AbyssLink, auto-updater
+     * and GC tracker.
      * A second invocation is a no-op, including after a partially failed startup. Individual stage
      * failures are logged and counted without skipping subsequent stages.
      */
@@ -130,7 +132,8 @@ public final class SourbyCraftBootstrap {
             dev.iyanz.sourbycraft.perf.NetworkMetrics.install();
         });
 
-        // The unified TOML: messages, /maxp, auto-updater settings.
+        // sourbycraft_global_config.yml and aurora.yml (messages, /maxp, auto-updater settings, Aurora services),
+        // the security limits and the engine files.
         stage("configuration", () -> {
             SourbyCraftConfig.init();
         });
@@ -164,8 +167,12 @@ public final class SourbyCraftBootstrap {
 
         // ORDERING: must precede CraftServer#enablePlugins, where Via reads its config in
         // onEnable. Writes the shipped default ViaVersion/ViaBackwards config only when absent.
+        // Read strictly: only an absent key (its default) or true provisions. A value that is not a
+        // boolean writes nothing; the early jar provisioning (BootstrapPluginSettings) also skips the
+        // group for an invalid value rather than taking the default.
         stage("plugin provisioning", () -> {
-            PluginProvisioner.provisionConfigs(SourbyCraftConfig.cfgBool(dev.iyanz.sourbycraft.config.UtilityKeys.VIAVERSION_AUTO_PROVISION.path(), true));
+            final Object provision = SourbyCraftConfig.cfgGet(dev.iyanz.sourbycraft.config.UtilityKeys.VIAVERSION_AUTO_PROVISION.path(), null);
+            PluginProvisioner.provisionConfigs(provision == null || Boolean.TRUE.equals(provision));
         });
 
         // Warning-only JVM flag advice, logged so it reaches logs/latest.log (no stdout banner since Build 49).

@@ -9,8 +9,9 @@ package dev.iyanz.sourbycraft.bridge;
  * plugin's task body is running on this thread the hit is recorded as that plugin's violation
  * through the bridge's quarantine path, and the bridge logs it rate-limited per (plugin, reason).
  * Anywhere else -- a native plugin, the server itself -- nothing is recorded and the guard logs
- * its own line; {@link #admitEngineLog} is the rate limit meant for that line, which the guard does not
- * call yet.</p>
+ * its own line; {@link #admitEngineLog} is the rate limit meant for that line. {@code TickGuard} calls
+ * {@link #report} and {@link #admitEngineLog} only on a tick thread; a hit off a tick thread is decided by
+ * {@code ThreadChecks} before either is reached.</p>
  *
  * <p>Attribution is by thread: a hit inside a bridged body is charged to that body's plugin, also
  * when the access was made by something it called (an event listener of another plugin, say).
@@ -49,8 +50,7 @@ public final class GuardViolations {
      * plugin reading a neighbouring region in a loop logs once a minute, with a count, instead of one stack trace
      * per access; another plugin hitting the same guard keeps its own line. The key is found by walking the stack
      * to the first frame loaded by a plugin class loader, on every hit, suppressed or not (its cost has not been
-     * measured). Never throws: on an unexpected failure the line is logged. {@code TickGuard} does not call this
-     * yet; until it does, its LOG-mode line is logged for every hit.
+     * measured). Never throws: on an unexpected failure the line is logged.
      *
      * @return {@code -1} to suppress the line, otherwise how many hits with that key were suppressed before it
      */

@@ -22,7 +22,9 @@ import org.slf4j.LoggerFactory;
  * owner-decisions section of {@code docs/DEVELOPMENT.md}.</p>
  *
  * <p>The mode is resolved once, at class init (RESTART_REQUIRED): the JVM property
- * {@code -Daurora.bridge.thread-checks=} wins, else the TOML key, else the owner's default {@code relaxed}.
+ * {@code -Daurora.bridge.thread-checks=} wins, else the {@code aurora.bridge.thread-checks} key (read early
+ * with the bridge's settings, {@code sourbycraft_config/aurora.yml} over the global YAML file), else the
+ * owner's default {@code relaxed}.
  * Whatever is configured only takes effect while {@code aurora.bridge.mode} admits legacy plugins; with the
  * bridge off the checks stay enforced. {@link #RELAXED_SCOPE} is a {@code static final} so the extra locking
  * and the cross-region world-data lookups it guards fold away on an enforced server.</p>
@@ -36,7 +38,7 @@ public final class ThreadChecks {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("Aurora");
 
-    /** JVM property; overrides the TOML key. */
+    /** JVM property; overrides the {@code aurora.bridge.thread-checks} key in the YAML configuration. */
     public static final String PROPERTY = "aurora.bridge.thread-checks";
     /** JVM property: {@code true} attaches a stack trace to every relaxed-hit log line (debugging only). */
     public static final String TRACE_PROPERTY = "aurora.bridge.thread-checks.trace";
@@ -46,7 +48,7 @@ public final class ThreadChecks {
     /** Distinct reasons remembered for rate limiting outside bridged bodies; past this, new reasons share one window. */
     static final int MAX_TRACKED_REASONS = 256;
 
-    /** What the operator configured (JVM property, else TOML, else the owner default). */
+    /** What the operator configured (JVM property, else the YAML key, else the owner default). */
     private static final AuroraConfig.ThreadChecks CONFIGURED;
     /** What the server does: {@link #CONFIGURED} while the bridge admits plugins, else {@code ENFORCED}. */
     private static final AuroraConfig.ThreadChecks EFFECTIVE;

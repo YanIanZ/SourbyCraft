@@ -6,10 +6,13 @@ import dev.iyanz.sourbycraft.brand.BuildInfo;
 import dev.iyanz.sourbycraft.bridge.AuroraBridge;
 import dev.iyanz.sourbycraft.core.AuroraRuntime;
 import dev.iyanz.sourbycraft.core.SourbyCraftBootstrap;
+import dev.iyanz.sourbycraft.util.SourbyLogger;
+import dev.iyanz.sourbycraft.util.VirtualExecutor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.RejectedExecutionException;
 import static net.kyori.adventure.text.Component.text;
 
 /** Operator hub and Aurora service diagnostics; reload is explicit and never implicit in a view. */
@@ -39,15 +42,7 @@ public class SourbyCraftCommand extends Command {
             }
             case "status" -> status(sender);
             case "config" -> config(sender);
-            case "reload" -> {
-                sender.sendMessage(UiPanel.header("Configuration reload"));
-                var report = SourbyCraftConfig.reloadDetailed();
-                sender.sendMessage(text("  " + (report.successful() ? "COMPLETE" : "PARTIAL / FAILED"),
-                    report.successful() ? SourbyCraftColors.SUCCESS : SourbyCraftColors.DANGER));
-                report.lines().forEach(line -> sender.sendMessage(UiPanel.hint(line)));
-                sender.sendMessage(UiPanel.actions(List.of("/sourbycraft config", "/aurora status")));
-                sender.sendMessage(UiPanel.footer());
-            }
+            case "reload" -> reload(sender);
             case "help" -> {
                 sender.sendMessage(UiPanel.header("Operator hub"));
                 final BuildInfo identity = BuildInfo.load();
@@ -66,6 +61,50 @@ public class SourbyCraftCommand extends Command {
             default -> sender.sendMessage(UiPanel.hint(usageMessage));
         }
         return true;
+    }
+
+    /**
+     * {@code /sourbycraft reload}: reads and applies the files on a SourbyCraft I/O virtual thread
+     * ({@link VirtualExecutor}), never on the tick thread that dispatched the command, and delivers the
+     * report through {@link SourbyReply}. Refused while the server is stopping or failed to start
+     * ({@link AuroraRuntime#stopping()}) and when the I/O workers are stopped or at capacity.
+     *
+     * <p>The engine part of the reload runs on that I/O thread as well: its post-load step schedules a
+     * player-info resend on each player's own scheduler and sends its broadcast lines to permitted players
+     * directly from that thread, and each loaded level's engine configuration is replaced from it (no single
+     * tick thread owns every player or level, so the dispatching thread did not own them either). A sender
+     * that collects output only while the command runs (RCON) can miss the report.</p>
+     */
+    private static void reload(CommandSender sender) {
+        if (AuroraRuntime.stopping()) {
+            sender.sendMessage(text("Reload not started: the server is stopping or failed to start.", SourbyCraftColors.DANGER));
+            return;
+        }
+        sender.sendMessage(text("Reloading configuration...", SourbyCraftColors.LABEL));
+        try {
+            VirtualExecutor.run(() -> {
+                try {
+                    var report = SourbyCraftConfig.reloadDetailed();
+                    SourbyReply.run(sender, () -> reloadReport(sender, report));
+                } catch (Throwable failure) {
+                    SourbyLogger.error("/sourbycraft reload failed", failure);
+                    SourbyReply.run(sender, () -> sender.sendMessage(text("Reload failed: " + failure
+                        + " (see console); some settings may already be applied.", SourbyCraftColors.DANGER)));
+                }
+            });
+        } catch (RejectedExecutionException refused) {
+            sender.sendMessage(text("Reload not started: the server's I/O workers are stopped or busy ("
+                + refused.getMessage() + ").", SourbyCraftColors.DANGER));
+        }
+    }
+
+    private static void reloadReport(CommandSender sender, SourbyCraftConfig.ReloadReport report) {
+        sender.sendMessage(UiPanel.header("Configuration reload"));
+        sender.sendMessage(text("  " + (report.successful() ? "COMPLETE" : "PARTIAL / FAILED"),
+            report.successful() ? SourbyCraftColors.SUCCESS : SourbyCraftColors.DANGER));
+        report.lines().forEach(line -> sender.sendMessage(UiPanel.hint(line)));
+        sender.sendMessage(UiPanel.actions(List.of("/sourbycraft config", "/aurora status")));
+        sender.sendMessage(UiPanel.footer());
     }
 
     private static void status(CommandSender sender) {
@@ -101,9 +140,11 @@ public class SourbyCraftCommand extends Command {
         sender.sendMessage(UiPanel.row("Bridge thread checks configured / effective", config.bridge().threadChecks().configValue() + " / "
             + dev.iyanz.sourbycraft.guards.ThreadChecks.describe()));
         sender.sendMessage(UiPanel.row("Console style", SourbyCraftConfig.cfgGet(dev.iyanz.sourbycraft.config.UtilityKeys.CONSOLE_STYLE.path(), "auto") + " (JVM property may override)"));
-        sender.sendMessage(UiPanel.hint("Scheduler budgets, AWF, startup provisioning, MOTD and updater interval also require restart."));
+        sender.sendMessage(UiPanel.hint("Scheduler budgets, AWF, startup provisioning, MOTD and updater interval also require restart;"
+            + " a change to them since boot is listed under Pending tracked changes."));
         sender.sendMessage(UiPanel.row("Pending tracked changes", SourbyCraftConfig.pendingRestartKeys().isEmpty() ? "none" : String.join(", ", SourbyCraftConfig.pendingRestartKeys())));
-        sender.sendMessage(UiPanel.hint("Views use loaded values. Reload never rewrites a file; Build 49 migrated old layouts once (copies kept as *.migrated)."));
+        sender.sendMessage(UiPanel.hint("Views use loaded values. A reload rewrites an engine file only to add or remove a key (logged);"
+            + " SourbyCraft files are never rewritten by a reload. Build 49 migrated old layouts once (copies kept as *.migrated)."));
         sender.sendMessage(UiPanel.actions(List.of("/sourbycraft reload", "/aurora status")));
         sender.sendMessage(UiPanel.footer());
     }

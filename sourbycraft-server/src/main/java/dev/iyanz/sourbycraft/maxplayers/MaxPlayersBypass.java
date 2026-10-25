@@ -26,8 +26,9 @@ import org.bukkit.plugin.Plugin;
  * <p><b>Opt-in (default OFF).</b> Registering a {@code PlayerLoginEvent} listener disables the
  * 1.20.2+ configuration-phase fast join path and slows every client join. Because most servers
  * never sit at their player cap, the bypass is not worth that cost by default. It is therefore
- * gated behind the config key {@code sourcebycraft.maxplayers.bypass-enabled} (default
- * {@code false}): when unset/false NO listener is registered.
+ * gated behind the config key {@code players.full-server-bypass} in
+ * {@code sourbycraft_config/sourbycraft_global_config.yml} (default {@code false}, RESTART_REQUIRED):
+ * when unset/false NO listener is registered.
  *
  * <p>Relocated out of the {@code perf} package when the engine became Aurora's — this is a kept utility feature, not part of the deferred self-tuning perf-engine.
  */
@@ -42,7 +43,7 @@ public final class MaxPlayersBypass implements Listener {
 
     /**
      * Register the full-server bypass listener — but only when
-     * {@code sourbycraft.maxplayers.bypass-enabled} is {@code true}. Returns whether a listener
+     * {@code players.full-server-bypass} is {@code true}. Returns whether a listener
      * was actually registered.
      */
     public static boolean register(Plugin plugin) {

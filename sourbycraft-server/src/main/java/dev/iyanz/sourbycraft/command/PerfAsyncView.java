@@ -16,8 +16,9 @@ import net.kyori.adventure.text.Component;
  * between, or a shutdown raced it). Neither drops the recompute: the region thread runs the
  * vanilla synchronous recompute for that slot, so a rising count means the pool is at capacity
  * for this workload and the region thread is doing that A* itself. Applied and discarded say
- * what became of finished solves on the owner. The inline counter is retained only for
- * compatibility with older telemetry and should stay zero.</p>
+ * what became of finished solves on the owner; retired counts finished solves that never reached
+ * it (the mob was removed or unloaded first, or the handoff was refused). The inline counter is
+ * retained only for compatibility with older telemetry and should stay zero.</p>
  */
 final class PerfAsyncView implements PerfView {
 
@@ -49,12 +50,13 @@ final class PerfAsyncView implements PerfView {
         // Both fall back to the synchronous recompute on the region thread; see the class javadoc.
         add(lines, "Declined, pool full / stopping (ran sync)", count(stats.declined()));
         add(lines, "Refused at submit (ran sync)", count(stats.refused()));
-        // Finished solves as the owner found them. Results whose entity was removed or unloaded
-        // before delivery are in neither row.
+        // Finished solves as the owner found them, then those that never reached it.
         add(lines, "Results applied", count(stats.applied()));
         add(lines, "Results discarded (entity / path / generation / no path)",
             count(stats.staleSubject()) + " / " + count(stats.stalePath()) + " / "
                 + count(stats.staleGeneration()) + " / " + count(stats.noPath()));
+        add(lines, "Results retired before delivery (mob removed / unloaded, or handoff refused)",
+            count(stats.retired()));
         final var types = dev.iyanz.sourbycraft.perf.AsyncPathTypeStats.top(TOP_TYPES);
         if (types.isEmpty()) {
             add(lines, "Top mob types", "none yet");

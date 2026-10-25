@@ -210,7 +210,7 @@ class AsyncPathPatchShapeTest {
         final int handoff = at(source, "RegionOwnerHandoff.forEntity(mob)");
         final int submit = at(source, ".trySubmit(subject, () -> solver.findPath(snapshot, subject, targets");
         final int deliver = at(source, "AsyncPathCompletion.deliver(");
-        final int release = at(source, "() -> navigation.sourbyAsyncPathPending = false));");
+        final int release = at(source, "() -> navigation.sourbyAsyncPathPending = false,");
         assertTrue(handoff < submit && submit < deliver && deliver < release,
             "owner handoff built before the submit, then the delivery, then the release callback");
         assertEquals(1, count(source, "RegionOwnerHandoff.forEntity("), "no handoff is built in the completion callback");

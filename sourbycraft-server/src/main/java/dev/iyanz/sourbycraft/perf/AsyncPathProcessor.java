@@ -60,7 +60,7 @@ public final class AsyncPathProcessor {
     /** Offloads declined on {@link #hasCapacity()} before anything was submitted. */
     private static final java.util.concurrent.atomic.AtomicLong DECLINED =
         new java.util.concurrent.atomic.AtomicLong();
-    /** Finished solves by how they ended on the owner, indexed by {@link Delivery#ordinal()}. */
+    /** Finished solves by how they ended (on the owner, or retired before it), indexed by {@link Delivery#ordinal()}. */
     private static final java.util.concurrent.atomic.AtomicLongArray DELIVERIES =
         new java.util.concurrent.atomic.AtomicLongArray(Delivery.values().length);
     private static final java.util.concurrent.atomic.AtomicLong SOLVE_NANOS =
@@ -91,9 +91,8 @@ public final class AsyncPathProcessor {
      * should remain zero. Saturation shows as {@code declined}, and as {@code refused} when the
      * queue fills between the capacity check and the submission.</p>
      *
-     * <p>The last five count finished solves by how they ended on the owner. A result whose entity
-     * was removed or unloaded before its next owning tick, or whose owner handoff was refused,
-     * never reaches that check and is in none of them.</p>
+     * <p>The last six count finished solves by how they ended: five by what the owner found, and
+     * {@code retired} for a result that never reached the owner.</p>
      *
      * @param admitted      solves the executor accepted; a submission it rejected (saturation or a
      *                      concurrent shutdown) is counted in {@code refused} only; excludes
@@ -123,15 +122,21 @@ public final class AsyncPathProcessor {
      *                        on (patch 0047), such as a {@code stop()} on an already-null path
      * @param noPath          results that were still valid but carried no path (none found, solver
      *                        failure, cancellation) or one without a target; nothing was applied
+     * @param retired         results that never reached the owner: the entity was removed or unloaded
+     *                        before its next owning tick (the handoff's retirement callback ran), or the
+     *                        owner handoff refused the delivery; nothing was applied
      */
     public record PathStats(long admitted, long inline, long refused, long declined, int outstanding,
                             double meanMillis, double slowestMillis,
                             int queueDepth, int activeWorkers, int poolSize,
                             double meanWaitMillis, double slowestWaitMillis,
                             long applied, long staleSubject, long stalePath, long staleGeneration,
-                            long noPath) {}
+                            long noPath, long retired) {}
 
-    /** How a finished solve ended on the owner; counted by {@code AsyncPathRecompute.deliver}. */
+    /**
+     * How a finished solve ended. The first five are counted by {@code AsyncPathRecompute.deliver} on the owner;
+     * {@link #RETIRED} by the retired callback {@code AsyncPathRecompute} hands to {@code AsyncPathCompletion}.
+     */
     enum Delivery {
         /** Still the requested route: applied to the navigation. */
         APPLIED,
@@ -142,7 +147,9 @@ public final class AsyncPathProcessor {
         /** The navigation's request generation moved on meanwhile. */
         STALE_GENERATION,
         /** Still valid, but no path (or one without a target) to apply. */
-        NO_PATH
+        NO_PATH,
+        /** Never reached the owner: it retired (entity removed or unloaded) or refused the handoff. */
+        RETIRED
     }
 
     /**
@@ -169,10 +176,15 @@ public final class AsyncPathProcessor {
             DELIVERIES.get(Delivery.STALE_SUBJECT.ordinal()),
             DELIVERIES.get(Delivery.STALE_PATH.ordinal()),
             DELIVERIES.get(Delivery.STALE_GENERATION.ordinal()),
-            DELIVERIES.get(Delivery.NO_PATH.ordinal()));
+            DELIVERIES.get(Delivery.NO_PATH.ordinal()),
+            DELIVERIES.get(Delivery.RETIRED.ordinal()));
     }
 
-    /** Counts how one finished solve ended on the owner. Called on the entity's owning thread. */
+    /**
+     * Counts how one finished solve ended. Thread-safe: the owner outcomes are counted on the entity's owning
+     * thread, {@link Delivery#RETIRED} in the handoff's retirement callback, or, when the handoff refused the
+     * delivery, on the thread that ran the solve's completion callback.
+     */
     static void noteDelivery(final Delivery outcome) {
         DELIVERIES.incrementAndGet(outcome.ordinal());
     }

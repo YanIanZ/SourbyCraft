@@ -185,8 +185,9 @@ def main(argv=None):
               'for servers that already enforce, except by a manual update.')
         if rotating:
             print('  2. Keep the CI secret on the OLD key and ship at least one release built with both keys.')
-            print(f'  3. Only then: gh secret set {SECRET_NAME} --repo YanIanZ/SourbyCraft < {key}, and move the new '
-                  'block first in the resource (the release job verifies with the first block only).')
+            print(f'  3. Only then: gh secret set {SECRET_NAME} --repo YanIanZ/SourbyCraft < {key}. Moving the new '
+                  'block first in the resource is optional (the release job, like servers, accepts a signature '
+                  'from any block).')
             print('  Servers that never ran a build trusting the new key need a manual update after the switch.')
             return 0
         print(f'  2. gh secret set {SECRET_NAME} --repo YanIanZ/SourbyCraft < {key}')

@@ -36,7 +36,7 @@ public record PerWorldDistanceConfig(
 
     /** Key of this config inside the {@code paper:level_overrides} saved data. */
     public static final String LEVEL_OVERRIDES_KEY = "Aurora.Distance";
-    /** The Canvas-era key, read until {@link LegacyNames#REMOVAL_BUILD} and never written. */
+    /** The Canvas-era key: still read and never written; its removal awaits an owner decision. */
     public static final String LEGACY_LEVEL_OVERRIDES_KEY = "Canvas.Distance";
 
     /**
@@ -108,7 +108,7 @@ public record PerWorldDistanceConfig(
     private static void warnLegacyKey() {
         LegacyNames.warnOnce("level-data:" + LEGACY_LEVEL_OVERRIDES_KEY, "Read the per-world distance from the deprecated "
             + LEGACY_LEVEL_OVERRIDES_KEY + " key; it is saved as " + LEVEL_OVERRIDES_KEY + " from now on (the old key is "
-            + "read until " + LegacyNames.REMOVAL_BUILD + ").");
+            + "still read; its removal awaits an owner decision).");
     }
 
     // this is for the codec, nothing much else

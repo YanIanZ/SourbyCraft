@@ -15,7 +15,8 @@ import java.util.Set;
  * shutdown begins or startup fails. Changing the state does not stop workers or drain queues; a
  * service refuses work only where it consults {@link #stopping()} alongside its own admission
  * controls; consumers include async-path admission ({@code AsyncPathProcessor}), the
- * {@code /speedtest} and {@code /awf} commands, and the GeoIP database download.
+ * {@code /speedtest} and {@code /awf} commands, {@code /update} check and apply
+ * ({@code UpdateCommand.runCheck}), {@code /sourbycraft reload}, and the GeoIP database download.
  * Persistence is deliberately not gated: the storage lane, AWF commits and region saves, and the
  * {@code VirtualExecutor} that AWF world operations use, must keep draining after STOPPING.
  * {@link #acceptingWork()} has no production admission consumer; it is a status query.</p>
