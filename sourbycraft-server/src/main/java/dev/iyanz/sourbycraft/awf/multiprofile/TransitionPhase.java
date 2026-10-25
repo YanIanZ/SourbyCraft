@@ -3,30 +3,41 @@ package dev.iyanz.sourbycraft.awf.multiprofile;
 /**
  * Phases of a profile switch, persisted in the recovery journal before the work of that phase starts.
  *
- * <p>A crash can therefore only ever be observed at a phase boundary, and {@code recover} can decide
- * whether to roll forward (the old state is still durable) or roll back (the new state was never
- * applied). The terminal phases are {@link #ACTIVE} and {@link #FAILED}.</p>
+ * <p>A crash can therefore only ever be observed at a phase boundary. {@code recover} completes the
+ * switch forward when the account already names the target, does nothing when the journal never
+ * reached {@link #APPLYING_TARGET} (the target state was not applied), and otherwise rolls the player
+ * back to the journal's rollback point. The terminal phases are {@link #ACTIVE} and {@link #FAILED}.</p>
+ *
+ * <p>Journals store the ordinal, so the declaration order below is fixed. A switch runs
+ * {@link #PREPARING_TARGET} before {@link #FREEZING} and {@link #SAVING}, so the player is frozen
+ * only for the capture, the apply and the commit, not while a world is created.</p>
  */
 public enum TransitionPhase {
-    /** Validating the player, the target and the requested deadline. */
+    /** Validating the player and the target. */
     VALIDATING,
-    /** Capturing the old profile state on its owning entity thread. */
+    /** The player is frozen; capturing the old state on its owning entity thread. */
     FREEZING,
-    /** Writing the old state as a durable snapshot. */
+    /** The rollback point (the old state's snapshot, or on a first switch the archived state) is durable. */
     SAVING,
-    /** Acquiring the target ownership and making its world ready. */
+    /** Acquiring the target ownership and making its world ready; runs before {@link #FREEZING}. */
     PREPARING_TARGET,
-    /** Applying the target state on the player's owning entity thread. */
+    /** Applying the target state on the player's owning entity thread; from here it may be on the player. */
     APPLYING_TARGET,
     /** Moving the player to the target world. */
     TELEPORTING,
     /** Committing the active-profile reference. */
     COMMITTING,
-    /** Finished. */
+    /** Finished. A switch removes its journal after the commit instead; earlier builds wrote this phase. */
     ACTIVE,
-    /** Compensating after a failure; the journal is kept until compensation is durable. */
+    /**
+     * The target state may be on the player and the rollback has not completed (the player was
+     * offline, or the rollback failed or timed out); the next join or {@code recover} rolls it back.
+     */
     RECOVERING,
-    /** Terminal failure; the journal records why and remains for an operator. */
+    /**
+     * Terminal record: the switch failed before the target state was applied, its rollback completed,
+     * or no rollback point exists. It blocks nothing and is listed by {@code /awf multiprofile status}.
+     */
     FAILED;
 
     public boolean terminal() {

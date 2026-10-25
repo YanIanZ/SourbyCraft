@@ -86,6 +86,12 @@ public final class RedisProfileOwnership implements ProfileOwnership {
         return true;
     }
 
+    /** The epoch keys never expire and every node shares them, so fences compare across processes. */
+    @Override
+    public String incarnation() {
+        return "redis-session-epoch";
+    }
+
     @Override
     public String describe() {
         return "redis session fabric (node " + this.nodeId + ", timeout " + this.timeoutMillis + " ms)";

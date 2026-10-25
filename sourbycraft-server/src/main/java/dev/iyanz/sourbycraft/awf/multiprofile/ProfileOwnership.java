@@ -36,6 +36,14 @@ public interface ProfileOwnership extends AutoCloseable {
         return false;
     }
 
+    /**
+     * Names the lifetime of the fence counters this provider issues. Two fences are comparable only
+     * when they carry the same incarnation: a process-local provider counts from 1 again after a
+     * restart, so a fence a journal recorded in an earlier process says nothing about a fresh claim.
+     * A provider whose counters are stored durably returns the same value in every process.
+     */
+    String incarnation();
+
     /** Short description for logs and {@code /awf multiprofile status}. Never contains credentials. */
     default String describe() {
         return "local";

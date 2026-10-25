@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.BooleanSupplier;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.NamespacedKey;
@@ -19,10 +20,11 @@ import org.bukkit.potion.PotionEffectType;
  * The Paper implementation of {@link PlayerStatePort}.
  *
  * <p>Every read or write runs inside one {@code EntityScheduler} task for the player, which is the
- * only place a Bukkit player may be touched. "Freeze" is the absence of a gap: the whole capture is a
- * single task, so a region tick cannot interleave half an inventory. The port never blocks the entity
- * thread on I/O: it only builds bytes and completes a future that the engine consumes on its I/O
- * worker.</p>
+ * only place a Bukkit player may be touched, or synchronously on a thread that already owns the
+ * player ({@link #captureOnOwnerThread}). A capture is a single task, so a region tick cannot
+ * interleave half an inventory; the gap between a switch's capture and its apply is covered by the
+ * runtime's freeze listener, not by this class. The port never blocks the entity thread on I/O: it
+ * only builds bytes and completes a future that the engine consumes on its I/O worker.</p>
  *
  * <p>Item stacks are encoded with Paper's {@code ItemStack.serializeAsBytes()}, which keeps data
  * components intact; they are decoded with {@code deserializeBytes} only after the snapshot passed
@@ -50,12 +52,36 @@ public final class BukkitPlayerStatePort implements PlayerStatePort {
         return onEntity(player, () -> captureNow(player, isolation), "capture");
     }
 
+    /**
+     * Captures on the calling thread, which must own the player. The quit listener uses it: inside
+     * {@code PlayerQuitEvent} the player still exists, while an entity task scheduled from there
+     * would run after the player was removed.
+     *
+     * @throws IllegalStateException when the calling thread does not own the player
+     */
+    public ProfileState captureOnOwnerThread(final Player player, final ProfileIsolation isolation) {
+        if (!Bukkit.isOwnedByCurrentRegion(player)) {
+            throw new IllegalStateException("the profile capture of " + player.getUniqueId()
+                + " must run on the thread that owns the player");
+        }
+        return captureNow(player, isolation);
+    }
+
     @Override
     public CompletableFuture<Void> apply(final UUID playerId, final ProfileState state,
                                          final ProfileIsolation isolation) {
+        return apply(playerId, state, isolation, () -> false);
+    }
+
+    @Override
+    public CompletableFuture<Void> apply(final UUID playerId, final ProfileState state,
+                                         final ProfileIsolation isolation, final BooleanSupplier abandoned) {
         final Player player = Bukkit.getPlayer(playerId);
         if (player == null) return CompletableFuture.failedFuture(new IllegalStateException("player is not online"));
         return onEntity(player, () -> {
+            if (abandoned.getAsBoolean()) {
+                throw new IllegalStateException("the profile switch was abandoned before its apply ran");
+            }
             applyNow(player, state, isolation);
             return null;
         }, "apply");
