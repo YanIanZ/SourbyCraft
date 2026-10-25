@@ -29,7 +29,8 @@ import java.util.concurrent.atomic.AtomicLong;
  * <p><b>Once attached, attached.</b> The store under a region folder shadows the region files
  * from then on. If the world is later removed from the list, the store is still opened: writing to
  * the region files underneath it would be silently overridden by older AWF data on a later run.
- * Leaving AWF needs an export, which does not exist yet.</p>
+ * Leaving AWF needs an export: a world listed in {@code aurora.awf.export} has its store written
+ * back to region files when it loads, and the store moved aside ({@link AwfEngine#export}).</p>
  */
 public final class AwfRegionStorage {
 
@@ -98,9 +99,20 @@ public final class AwfRegionStorage {
      * Positions whose stored bytes could not be read, with the time they were fenced. The engine
      * treats a failed read as "no data" and generates the chunk again; writes of that position are
      * refused from then on, so the regenerated chunk can never replace the stored one. A later
-     * successful read on the chunk-load path lifts the fence (see {@link #recovered}).
+     * successful read on the chunk-load path lifts the fence (see {@link #recovered}). A region
+     * storage passes its fences on to the POI storage of its dimension ({@link #fencedBySibling}).
      */
     private final java.util.Map<ChunkKey, Long> unreadable = new java.util.concurrent.ConcurrentHashMap<>();
+    /**
+     * Positions the region storage of this dimension fenced, when this is its POI storage: the chunk
+     * the engine generates in place of an unreadable one derives new POI, which must not replace the
+     * stored ones either. Lifted when the region storage reads the chunk back on the chunk-load path.
+     * Entities are not fenced this way: an entity that moved into such a chunk would be lost with a
+     * refused save. See {@link #siblingFence}.
+     */
+    private final java.util.Set<ChunkKey> fencedBySibling = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    /** Told when this storage fences a position ({@code true}) and lifts the fence ({@code false}). */
+    private volatile java.util.function.BiConsumer<ChunkKey, Boolean> siblingFence = (key, fenced) -> { };
     private final AtomicLong readRetries = new AtomicLong();
     private final AtomicLong readFailures = new AtomicLong();
     private final AtomicLong refusedWrites = new AtomicLong();
@@ -198,6 +210,23 @@ public final class AwfRegionStorage {
         if (n >= 2) names.add(folder.getName(n - 2).toString());
         if (n >= 3) names.add(folder.getName(n - 3).toString());
         return names;
+    }
+
+    /**
+     * The names a world managed through the AuroraWorlds API is matched by: in the 26.2 layout only
+     * the dimension's own {@code <name>}, never the level folder (a managed world is one dimension,
+     * and an entry named like the level folder would otherwise claim every dimension of the main
+     * world, the overworld included); in any other layout the same names as {@link #worldNames}.
+     * {@code aurora.awf.worlds} keeps matching {@link #worldNames}, where naming the level folder
+     * deliberately covers all of its dimensions.
+     */
+    static java.util.Set<String> managedNames(final Path regionFolder) {
+        final Path folder = regionFolder.toAbsolutePath().normalize();
+        final int n = folder.getNameCount();
+        if (n >= 5 && folder.getName(n - 4).toString().equals("dimensions")) {
+            return java.util.Set.of(folder.getName(n - 2).toString());
+        }
+        return worldNames(regionFolder);
     }
 
     public String name() {
@@ -341,6 +370,7 @@ public final class AwfRegionStorage {
     private IOException fence(final ChunkKey key, final IOException failed, final int attempts) {
         this.readFailures.incrementAndGet();
         this.unreadable.putIfAbsent(key, System.nanoTime());
+        this.siblingFence.accept(key, true);
         final String message = "AWF could not read chunk " + key + " of " + this.name + " (" + attempts
             + " attempt(s)): " + failed.getMessage() + ". The stored chunk is kept: writes of this position are"
             + " refused until it is read back when the chunk loads again; a chunk the server generates in its"
@@ -390,6 +420,7 @@ public final class AwfRegionStorage {
     private void recovered(final ChunkKey key) {
         if (!this.loadPath.getAsBoolean()) return;
         if (this.unreadable.remove(key) != null) {
+            this.siblingFence.accept(key, false);
             // A chunk load reads every fenced neighbour back at once (529 in one second on the agent
             // test server): the first of a window is logged on its own, the rest in one summary.
             this.recoveryLog.failed("AWF read chunk " + key + " of " + this.name
@@ -425,6 +456,17 @@ public final class AwfRegionStorage {
         return java.util.Set.copyOf(this.unreadable.keySet());
     }
 
+    /** Sets who is told when this storage fences or lifts a position; the engine wires a region storage to its POI storage. */
+    void siblingFence(final java.util.function.BiConsumer<ChunkKey, Boolean> listener) {
+        this.siblingFence = listener;
+    }
+
+    /** The region storage of this dimension fenced ({@code true}) or read back ({@code false}) a position. */
+    void fenceFromSibling(final ChunkKey key, final boolean fenced) {
+        if (fenced) this.fencedBySibling.add(key);
+        else this.fencedBySibling.remove(key);
+    }
+
     /**
      * Takes a chunk's new NBT bytes, or its deletion when {@code nbt} is {@code null}. The array is
      * copied. Never touches a region file and never blocks on the backend.
@@ -445,8 +487,9 @@ public final class AwfRegionStorage {
     }
 
     private void admittedWrite(final int chunkX, final int chunkZ, final byte[] nbt) throws IOException {
-        if (!this.unreadable.isEmpty() && this.unreadable.containsKey(new ChunkKey(chunkX, chunkZ))) {
-            // Not derived from the stored bytes, which could not be read: never let it replace them.
+        if ((!this.unreadable.isEmpty() && this.unreadable.containsKey(new ChunkKey(chunkX, chunkZ)))
+            || (!this.fencedBySibling.isEmpty() && this.fencedBySibling.contains(new ChunkKey(chunkX, chunkZ)))) {
+            // Not derived from the stored chunk, which could not be read: never let it replace what is stored.
             this.refusedWrites.incrementAndGet();
             return;
         }
@@ -527,6 +570,11 @@ public final class AwfRegionStorage {
      * Commits everything written so far and returns once it is durable. On a region thread, where
      * blocking on disk is not allowed, the commit is started on the storage lane instead and this
      * returns at once.
+     *
+     * <p>Two refusals return without throwing, because the close that follows reports them: the
+     * shutdown deadline stopping the commit (the region save of this world at shutdown), and the
+     * world being fenced (discarded, closed or past the deadline) before the commit took its
+     * snapshot. A caller that reports the outcome as saved uses {@link #flushConfirmed()}.</p>
      */
     public void flush() throws IOException {
         if (this.discarding || this.closed.get()) return;
@@ -542,27 +590,57 @@ public final class AwfRegionStorage {
             maintain(0L);
             return;
         }
+        try {
+            commitNow();
+        } catch (final AwfDeadlineExceeded | AwfWorld.FencedException refused) {
+            // Reported by close, which follows (lastCommitFailed is already set).
+        }
+    }
+
+    /**
+     * {@link #flush()} for a caller that reports the outcome as saved ({@code AuroraWorlds.save},
+     * {@code /awf save}, the save before an unload): returns only once everything written before the
+     * call is committed and confirmed by the backend, and throws otherwise, also where
+     * {@link #flush()} returns quietly (the shutdown deadline, a fenced world, a storage already
+     * closed or being discarded). Blocking; never call it on a region thread.
+     *
+     * @throws AwfDeadlineExceeded when the shutdown deadline stopped the commit; see
+     *     {@link AwfDeadlineExceeded#requestSent()} for whether it may have been applied
+     * @throws IOException when the commit failed or was refused; the chunks stay dirty
+     */
+    public void flushConfirmed() throws IOException {
+        if (ExecutionLane.of(Thread.currentThread().getName()) == ExecutionLane.REGION_TICK) {
+            throw new IllegalStateException("a confirmed AWF flush blocks; it must not run on a region thread");
+        }
+        if (this.discarding || this.closed.get()) {
+            throw new IOException("AWF storage " + this.name + " is " + (this.discarding ? "being unloaded without saving"
+                : "closed") + "; this save committed nothing for it");
+        }
+        if (this.world.dirtyCount() == 0) return;
+        try {
+            commitNow();
+        } catch (final AwfWorld.FencedException fenced) {
+            throw new IOException("AWF storage " + this.name + " refused this save's commit: " + fenced.getMessage(), fenced);
+        }
+    }
+
+    /**
+     * Commits the dirty chunks on the calling thread, within the shutdown budget once shutdown has
+     * begun (no attempt starts after the deadline). Records the outcome in {@link #lastCommitFailed}.
+     */
+    private void commitNow() throws IOException {
         final AwfShutdownBudget budget = this.shutdown.get();
         try {
             if (budget == null) {
                 this.world.saveNow(this.settings.persistence(), this.settings.commitAttempts());
             } else {
-                // Shutdown (the region save of this world): within the shared budget. What the deadline
-                // stops here is reported by close, which follows.
-                if (budget.expired()) {
-                    this.lastCommitFailed = true;
-                    return;
-                }
                 this.world.saveNow(this.settings.persistence(), this.settings.commitAttempts(), budget);
             }
-            this.lastCommitFailed = false;
-        } catch (final AwfDeadlineExceeded cut) {
-            this.lastCommitFailed = true;
-            return;
-        } catch (final IOException failed) {
+        } catch (final IOException | RuntimeException failed) {
             this.lastCommitFailed = true;
             throw failed;
         }
+        this.lastCommitFailed = false;
         this.lastCommitNanos.set(System.nanoTime());
     }
 

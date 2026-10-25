@@ -169,10 +169,12 @@ public final class AuroraKeys {
             + "and one commit per storage runs at a time. 0-2147483647.");
     public static final ConfigKey AWF_SHUTDOWN_DEADLINE = restart(AwfSettings.SHUTDOWN_DEADLINE_KEY,
         AwfSettings.DEFAULT_SHUTDOWN_DEADLINE_MILLIS,
-        "One budget in milliseconds for every AWF wait at shutdown (flushes, final commits, lock waits, backend calls, "
-            + "lease release), from the start of shutdown. When it passes no further commit is attempted, open Redis "
-            + "connections are cut, and the shutdown is logged as AWF-SHUTDOWN-INCOMPLETE with every unconfirmed "
-            + "storage (exit status 70), never as saved. 1-2147483647.");
+        "One budget in milliseconds for the AWF waits at shutdown (lock waits, the start of each commit attempt, "
+            + "Redis calls, lease release), from the start of shutdown. When it passes no further commit is attempted, "
+            + "open Redis connections are cut, and the shutdown is logged as AWF-SHUTDOWN-INCOMPLETE with every "
+            + "unconfirmed storage (exit status 70), never as saved. A FILE commit already writing (an fsync on a "
+            + "stalled disk) cannot be cut. Also how long an AuroraWorlds save (/awf save, the save before an unload) "
+            + "waits for its world's chunk I/O to drain before it fails as not durable. 1-2147483647.");
 
     // [aurora.awf.multiprofile] — AWF MultiProfile (docs/awf/multiprofile/CONFIGURATION.md)
     public static final List<ConfigKey> AWF_MULTIPROFILE_KEYS = List.of(

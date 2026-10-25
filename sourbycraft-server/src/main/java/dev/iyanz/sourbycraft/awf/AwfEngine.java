@@ -48,6 +48,14 @@ public final class AwfEngine {
      * instance of it shares one read-only store and its chunk index.
      */
     private final Map<String, AwfStore> templateStores = new ConcurrentHashMap<>();
+    /**
+     * Storage folders (absolute names) whose store {@link #open} or {@link #prepareStores} is opening
+     * right now. Reserved before the backend opens anything, so a second, concurrent open of the same
+     * folder is refused before it touches the store (recovery, temp cleanup, a Redis lease).
+     */
+    private final java.util.Set<String> opening = ConcurrentHashMap.newKeySet();
+    /** Why the configured backend is not registered, when the engine refused to register it itself. */
+    private volatile String backendRefusal;
     private volatile boolean warnedMissingBackend;
     /** Set once by {@link #beginShutdown()}; every AWF wait from then on shares it. */
     private volatile AwfShutdownBudget shutdownBudget;
@@ -100,7 +108,7 @@ public final class AwfEngine {
                     }
                     loadManaged(current);
                     if ("redis".equals(settings.backend()) && AwfBackend.named("redis") == null) {
-                        registerRedis();
+                        registerRedis(current);
                     }
                     global = current;
                 }
@@ -112,13 +120,22 @@ public final class AwfEngine {
     /**
      * Registers the built-in Redis backend from {@code [aurora.awf.redis]}. A Redis that does not
      * answer is reported, not hidden: the backend is still registered, so a world stored there
-     * fails to load instead of quietly opening from region files.
+     * fails to load instead of quietly opening from region files. Misconfigured settings (an
+     * unusable URI or environment value) are never replaced by a default server: the backend is
+     * not registered, and every world stored on Redis fails to load with the reason.
      */
-    private static void registerRedis() {
+    private static void registerRedis(final AwfEngine engine) {
         final dev.iyanz.sourbycraft.awf.redis.RedisBackend redis;
         try {
             final dev.iyanz.sourbycraft.awf.redis.RedisSettings settings =
                 dev.iyanz.sourbycraft.awf.redis.RedisSettings.readEarly(AURORA_FILE, UNIFIED_FILE);
+            final java.util.Optional<String> invalid = settings.invalidReason();
+            if (invalid.isPresent()) {
+                engine.backendRefusal = "the Redis backend is misconfigured: " + invalid.get();
+                SourbyLogger.error("Aurora World Fabric: " + engine.backendRefusal + "; it is not registered, so every"
+                    + " world stored on Redis fails to load until the setting is fixed (no default server is used)");
+                return;
+            }
             final dev.iyanz.sourbycraft.awf.redis.fabric.RedisFabric fabric =
                 dev.iyanz.sourbycraft.awf.redis.fabric.RedisFabric.running();
             if (fabric != null && fabric.settings().enabled()) {
@@ -129,7 +146,8 @@ public final class AwfEngine {
                 redis = new dev.iyanz.sourbycraft.awf.redis.RedisBackend(settings);
             }
         } catch (final RuntimeException invalid) {
-            SourbyLogger.error("Aurora World Fabric: the Redis backend is misconfigured: " + invalid.getMessage());
+            engine.backendRefusal = "the Redis backend is misconfigured: " + invalid.getMessage();
+            SourbyLogger.error("Aurora World Fabric: " + engine.backendRefusal);
             return;
         }
         AwfBackend.register(redis);
@@ -213,7 +231,7 @@ public final class AwfEngine {
         else engine.bounds.remove(worldName);
         for (final AwfRegionStorage storage : engine.storages.values()) {
             final Path folder = Path.of(storage.name());
-            if (!AwfRegionStorage.worldNames(folder).contains(worldName)) continue;
+            if (!AwfRegionStorage.managedNames(folder).contains(worldName)) continue;
             storage.pruneKind(pruneEmpty ? folder.getFileName().toString() : null);
             storage.saveBounds(saveBounds);
         }
@@ -277,19 +295,43 @@ public final class AwfEngine {
 
     void prepareStores(final Path dimensionFolder, final String template) throws IOException {
         final AwfBackend backend = this.backends.apply(this.settings.backend());
-        if (backend == null) {
-            throw new IOException("AWF backend '" + this.settings.backend() + "' (" + AwfSettings.BACKEND_KEY
-                + ") is not registered");
-        }
+        if (backend == null) throw unregistered("");
+        if (template != null) requireTemplate(template, dimensionFolder);
         for (final String folder : STORAGE_FOLDERS) {
             if (template != null) templateBase(template, folder);
             final Path storageFolder = dimensionFolder.resolve(folder);
             final String id = storageId(storageFolder);
-            if (this.storages.containsKey(storageFolder.toAbsolutePath().normalize().toString())
-                || this.prepared.containsKey(id)) {
-                continue;
+            final String name = storageFolder.toAbsolutePath().normalize().toString();
+            if (!this.opening.add(name)) {
+                throw new IOException("AWF storage " + name + " is being opened by another load");
             }
-            this.prepared.put(id, backend.open(id, WorldRole.VANILLA, this.settings.retainedGenerations()));
+            try {
+                if (this.storages.containsKey(name) || this.prepared.containsKey(id)) continue;
+                this.prepared.put(id, backend.open(id, WorldRole.VANILLA, this.settings.retainedGenerations()));
+            } finally {
+                this.opening.remove(name);
+            }
+        }
+    }
+
+    /** The configured backend is not registered: why, when the engine knows, and {@code context}. */
+    private IOException unregistered(final String context) {
+        return new IOException("AWF backend '" + this.settings.backend() + "' (" + AwfSettings.BACKEND_KEY
+            + ") is not registered" + (this.backendRefusal != null ? " (" + this.backendRefusal + ")" : "") + context);
+    }
+
+    /**
+     * Refuses to open an instance of a template that is gone ({@code awf-templates/<t>/template.json}
+     * missing): without its base it would open as an empty or regenerated world, and its next commits
+     * would replace the instance's content. Every load path checks here, also a plugin's
+     * {@code Bukkit.createWorld} of a managed instance, which bypasses the AuroraWorlds service. A
+     * template that merely has no store for one storage folder (no POI) is complete.
+     */
+    private static void requireTemplate(final String template, final Path folder) throws IOException {
+        if (!new dev.iyanz.sourbycraft.awf.world.AuroraTemplates(TEMPLATES).exists(template)) {
+            throw new IOException("AWF world folder " + folder + " is an instance of template '" + template
+                + "', which is missing (no " + TEMPLATES.resolve(template).resolve("template.json") + "); refusing to"
+                + " open it without its template (restore the template or delete the world)");
         }
     }
 
@@ -332,6 +374,11 @@ public final class AwfEngine {
     private static final java.util.concurrent.CopyOnWriteArrayList<CloseWatch> CLOSE_WATCHES =
         new java.util.concurrent.CopyOnWriteArrayList<>();
 
+    /**
+     * Every storage under a folder that is open when the watch starts or opens while it lasts, so
+     * a world unload can tell whether each one confirmed its final commit, even when the chunk
+     * engine caught and only logged the close's failure.
+     */
     public static final class CloseWatch implements AutoCloseable {
         private final Path root;
         private final java.util.Set<AwfRegionStorage> observed = java.util.concurrent.ConcurrentHashMap.newKeySet();
@@ -344,12 +391,17 @@ public final class AwfEngine {
             if (Path.of(storage.name()).startsWith(this.root)) this.observed.add(storage);
         }
 
-        public void requireConfirmed() {
+        /**
+         * The observed storages that did not confirm their final commit (or discard), by name: not
+         * closed, or closed while the commit failed or could not be confirmed. Empty when all did.
+         */
+        public List<String> unconfirmed() {
+            final List<String> names = new java.util.ArrayList<>();
             for (final AwfRegionStorage storage : this.observed) {
-                if (!storage.closeConfirmed()) {
-                    throw new IllegalStateException("AWF unload did not confirm final storage commit: " + storage.name());
-                }
+                if (!storage.closeConfirmed()) names.add(storage.name());
             }
+            java.util.Collections.sort(names);
+            return names;
         }
 
         @Override
@@ -359,6 +411,7 @@ public final class AwfEngine {
         }
     }
 
+    /** Starts watching the storages under {@code folder}; close the watch when the unload is over. */
     public static CloseWatch watchClose(final Path folder) {
         final CloseWatch watch = new CloseWatch(folder);
         CLOSE_WATCHES.add(watch);
@@ -419,15 +472,14 @@ public final class AwfEngine {
     }
 
     AwfRegionStorage open(final Path regionFolder, final RegionSink exportSink) throws IOException {
-        final boolean managedWorld = AwfRegionStorage.listed(regionFolder, this.managed);
+        final boolean managedWorld = managedFolder(regionFolder);
         final boolean listed = managedWorld || AwfRegionStorage.listed(regionFolder, this.settings.worlds());
         final boolean exporting = AwfRegionStorage.listed(regionFolder, this.settings.export());
         final AwfBackend backend = this.backends.apply(this.settings.backend());
         if (backend == null) {
             if (listed || exporting) {
                 // Never a fallback: the world's chunks may live only on that backend.
-                throw new IOException("AWF backend '" + this.settings.backend() + "' (" + AwfSettings.BACKEND_KEY
-                    + ") is not registered; refusing to load " + regionFolder);
+                throw unregistered("; refusing to load " + regionFolder);
             }
             if (!this.warnedMissingBackend) {
                 this.warnedMissingBackend = true;
@@ -457,12 +509,28 @@ public final class AwfEngine {
                 + " than the chunks it holds");
         }
         final String name = regionFolder.toAbsolutePath().normalize().toString();
-        // Checked before a store is opened: a second open of a store this server already holds
-        // would take its Redis lease over from the open storage, then hand it back by closing.
-        if (this.storages.containsKey(name)) {
-            throw new IOException("AWF storage " + name + " is already open");
+        // Reserved, then checked, before a store is opened: a second open of a store this server
+        // already holds (or is opening) would take its Redis lease over from the open storage, then
+        // hand it back by closing, and on FILE recover and clean the directory the first one uses.
+        if (!this.opening.add(name)) {
+            throw new IOException("AWF storage " + name + " is already being opened");
         }
+        try {
+            if (this.storages.containsKey(name)) {
+                throw new IOException("AWF storage " + name + " is already open");
+            }
+            return openReserved(regionFolder, name, id, backend, managedWorld);
+        } finally {
+            this.opening.remove(name);
+        }
+    }
+
+    /** The rest of {@link #open}, with the folder's name reserved in {@link #opening}. */
+    private AwfRegionStorage openReserved(final Path regionFolder, final String name, final String id,
+                                          final AwfBackend backend, final boolean managedWorld) throws IOException {
         final String template = managedWorld ? templateFor(regionFolder) : null;
+        // A prepared store's template was checked by prepareStores, off the region threads.
+        if (template != null && !this.prepared.containsKey(id)) requireTemplate(template, regionFolder.getParent());
         final ChunkSource base = template == null ? null
             : templateBase(template, regionFolder.getFileName().toString());
         final WorldRole role = template == null ? WorldRole.VANILLA : WorldRole.INSTANCE;
@@ -476,6 +544,15 @@ public final class AwfEngine {
                 this.shutdownReport::record);
             if (managedWorld && prunes(regionFolder)) storage.pruneEmpty(regionFolder.getFileName().toString());
             if (managedWorld) storage.saveBounds(boundsFor(regionFolder));
+            if ("region".equals(regionFolder.getFileName().toString())) {
+                // A chunk regenerated in place of an unreadable one derives new POI as well; the POI
+                // storage of the same dimension refuses them until the chunk is read back.
+                final String poi = regionFolder.resolveSibling("poi").toAbsolutePath().normalize().toString();
+                storage.siblingFence((key, fenced) -> {
+                    final AwfRegionStorage sibling = this.storages.get(poi);
+                    if (sibling != null) sibling.fenceFromSibling(key, fenced);
+                });
+            }
             if (this.storages.putIfAbsent(name, storage) != null) {
                 throw new IOException("AWF storage " + name + " is already open");
             }
@@ -488,8 +565,20 @@ public final class AwfEngine {
         }
     }
 
+    /**
+     * Whether a storage folder belongs to a world managed through the AuroraWorlds API, matched by
+     * {@link AwfRegionStorage#managedNames}: never by the level folder, so a registry entry named
+     * like it cannot claim every dimension of the main world.
+     */
+    private boolean managedFolder(final Path regionFolder) {
+        for (final String name : AwfRegionStorage.managedNames(regionFolder)) {
+            if (this.managed.contains(name)) return true;
+        }
+        return false;
+    }
+
     private dev.iyanz.sourbycraft.api.world.WorldProperties.Bounds boundsFor(final Path regionFolder) {
-        for (final String name : AwfRegionStorage.worldNames(regionFolder)) {
+        for (final String name : AwfRegionStorage.managedNames(regionFolder)) {
             final var found = this.bounds.get(name);
             if (found != null && this.managed.contains(name)) return found;
         }
@@ -497,7 +586,7 @@ public final class AwfEngine {
     }
 
     private boolean prunes(final Path regionFolder) {
-        for (final String name : AwfRegionStorage.worldNames(regionFolder)) {
+        for (final String name : AwfRegionStorage.managedNames(regionFolder)) {
             if (this.pruning.contains(name) && this.managed.contains(name)) return true;
         }
         return false;
@@ -505,7 +594,7 @@ public final class AwfEngine {
 
     /** The template of the managed instance world this folder belongs to, or {@code null}. */
     private String templateFor(final Path regionFolder) {
-        for (final String name : AwfRegionStorage.worldNames(regionFolder)) {
+        for (final String name : AwfRegionStorage.managedNames(regionFolder)) {
             final String template = this.templateOf.get(name);
             if (template != null && this.managed.contains(name)) return template;
         }
@@ -563,9 +652,11 @@ public final class AwfEngine {
      * saves, the chunk I/O drain and {@link #closeAll()}); later calls keep the first budget. Does
      * nothing when no storage was ever attached.
      *
-     * <p>From then on every flush, close, commit and Redis call measures against this one deadline;
-     * when it passes, every world is fenced (queued commits commit nothing), lease renewal stops and
-     * every Redis connection in use is aborted.</p>
+     * <p>From then on the lock waits and commit attempts of every flush and close, and every Redis
+     * call, measure against this one deadline; when it passes, every world is fenced (queued commits
+     * commit nothing), lease renewal stops and every Redis connection in use is aborted. A FILE
+     * commit that is already writing (an fsync on a stalled disk) cannot be cut: the stop waits for
+     * it past the deadline.</p>
      */
     public static void beginShutdown() {
         final AwfEngine current = global;
@@ -641,6 +732,9 @@ public final class AwfEngine {
     int shutdownAll() {
         final AwfShutdownBudget budget = beginShutdownBudget();
         closeEvery();
+        // Stores prepared for a world whose creation never finished hold their backend claim (a
+        // Redis lease) until closed; nothing else closes them.
+        for (final String id : List.copyOf(this.prepared.keySet())) closeQuietly(this.prepared.remove(id), id);
         for (final AwfBackend backend : shutdownBackends()) backend.shutdown();
         final List<AwfShutdownReport.StorageResult> results = this.shutdownReport.results();
         final int unconfirmed = this.shutdownReport.unconfirmed().size();
@@ -659,11 +753,18 @@ public final class AwfEngine {
     public static AwfBackend backend() throws IOException {
         final AwfEngine engine = global();
         final AwfBackend backend = engine.backends.apply(engine.settings.backend());
-        if (backend == null) {
-            throw new IOException("AWF backend '" + engine.settings.backend() + "' (" + AwfSettings.BACKEND_KEY
-                + ") is not registered");
-        }
+        if (backend == null) throw engine.unregistered("");
         return backend;
+    }
+
+    /**
+     * How long a save through the AuroraWorlds service ({@code AuroraWorlds.save}, {@code /awf save},
+     * the save before an unload) waits for its world's chunk I/O to drain before it fails as not
+     * durable: {@code aurora.awf.shutdown-deadline-ms}, the bound AWF already puts on its waits at
+     * shutdown. RESTART_REQUIRED, like every AWF setting.
+     */
+    public static long saveDrainTimeoutMillis() {
+        return global().settings.shutdownDeadlineMillis();
     }
 
     /** The storage id of one storage folder of a dimension folder. */
@@ -686,19 +787,35 @@ public final class AwfEngine {
         for (final String folder : STORAGE_FOLDERS) backend.delete(storeId(dimensionFolder, folder));
     }
 
+    /**
+     * Closes every open storage. Under the shutdown budget (production: {@link #shutdownAll()} always
+     * starts it) each close reports to {@link #shutdownReport}, once per storage, and the result is
+     * the number of storages not confirmed; without a budget (unit tests only) it is the number of
+     * closes that threw.
+     */
     int closeEvery() {
         if (this.shutdownBudget != null) {
             // Each close reports to shutdownReport; none throws for an unconfirmed commit.
-            int failed = 0;
+            final java.util.Set<String> reported = new java.util.HashSet<>();
+            for (final AwfShutdownReport.StorageResult result : this.shutdownReport.results()) reported.add(result.storage());
             for (final AwfRegionStorage storage : this.storages.values()) {
+                // Already reported by its world's close during the region saves (REFUSED: a write held
+                // it past the deadline). That line already says it was not closed; a second close
+                // would report the same storage twice.
+                if (reported.contains(storage.name())) continue;
                 try {
                     storage.close();
                 } catch (final IOException | RuntimeException failure) {
-                    failed++;
                     SourbyLogger.error("Aurora World Fabric could not close " + storage.name() + " at shutdown", failure);
+                    if (this.shutdownReport.results().stream().noneMatch(result -> result.storage().equals(storage.name()))) {
+                        // The close threw before it reported: its data is not confirmed.
+                        this.shutdownReport.record(new AwfShutdownReport.StorageResult(storage.name(),
+                            AwfShutdownReport.Outcome.FAILED, storage.dirtyCount(), List.of(), 0, storage.closedWrites(), 0,
+                            false, "the close threw: " + failure));
+                    }
                 }
             }
-            return failed + this.shutdownReport.unconfirmed().size();
+            return this.shutdownReport.unconfirmed().size();
         }
         int failed = 0;
         int closed = 0;
@@ -714,8 +831,9 @@ public final class AwfEngine {
                     + failure.getMessage(), failure);
             } catch (final IOException | RuntimeException failure) {
                 failed++;
-                SourbyLogger.error("Aurora World Fabric could not commit " + storage.name()
-                    + " at shutdown; its chunks written since the last commit are lost", failure);
+                SourbyLogger.error("Aurora World Fabric could not confirm the final commit of " + storage.name()
+                    + " at shutdown; its chunks written since the last confirmed commit may or may not have been"
+                    + " applied", failure);
             }
         }
         if (closed + failed > 0) {

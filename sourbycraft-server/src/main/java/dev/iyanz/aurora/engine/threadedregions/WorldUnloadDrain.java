@@ -192,13 +192,39 @@ public final class WorldUnloadDrain {
         }
     }
 
-    /** Refuse success if the inherited close path logged and swallowed an AWF commit failure. */
+    /**
+     * The unload finished, so the world is removed, but Aurora World Fabric did not confirm the
+     * final commit of every one of its storages (one was left open, or its final commit failed or
+     * could not be confirmed): what they held since their last confirmed commit may or may not be
+     * on the backend. {@link WorldUnloadCompletion} answers
+     * it with {@code FAIL_UNKNOWN} and an ERROR instead of rethrowing it: a rethrow reaches the
+     * shutdown thread's handler, which stops the server, and with the world already gone there is
+     * nothing left to save or retry.
+     */
+    public static final class AwfUnloadNotConfirmed extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+
+        AwfUnloadNotConfirmed(final String world, final List<String> storages) {
+            super("World " + world + " was unloaded, but Aurora World Fabric did not confirm the final commit of "
+                + storages + " (left open, or the final commit failed or was not confirmed): the chunks written since"
+                + " their last confirmed commit may or may not have been applied");
+        }
+    }
+
+    /**
+     * Runs the unload, then refuses success if the inherited close path logged and swallowed an AWF
+     * commit failure.
+     *
+     * @throws AwfUnloadNotConfirmed when the unload returned but a storage of the world did not
+     *     confirm its final commit
+     */
     public static void runWithAwfConfirmation(final ServerLevel level, final Runnable unload) {
         final java.nio.file.Path folder = net.minecraft.server.MinecraftServer.getServer()
             .storageSource.getDimensionPath(level.dimension());
         try (var watch = dev.iyanz.sourbycraft.awf.AwfEngine.watchClose(folder)) {
             unload.run();
-            watch.requireConfirmed();
+            final List<String> unconfirmed = watch.unconfirmed();
+            if (!unconfirmed.isEmpty()) throw new AwfUnloadNotConfirmed(level.getWorld().getName(), unconfirmed);
         }
     }
 
