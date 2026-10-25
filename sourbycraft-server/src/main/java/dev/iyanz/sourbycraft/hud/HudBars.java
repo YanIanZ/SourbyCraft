@@ -23,16 +23,18 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * SourbyCraft HUD boss bars: {@code /tpsbar} + {@code /rambar}.
+ * SourbyCraft HUD boss bars: {@code /tpsbar}, {@code /rambar} and {@code /perfbar}.
  *
  * <p><b>One shared bar per metric</b> — adventure {@link BossBar} is mutable and propagates
- * {@code name}/{@code progress}/{@code color} changes to every viewer, so the whole HUD is two
- * bar objects mutated by ONE global-region task (no per-player bar churn, no per-player timers).
- * Show/hide hops to the player's owning region via the entity scheduler (Folia rule 1).
+ * {@code name}/{@code progress}/{@code color} changes to every viewer, so the whole HUD is three
+ * bar objects (TPS, RAM, PERF) mutated by ONE global-region task (no per-player bar churn, no
+ * per-player timers). Show/hide hops to the player's owning region via the entity scheduler
+ * (Folia rule 1).
  *
- * <p>TPS and RAM read the immutable metrics cache once per update. RAM shows heap used/max, plus the container/panel allocation when
- * it is meaningfully larger than the heap (the "panel gave me 10G, spark shows 2G" case — that
- * gap is a JVM flag issue, and the bar makes it visible).
+ * <p>Every bar reads the immutable metrics cache once per update. RAM shows heap used/max and, when
+ * swap exists, swap used/total from the metrics collector's last sample
+ * ({@link ContainerMemory#lastSwapSample()}); the updater itself reads no file. PERF adds heap and
+ * process CPU percentages to the TPS line.
  *
  * <p>The updater task is scheduled lazily on the first toggle and keeps running (single cheap
  * task; while nobody watches it still reads the cached snapshot once a second but leaves every bar untouched). Viewers are evicted on quit.
@@ -571,11 +573,14 @@ public final class HudBars {
         // exists. Robust against the common container bug where the platform bean's free-swap figure
         // is unreliable (negative, or larger than the total) while the total itself is fine — see
         // ContainerMemory#swapUsedBytes. Never renders "?": an untrustworthy used figure falls back
-        // to a graceful "n/a" instead of a bogus/clamped number.
+        // to a graceful "n/a" instead of a bogus/clamped number. The figures are the metrics
+        // collector's last sample: this runs on the global region tick, which must not read the
+        // cgroup files itself (audit PM-244).
         try {
-            final long swapTotal = ContainerMemory.swapTotalBytes();
+            final ContainerMemory.SwapSample swap = ContainerMemory.lastSwapSample();
+            final long swapTotal = swap == null ? -1L : swap.totalBytes();
             if (swapTotal > 0) {
-                final long swapUsed = ContainerMemory.swapUsedBytes(swapTotal);
+                final long swapUsed = swap.usedBytes();
                 final Component swapValue;
                 if (swapUsed < 0) {
                     swapValue = Component.text(ContainerMemory.fmt(swapTotal) + " total (used n/a)", SourbyCraftColors.DIM);

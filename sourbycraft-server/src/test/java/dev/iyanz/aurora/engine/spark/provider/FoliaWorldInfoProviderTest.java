@@ -64,7 +64,7 @@ class FoliaWorldInfoProviderTest {
         assertEquals(3, counts.players());
         assertEquals(15, counts.entities());
         assertEquals(147, counts.chunks());
-        assertEquals(0, counts.tileEntities(), "tile entities are not read: they are not safe to read from this thread");
+        assertEquals(0, counts.tileEntities(), "the mocked worlds publish no tickable block entities");
     }
 
     @Test

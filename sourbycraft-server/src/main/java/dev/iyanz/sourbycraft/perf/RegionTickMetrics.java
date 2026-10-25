@@ -29,14 +29,19 @@ public final class RegionTickMetrics {
     private static final long FIVE_MINUTES = 5L * MINUTE;
     private static final long FIFTEEN_MINUTES = 15L * MINUTE;
     /**
-     * Default raw-ring capacity: fifteen seconds at the 20 Hz default with headroom. Sized from
-     * the observed tick interval instead of a fixed value, so a faster rate (or a tick sprint)
-     * does not wrap the ring and truncate the 10/15-second windows (audit OBS-5).
+     * Default raw-ring capacity: fifteen seconds at the 20 Hz default with headroom. The ring is
+     * sized from the target tick interval ({@link #rawCapacityFor}), and grows again (doubling,
+     * up to {@link #MAX_RAW_CAPACITY}) when the observed rate fills it while its oldest sample is
+     * still inside the fifteen-second window, as in a tick sprint (audit OBS-5, PM-102).
      */
     static final int DEFAULT_RAW_CAPACITY = 384;
-    /** Hard cap on the raw ring, bounding memory however fast the tick rate is (audit OBS-5). */
+    /**
+     * Hard cap on the raw ring, bounding memory however fast the tick rate is (audit OBS-5). A
+     * faster rate wraps the ring; the short windows then report the retained samples, marked
+     * truncated (audit PM-102).
+     */
     static final int MAX_RAW_CAPACITY = 4096;
-    /** Headroom over fifteen seconds so a 2x tick sprint does not wrap the ring (audit OBS-5). */
+    /** Headroom over fifteen seconds at the target interval before the ring has to grow (audit OBS-5). */
     private static final int RAW_HEADROOM = 2;
     private static final int UNRESOLVED_CAPACITY = 8;
     private static final int HISTOGRAM_BINS = 64;
@@ -301,6 +306,15 @@ public final class RegionTickMetrics {
         return this.acquired;
     }
 
+    /**
+     * The {@code TickData} report for one window, or {@code null} only when the window has no
+     * sample (the upstream contract). When the raw ring has wrapped inside a short window (ticks
+     * faster than {@link #MAX_RAW_CAPACITY} per fifteen seconds, such as a long tick sprint), the
+     * report covers the retained samples only: {@code collectedTickIntervalStart} shows where that
+     * coverage begins, and utilisation is measured over the covered span rather than the whole
+     * window. Returning {@code null} there crashed callers that dereference the report on the
+     * region thread, such as the TPS bar (audit PM-102).
+     */
     public synchronized TickData.TickReportData report(final long windowNanos, final TickTime inProgress,
                                                        final long nowNanos, final long targetIntervalNanos) {
         if (windowNanos > FIFTEEN_SECONDS) {
@@ -308,9 +322,7 @@ public final class RegionTickMetrics {
         }
         int count = 0;
         final long cutoff = subtractFloor(nowNanos, windowNanos);
-        if (this.lastDroppedEnd != INACTIVE && this.lastDroppedEnd >= cutoff) {
-            return null;
-        }
+        final boolean truncated = this.lastDroppedEnd != INACTIVE && this.lastDroppedEnd >= cutoff;
         for (int i = 0; i < this.rawSize; ++i) {
             final int index = (this.rawStart + i) % this.rawCapacity;
             if (this.rawEnds[index] >= cutoff && this.rawEnds[index] <= nowNanos) {
@@ -363,8 +375,9 @@ public final class RegionTickMetrics {
         Arrays.sort(intervals);
         Arrays.sort(executions);
         Arrays.sort(missingCpu);
+        final long measured = truncated ? Math.max(1L, nowNanos - Math.max(cutoff, intervalStart)) : windowNanos;
         return new TickData.TickReportData(count, intervalStart, intervalEnd, totalExecution,
-            Math.min(1.0, (double)utilised / (double)windowNanos),
+            Math.min(1.0, (double)utilised / (double)measured),
             segmented(intervals, true), segmented(executions, false), segmented(missingCpu, false));
     }
 
@@ -455,8 +468,9 @@ public final class RegionTickMetrics {
 
     /**
      * Sums the requested window exactly as {@link #report} does — including the targetless
-     * interval resolution and the in-progress tick — but never allocates the per-tick arrays or
-     * sorts them. Returns {@code null} when {@link #report} would (truncation or no data).
+     * interval resolution, the in-progress tick and, in a wrapped short window, the retained
+     * samples only — but never allocates the per-tick arrays or sorts them. Returns {@code null}
+     * when {@link #report} would (no data, or unresolvable targetless intervals in a long window).
      */
     private WindowSums sumsFor(final long windowNanos, final TickTime inProgress,
                                final long nowNanos, final long targetIntervalNanos) {
@@ -483,9 +497,6 @@ public final class RegionTickMetrics {
             return new WindowSums(tps, mspt);
         }
         final long cutoff = subtractFloor(nowNanos, windowNanos);
-        if (this.lastDroppedEnd != INACTIVE && this.lastDroppedEnd >= cutoff) {
-            return null;
-        }
         long count = 0L;
         long interval = 0L;
         long execution = 0L;
@@ -517,12 +528,21 @@ public final class RegionTickMetrics {
         if (this.completionFailure != null) {
             this.completionFailure.run();
         }
-        // Size the raw ring from the tick rate so the 10/15-second windows survive a rate above
-        // the 20 Hz default or a tick sprint. The growth (allocation) lives in growRawRing, not
-        // here, so this hot method stays allocation-free.
+        // Size the raw ring from the target tick rate so the 10/15-second windows survive a rate
+        // above the 20 Hz default. The growth (allocation) lives in growRawRing, not here, so this
+        // hot method stays allocation-free.
         final int requiredCapacity = rawCapacityFor(targetIntervalNanos);
         if (requiredCapacity > this.rawCapacity) {
             this.growRawRing(requiredCapacity);
+        }
+        // The target interval says nothing about a tick sprint (ticks back to back): when the ring
+        // is full and its oldest sample still ends inside the fifteen-second window, the observed
+        // rate outruns the target-derived size, so grow (doubling, capped) instead of dropping a
+        // sample the short windows still cover. A short catch-up burst does not fill the ring that
+        // fast, so it does not grow it.
+        if (this.rawSize == this.rawCapacity && this.rawCapacity < MAX_RAW_CAPACITY
+            && this.rawEnds[this.rawStart] >= subtractFloor(tick.tickEnd(), FIFTEEN_SECONDS)) {
+            this.growRawRing(Math.min(MAX_RAW_CAPACITY, this.rawCapacity * 2));
         }
         final long tickLength = nonNegativeDifference(tick.tickEnd(), tick.tickStart());
         final long execution = saturatingAdd(tickLength, Math.max(0L, tick.intermediateTaskExecutionTime()));

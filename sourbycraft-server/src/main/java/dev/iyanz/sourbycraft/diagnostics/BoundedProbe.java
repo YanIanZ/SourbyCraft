@@ -4,6 +4,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
@@ -25,12 +26,21 @@ final class BoundedProbe implements AutoCloseable {
         });
     private Future<?> pending;
 
-    /** The probe's value, or {@code fallback} when it is still running after {@code timeoutMillis} or a previous probe has not finished. */
+    /**
+     * The probe's value, or {@code fallback} when it is still running after {@code timeoutMillis}, a
+     * previous probe has not finished, the probe threw, or this probe has been {@linkplain #close closed}.
+     */
     synchronized <T> T call(final Supplier<T> probe, final long timeoutMillis, final T fallback) {
         if (this.pending != null && !this.pending.isDone()) {
             return fallback;
         }
-        final Future<T> future = this.executor.submit(probe::get);
+        final Future<T> future;
+        try {
+            future = this.executor.submit(probe::get);
+        } catch (final RejectedExecutionException closed) {
+            // Closed (the recorder stopped): a dump racing that close is still written, with the fallback.
+            return fallback;
+        }
         this.pending = future;
         try {
             return future.get(timeoutMillis, TimeUnit.MILLISECONDS);

@@ -46,7 +46,11 @@ import java.util.Objects;
  *   <li>{@link Kind#BRIDGE_FATAL_VIOLATION}: a bridged plugin's fatal ownership-violation counter grew.</li>
  * </ul>
  * <p>Counter-based signals compare against the previous pass; the first pass only takes the
- * baseline, and a counter that goes backwards (a restarted subsystem) is re-baselined.</p>
+ * baseline, and a counter that goes backwards (a restarted subsystem) is re-baselined. A subject
+ * missing (or unavailable) for more than {@link #FORGET_AFTER_PASSES} passes in a row (an unloaded
+ * AWF world, a removed plugin) is forgotten, so the baselines stay bounded on a server that keeps creating uniquely named
+ * worlds (audit PM-308); if it comes back it is baselined again. Short gaps, such as a source that
+ * failed for a few passes, keep the baseline, so growth across the gap is still reported.</p>
  */
 public final class IncidentDetector {
 
@@ -56,6 +60,8 @@ public final class IncidentDetector {
     public static final long STORAGE_BACKLOG_TASKS = 1_000L;
     /** Tick budget used when the snapshot has no valid target TPS. */
     public static final double DEFAULT_TICK_BUDGET_MS = 50.0;
+    /** Passes a counter subject may be missing before its baseline is dropped (15 minutes at one pass a second). */
+    static final long FORGET_AFTER_PASSES = 900L;
 
     /** A monotonic counter reading for one subject. */
     public record Counter(String subject, long value) {}
@@ -79,7 +85,20 @@ public final class IncidentDetector {
 
     private final IncidentLog log;
     private final Sources sources;
-    private final Map<String, Long> previous = new HashMap<>();
+    /** Counter baselines by signal and subject. Guarded by this detector's monitor, like {@link #pass}. */
+    private final Map<String, Baseline> previous = new HashMap<>();
+    private long pass;
+
+    /** A counter's last reading and the pass that read it. */
+    private static final class Baseline {
+        long value;
+        long seenAtPass;
+
+        Baseline(final long value, final long seenAtPass) {
+            this.value = value;
+            this.seenAtPass = seenAtPass;
+        }
+    }
 
     public IncidentDetector(final IncidentLog log, final Sources sources) {
         this.log = Objects.requireNonNull(log, "log");
@@ -106,6 +125,7 @@ public final class IncidentDetector {
     }
 
     List<Breach> breaches(final PerformanceSnapshot snapshot, final SlowRegion slowest, final External external) {
+        ++this.pass;
         final List<Breach> out = new ArrayList<>();
         if (snapshot != null) {
             final double budget = budgetMillis(snapshot.targetTps());
@@ -148,6 +168,7 @@ public final class IncidentDetector {
         for (final Counter plugin : external.bridgeFatalViolations()) {
             this.counter(out, Kind.BRIDGE_FATAL_VIOLATION, plugin);
         }
+        this.previous.values().removeIf(baseline -> this.pass - baseline.seenAtPass > FORGET_AFTER_PASSES);
         return out;
     }
 
@@ -166,11 +187,15 @@ public final class IncidentDetector {
         if (value < 0L) {
             return 0L;
         }
-        final Long before = this.previous.put(key, value);
-        if (before == null || value < before) {
+        final Baseline baseline = this.previous.get(key);
+        if (baseline == null) {
+            this.previous.put(key, new Baseline(value, this.pass));
             return 0L;
         }
-        return value - before;
+        final long before = baseline.value;
+        baseline.value = value;
+        baseline.seenAtPass = this.pass;
+        return value < before ? 0L : value - before;
     }
 
     static double budgetMillis(final double targetTps) {
