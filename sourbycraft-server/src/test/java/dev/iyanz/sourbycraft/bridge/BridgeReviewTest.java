@@ -152,10 +152,11 @@ class BridgeReviewTest {
         assertEquals(1, runningInside.get());
         assertEquals(0, bridge.runningAsync("A"), "the running slot is released in finally");
         assertTrue(bridge.activeWorkers().isEmpty());
-        assertTrue(timer.cancelled(), "a rejected repeater loses its future invocations");
-        assertFalse(bridge.knows(7));
+        assertFalse(timer.cancelled(), "a repeater only skips the overlapping run and keeps its later ones");
+        assertTrue(bridge.knows(7));
         assertEquals(0, bridge.telemetry().stats("A").fatalViolations());
-        assertEquals(1, bridge.telemetry().stats("A").rejectedOperations());
+        assertEquals(0, bridge.telemetry().stats("A").rejectedOperations());
+        assertEquals(1, bridge.telemetry().stats("A").skippedRuns());
         // Sync work never consumes an async slot.
         assertTrue(bridge.submit("A", null, new BridgeRuntimeTest.FakeTask(8, true, -1, () -> {}), 0));
     }

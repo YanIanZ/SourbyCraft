@@ -4,8 +4,6 @@ import dev.iyanz.sourbycraft.bridge.AuroraBridge;
 import dev.iyanz.sourbycraft.bridge.BridgeRuntime;
 import dev.iyanz.sourbycraft.config.AuroraConfig;
 import java.util.Locale;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Consumer;
@@ -45,7 +43,7 @@ public final class ThreadChecks {
 
     /** How long one (plugin or thread, reason) log line suppresses the next. */
     static final long LOG_WINDOW_NANOS = TimeUnit.SECONDS.toNanos(60L);
-    /** Distinct reasons remembered for rate limiting outside bridged bodies; more than this logs every time. */
+    /** Distinct reasons remembered for rate limiting outside bridged bodies; past this, new reasons share one window. */
     static final int MAX_TRACKED_REASONS = 256;
 
     /** What the operator configured (JVM property, else TOML, else the owner default). */
@@ -63,7 +61,7 @@ public final class ThreadChecks {
     private static final boolean TRACE = Boolean.getBoolean(TRACE_PROPERTY);
     private static final LongAdder RELAXED_HITS = new LongAdder();
     private static final LongAdder RELAXED_HITS_OUTSIDE_BRIDGE = new LongAdder();
-    private static final Map<String, Long> LAST_LOG = new ConcurrentHashMap<>();
+    private static final LogWindows LOG_WINDOWS = new LogWindows(LOG_WINDOW_NANOS, MAX_TRACKED_REASONS);
 
     static {
         AuroraConfig.ThreadChecks configured;
@@ -148,19 +146,22 @@ public final class ThreadChecks {
         return false;
     }
 
-    /** Rate-limited: one line per reason per {@link #LOG_WINDOW_NANOS} on the thread that hit it. */
+    /**
+     * Rate-limited: one line per reason per {@link #LOG_WINDOW_NANOS}, logged on the thread that hit it. The window
+     * is keyed by the reason without its per-hit context ({@link LogWindows#baseReason}: TickThread appends the
+     * thread, world and position of every hit), so a sweep across many positions logs once, not once per position;
+     * the line itself carries the full text of the hit that opened the window.
+     */
     private static void logOutsideBridge(final String reason) {
-        final String key = reason == null ? "unknown" : reason;
-        final long now = System.nanoTime();
-        if (LAST_LOG.size() < MAX_TRACKED_REASONS || LAST_LOG.containsKey(key)) {
-            final Long last = LAST_LOG.put(key, now);
-            if (last != null && now - last < LOG_WINDOW_NANOS) {
-                return;
-            }
+        final String text = reason == null ? "unknown" : reason;
+        final long suppressed = LOG_WINDOWS.admit(LogWindows.baseReason(text), System.nanoTime());
+        if (suppressed < 0) {
+            return;
         }
         final String line = "Region-ownership check relaxed (aurora.bridge.thread-checks = " + EFFECTIVE.configValue()
-            + "): " + key + "; thread=" + Thread.currentThread().getName()
-            + ". The access proceeded on a thread that does not own that state; this server is not qualified.";
+            + "): " + text + "; thread=" + Thread.currentThread().getName()
+            + ". The access proceeded on a thread that does not own that state; this server is not qualified."
+            + LOG_WINDOWS.suppressedNote(suppressed);
         if (TRACE) {
             LOGGER.warn(line, new Throwable("relaxed thread check"));
         } else {
@@ -187,6 +188,6 @@ public final class ThreadChecks {
 
     /** For {@code ThreadChecksTest} only: clears the rate-limit memory. */
     static void resetLogMemoryForTesting() {
-        LAST_LOG.clear();
+        LOG_WINDOWS.clear();
     }
 }
