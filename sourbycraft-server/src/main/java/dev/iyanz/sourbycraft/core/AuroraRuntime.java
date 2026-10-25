@@ -12,8 +12,13 @@ import java.util.Set;
  * <p>This does not replace a service's own state. A pool still knows whether it has started, and
  * a collector still knows whether it has been closed. It adds the fact none of them own: whether
  * the server as a whole is still running. {@link #acceptingWork()} is false from the moment
- * shutdown begins or startup fails. Services must explicitly consult this state alongside their
- * own admission controls; changing it does not stop workers or drain their queues.</p>
+ * shutdown begins or startup fails. Changing the state does not stop workers or drain queues; a
+ * service refuses work only where it consults {@link #stopping()} alongside its own admission
+ * controls; consumers include async-path admission ({@code AsyncPathProcessor}), the
+ * {@code /speedtest} and {@code /awf} commands, and the GeoIP database download.
+ * Persistence is deliberately not gated: the storage lane, AWF commits and region saves, and the
+ * {@code VirtualExecutor} that AWF world operations use, must keep draining after STOPPING.
+ * {@link #acceptingWork()} has no production admission consumer; it is a status query.</p>
  *
  * <p>Not a service locator. It holds no services and resolves nothing; {@link SourbyCraftBootstrap}
  * still owns startup order and shutdown order explicitly, because an order that is written down is
@@ -38,7 +43,7 @@ public final class AuroraRuntime {
         RUNNING,
         /** Runtime remains operational, but one or more optional subsystems are degraded. */
         DEGRADED,
-        /** Shutdown has begun. No new work is admitted; outstanding work drains. */
+        /** Shutdown has begun. Admission points that check {@link #stopping()} refuse new work; outstanding work drains. */
         STOPPING,
         /** The bootstrap shutdown sequence has completed its cleanup attempts. */
         STOPPED,
@@ -72,9 +77,10 @@ public final class AuroraRuntime {
      * Whether a subsystem may admit new work.
      *
      * <p>True while starting as well as running: services come up in order, and one that is up
-     * has to serve the ones still coming up behind it.</p>
+     * has to serve the ones still coming up behind it. Also false in NEW, before bootstrap, which is
+     * why admission points check {@link #stopping()} instead.</p>
      *
-     * @return true in BOOTSTRAPPING, STARTING or RUNNING; false otherwise
+     * @return true in BOOTSTRAPPING, STARTING, RUNNING or DEGRADED; false otherwise
      */
     public static boolean acceptingWork() {
         final State current = state;

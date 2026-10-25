@@ -33,7 +33,7 @@ class ReleaseIdentityTest {
     void prereleaseIdentityCarriesTheCommitAndMarker() {
         assertEquals("Build 50@abc1234PR!",
             BuildInfo.formatReleaseIdentity("50", "aurora-nexus", "REL", "26.2", "abc1234", true));
-        assertEquals("Build 50@?PR!",
+        assertEquals("Build 50 — Aurora Nexus (DEV, 26.2@?)",
             BuildInfo.formatReleaseIdentity("50", "aurora-nexus", "DEV", "26.2", "", true));
         final BuildInfo info = BuildInfo.loadFrom(new ByteArrayInputStream("""
             version=26.2-REL

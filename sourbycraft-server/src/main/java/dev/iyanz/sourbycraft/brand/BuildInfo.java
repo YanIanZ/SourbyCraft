@@ -20,8 +20,9 @@ import java.util.Properties;
  * @param buildTimestamp ISO-8601 instant the jar was built, or empty if unknown
  * @param gitBranch      source branch, from the same provider as the manifest's Git-Branch
  * @param gitCommit      full source commit, matching the manifest's Git-Commit
- * @param prerelease     whether this jar was built for a GitHub prerelease ({@code release=pre});
- *                       its display identity ends with {@code @<commit>PR!} and is shown in red
+ * @param prerelease     whether this jar was built while {@code release=pre} (baked for every channel);
+ *                       only a REL build's display identity then ends with {@code @<commit>PR!}, see
+ *                       {@link #formatReleaseIdentity(String, String, String, String, String, boolean)}
  */
 public record BuildInfo(
     String version,
@@ -182,6 +183,15 @@ public record BuildInfo(
         };
     }
 
+    /**
+     * Whether {@link #releaseIdentity()} carries the prerelease marker: a REL build made while
+     * {@code release=pre}. The same rule as {@link #formatReleaseIdentity(String, String, String,
+     * String, String, boolean)}, for callers that colour the identity by stage.
+     */
+    public boolean prereleaseStage() {
+        return prerelease && "REL".equals(channel());
+    }
+
     /** Shared display text only; version/build fields retain their machine-readable formats. */
     public String releaseIdentity() {
         final String commit = sourceOrUnknown(gitCommit);
@@ -196,19 +206,21 @@ public record BuildInfo(
     }
 
     /**
-     * Pure release formatter with the publication stage. A prerelease renders
+     * Pure release formatter with the publication stage. A REL build made for a prerelease renders
      * {@code Build 50@abc1234PR!} (the GitHub prerelease marker at the end); a normal release keeps
-     * {@code Build 50 — Aurora Nexus}; a development build keeps the branch/commit suffix.
+     * {@code Build 50 — Aurora Nexus}; a development or experimental build keeps the branch/commit
+     * suffix even when it was built while {@code release=pre}, because only the REL build is the
+     * one CI publishes as the prerelease.
      */
     public static String formatReleaseIdentity(String buildNumber, String codename, String channel,
                                                String branch, String shortCommit, boolean prerelease) {
         final String release = "Build " + stripPlatformSuffix(sourceOrUnknown(buildNumber));
-        if (prerelease) {
+        final String actualChannel = normalizeChannel(channel);
+        if (prerelease && "REL".equals(actualChannel)) {
             return release + "@" + sourceOrUnknown(shortCommit) + "PR!";
         }
         final String name = codenameDisplay(codename);
         final String identity = "Development".equals(name) ? release : release + " — " + name;
-        final String actualChannel = normalizeChannel(channel);
         return "REL".equals(actualChannel) ? identity
             : identity + " (" + actualChannel + ", " + sourceOrUnknown(branch)
                 + "@" + sourceOrUnknown(shortCommit) + ")";

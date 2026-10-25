@@ -28,6 +28,8 @@ public final class AbyssLinkClient implements AutoCloseable {
     private AbyssLinkConnectionManager manager;
     private volatile boolean closed;
     private volatile long generation;
+    /** Stage of the last failed connection attempt (no message or address), cleared by a TLS handshake or authentication. */
+    private volatile String lastFailure;
     private long nextId = 1, queryWindowNanos;
     private int queryCount;
 
@@ -42,7 +44,20 @@ public final class AbyssLinkClient implements AutoCloseable {
         if (closed) { value.close(); return; }
         if (session != null && session != value) session.close();
         cache.clear(); generation++;session=value; metrics.connections.increment();
+        lastFailure=null;
         if(manager!=null)manager.authenticated();
+    }
+    /**
+     * Records which stage of a connection attempt failed; the detail goes to the log, not to {@link #status()}.
+     * {@code null} clears it once an attempt has passed every recorded stage (TLS handshake done).
+     */
+    void failed(String stage) { lastFailure=stage; }
+    /** One log line for a failure: exception class and message, control characters removed, capped at 240 characters. */
+    static String describe(Throwable failure) {
+        Throwable cause=failure instanceof java.util.concurrent.CompletionException && failure.getCause()!=null?failure.getCause():failure;
+        String message=cause.getMessage();
+        String text=(cause.getClass().getSimpleName()+(message==null || message.isBlank()?"":": "+message)).replaceAll("\\p{Cntrl}"," ");
+        return text.length()>240?text.substring(0,237)+"...":text;
     }
     long generation(){return generation;}
     public boolean connected() { var current=session; return current != null && current.active(); }
@@ -52,7 +67,14 @@ public final class AbyssLinkClient implements AutoCloseable {
         return connected() && sample.generation()==generation && sample.sampledAtMillis()<=System.currentTimeMillis()+1000
             && sample.sampledAtMillis()>=System.currentTimeMillis()-settings.maxSampleAgeMillis();
     }
-    public String status() { return connected() ? "authenticated" : closed ? "stopped" : settings.enabled() ? "disconnected" : "disabled"; }
+    /** Shown by {@code /ping} to any player: a state and at most the failed stage, never an address or exception text. */
+    public String status() {
+        if (connected()) return "authenticated";
+        if (closed) return "stopped";
+        if (!settings.enabled()) return "disabled";
+        var failure=lastFailure;
+        return failure==null ? "disconnected" : "disconnected (" + failure + " failed)";
+    }
     public synchronized int pendingCount() { return pending.size(); }
 
     /** Copies isolate caller cancellation; one wire request is shared by concurrent queries for a UUID. */

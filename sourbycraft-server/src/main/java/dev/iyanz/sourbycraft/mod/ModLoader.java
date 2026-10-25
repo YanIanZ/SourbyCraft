@@ -9,6 +9,8 @@ import java.net.URLClassLoader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -27,9 +29,10 @@ import org.bukkit.event.server.ServerLoadEvent;
  * after configuration and before worlds load. It is <b>not</b> a Fabric/Forge loader: those formats
  * use different mappings, mixins and lifecycles and are refused with one WARN per jar.</p>
  *
- * <p>Lifecycle: {@link #bootstrap()} scans and calls {@link SourbyMod#onLoad}. A
- * {@code ServerLoadEvent(STARTUP)} listener calls {@link #enableAll()} once worlds and plugins are
- * ready. {@link #shutdown()} calls {@link SourbyMod#onDisable} in reverse order and closes the mod
+ * <p>Lifecycle: {@link #bootstrap()} scans the jars in file-name order and calls
+ * {@link SourbyMod#onLoad}. A {@code ServerLoadEvent(STARTUP)} listener calls {@link #enableAll()}
+ * once worlds and plugins are ready. {@link #shutdown()} calls {@link SourbyMod#onDisable} (if the
+ * mods were enabled) and {@link SourbyMod#onUnload} in reverse order and closes the mod
  * classloaders. A failure in one mod is logged and does not stop the server or the other mods.</p>
  *
  * <p><b>Security:</b> mods run in-process with full server privileges, the same trust level as a
@@ -75,6 +78,9 @@ public final class ModLoader {
             SourbyLogger.info("mods: (0 loaded)");
             return;
         }
+        // listFiles has no defined order. Sorted by file name (String order, so case-sensitive), the
+        // load/enable order and which of two jars with one id wins are the same on every host.
+        Arrays.sort(jarFiles, Comparator.comparing(File::getName));
 
         final Set<String> seenIds = new LinkedHashSet<>();
         final List<Entry> toLoad = new ArrayList<>();
@@ -182,17 +188,28 @@ public final class ModLoader {
         }
     }
 
-    /** Shutdown: {@code onDisable} in reverse order, then close the classloaders. Idempotent. */
+    /**
+     * Shutdown, in reverse load order: {@code onDisable} for each mod if {@link #enableAll()} ran,
+     * then {@code onUnload} for every mod whose {@code onLoad} succeeded (also when the server
+     * stopped before it was ready), then the classloaders close. Idempotent.
+     */
     public static void shutdown() {
-        if (enabled) {
-            for (int i = LOADED.size() - 1; i >= 0; i--) {
-                final Loaded loaded = LOADED.get(i);
+        final boolean wasEnabled = enabled;
+        for (int i = LOADED.size() - 1; i >= 0; i--) {
+            final Loaded loaded = LOADED.get(i);
+            if (wasEnabled) {
                 try {
                     loaded.mod().onDisable();
                 } catch (final Throwable failed) {
                     SourbyLogger.warn("mod:" + loaded.descriptor().id + " onDisable threw "
                         + failed.getClass().getSimpleName() + ": " + failed.getMessage());
                 }
+            }
+            try {
+                loaded.mod().onUnload();
+            } catch (final Throwable failed) {
+                SourbyLogger.warn("mod:" + loaded.descriptor().id + " onUnload threw "
+                    + failed.getClass().getSimpleName() + ": " + failed.getMessage());
             }
         }
         enabled = false;

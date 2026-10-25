@@ -12,7 +12,10 @@ package dev.iyanz.sourbycraft.mod;
  *   <li>{@link #onEnable()} — on {@code ServerLoadEvent(STARTUP)}: worlds are loaded and plugins are
  *       enabled, so the full Bukkit/Paper API is available.</li>
  *   <li>{@link #onDisable()} — during shutdown, in reverse enable order, before the rest of
- *       SourbyCraft's services stop.</li>
+ *       SourbyCraft's services stop. Only after {@link #onEnable()} was called.</li>
+ *   <li>{@link #onUnload()} — right after {@code onDisable} (or in its place when the server stopped
+ *       before it was ready, so {@code onEnable} never ran), for every mod whose {@code onLoad}
+ *       returned normally, before the mod's classloader is closed.</li>
  * </ul>
  *
  * <p>Mods run in-process with full server privileges. No sandbox is applied — the same trust level as
@@ -29,6 +32,13 @@ public interface SourbyMod {
     /** The server is ready (worlds loaded, plugins enabled); the Bukkit API is safe here. */
     default void onEnable() {}
 
-    /** Shutdown; release resources. Called in reverse enable order. */
+    /** Shutdown; release resources. Called in reverse enable order, only for an enabled mod. */
     default void onDisable() {}
+
+    /**
+     * Last call before the classloader closes, whether or not the mod was enabled: release what
+     * {@link #onLoad(ModContext)} acquired (threads, files). It runs during shutdown, after plugins
+     * were disabled, and also when the server never became ready: do not start Bukkit work here.
+     */
+    default void onUnload() {}
 }

@@ -24,9 +24,23 @@ final class AbyssLinkConnectionManager implements AutoCloseable {
     private volatile java.util.concurrent.CompletableFuture<?> preparation;
     private volatile io.netty.util.concurrent.ScheduledFuture<?> retry;
     private int failures;
+    /** Consecutive failed attempts since the last authentication; event-loop confined like {@link #failures}. */
+    private int failedAttempts;
+    /** The first failure is logged, then every Nth while it keeps failing. */
+    private static final int LOG_EVERY=10;
     AbyssLinkConnectionManager(AbyssLinkClient client){this.client=client;}
     void start(){prepare();}
-    void authenticated(){failures=0;}
+    void authenticated(){failures=0;failedAttempts=0;}
+    /** On the event loop: records the failed stage for status and logs the first and every Nth failure. */
+    private void attemptFailed(String stage,Throwable cause){
+        client.failed(stage);
+        failedAttempts++;
+        if(failedAttempts==1 || failedAttempts%LOG_EVERY==0){
+            dev.iyanz.sourbycraft.util.SourbyLogger.warn("AbyssLink: "+stage+" failed (attempt "+failedAttempts+"): "
+                +(cause==null?"no cause reported":AbyssLinkClient.describe(cause))+"; retrying with backoff"
+                +(failedAttempts==1?", logged again every "+LOG_EVERY+" failed attempts":""));
+        }
+    }
     private void prepare(){
         if(stopped)return;
         var preparing=VirtualExecutor.supply(() -> {
@@ -45,7 +59,7 @@ final class AbyssLinkConnectionManager implements AutoCloseable {
             if(stopped)return;
             try {group.next().execute(() -> {
                 if(stopped)return;
-                if(failure!=null){scheduleRetry();return;}
+                if(failure!=null){attemptFailed("TLS/DNS setup",failure);scheduleRetry();return;}
                 connect(prepared);
             });}catch(java.util.concurrent.RejectedExecutionException shuttingDown){ /* terminal */ }
         });
@@ -70,12 +84,15 @@ final class AbyssLinkConnectionManager implements AutoCloseable {
                         @Override public void exceptionCaught(ChannelHandlerContext ctx,Throwable failure){client.metrics.rejected.increment();ctx.close();}
                     });
                     ssl.handshakeFuture().addListener(handshake -> {
+                        if(!handshake.isSuccess() && !stopped)attemptFailed("TLS handshake",handshake.cause());
                         if(!handshake.isSuccess() || stopped){socket.close();return;}
+                        // Past every recorded stage: an earlier attempt's label would now be stale.
+                        client.failed(null);
                         socket.pipeline().addLast("session",new AbyssLinkSession(client,prepared.nonce));
                     });
                 }
             }).connect(prepared.address).addListener((ChannelFutureListener)connected -> {
-                if(!connected.isSuccess()){scheduleRetry();return;}
+                if(!connected.isSuccess()){if(!stopped)attemptFailed("connect",connected.cause());scheduleRetry();return;}
                 channel=connected.channel();
                 if(stopped){channel.close();return;}
                 channel.closeFuture().addListener(closed -> {
