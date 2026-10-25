@@ -303,4 +303,31 @@ class ProfileEngineTest {
         final ProfileOperationException failed = failure(() -> this.engine.delete(profile.id()).join());
         assertEquals(ProfileErrorCode.PROFILE_LOCKED, failed.code());
     }
+    @Test
+    void concurrentCreatesKeepEverySuccessfulProfileAndRespectSlots() throws Exception {
+        final List<CompletableFuture<ProfileInfo>> requests = new java.util.ArrayList<>();
+        for (int i = 0; i < 20; i++) {
+            requests.add(this.engine.create(ProfileRequest.of(this.player, "skyblock"))
+                .exceptionally(failed -> null));
+        }
+        CompletableFuture.allOf(requests.toArray(CompletableFuture[]::new)).get(10, TimeUnit.SECONDS);
+        final Set<UUID> successful = new HashSet<>();
+        for (final var request : requests) {
+            if (request.join() != null) successful.add(request.join().id());
+        }
+        assertEquals(3, successful.size());
+        assertEquals(successful, new HashSet<>(this.repository.loadAccount(this.player, 3).profileIds()));
+    }
+
+    @Test
+    void publicBindingPersistsAndRefusesActiveProfileMutation() {
+        final ProfileInfo profile = create("skyblock");
+        final var request = new dev.iyanz.sourbycraft.api.profile.ProfileWorldBindingRequest(profile.id(),
+            Map.of("island_test", dev.iyanz.sourbycraft.api.profile.ProfileWorldRole.PRIMARY), "template_test");
+        this.engine.bindWorlds(request).join();
+        assertEquals("island_test", this.engine.worlds(profile.id()).join().getFirst().world());
+        assertTrue(this.engine.switchProfile(this.player, profile.id()).join().success());
+        assertEquals(ProfileErrorCode.PROFILE_LOCKED, failure(() -> this.engine.bindWorlds(request).join()).code());
+    }
+
 }

@@ -1,5 +1,11 @@
 # Testing
 
+Build 50 candidate update (2026-10-25): distributed startup is refused because the FILE profile
+repository cannot atomically fence its writes with Redis ownership. Distributed protocols below
+are design requirements, not available production behavior. Use `mode: standalone` with an
+exclusive profile directory. Current changes/evidence: [readiness](../../releases/BUILD-50-READINESS.md)
+and [Tester Owner](../../tester%20owner.md). No tests/build were run for this candidate by the agent.
+
 > **Owner-managed testing.** The results below were produced by coding agents during implementation;
 > they are implementation evidence, not qualification. No runtime result in this repository is
 > accepted until the project owner runs it. The owner-facing procedures and status dashboard are in

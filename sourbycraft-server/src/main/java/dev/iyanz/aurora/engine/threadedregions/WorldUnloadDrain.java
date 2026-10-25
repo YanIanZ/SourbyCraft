@@ -192,6 +192,16 @@ public final class WorldUnloadDrain {
         }
     }
 
+    /** Refuse success if the inherited close path logged and swallowed an AWF commit failure. */
+    public static void runWithAwfConfirmation(final ServerLevel level, final Runnable unload) {
+        final java.nio.file.Path folder = net.minecraft.server.MinecraftServer.getServer()
+            .storageSource.getDimensionPath(level.dimension());
+        try (var watch = dev.iyanz.sourbycraft.awf.AwfEngine.watchClose(folder)) {
+            unload.run();
+            watch.requireConfirmed();
+        }
+    }
+
     /**
      * Closes the world's region storage when it has no region to save (audit follow-up to AWF-8).
      * The storage is otherwise closed by the last region's chunk save; a world unloaded with no

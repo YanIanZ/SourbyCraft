@@ -70,3 +70,26 @@ profiles.createProfile(ProfileRequest.of(player.getUniqueId(), "skyblock"))
 
 `AuroraWorlds` keeps its exact contract. `AuroraProfiles` is a new, separate service; plugins that do
 not use profiles do not depend on Redis or on this API.
+
+## Build 50 world-binding API (owner testing pending)
+
+```java
+var request = new ProfileWorldBindingRequest(profileId,
+    Map.of("island_50", ProfileWorldRole.PRIMARY), "starter_template");
+profiles.bindProfileWorlds(request).thenCompose(ignored -> profiles.getProfileWorlds(profileId));
+```
+
+Use `dev.iyanz.sourbycraft.api.profile` types. This replaces the entire binding (0–16 worlds),
+without creating or deleting worlds. Empty map unbinds. Names are `[a-z0-9_-]{1,48}`.
+Only an inactive, unclaimed, non-deleted profile can be rebound, outside an account transition.
+World creation/loading happens on activation. Roles describe relationships, not access permissions;
+the consumer must authorize player requests and enforce shared-world membership itself.
+Admin commands: `/awf multiprofile bind <profile-uuid> <world> [template]` replaces the binding with
+one PRIMARY world; `/awf multiprofile unbind <profile-uuid>` clears it. Both require
+`sourbycraft.command.awf.multiprofile.admin` in addition to normal AWF permissions.
+
+Distributed mode refuses startup in this candidate. Account/snapshot metadata operations serialize
+in-process; this is not cross-node atomic fencing. Save revalidates account revision and the exact
+ownership claim after capture; capture spanning A→B→A is rejected. Recovery holds the player's
+transition reservation until its future completes. Changes require the owner regression cases in
+[Tester Owner](../../tester%20owner.md).

@@ -130,3 +130,5 @@ Cherry incorporates work inspired by or derived from **[LeavesMC](https://github
 SourbyCraft is licensed under the [GPL version 3 only](LICENSE.md); upstream components keep their own
 licences, listed there. The SourbyCraft and Aurora names and logos are covered by the
 [trademark policy](TRADEMARK.md): forks are welcome under the GPL, but must use their own name.
+
+Build 50 candidate: [readiness and partial-work closure](docs/releases/BUILD-50-READINESS.md) · [Tester Owner](docs/tester%20owner.md). Manual qualification pending; distributed MultiProfile startup is refused until atomic fenced storage exists.

@@ -114,6 +114,12 @@ public final class AwfRegionStorage {
     private volatile java.util.function.BooleanSupplier loadPath = AwfRegionStorage::onChunkLoadPath;
     /** Set when {@link #close} committed everything but the backend could not release the store. */
     private volatile boolean releaseFailed;
+    /** Published only after the final commit/discard completes, independent of engine exception logging. */
+    private volatile boolean closeConfirmed;
+
+    public boolean closeConfirmed() {
+        return this.closeConfirmed;
+    }
     /** Whether the last commit attempt (periodic, flush or close) failed; for flush reporting. */
     private volatile boolean lastCommitFailed;
     /** The engine's shutdown budget once shutdown has begun, else {@code null}; see {@link AwfShutdownBudget}. */
@@ -725,6 +731,7 @@ public final class AwfRegionStorage {
                 this.onClose.run();
             }
         }
+        if (commitFailed == null) this.closeConfirmed = true;
         if (commitFailed != null) {
             throw new CloseFailure("AWF could not confirm the final commit of " + this.name + ": " + uncommitted
                 + " chunk(s) written since the last confirmed commit are lost, unless the backend applied the"
@@ -800,6 +807,7 @@ public final class AwfRegionStorage {
             dev.iyanz.sourbycraft.util.SourbyLogger.warn("AWF committed " + this.name + " but its backend could not"
                 + " release it (" + detail + "); no chunks are lost, and a lease expires on its own");
         }
+        this.closeConfirmed = outcome == AwfShutdownReport.Outcome.CONFIRMED;
         this.shutdownReport.accept(new AwfShutdownReport.StorageResult(this.name, outcome, dirty,
             this.discarding ? java.util.List.of() : this.world.dirtySample(AwfShutdownReport.POSITIONS_LISTED),
             outcome == AwfShutdownReport.Outcome.CONFIRMED ? 0 : queued,

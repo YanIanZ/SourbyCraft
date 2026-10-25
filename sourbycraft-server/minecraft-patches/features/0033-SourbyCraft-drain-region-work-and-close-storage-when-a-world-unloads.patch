@@ -28,7 +28,7 @@ index b6be665b27fbd0a7bce198b52c9793a164a6a07a..b325336584a632ab4ffffb82bb4fc58c
      public void run() {
          // SourbyCraft start - always complete the unload callback, also when the unload throws
 -        WorldUnloadCompletion.run(this.level.canvas$unloadTicket::get, this::unload);
-+        WorldUnloadCompletion.run(this.level.canvas$unloadTicket::get, this::unload,
++        WorldUnloadCompletion.run(this.level.canvas$unloadTicket::get, () -> WorldUnloadDrain.runWithAwfConfirmation(this.level, this::unload),
 +            () -> WorldUnloadDrain.releaseBridgedTasks(this.level, this.debugName, LOGGER)); // SourbyCraft - release bridged tasks also when the unload throws
      }
  

@@ -7,6 +7,12 @@ never a claim that something passed.
 Owner testing starts with **data safety** (AWF, MultiProfile, Redis), then entity/region safety
 (async pathfinding), then runtime correctness (bridge, caches, governor), and only then performance.
 
+## Candidate update 2026-10-25
+
+Start with [Tester Owner](../../tester%20owner.md) and the
+[closure plan](../../releases/BUILD-50-READINESS.md). AWF/MultiProfile historical PASS rows need
+retesting on the candidate after the save, unload and account lifecycle changes.
+
 ## How to use this directory
 
 | Document | Use it for |
@@ -72,32 +78,32 @@ Priority: **P0** data/region safety, **P1** runtime correctness, **P2** performa
 
 | ID | Feature | Flag / config | Risk | Procedure | Status |
 | --- | --- | --- | --- | --- | --- |
-| AWF-001 | Create, save, restart, load a persistent world | `aurora.awf.worlds`, `aurora.awf.backend: file` | Low on disposable server | `01` §AWF-001 | PASSED (owner report) |
-| AWF-002 | Template + copy-on-write instance isolation | `aurora.awf.backend: file` | High (data isolation) | `01` §AWF-002 | PASSED (owner report) |
-| AWF-003 | Redis backend, lease, second-server refusal | `aurora.awf.backend: redis`, `aurora.awf.redis.*` | High | `01` §AWF-003 | PASSED (owner report) |
-| AWF-004 | Unload with players present; `nosave` | — | High | `01` §AWF-004 | PASSED (owner report) |
-| AWF-005 | Delete world and template | — | High (irreversible) | `01` §AWF-005 | PASSED (owner report) |
-| AWF-006 | `/awf save` durability immediately after completion | — | High | `01` §AWF-006 | PASSED (owner report) |
-| AWF-007 | Clean stop with dirty chunks (exit 0, `AWF-SHUTDOWN-OK`) | `aurora.awf.shutdown-deadline-ms` | High | `01` §AWF-007 | PASSED (owner report) |
-| AWF-008 | Concurrent create/load/unload/delete | — | Medium | `01` §AWF-008 | PASSED (owner report) |
-| AWF-009 | Missing template is refused (Build 50 fix) | — | High | `01` §AWF-009 | PASSED (owner report) |
-| AWF-010 | Hand-edited registry is rejected safely (Build 50 fix) | `awf/aurora-worlds.json` | Medium | `01` §AWF-010 | PASSED (owner report) |
-| AWF-011 | World properties and clone | `/awf set`, `/awf clone` | Medium | `01` §AWF-011 | PASSED (owner report) |
+| AWF-001 | Create, save, restart, load a persistent world | `aurora.awf.worlds`, `aurora.awf.backend: file` | Low on disposable server | `01` §AWF-001 | NEEDS RETEST (historical owner report) |
+| AWF-002 | Template + copy-on-write instance isolation | `aurora.awf.backend: file` | High (data isolation) | `01` §AWF-002 | NEEDS RETEST (historical owner report) |
+| AWF-003 | Redis backend, lease, second-server refusal | `aurora.awf.backend: redis`, `aurora.awf.redis.*` | High | `01` §AWF-003 | NEEDS RETEST (historical owner report) |
+| AWF-004 | Unload with players present; `nosave` | — | High | `01` §AWF-004 | NEEDS RETEST (historical owner report) |
+| AWF-005 | Delete world and template | — | High (irreversible) | `01` §AWF-005 | NEEDS RETEST (historical owner report) |
+| AWF-006 | `/awf save` durability immediately after completion | — | High | `01` §AWF-006 | NEEDS RETEST (historical owner report) |
+| AWF-007 | Clean stop with dirty chunks (exit 0, `AWF-SHUTDOWN-OK`) | `aurora.awf.shutdown-deadline-ms` | High | `01` §AWF-007 | NEEDS RETEST (historical owner report) |
+| AWF-008 | Concurrent create/load/unload/delete | — | Medium | `01` §AWF-008 | NEEDS RETEST (historical owner report) |
+| AWF-009 | Missing template is refused (Build 50 fix) | — | High | `01` §AWF-009 | NEEDS RETEST (historical owner report) |
+| AWF-010 | Hand-edited registry is rejected safely (Build 50 fix) | `awf/aurora-worlds.json` | Medium | `01` §AWF-010 | NEEDS RETEST (historical owner report) |
+| AWF-011 | World properties and clone | `/awf set`, `/awf clone` | Medium | `01` §AWF-011 | NEEDS RETEST (historical owner report) |
 
 ### AWF MultiProfile (P0, disabled by default)
 
 | ID | Feature | Flag / config | Risk | Procedure | Status |
 | --- | --- | --- | --- | --- | --- |
-| MP-001 | Enable, create, list, inspect a profile | `aurora.awf.multiprofile.enabled: true` | Medium | `03` §MP-001 | PASSED (owner report) |
-| MP-002 | Switch profile and verify isolation categories | `...isolation.*` | High (item loss) | `03` §MP-002 | PASSED (owner report) |
-| MP-003 | Reconnect after a switch (Build 50 fix: no false duplicate kick) | `...coordination.single-active-session` | High | `03` §MP-003 | PASSED (owner report) |
-| MP-004 | Save on quit and on explicit `saveProfile` | — | High | `03` §MP-004 | PASSED (owner report) |
-| MP-005 | Switch timeout rolls back | `...switching.timeout-ms` | Medium | `03` §MP-005 | PASSED (owner report) |
-| MP-006 | Recovery of an interrupted switch | `...switching.require-durable-save` | High | `03` §MP-006 | PASSED (owner report) |
-| MP-007 | Idle world unload | `...worlds.idle-unload-seconds` | Medium | `03` §MP-007 | BLOCKED (no public world binding) |
-| MP-008 | Disabled feature creates nothing | `...enabled: false` | Low | `03` §MP-008 | PASSED (owner report) |
-| MP-009 | Distributed mode refuses without fabric/fencing | `...mode: distributed` | Medium | `03` §MP-009 | PASSED (owner report) |
-| MP-010 | Two-node ownership and takeover | fabric + `coordination.provider: redis` | High | `03` §MP-010 | BLOCKED (needs two nodes) |
+| MP-001 | Enable, create, list, inspect a profile | `aurora.awf.multiprofile.enabled: true` | Medium | `03` §MP-001 | NEEDS RETEST (historical owner report) |
+| MP-002 | Switch profile and verify isolation categories | `...isolation.*` | High (item loss) | `03` §MP-002 | NEEDS RETEST (historical owner report) |
+| MP-003 | Reconnect after a switch (Build 50 fix: no false duplicate kick) | `...coordination.single-active-session` | High | `03` §MP-003 | NEEDS RETEST (historical owner report) |
+| MP-004 | Save on quit and on explicit `saveProfile` | — | High | `03` §MP-004 | NEEDS RETEST (historical owner report) |
+| MP-005 | Switch timeout rolls back | `...switching.timeout-ms` | Medium | `03` §MP-005 | NEEDS RETEST (historical owner report) |
+| MP-006 | Recovery of an interrupted switch | `...switching.require-durable-save` | High | `03` §MP-006 | NEEDS RETEST (historical owner report) |
+| MP-007 | Idle world unload | `...worlds.idle-unload-seconds` | Medium | `03` §MP-007 | READY FOR OWNER TEST (public binding + admin bind/unbind added) |
+| MP-008 | Disabled feature creates nothing | `...enabled: false` | Low | `03` §MP-008 | NEEDS RETEST (historical owner report) |
+| MP-009 | Distributed mode refuses without fabric/fencing | `...mode: distributed` | Medium | `03` §MP-009 | NEEDS RETEST (historical owner report) |
+| MP-010 | Two-node ownership and takeover | fabric + `coordination.provider: redis` | High | `03` §MP-010 | BLOCKED BY IMPLEMENTATION (shared atomic fenced repository missing) |
 
 ### Aurora Redis Fabric (P1, disabled by default)
 
@@ -151,13 +157,12 @@ These were changed after the last Build 49 tag. The owner reported AWF/MultiProf
 
 ## Known limitations recorded instead of hidden
 
-- `aurora.awf.multiprofile` has no public world-binding API yet: a profile cannot be bound to an AWF
-  template through the API in Build 50. `getProfileWorlds` returns nothing unless a consumer wrote a
-  binding through internal code.
-- Distributed MultiProfile is **experimental and unqualified**; only two-node owner testing can
-  change that. `RF-006`/`MP-009` do not qualify it.
+- Public binding is available through `AuroraProfiles.bindProfileWorlds` and admin bind/unbind;
+  see `Tester Owner` B50-09…12. No world is deleted by replacing a binding.
+- Distributed MultiProfile refuses startup until the repository supports atomic fenced writes;
+  a two-node environment alone no longer unblocks MP-010.
 - The AWF event stream has no consumer in this build; `services.events` is off by default.
-- `/awf save` returns when the save was scheduled, not necessarily when every chunk reached the
-  store (AWF-006 measures this).
+- `/awf save` now explicitly drains world I/O after region ticket completion, then flushes AWF
+  stores off-region. AWF-006 must verify the boundary; source review is not durability evidence.
 - AWF `shutdown-deadline-ms` starts before the vanilla world save, so a save longer than the deadline
   reports an unconfirmed storage (AWF-007 measures the boundary).

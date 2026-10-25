@@ -68,4 +68,17 @@ class WorldUnloadCompletionTest {
         assertEquals("release", thrown.getSuppressed()[0].getMessage());
         assertEquals(List.of(WorldUnloadResult.FAIL_UNKNOWN), results);
     }
+    @Test
+    void aThrowingReleaseAfterSuccessfulUnloadStillCompletesExactlyOnce() {
+        final List<WorldUnloadResult> results = new ArrayList<>();
+        final java.util.concurrent.atomic.AtomicInteger releases = new java.util.concurrent.atomic.AtomicInteger();
+        final UnloadTicket ticket = new UnloadTicket(results::add, true);
+        assertThrows(IllegalStateException.class, () -> WorldUnloadCompletion.run(() -> ticket, () -> {}, () -> {
+            releases.incrementAndGet();
+            throw new IllegalStateException("release failed");
+        }));
+        assertEquals(1, releases.get());
+        assertEquals(List.of(WorldUnloadResult.FAIL_UNKNOWN), results);
+    }
+
 }

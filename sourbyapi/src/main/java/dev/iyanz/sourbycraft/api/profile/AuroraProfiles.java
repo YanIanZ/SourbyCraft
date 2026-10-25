@@ -48,6 +48,16 @@ public interface AuroraProfiles {
     /** Captures and persists the profile's current state, if its owner is online. */
     CompletableFuture<Void> saveProfile(UUID profileId);
 
+    /**
+     * Replaces the complete binding of an inactive, unclaimed profile. Refused during an account
+     * transition or for the active/deleted profile. Does not delete or immediately load worlds.
+     * The plugin must authorize player requests itself. Default failure preserves compatibility
+     * with alternative service implementations built before this API was added.
+     */
+    default CompletableFuture<Void> bindProfileWorlds(ProfileWorldBindingRequest request) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("profile world binding unavailable"));
+    }
+
     CompletableFuture<List<ProfileWorldRef>> getProfileWorlds(UUID profileId);
 
     /** Which node owns the profile, if any. */
