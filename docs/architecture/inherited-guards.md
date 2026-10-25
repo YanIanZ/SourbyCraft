@@ -60,9 +60,9 @@ Every number below is generated; the test fails when it drifts from the manifest
 | FEATURE-DISABLED | 6 | 2 | 1 | 0 | 9 |
 | API-REFUSED | 58 | 9 | 2 | 0 | 69 |
 | OWNERSHIP-CHECK | 6 | 0 | 0 | 0 | 6 |
-| DEGRADED | 4 | 1 | 0 | 0 | 5 |
+| DEGRADED | 5 | 0 | 0 | 0 | 5 |
 | REROUTED | 25 | 0 | 0 | 0 | 25 |
-| **guards** | **99** | **12** | **3** | **0** | **114** |
+| **guards** | **100** | **11** | **3** | **0** | **114** |
 
 | origin | Folia | Canvas | SourbyCraft |
 | --- | --- | --- | --- |
@@ -448,7 +448,7 @@ origin is SourbyCraft or the note names a feature patch.
 | `Entity#7` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/world/entity/Entity.java:5588` | `if (true) {` |
 | `LivingEntity#1` | Canvas | REROUTED | KEEP-OWNED | `net/minecraft/world/entity/LivingEntity.java:606` | `if (true) { // Canvas - check frozen ticks before landing block` |
 | `WanderingTraderSpawner#1` | SourbyCraft | FEATURE-DISABLED | KEEP-OWNED | `net/minecraft/world/entity/npc/wanderingtrader/WanderingTraderSpawner.java:44` | `return; // SourbyCraft - global coordinator owns trader ticking` |
-| `ThrownEnderpearl#1` | Folia | DEGRADED | REPLACE | `net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java:103` | `if (true) {` |
+| `ThrownEnderpearl#1` | Folia | DEGRADED | KEEP-OWNED | `net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java:103` | `if (true) {` |
 | `BaseCommandBlock#2` | SourbyCraft | OWNERSHIP-CHECK | KEEP-OWNED | `net/minecraft/world/level/BaseCommandBlock.java:187` | `return false;` |
 | `Level#1` | Canvas | OWNERSHIP-CHECK | KEEP-OWNED | `net/minecraft/world/level/Level.java:1380` | `if (!(this instanceof ServerLevel serverLevel)) throw new UnsupportedOperationException();` |
 | `NaturalSpawner#1` | Canvas | REROUTED | KEEP-OWNED | `net/minecraft/world/level/NaturalSpawner.java:300` | `throw new UnsupportedOperationException(); // Canvas - optimize natural spawning` |
