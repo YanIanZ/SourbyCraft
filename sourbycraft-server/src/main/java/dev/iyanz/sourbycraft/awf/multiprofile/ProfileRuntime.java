@@ -31,11 +31,21 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
+import org.bukkit.event.Event;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.entity.EntityPickupItemEvent;
+import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
+import org.bukkit.event.player.PlayerDropItemEvent;
+import org.bukkit.event.player.PlayerInteractEntityEvent;
+import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.player.PlayerItemConsumeEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.ServicePriority;
 
@@ -49,12 +59,16 @@ import org.bukkit.plugin.ServicePriority;
  *
  * <p>Shutdown: {@link #close(long)} drains the engine's queued I/O within a budget before the
  * Resource Governor storage lane is shut down; a drain that times out is logged as incomplete, never
- * as saved.</p>
+ * as saved. The server closes SourbyCraft services before it saves and removes players, so players
+ * still online then get no quit snapshot; their active profile's live state stays in vanilla
+ * playerdata, which the next switch captures.</p>
  */
 public final class ProfileRuntime {
 
     private static final Path AURORA_FILE = Path.of("sourbycraft_config", "aurora.yml");
     private static final Path UNIFIED_FILE = Path.of("sourbycraft_config", "sourbycraft_global_config.yml");
+    /** Lease of a local session claim; the heartbeat renews it well before it lapses. */
+    private static final int LOCAL_LEASE_SECONDS = 60;
 
     private static volatile ProfileRuntime running;
 
@@ -67,12 +81,14 @@ public final class ProfileRuntime {
     private final ScheduledExecutorService idleSweeper;
     private final ScheduledExecutorService heartbeat;
     private final String nodeId;
+    /** The fabric this node advertises itself in, or {@code null} when routing is off. */
+    private final RedisFabric routing;
     private volatile boolean closed;
 
     private ProfileRuntime(final Plugin plugin, final ProfileSettings settings, final ProfileEngine engine,
                            final ProfileStateAdapters adapters, final BukkitPlayerStatePort statePort,
                            final ScheduledExecutorService idleSweeper, final ScheduledExecutorService heartbeat,
-                           final String nodeId) {
+                           final String nodeId, final RedisFabric routing) {
         this.plugin = plugin;
         this.settings = settings;
         this.engine = engine;
@@ -81,6 +97,7 @@ public final class ProfileRuntime {
         this.idleSweeper = idleSweeper;
         this.heartbeat = heartbeat;
         this.nodeId = nodeId;
+        this.routing = routing;
         this.api = new Api();
     }
 
@@ -118,33 +135,91 @@ public final class ProfileRuntime {
         }
     }
 
+    /**
+     * Refuses settings this build cannot run safely. Static and Bukkit-free so the refusal can be
+     * checked without a server.
+     *
+     * <p>{@code repository: redis} and {@code mode: distributed} both need the running fabric, Redis
+     * ownership and fencing: the Redis repository fences each write with the session claim it carries,
+     * so a write without that claim kind, or unfenced, would bypass it. Distributed mode additionally
+     * needs the Redis repository: the file repository compares revisions in one process only and cannot
+     * fence a write with Redis ownership, so two servers must never share it.</p>
+     *
+     * @param fabricEnabled whether the Aurora Redis Fabric is running and enabled
+     * @throws IllegalStateException naming the first setting that is refused
+     */
+    static void validate(final ProfileSettings settings, final boolean fabricEnabled) {
+        if (!settings.distributed() && !settings.redisRepository()) return;
+        final String what = settings.distributed() ? "mode: distributed" : "repository: redis";
+        if (!fabricEnabled) {
+            throw new IllegalStateException(what + " requires aurora.awf.redis.fabric.enabled: true and a reachable"
+                + " Redis; refusing to start with local-only ownership");
+        }
+        if (settings.coordination().provider() != ProfileSettings.Provider.REDIS) {
+            throw new IllegalStateException(what + " requires coordination.provider: redis");
+        }
+        if (!settings.coordination().fencingEnabled()) {
+            throw new IllegalStateException(what + " requires coordination.fencing-enabled: true; without it a stale"
+                + " owner could commit");
+        }
+        if (settings.distributed() && !settings.redisRepository()) {
+            throw new IllegalStateException("mode: distributed requires repository: redis: the file repository cannot"
+                + " atomically fence its writes with Redis ownership, so two servers must never share its directory."
+                + " Use mode: standalone with a directory exclusive to this server, or repository: redis.");
+        }
+    }
+
     private static ProfileRuntime create(final Plugin plugin, final ProfileSettings settings) throws IOException {
         final String nodeId = resolveNodeId();
         final RedisFabric fabric = RedisFabric.running();
-        if (settings.distributed() && (fabric == null || !fabric.settings().enabled())) {
-            throw new IllegalStateException("mode: distributed requires aurora.awf.redis.fabric.enabled: true"
-                + " and a reachable Redis; refusing to start with local-only ownership");
+        validate(settings, fabric != null && fabric.settings().enabled());
+        // The file repository takes the directory's exclusive lock: a second server on it fails here.
+        // The Redis repository refuses a Redis it cannot run on safely (see RedisProfileRepository.open).
+        final ProfileRepository repository = settings.redisRepository()
+            ? RedisProfileRepository.open(fabric, settings.repository(), Path.of(settings.directory()))
+            : new FileProfileRepository(Path.of(settings.directory()), nodeId);
+        try {
+            return create(plugin, settings, nodeId, fabric, repository);
+        } catch (final IOException | RuntimeException failed) {
+            repository.close();
+            throw failed;
         }
-        if (settings.distributed() && settings.coordination().provider() != ProfileSettings.Provider.REDIS) {
-            throw new IllegalStateException("mode: distributed requires coordination.provider: redis");
-        }
-        if (settings.distributed() && !settings.coordination().fencingEnabled()) {
-            throw new IllegalStateException("mode: distributed requires coordination.fencing-enabled: true;"
-                + " without it a stale owner could commit");
-        }
-        if (settings.distributed()) {
-            throw new IllegalStateException("distributed MultiProfile is unavailable in Build 50: the FILE profile"
-                + " repository cannot atomically fence writes with Redis ownership. Use mode: standalone with a"
-                + " directory exclusive to this server; two-node takeover is not supported yet.");
-        }
-        final ProfileRepository repository = new FileProfileRepository(Path.of(settings.directory()));
+    }
+
+    private static ProfileRuntime create(final Plugin plugin, final ProfileSettings settings, final String nodeId,
+                                         final RedisFabric fabric, final ProfileRepository repository)
+        throws IOException {
         final ProfileOwnership ownership;
+        final long leaseMillis;
         if (settings.coordination().provider() == ProfileSettings.Provider.REDIS) {
             if (fabric == null) throw new IllegalStateException("coordination.provider: redis requires the Aurora Redis Fabric");
             final RedisSettings redis = fabric.redisSettings();
             ownership = new RedisProfileOwnership(fabric.sessions(), nodeId, redis.timeoutMillis());
+            leaseMillis = fabric.settings().sessions().ttlSeconds() * 1000L;
+            if (!settings.distributed() && !settings.redisRepository()) {
+                SourbyLogger.warn("AWF MultiProfile: coordination.provider: redis with mode: standalone and the file"
+                    + " repository coordinates claims through Redis, but the profiles stay in this server's directory,"
+                    + " which no second server may use (its lock refuses one). This is a single-node setup, not"
+                    + " distributed mode.");
+            }
         } else {
-            ownership = new LocalProfileOwnership(nodeId, 60);
+            ownership = new LocalProfileOwnership(nodeId, LOCAL_LEASE_SECONDS);
+            leaseMillis = LOCAL_LEASE_SECONDS * 1000L;
+        }
+        if (settings.switching().timeoutMillis() >= leaseMillis) {
+            SourbyLogger.warn("AWF MultiProfile: switching.timeout-ms (" + settings.switching().timeoutMillis()
+                + " ms) is not below the claim lease (" + leaseMillis + " ms). The heartbeat renews the claims of a"
+                + " running switch, but a recovery's claim is not renewed: a rollback that runs longer than the lease"
+                + " loses it and its account write is refused (OWNERSHIP_CONFLICT). Keep timeout-ms below the lease.");
+        }
+        if (settings.distributed() || settings.redisRepository()) {
+            SourbyLogger.warn("AWF MultiProfile: profiles in the shared Redis repository are EXPERIMENTAL and not"
+                + " qualified on two nodes (owner test MP-010). A profile write made under a session claim is fenced in"
+                + " Redis by that claim; creating a profile, slot limits and journal phases written before a switch holds"
+                + " a claim are checked by revision or not at all. Not handled yet: a player's live state does not follow them to another server (a join"
+                + " keeps that server's vanilla playerdata, only a switch applies a profile snapshot, and the next save"
+                + " or quit snapshot stores that state), players online at shutdown get no quit snapshot, and no proxy"
+                + " hands players between servers. A player who moves between servers can therefore lose progress.");
         }
         final ProfileStateAdapters adapters = new ProfileStateAdapters();
         final BukkitPlayerStatePort statePort = new BukkitPlayerStatePort(plugin, adapters);
@@ -170,42 +245,49 @@ public final class ProfileRuntime {
         }
         final boolean routing = fabric != null && fabric.settings().enabled()
             && fabric.settings().services().routing();
-        ScheduledExecutorService heartbeats = null;
-        if (settings.coordination().provider() == ProfileSettings.Provider.REDIS || routing) {
-            // A session lease is renewed on the fabric's own cadence; without this the claim would
-            // expire after sessions.ttl-seconds and a second node could take the profile over.
-            final long period = Math.max(1L, fabric == null ? 10L : fabric.settings().sessions().heartbeatSeconds());
-            heartbeats = Executors.newSingleThreadScheduledExecutor(task -> {
-                final Thread thread = new Thread(task, "SourbyCraft-AWF-profile-heartbeat");
-                thread.setDaemon(true);
-                return thread;
-            });
-            if (settings.coordination().provider() == ProfileSettings.Provider.REDIS) {
-                heartbeats.scheduleWithFixedDelay(() -> engine.renewSessions().exceptionally(failed -> {
-                    SourbyLogger.warn("AWF MultiProfile: session renewal failed: " + ProfileEngine.messageOf(failed));
-                    return 0;
-                }), period, period, TimeUnit.SECONDS);
-            }
-            if (routing) {
-                final Runnable advertise = () -> {
-                    try {
-                        fabric.routing().register(new dev.iyanz.sourbycraft.awf.redis.fabric.RoutingFabric.NodeInfo(
-                            nodeId, "", Math.max(1, Bukkit.getMaxPlayers()), Bukkit.getOnlinePlayers().size(),
-                            "HEALTHY", System.currentTimeMillis()));
-                    } catch (final RuntimeException | java.io.IOException failed) {
-                        SourbyLogger.warn("AWF MultiProfile: advertising this node failed: " + failed.getMessage());
-                    }
-                };
-                advertise.run();
-                heartbeats.scheduleWithFixedDelay(advertise, period, period, TimeUnit.SECONDS);
-            }
+        final long fabricPeriod = Math.max(1L, fabric == null ? 10L : fabric.settings().sessions().heartbeatSeconds());
+        // Session claims are leases under both providers. A Redis claim is renewed on the fabric's own
+        // cadence, or it would expire after sessions.ttl-seconds and a second node could take the
+        // profile over; a local claim is renewed at a quarter of its lease, because a save validates
+        // the session claim and would refuse once the lease lapsed.
+        final long renewPeriod = settings.coordination().provider() == ProfileSettings.Provider.REDIS
+            ? fabricPeriod : LOCAL_LEASE_SECONDS / 4;
+        final ScheduledExecutorService heartbeats = Executors.newSingleThreadScheduledExecutor(task -> {
+            final Thread thread = new Thread(task, "SourbyCraft-AWF-profile-heartbeat");
+            thread.setDaemon(true);
+            return thread;
+        });
+        heartbeats.scheduleWithFixedDelay(() -> engine.renewSessions().exceptionally(failed -> {
+            SourbyLogger.warn("AWF MultiProfile: session renewal failed: " + ProfileEngine.messageOf(failed));
+            return 0;
+        }), renewPeriod, renewPeriod, TimeUnit.SECONDS);
+        if (routing) {
+            final Runnable advertise = () -> {
+                try {
+                    fabric.routing().register(new dev.iyanz.sourbycraft.awf.redis.fabric.RoutingFabric.NodeInfo(
+                        nodeId, "", Math.max(1, Bukkit.getMaxPlayers()), Bukkit.getOnlinePlayers().size(),
+                        "HEALTHY", System.currentTimeMillis()));
+                } catch (final RuntimeException | java.io.IOException failed) {
+                    SourbyLogger.warn("AWF MultiProfile: advertising this node failed: " + failed.getMessage());
+                }
+            };
+            advertise.run();
+            heartbeats.scheduleWithFixedDelay(advertise, fabricPeriod, fabricPeriod, TimeUnit.SECONDS);
         }
         final ProfileRuntime runtime = new ProfileRuntime(plugin, settings, engine, adapters, statePort, sweeper,
-            heartbeats, nodeId);
-        Bukkit.getServicesManager().register(AuroraProfiles.class, runtime.api(), plugin, ServicePriority.Normal);
-        Bukkit.getPluginManager().registerEvents(runtime.new Sessions(), plugin);
+            heartbeats, nodeId, routing ? fabric : null);
+        try {
+            Bukkit.getServicesManager().register(AuroraProfiles.class, runtime.api(), plugin, ServicePriority.Normal);
+            Bukkit.getPluginManager().registerEvents(runtime.new Sessions(), plugin);
+            Bukkit.getPluginManager().registerEvents(runtime.new SwitchFreeze(), plugin);
+        } catch (final RuntimeException failed) {
+            // The caller closes the repository; the scheduled work must not outlive a failed start.
+            if (sweeper != null) sweeper.shutdownNow();
+            heartbeats.shutdownNow();
+            throw failed;
+        }
         SourbyLogger.info("AWF MultiProfile: enabled (" + settings.mode().name().toLowerCase(java.util.Locale.ROOT)
-            + ", node " + nodeId + ", directory " + settings.directory() + ", ownership " + ownership.describe()
+            + ", node " + nodeId + ", repository " + repository.describe() + ", ownership " + ownership.describe()
             + (sweeper == null ? ", idle unload off" : ", idle unload after " + settings.worlds().idleUnloadSeconds() + " s")
             + ")");
         return runtime;
@@ -227,12 +309,45 @@ public final class ProfileRuntime {
         return this.nodeId;
     }
 
+    /**
+     * Copies the file repository of {@code aurora.awf.multiprofile.directory} into the running Redis
+     * repository, once ({@link ProfileRepositoryMigration}); completes with what was copied and
+     * verified. Runs on an administrative I/O thread. Fails when the running repository is the file
+     * repository, when the Redis repository already holds data, or when the directory is in use by
+     * another process. The directory is kept as it is.
+     */
+    public CompletableFuture<String> migrateFileRepository() {
+        if (!(this.engine.repository() instanceof RedisProfileRepository redis)) {
+            return CompletableFuture.failedFuture(new ProfileOperationException(ProfileErrorCode.INVALID_REQUEST,
+                "the running repository is " + this.engine.repository().describe() + "; set"
+                    + " aurora.awf.multiprofile.repository: redis and restart before migrating into it"));
+        }
+        return dev.iyanz.sourbycraft.util.VirtualExecutor.supply(() -> {
+            try (FileProfileRepository file = new FileProfileRepository(Path.of(this.settings.directory()), this.nodeId)) {
+                final String summary = ProfileRepositoryMigration.fileToRedis(file, redis).summary();
+                SourbyLogger.info("AWF MultiProfile: migrated " + file.root() + " into Redis: " + summary
+                    + "; the directory was kept unchanged");
+                return summary;
+            }
+        });
+    }
+
     /** Drains queued profile I/O, then closes the engine. Never claims success it cannot prove. */
     public void close(final long budgetMillis) {
         if (this.closed) return;
         this.closed = true;
         if (this.idleSweeper != null) this.idleSweeper.shutdownNow();
         if (this.heartbeat != null) this.heartbeat.shutdownNow();
+        if (this.routing != null) {
+            // Best effort: the entry also expires on its own TTL. Proxies and plugins reading the node
+            // directory stop routing here as soon as it is gone.
+            try {
+                this.routing.routing().unregister(this.nodeId);
+            } catch (final IOException | RuntimeException failed) {
+                SourbyLogger.warn("AWF MultiProfile: removing this node from the routing directory failed ("
+                    + failed.getMessage() + "); its entry expires on its own");
+            }
+        }
         final boolean drained = this.engine.drain(budgetMillis);
         if (!drained) {
             SourbyLogger.warn("AWF MultiProfile: " + budgetMillis + " ms elapsed with profile I/O still queued;"
@@ -245,6 +360,16 @@ public final class ProfileRuntime {
             SourbyLogger.warn("AWF MultiProfile: unregistering the service failed: " + failed.getMessage());
         }
         this.engine.close();
+        int online = 0;
+        try {
+            online = Bukkit.getOnlinePlayers().size();
+        } catch (final RuntimeException unavailable) {
+            // Only the notice below depends on it.
+        }
+        if (online > 0) {
+            SourbyLogger.info("AWF MultiProfile: closed with " + online + " player(s) online; they get no quit"
+                + " snapshot, and their active profile's live state stays in vanilla playerdata");
+        }
     }
 
     /** Releases the static handle; used by bootstrap and tests. */
@@ -258,12 +383,17 @@ public final class ProfileRuntime {
         return dev.iyanz.sourbycraft.awf.redis.fabric.FabricRuntime.nodeId();
     }
 
-    /** Join/quit integration: recovery, session claim, save on the way out. */
+    /** Join/quit integration: recovery, session claim, the active profile's worlds, save on the way out. */
     private final class Sessions implements Listener {
 
         @EventHandler(priority = EventPriority.MONITOR)
         public void onJoin(final PlayerJoinEvent event) {
             final UUID playerId = event.getPlayer().getUniqueId();
+            // Read here, on the thread that owns the player: the world the join placed them in.
+            final String joinedWorld = event.getPlayer().getWorld().getName();
+            // A quit during a switch asked for the session claim to be released when the switch
+            // ends; the player is back, so the claim the switch leaves behind is theirs again.
+            ProfileRuntime.this.engine.keepSessionAfterSwitch(playerId);
             ProfileRuntime.this.engine.recoverPending(playerId).exceptionally(failed -> {
                 SourbyLogger.warn("AWF MultiProfile: recovery for " + playerId + " failed: "
                     + ProfileEngine.messageOf(failed));
@@ -271,14 +401,28 @@ public final class ProfileRuntime {
             }).thenCompose(recovered -> ProfileRuntime.this.engine.active(playerId)).thenCompose(active -> {
                 if (active.isEmpty()) return CompletableFuture.completedFuture(null);
                 final UUID profileId = active.get().id();
-                if (!active.get().worlds().isEmpty()) {
-                    ProfileRuntime.this.engine.touch(active.get().worlds().getFirst());
-                }
                 return ProfileRuntime.this.engine.claimSession(playerId, profileId)
-                    .thenAccept(claim -> {
-                        if (!claim.granted() && ProfileRuntime.this.settings.coordination().singleActiveSession()) {
-                            rejectDuplicate(event.getPlayer(), claim);
+                    .thenCompose(claim -> {
+                        if (claim.granted() && !ProfileRuntime.this.statePort.online(playerId)) {
+                            // The player quit while recovery and the claim ran; their quit found no
+                            // session to release, so this one is released here instead of lingering.
+                            ProfileRuntime.this.engine.releaseSession(playerId);
+                            return CompletableFuture.completedFuture(null);
                         }
+                        if (!claim.granted()) {
+                            if (ProfileRuntime.this.settings.coordination().singleActiveSession()) {
+                                rejectDuplicate(event.getPlayer(), claim);
+                            }
+                            return CompletableFuture.completedFuture(null);
+                        }
+                        // Profile worlds are not loaded at startup: load the active profile's worlds and
+                        // bring the player back into them when the join placed them elsewhere.
+                        return ProfileRuntime.this.engine.prepareActive(playerId, joinedWorld).thenAccept(moved -> {
+                            if (moved) {
+                                SourbyLogger.info("AWF MultiProfile: returned " + playerId
+                                    + " to the worlds of their active profile after joining");
+                            }
+                        });
                     });
             }).exceptionally(failed -> {
                 SourbyLogger.warn("AWF MultiProfile: session claim for " + playerId + " failed: "
@@ -289,24 +433,39 @@ public final class ProfileRuntime {
 
         @EventHandler(priority = EventPriority.MONITOR)
         public void onQuit(final PlayerQuitEvent event) {
-            final UUID playerId = event.getPlayer().getUniqueId();
-            if (ProfileRuntime.this.engine.switchInProgress(playerId)) {
-                // The switch already captured the previous profile; a second capture here would
-                // write the target's state under the profile being left.
-                ProfileRuntime.this.engine.releaseSessionAfterSwitch(playerId);
+            final Player player = event.getPlayer();
+            final UUID playerId = player.getUniqueId();
+            final ProfileEngine engine = ProfileRuntime.this.engine;
+            if (engine.switchInProgress(playerId)) {
+                // A switch already captured the previous profile; a second capture here would write
+                // the target's state under the profile being left. A recovery or the teleport of a join
+                // preparation refuses the save as well; the live state stays in vanilla playerdata.
+                engine.releaseSessionAfterSwitch(playerId);
                 return;
             }
-            ProfileRuntime.this.engine.active(playerId).thenCompose(active -> {
-                if (active.isEmpty()) return CompletableFuture.completedFuture(null);
-                final UUID profileId = active.get().id();
-                return ProfileRuntime.this.engine.save(profileId).handle((ignored, failed) -> {
-                    if (failed != null) {
-                        SourbyLogger.warn("AWF MultiProfile: saving profile " + profileId + " on quit failed: "
-                            + ProfileEngine.messageOf(failed));
-                    }
-                    return null;
-                });
-            }).whenComplete((ignored, failed) -> ProfileRuntime.this.engine.releaseSession(playerId))
+            if (!engine.isOpen() || !engine.holdsSession(playerId)) {
+                // Closed: shutdown closes MultiProfile before the server removes players. No session
+                // claim: the join found no active profile to claim. Either way nothing is written.
+                return;
+            }
+            // Captured here, on the thread that owns the player, while the player still exists; an
+            // entity task scheduled from here would run after the player was removed.
+            ProfileState state = null;
+            try {
+                state = ProfileRuntime.this.statePort.captureOnOwnerThread(player, ProfileRuntime.this.settings.isolation());
+            } catch (final RuntimeException failed) {
+                SourbyLogger.warn("AWF MultiProfile: capturing " + playerId + " on quit failed (" + failed.getMessage()
+                    + "); no quit snapshot was written");
+            }
+            final CompletableFuture<Boolean> saved = state == null
+                ? CompletableFuture.completedFuture(false) : engine.saveCaptured(playerId, state);
+            saved.handle((written, failed) -> {
+                if (failed != null && engine.isOpen()) {
+                    SourbyLogger.warn("AWF MultiProfile: saving the active profile of " + playerId + " on quit failed: "
+                        + ProfileEngine.messageOf(failed));
+                }
+                return null;
+            }).thenCompose(ignored -> engine.releaseSession(playerId))
                 .exceptionally(failed -> {
                     SourbyLogger.warn("AWF MultiProfile: quit handling for " + playerId + " failed: "
                         + ProfileEngine.messageOf(failed));
@@ -334,6 +493,74 @@ public final class ProfileRuntime {
                 SourbyLogger.warn("AWF MultiProfile: could not reject a duplicate session for "
                     + player.getUniqueId() + ": " + retired.getMessage());
             }
+        }
+    }
+
+    /**
+     * Cancels the item, experience and interaction events of a player a running switch froze: between
+     * its capture and its commit or rollback, a pickup would be lost and an item dropped, placed,
+     * consumed or put into a container would exist twice once the target state is applied. The engine
+     * unfreezes on every exit path of the switch. Handlers run on the player's thread and only read a
+     * concurrent set. Changes that fire none of these events (damage, hunger, commands or plugins that
+     * edit an inventory directly) are not held back.
+     */
+    private final class SwitchFreeze implements Listener {
+
+        private boolean frozen(final Object entity) {
+            return entity instanceof Player player && ProfileRuntime.this.engine.frozen(player.getUniqueId());
+        }
+
+        @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+        public void onDrop(final PlayerDropItemEvent event) {
+            if (frozen(event.getPlayer())) event.setCancelled(true);
+        }
+
+        @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+        public void onPickup(final EntityPickupItemEvent event) {
+            if (frozen(event.getEntity())) event.setCancelled(true);
+        }
+
+        @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+        public void onInventoryClick(final InventoryClickEvent event) {
+            if (frozen(event.getWhoClicked())) event.setCancelled(true);
+        }
+
+        @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+        public void onInventoryDrag(final InventoryDragEvent event) {
+            if (frozen(event.getWhoClicked())) event.setCancelled(true);
+        }
+
+        @EventHandler(priority = EventPriority.LOWEST)
+        public void onInteract(final PlayerInteractEvent event) {
+            if (!frozen(event.getPlayer())) return;
+            event.setUseInteractedBlock(Event.Result.DENY);
+            event.setUseItemInHand(Event.Result.DENY);
+        }
+
+        @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+        public void onInteractEntity(final PlayerInteractEntityEvent event) {
+            if (frozen(event.getPlayer())) event.setCancelled(true);
+        }
+
+        @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+        public void onPlace(final BlockPlaceEvent event) {
+            if (frozen(event.getPlayer())) event.setCancelled(true);
+        }
+
+        @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+        public void onConsume(final PlayerItemConsumeEvent event) {
+            if (frozen(event.getPlayer())) event.setCancelled(true);
+        }
+
+        @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+        public void onSwapHands(final PlayerSwapHandItemsEvent event) {
+            if (frozen(event.getPlayer())) event.setCancelled(true);
+        }
+
+        /** Experience is part of the profile too; the orb stays and is picked up after the switch. */
+        @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+        public void onPickupExperience(final com.destroystokyo.paper.event.player.PlayerPickupExperienceEvent event) {
+            if (frozen(event.getPlayer())) event.setCancelled(true);
         }
     }
 
@@ -396,6 +623,16 @@ public final class ProfileRuntime {
         @Override
         public CompletableFuture<List<ProfileWorldRef>> getProfileWorlds(final UUID profileId) {
             return this.engine.worlds(profileId);
+        }
+
+        @Override
+        public CompletableFuture<Void> setProfileLocked(final UUID profileId, final boolean locked) {
+            return this.engine.setLocked(profileId, locked);
+        }
+
+        @Override
+        public CompletableFuture<Integer> setProfileSlotLimit(final UUID accountId, final int slots) {
+            return this.engine.setSlotLimit(accountId, slots);
         }
 
         @Override

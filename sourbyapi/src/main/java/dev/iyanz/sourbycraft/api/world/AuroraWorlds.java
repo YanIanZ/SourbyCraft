@@ -111,8 +111,12 @@ public interface AuroraWorlds {
                                          boolean autoload);
 
     /**
-     * Imports an {@code .awf} world file as a new world and loads it, with the environment, seed
-     * and generator the file records.
+     * Imports an {@code .awf} world file as a new world and loads it, with the environment, seed,
+     * generator and properties the file records. Plugin data the file records (a file converted
+     * from a Slime world with {@code BukkitValues}) is merged into the world's persistent data
+     * container on the global region thread just before the future completes, so a
+     * {@code WorldLoadEvent} listener does not see it yet; a file whose properties or plugin data
+     * are malformed fails the import before anything is created.
      */
     CompletableFuture<World> importWorld(java.nio.file.Path file, String name, boolean autoload);
 
@@ -144,12 +148,20 @@ public interface AuroraWorlds {
     CompletableFuture<Void> save(String name);
 
     /**
-     * Unloads a loaded world. Fails with the engine's reason when the world cannot be unloaded,
-     * for example while players are in it.
+     * Unloads a loaded world. Completes with the engine's reason when the world cannot be
+     * unloaded, for example while players are in it.
      *
-     * @param save {@code true} commits the world's current chunks; {@code false} keeps the state
-     *     of its last commit and writes nothing (what changed since is lost) — the region-threaded
-     *     engine itself always saves on unload, so this is done by its AWF storages discarding
+     * <p>{@link UnloadResult#FAILED} can also mean that the world was unloaded but its final AWF
+     * commit, made as its storages close after the world is removed, was not confirmed; the
+     * server log names the storage. {@link #isLoaded} tells the two apart.</p>
+     *
+     * @param save {@code true} first saves a world created through this API durably, as
+     *     {@link #save} does, and fails exceptionally, the world left loaded, when that save fails
+     *     (while the server is stopping, the unload is asked for without that save, and the engine
+     *     normally refuses it with {@link UnloadResult#SERVER_STOPPING}); {@code false} keeps the
+     *     state of its last commit and writes nothing (what changed since is lost) — the
+     *     region-threaded engine itself always saves on unload, so this is done by its AWF
+     *     storages discarding
      */
     CompletableFuture<UnloadResult> unload(String name, boolean save);
 

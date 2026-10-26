@@ -4,6 +4,7 @@ import dev.iyanz.sourbycraft.awf.redis.fabric.ClaimResult;
 import dev.iyanz.sourbycraft.awf.redis.fabric.OwnerClaim;
 import dev.iyanz.sourbycraft.awf.redis.fabric.SessionFabric;
 import java.io.IOException;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -72,6 +73,16 @@ public final class RedisProfileOwnership implements ProfileOwnership {
         }
     }
 
+    /** One pipelined {@code REFRESH} per claim in a single round trip ({@link SessionFabric#refreshAll}). */
+    @Override
+    public CompletableFuture<List<Boolean>> renewAll(final List<OwnerClaim> claims) {
+        try {
+            return CompletableFuture.completedFuture(this.sessions.refreshAll(claims));
+        } catch (final IOException failed) {
+            return CompletableFuture.failedFuture(failed);
+        }
+    }
+
     @Override
     public CompletableFuture<OwnerClaim> holder(final UUID profileId) {
         try {
@@ -81,9 +92,36 @@ public final class RedisProfileOwnership implements ProfileOwnership {
         }
     }
 
+    /** Compares the holder's incarnation with this process's, not only its node id. */
+    @Override
+    public CompletableFuture<OwnerClaim> foreignHolder(final UUID profileId) {
+        try {
+            return CompletableFuture.completedFuture(this.sessions.foreignHolder(profileId));
+        } catch (final IOException failed) {
+            return CompletableFuture.failedFuture(failed);
+        }
+    }
+
+    /** {@link SessionFabric#reclaim}: the session epoch is the fence. */
+    @Override
+    public CompletableFuture<ClaimResult> reclaim(final UUID profileId, final long expectedFence, final String node,
+                                                  final UUID ownerToken) {
+        try {
+            return CompletableFuture.completedFuture(this.sessions.reclaim(profileId, expectedFence, node, ownerToken));
+        } catch (final IOException failed) {
+            return CompletableFuture.failedFuture(failed);
+        }
+    }
+
     @Override
     public boolean distributed() {
         return true;
+    }
+
+    /** The epoch keys never expire and every node shares them, so fences compare across processes. */
+    @Override
+    public String incarnation() {
+        return "redis-session-epoch";
     }
 
     @Override

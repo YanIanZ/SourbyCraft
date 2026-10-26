@@ -54,6 +54,17 @@ public record AuroraProfile(UUID id, UUID accountId, String type, Map<String, St
             this.revision + 1, next);
     }
 
+    /**
+     * An administrative hold or its release ({@link ProfileStatus#LOCKED} / {@link ProfileStatus#ACTIVE})
+     * without a revision bump: the revision is the snapshot freshness counter, and bumping it would make
+     * the profile's latest snapshot stale, so a switch to it after unlocking would be refused.
+     */
+    public AuroraProfile withHold(final ProfileStatus next) {
+        if (next == ProfileStatus.DELETED) throw new IllegalArgumentException("a deletion uses withStatus");
+        return new AuroraProfile(this.id, this.accountId, this.type, this.metadata, this.createdAtMillis,
+            this.revision, next);
+    }
+
     public boolean usable() {
         return this.status == ProfileStatus.ACTIVE;
     }

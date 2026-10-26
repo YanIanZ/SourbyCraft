@@ -24,9 +24,26 @@ public interface ProfileWorldPort {
     /** Records that the world was used now, for idle unloading. */
     default void touch(final String world) {}
 
-    /** World names currently loaded through this port that belong to no active profile. */
-    default java.util.Set<String> loadedWorlds() {
-        return java.util.Set.of();
+    /**
+     * Whether idle unloading may unload the world at all: an AWF world, which is never the server's
+     * main world. This default manages none, so a port that does not say otherwise is never asked to
+     * unload a world idle.
+     */
+    default boolean managed(final String world) {
+        return false;
+    }
+
+    /** Whether a player is in the world right now; non-blocking, callable from any thread. */
+    default boolean occupied(final String world) {
+        return false;
+    }
+
+    /**
+     * The spawn point of a loaded world, or {@code null} when it is not loaded (or, in this default,
+     * unknown); non-blocking, callable from any thread.
+     */
+    default ProfileState.Location spawnOf(final String world) {
+        return null;
     }
 
     /** No-op port for a deployment without AWF worlds bound to profiles. */

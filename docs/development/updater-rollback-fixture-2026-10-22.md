@@ -5,6 +5,19 @@ Status: **Active** (2026-10-22). Build 49 Security gate item: "`.prev` rollback 
 [G11](../releases/runbooks/build-49-real-test.md#g11-security)). This page describes the local fixture that exercises
 `SourbyUpdater` → `UpdateApplier` → `UpdateRollbackGuard` on real JVM boots, and the evidence from its first runs.
 
+**Status 2026-10-25 (PR #62).** Two facts this page states as of 2026-10-22 have moved: release signing is enabled
+since Build 48 (the real key ships in the jar and CI signs every release; see
+[AUTO-UPDATER.md](AUTO-UPDATER.md#signed-releases-sec-2--enabled-since-build-48)), which is why the fixture needs the
+keyless jar described under *Run it*; and the SourbyClip pin is 3.1.3 (below 3.1.4, so the launcher-restore
+expectation stays skipped). PR #62 then changed the code this fixture drives (code written and statically reviewed;
+not built; not tested by the owner): the apply preflights and copies, re-hashes and atomically renames the jar, a
+failed apply no longer restarts, the rollback guard runs before every bootstrap stage, and `http` asset URLs are
+accepted only on loopback while `sourbycraft.update.api-base` is set (the fixture's setup). The log lines the fixture
+matches (`staged`, `applying ... (mode=exit)`, `swapped ... (previous build kept at ...)`, `restarting now
+(plan=EXIT_70)`, `first boot after applying`, `reached ready; update confirmed`, `UPDATE ROLLED BACK`,
+`AUTO-UPDATER HELD`, `already applied`) are unchanged in the code. **The runs below are NEEDS RETEST** on a build with
+PR #62; their results stay as recorded for the 2026-10-22 tree.
+
 **What this is and is not.** Functional evidence from an agent test server on a shared macOS laptop: the code path
 runs end to end and logs each step. It is **not** a panel/Linux/Windows run, **not** the real GitHub release API,
 **not** the real release signing key, and says nothing about performance. The gate stays OPEN for the parts it cannot
@@ -73,8 +86,8 @@ Missing hashes retain the server's old copy behavior; the 3.1.4 launcher instead
 `Main-Class` manifest fallback when no hash is supplied.
 
 **RESTART_REQUIRED launcher capability:** the runtime gate reads `clipVersion` from this
-worktree's `gradle.properties` each run. The actual pin is **3.1.2**, not 3.1.3; both are below
-3.1.4. For <=3.1.3 the launcher-restore expectation is recorded as `[SKIP]` with a reason
+worktree's `gradle.properties` each run. The pin is **3.1.3** since 2026-10-22 (this paragraph said 3.1.2 when it
+was written); both are below 3.1.4. For <=3.1.3 the launcher-restore expectation is recorded as `[SKIP]` with a reason
 in the check list (also `skipped: true` in JSON), while existing legacy/manual recovery checks
 still run. For >=3.1.4, restore is required: boot 2 exits 4 leaving `APPLIED`, boot 3 invokes the
 embedded launcher guard, restores `.prev`, records `ROLLED_BACK` with the launcher note and
@@ -152,9 +165,11 @@ the apply and records `OK`).
 
 ## Not covered
 
-* A real GitHub release, the real release key, CI signing (`SOURBYCRAFT_RELEASE_SIGNING_KEY` does not exist yet).
+* A real GitHub release, the real release key, CI signing (`SOURBYCRAFT_RELEASE_SIGNING_KEY` did not exist yet on
+  2026-10-22; it does since Build 48, but the fixture still uses a throwaway key).
 * Panel/Pterodactyl restart behaviour (`P_SERVER_UUID`, exit code 70 handling by a panel), Linux, Windows (the in-place
-  swap is a POSIX rename; Windows keeps the `core.path` fallback).
+  swap is a POSIX rename; the 2026-10-22 text "Windows keeps the `core.path` fallback" was wrong: nothing reads
+  `core.path` at boot, and since PR #62 a failed rename on Windows ends as a failed apply without a restart).
 * Failure causes other than the marker-driven halt: an OOM, a real plugin crash, a hung boot that never reaches ready
   (the guard infers "not ready" from the phase file alone; a hung boot only counts once someone restarts it).
 * Players, worlds with data worth keeping, or the extra-restart cost with a real panel's crash-loop limits.

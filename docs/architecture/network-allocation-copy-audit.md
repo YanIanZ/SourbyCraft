@@ -7,7 +7,10 @@
 > what the code does, not what it costs. Part of [engine-network.md](engine-network.md) §3.
 
 Sources: `sourbycraft-server/src/minecraft/java/net/minecraft/network/` (materialized from the
-patches; no SourbyCraft feature patch edits these classes), Netty 4.2.15.Final and
+patches; of these classes only `PacketDecoder` is edited by SourbyCraft feature patches, 0034 security
+scope and 0040 rejected frames, plus 0034's payload hooks in `DiscardedPayload` and
+`ServerboundSetCreativeModeSlotPacket`; none of them changes the buffer allocation or copy path
+described below; corrected 2026-10-25, the original text said no patch edits them), Netty 4.2.15.Final and
 `velocity-native` 4.1.0 as resolved by `sourbycraft-server/build.gradle.kts`. Netty and Velocity
 behaviour below was read from the 4.2.15.Final / 4.1.0 class files, not from memory.
 
@@ -90,7 +93,7 @@ cumulation may add a merge copy for frames split across reads (not read in this 
 ## 6. What this does and does not establish
 
 * It establishes the structure of the fixed per-packet cost and which stages are pure copies. It
-  does **not** establish that any of it is a bottleneck: no `network-stress` run with clients exists
+  does **not** establish that any of it is a bottleneck: no measurement with clients exists
   ([engine-network.md](engine-network.md) §4), and pooled direct buffers are cheap relative to
   deflate/encrypt for large packets.
 * ProtocolLib, ViaVersion/ViaBackwards and other plugins add their own pipeline handlers and
@@ -98,9 +101,13 @@ cumulation may add a merge copy for frames split across reads (not read in this 
 * Candidate reductions (none implemented, none claimed to help): size the stage-1 buffer from a
   hint to avoid growth copies; fold the length prefix into the compress stage's output so the
   prepender copy disappears (both are Minecraft feature patches, vanilla/Paper-owned classes, and
-  would need `needs-patch-slot`, a `network-stress` baseline first and the compression-setting
+  would need `needs-patch-slot`, a play-state baseline first and the compression-setting
   rule in engine-network.md §3: operator-visible compression stays operator-owned); cache the
   per-chunk packet body across players (correctness: Anti-Xray and per-player light/ready state).
-* To turn this into numbers: a certified `network-stress` run with clients reading
+* To turn this into numbers: a certified run with connected clients in play reading
   `PooledByteBufAllocator.DEFAULT.metric()` (allocations, arena churn) and JFR allocation
-  profiling, with hardware, config and noise state recorded per `docs/DEVELOPMENT.md`.
+  profiling, with hardware, config and noise state recorded per `docs/DEVELOPMENT.md`. The
+  `network-stress` workload does not do this: it drives handshake/status/ping only
+  (`scripts/baseline_workloads.py`) and exercises none of the play-state, chunk, entity-tracking or
+  large-payload compression paths above. A `players-N` run with that capture is the candidate; no
+  play-state network workload exists yet (corrected 2026-10-25).

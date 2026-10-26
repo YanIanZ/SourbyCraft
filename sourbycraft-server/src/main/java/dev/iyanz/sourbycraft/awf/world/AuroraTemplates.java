@@ -2,13 +2,16 @@ package dev.iyanz.sourbycraft.awf.world;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonParseException;
 import dev.iyanz.sourbycraft.awf.AwfBackend;
 import dev.iyanz.sourbycraft.awf.AwfEngine;
 import dev.iyanz.sourbycraft.awf.AwfRegionStorage;
 import dev.iyanz.sourbycraft.awf.AwfStore;
 import dev.iyanz.sourbycraft.awf.AwfWorldStore;
+import dev.iyanz.sourbycraft.awf.Durability;
 import dev.iyanz.sourbycraft.awf.WorldRole;
+import dev.iyanz.sourbycraft.util.SourbyLogger;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -33,7 +36,9 @@ import java.util.stream.Stream;
  * keep their own changes in their own stores.</p>
  *
  * <p>The template is built in a hidden folder and moved into place at the end, so a crash or a
- * failure part-way never leaves a half-written template that instances could be created from.</p>
+ * failure part-way never leaves a half-written template that instances could be created from.
+ * {@code template.json} and the move are forced to disk before a save completes; an empty or
+ * {@code null} {@code template.json} reads as an error, never as a missing template.</p>
  */
 public final class AuroraTemplates {
 
@@ -64,13 +69,13 @@ public final class AuroraTemplates {
 
     /**
      * A template's folder. Template names follow the world name rules
-     * ({@link AuroraWorldRegistry#invalidName}), so a name can never leave {@link #root}: no
+     * ({@link AuroraWorldRegistry#invalidTemplateName}), so a name can never leave {@link #root}: no
      * {@code ..}, no separator, no absolute path. Checked again on the resolved path.
      *
      * @throws IllegalArgumentException for a name that is not a valid template name
      */
     Path folder(final String template) {
-        final var invalid = AuroraWorldRegistry.invalidName(template);
+        final var invalid = AuroraWorldRegistry.invalidTemplateName(template);
         if (invalid.isPresent()) throw new IllegalArgumentException("not a template name: " + invalid.get());
         return resolveInside(this.root, template);
     }
@@ -86,20 +91,47 @@ public final class AuroraTemplates {
     }
 
     public boolean exists(final String template) {
-        if (AuroraWorldRegistry.invalidName(template).isPresent()) return false;
+        if (AuroraWorldRegistry.invalidTemplateName(template).isPresent()) return false;
         return Files.isRegularFile(folder(template).resolve(METADATA));
     }
 
-    /** What instances of the template are created with; the entry's name is the template's. */
+    /**
+     * What instances of the template are created with; the entry's name is the template's. A
+     * stored spawn outside the world (a template saved before Build 50) is dropped with a WARN on
+     * every read, as {@code template.json} is never rewritten
+     * ({@link AuroraWorldRegistry#dropInvalidSpawn}).
+     *
+     * @throws IOException when the file is malformed, empty or {@code null}, or holds other
+     *     properties a record constructor refuses
+     */
     public Optional<AuroraWorldRegistry.Entry> read(final String template) throws IOException {
         final Path file = folder(template).resolve(METADATA);
         if (!Files.isRegularFile(file)) return Optional.empty();
+        final JsonElement stored;
         try {
-            return Optional.ofNullable(GSON.fromJson(Files.readString(file, StandardCharsets.UTF_8),
-                AuroraWorldRegistry.Entry.class));
+            stored = GSON.fromJson(Files.readString(file, StandardCharsets.UTF_8), JsonElement.class);
         } catch (final JsonParseException malformed) {
             throw new IOException(file + " is not a valid template description", malformed);
         }
+        // An empty file (or a literal null) reads as null; save() always writes a description.
+        if (stored == null || stored.isJsonNull()) {
+            throw new IOException(file + " is empty or null, not a template description");
+        }
+        final Optional<String> droppedSpawn = AuroraWorldRegistry.dropInvalidSpawn(stored);
+        final AuroraWorldRegistry.Entry description;
+        try {
+            description = GSON.fromJson(stored, AuroraWorldRegistry.Entry.class);
+        } catch (final JsonParseException malformed) {
+            throw new IOException(file + " is not a valid template description", malformed);
+        } catch (final RuntimeException refused) {
+            // Gson wraps a record constructor's refusal in a plain RuntimeException.
+            throw new IOException(file + " holds invalid properties (" + AuroraWorldRegistry.refusal(refused) + ")",
+                refused);
+        }
+        droppedSpawn.ifPresent(reason -> SourbyLogger.warn("Aurora World Fabric: ignoring the stored spawn of"
+            + " template '" + template + "' in " + file + " (" + reason + "); worlds made from it get no spawn"
+            + " property"));
+        return Optional.of(description);
     }
 
     /** As {@link #save(AwfBackend, Path, AuroraWorldRegistry.Entry, String)} for a world on disk. */
@@ -141,12 +173,18 @@ public final class AuroraTemplates {
             }
             final AuroraWorldRegistry.Entry description = world.named(template, null, false);
             Files.createDirectories(partial);
-            Files.writeString(partial.resolve(METADATA), GSON.toJson(description) + "\n", StandardCharsets.UTF_8);
+            final Path metadata = partial.resolve(METADATA);
+            Files.writeString(metadata, GSON.toJson(description) + "\n", StandardCharsets.UTF_8);
+            // template.json is what makes the template complete: durable, with its folder entry, before
+            // the move publishes it, and the move durable before this reports the template saved.
+            Durability.DISK.forceFile(metadata);
+            Durability.DISK.forceDirectory(partial);
             try {
                 Files.move(partial, target, StandardCopyOption.ATOMIC_MOVE);
             } catch (final AtomicMoveNotSupportedException notAtomic) {
                 Files.move(partial, target);
             }
+            Durability.DISK.forceDirectory(this.root);
             return chunks;
         } finally {
             deleteRecursively(partial);

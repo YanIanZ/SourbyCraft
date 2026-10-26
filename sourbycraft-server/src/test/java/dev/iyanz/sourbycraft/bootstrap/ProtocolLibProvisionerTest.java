@@ -66,8 +66,8 @@ class ProtocolLibProvisionerTest {
     }
 
     private void toml(boolean protocolLib, boolean via) throws IOException {
-        Files.writeString(this.config, "[protocollib]\nauto-provision = " + protocolLib
-            + "\n\n[viaversion]\nauto-provision = " + via + "\n");
+        Files.writeString(this.config, "[plugins.protocollib]\nauto-provision = " + protocolLib
+            + "\n\n[plugins.viaversion]\nauto-provision = " + via + "\n");
     }
 
     // ---- the pin against build-data/protocollib-pin.json --------------------------------

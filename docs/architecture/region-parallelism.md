@@ -17,7 +17,7 @@ CPU used  ≈  (number of DISCONNECTED active regions)  ×  (per-region tick cos
 
 ## 1. Region tick threads — measured, and the default is not the best value
 
-`threads: -1` in `paper-global.yml` currently resolves through **our own patch 0002** to the Aurora CPU budget. With no explicit `aurora.cpu.cores`, AUTO resolves to **all JVM-visible processors** (`Runtime.getRuntime().availableProcessors()`). On this 8-processor host that is **8**. Historical measurements below include an earlier 4-thread default/configuration and are retained as evidence, not as a description of the current default.
+`threads: -1` in `paper-global.yml` currently resolves through **our own patch 0002** to the Aurora CPU budget. With no explicit `aurora.cpu.cores`, AUTO resolves to **all JVM-visible processors** (`Runtime.getRuntime().availableProcessors()`). On this 8-processor host that is **8**. Historical measurements below include an earlier 4-thread default/configuration and are retained as evidence, not as a description of the current default. That 4-thread arm was the branch's default at the time (half the processors, Folia's own default); the inherited region scheduler's formula that patch 0002 replaces (total cores / 2, then 1 when that is ≤ 4, otherwise a further / 4) would give **1** thread on this host. `aurora.cpu.cores` is read from `sourbycraft_config/aurora.yml` over the global file (`dev.iyanz.aurora.cpu.AuroraCpu`, RESTART_REQUIRED).
 
 Identical block-tick load, same world, same server, one restart between arms:
 

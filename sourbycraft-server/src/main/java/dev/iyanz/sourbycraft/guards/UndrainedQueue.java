@@ -39,11 +39,11 @@ public final class UndrainedQueue extends AbstractQueue<Runnable> {
     @Override
     public boolean offer(final Runnable task) {
         final String caller = caller();
-        final String message = RegionRefusal.UNDRAINED_QUEUE.message("added by " + caller);
+        final RegionRefusal.Refused refused = RegionRefusal.UNDRAINED_QUEUE.error("added by " + caller);
         if (this.reported.size() < MAX_REPORTED_CALLERS && this.reported.add(caller)) {
-            this.errorSink.accept(message);
+            this.errorSink.accept(refused.getMessage());
         }
-        throw new UnsupportedOperationException(message);
+        throw refused;
     }
 
     @Override

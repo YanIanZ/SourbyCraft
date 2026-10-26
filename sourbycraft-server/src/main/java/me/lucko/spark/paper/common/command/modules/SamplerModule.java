@@ -290,6 +290,10 @@ public class SamplerModule implements CommandModule {
         }
 
         CompletableFuture<Sampler> future = sampler.getFuture();
+        // SourbyCraft start - explicit executor: the default *Async executor is ForkJoinPool.commonPool,
+        // and the upload below blocks on the network (audit PM-246)
+        final java.util.concurrent.Executor asyncExecutor = platform.getPlugin()::executeAsync;
+        // SourbyCraft end - explicit executor
 
         // send message if profiling fails
         future.whenCompleteAsync((_, throwable) -> {
@@ -309,10 +313,10 @@ public class SamplerModule implements CommandModule {
                 } else callback.run();
                 // Canvas end - region profiler
             }
-        });
+        }, asyncExecutor); // SourbyCraft - explicit executor
 
         // set activeSampler to null when complete.
-        sampler.getFuture().whenCompleteAsync((s, throwable) -> platform.getSamplerContainer().unsetActiveSampler(s));
+        sampler.getFuture().whenCompleteAsync((s, throwable) -> platform.getSamplerContainer().unsetActiveSampler(s), asyncExecutor); // SourbyCraft - explicit executor
 
         // await the result
         if (timeoutSeconds != -1) {
@@ -333,7 +337,7 @@ public class SamplerModule implements CommandModule {
                     );
                 } else callback.run();
                 // Canvas end - region profiler
-            });
+            }, asyncExecutor); // SourbyCraft - explicit executor
         }
         };
         Set<String> regionArgSet = arguments.stringFlag("region");

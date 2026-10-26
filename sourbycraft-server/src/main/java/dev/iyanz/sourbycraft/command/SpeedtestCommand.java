@@ -36,7 +36,8 @@ import static net.kyori.adventure.text.Component.text;
  * <p>The platform-specific binary is lazy-downloaded on first use into
  * {@code libraries/speedtest/<os>/<arch>/} and verified against a hard-coded SHA-256 pin (see
  * {@link #OOKLA_SHA256}) before it is ever extracted or executed — the same download-integrity
- * discipline as {@code LibDownloader}/{@code SourbyUpdater}. Runs on a
+ * discipline as {@code LibDownloader}/{@code SourbyUpdater}. The extracted binary's SHA-256 is
+ * recorded beside it and re-checked before every run (see {@link #installIntact()}). Runs on a
  * {@link dev.iyanz.sourbycraft.util.VirtualExecutor virtual thread}; only one speedtest may be
  * in flight at a time so repeated invocations cannot stack OS processes that would themselves
  * saturate the bandwidth being measured. The process's output is drained concurrently and the
@@ -110,6 +111,11 @@ public class SpeedtestCommand extends Command {
     }
 
     private static final Path BIN = getBinaryPath();
+    /**
+     * SHA-256 of {@link #BIN} as extracted from the verified archive, written after the binary is in
+     * place: a binary without this record is an interrupted install and is downloaded again.
+     */
+    private static final Path BIN_SHA256 = BIN.resolveSibling(BIN.getFileName() + ".sha256");
 
     /**
      * Starts the Ookla CLI. The server's launcher ({@link PinnedBinaryLauncher}) downloads and
@@ -142,20 +148,39 @@ public class SpeedtestCommand extends Command {
 
         @Override
         public boolean needsDownload() {
-            return !Files.exists(BIN);
+            return !Files.exists(BIN) || !Files.exists(BIN_SHA256);
         }
 
+        /** Re-verifies the installed binary before every run; a missing or failed check downloads it again. */
         @Override
         public Process start() throws IOException {
-            if (!Files.exists(BIN)) {
+            if (!installIntact()) {
                 downloadSpeedtestBinary();
             }
-            if (!Files.exists(BIN)) {
-                throw new IOException("speedtest binary unavailable (download failed)");
+            if (!installIntact()) {
+                throw new IOException("speedtest binary unavailable (download failed verification)");
             }
             return new ProcessBuilder(BIN.toString(), "--format=json", "--accept-license", "--accept-gdpr")
                 .redirectErrorStream(true).start();
         }
+    }
+
+    /**
+     * Whether {@link #BIN} still has the SHA-256 recorded when it was extracted. A binary without a
+     * record (an interrupted install, or one extracted by a build before the record existed) or with
+     * a different hash is deleted with its record, so the caller downloads and verifies it again.
+     * This catches a truncated or corrupted binary; whoever can write both files can replace both.
+     */
+    private static boolean installIntact() throws IOException {
+        // A record that is too long or not text fails the comparison, so it is replaced rather than thrown on.
+        if (Files.isRegularFile(BIN) && Files.isRegularFile(BIN_SHA256) && Files.size(BIN_SHA256) <= 128) {
+            final String recorded = new String(Files.readAllBytes(BIN_SHA256), StandardCharsets.US_ASCII).trim();
+            if (recorded.equalsIgnoreCase(sha256(BIN))) return true;
+            LOG.warn("Speedtest binary {} does not match its recorded SHA-256; downloading it again", BIN);
+        }
+        Files.deleteIfExists(BIN_SHA256);
+        Files.deleteIfExists(BIN);
+        return false;
     }
 
     /** How long the CLI may run before it is killed; a complete Ookla run takes about 30 s. */
@@ -203,6 +228,12 @@ public class SpeedtestCommand extends Command {
         // Nothing happens before the permission check -- not even a log line (OBS-12): the log
         // used to name the binary path and platform for every sender, permitted or not.
         if (!testPermission(sender)) return true;
+
+        if (dev.iyanz.sourbycraft.core.AuroraRuntime.stopping()) {
+            sender.sendMessage(text("Speedtest unavailable: the server is stopping or failed to start",
+                SourbyCraftColors.DANGER));
+            return true;
+        }
 
         final String unsupported = this.launcher.unsupportedReason();
         if (unsupported != null) {
@@ -333,10 +364,14 @@ public class SpeedtestCommand extends Command {
             say(sender, text("Speedtest failed: malformed JSON response", SourbyCraftColors.DANGER));
             return;
         }
-        if (dl == null || ul == null || ping == null || sv == null
-            || !(dl.get("bandwidth") instanceof Number) || !(ul.get("bandwidth") instanceof Number)
-            || !(ping.get("latency") instanceof Number)) {
-            LOG.error("Speedtest JSON missing expected fields: {}", trimmed);
+        final java.util.List<String> missing = new java.util.ArrayList<>();
+        if (dl == null || !(dl.get("bandwidth") instanceof Number)) missing.add("download.bandwidth");
+        if (ul == null || !(ul.get("bandwidth") instanceof Number)) missing.add("upload.bandwidth");
+        if (ping == null || !(ping.get("latency") instanceof Number)) missing.add("ping.latency");
+        if (sv == null) missing.add("server");
+        if (!missing.isEmpty()) {
+            // Names and length only: the report itself carries the host's external IP and MAC address.
+            LOG.error("Speedtest JSON missing expected fields {} ({} characters, not logged)", missing, trimmed.length());
             say(sender, text("Speedtest failed: incomplete JSON response", SourbyCraftColors.DANGER));
             return;
         }
@@ -426,22 +461,40 @@ public class SpeedtestCommand extends Command {
                 + ": got " + actual + ", expected " + expected + " (refusing to execute)");
         }
         LOG.info("Speedtest archive SHA-256 verified for {}", BINARY_NAME);
-        try (InputStream raw = Files.newInputStream(tarball)) {
-            if (OOKLA_URL.endsWith(".zip")) {
-                extractSpeedtestFromZip(raw, BIN);
-            } else {
-                try (GZIPInputStream gz = new GZIPInputStream(raw)) {
-                    extractSpeedtestFromTar(gz, BIN);
+        // Extracted beside BIN and renamed into place only when complete: an extraction that failed
+        // midway (disk full, a kill) used to leave a truncated BIN that every later run executed.
+        final Path partial = BIN.resolveSibling(BIN.getFileName() + ".part");
+        try {
+            Files.deleteIfExists(partial);
+            try (InputStream raw = Files.newInputStream(tarball)) {
+                if (OOKLA_URL.endsWith(".zip")) {
+                    extractSpeedtestFromZip(raw, partial);
+                } else {
+                    try (GZIPInputStream gz = new GZIPInputStream(raw)) {
+                        extractSpeedtestFromTar(gz, partial);
+                    }
                 }
             }
+            if (!Files.exists(partial)) {
+                throw new IOException("speedtest binary missing from extracted archive");
+            }
+            try {
+                partial.toFile().setExecutable(true);
+            } catch (SecurityException ignored) { }
+            final String extracted = sha256(partial);
+            // The old record goes first, so no crash can pair it with the new binary.
+            Files.deleteIfExists(BIN_SHA256);
+            try {
+                Files.move(partial, BIN, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (final AtomicMoveNotSupportedException notAtomic) {
+                Files.move(partial, BIN, StandardCopyOption.REPLACE_EXISTING);
+            }
+            // Written last: its presence marks a complete install (a torn write fails the next check).
+            Files.writeString(BIN_SHA256, extracted, StandardCharsets.US_ASCII);
+        } finally {
+            Files.deleteIfExists(partial);
+            Files.deleteIfExists(tarball);
         }
-        Files.deleteIfExists(tarball);
-        if (!Files.exists(BIN)) {
-            throw new IOException("speedtest binary missing from extracted archive");
-        }
-        try {
-            BIN.toFile().setExecutable(true);
-        } catch (SecurityException ignored) { }
         LOG.info("Speedtest binary downloaded to {}", BIN);
     }
 

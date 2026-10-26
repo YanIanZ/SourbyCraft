@@ -41,7 +41,8 @@ import java.util.zip.ZipFile;
  * and the price of a wrong refusal is one logged line plus a manual jar swap, whereas the price of a
  * wrong acceptance is a server that restarts into a launcher nobody has checked (the rollback guard
  * can restore {@code .prev}, but only after a failed boot). Every release built from this tree has
- * both entries (checked against {@code build/libs/SourbyCraft-slim.jar}, clip 3.1.2, protocol 1).
+ * both entries: checked against {@code build/libs/SourbyCraft-slim.jar} with clip 3.1.2, protocol 1;
+ * the current pin is {@code clipVersion=3.1.3} ({@code gradle.properties}), still protocol 1.
  *
  * <p>The jar is only read: two small entries, each bounded to {@link #MAX_ENTRY_BYTES}.
  */

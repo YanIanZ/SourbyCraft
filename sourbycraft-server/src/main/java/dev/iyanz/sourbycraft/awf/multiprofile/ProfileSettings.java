@@ -16,7 +16,8 @@ import java.util.Objects;
  * directory is created, no thread is started and no player is touched.</p>
  */
 public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int maxSlots, Switching switching,
-                              ProfileIsolation isolation, Worlds worlds, Coordination coordination, String directory) {
+                              ProfileIsolation isolation, Worlds worlds, Coordination coordination, String directory,
+                              Repository repository) {
 
     public enum Mode {
         STANDALONE,
@@ -79,6 +80,33 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
      */
     public record Coordination(Provider provider, boolean fencingEnabled, boolean singleActiveSession) {}
 
+    /** Where profiles, snapshots and journals are stored. */
+    public enum Backend {
+        FILE,
+        REDIS;
+
+        public static Backend parse(final String text) {
+            try {
+                return valueOf(text.toUpperCase(Locale.ROOT));
+            } catch (final IllegalArgumentException invalid) {
+                throw new IllegalArgumentException("repository must be file or redis, not " + text);
+            }
+        }
+    }
+
+    /**
+     * @param backend {@code file} (the directory, one server) or {@code redis} (the Aurora Redis
+     *     Fabric, fenced commits)
+     * @param requireAof {@code redis} only: refuse to start when Redis reports {@code appendonly} off
+     * @param waitForAof {@code redis} only: confirm the writes a later step relies on with
+     *     {@code WAITAOF} before acknowledging them
+     */
+    public record Repository(Backend backend, boolean requireAof, boolean waitForAof) {
+        public Repository {
+            Objects.requireNonNull(backend, "backend");
+        }
+    }
+
     public static final String ENABLED_KEY = "aurora.awf.multiprofile.enabled";
     public static final String MODE_KEY = "aurora.awf.multiprofile.mode";
     public static final String DEFAULT_SLOTS_KEY = "aurora.awf.multiprofile.default-slots";
@@ -92,6 +120,9 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
     public static final String COORDINATION_SINGLE_SESSION_KEY = "aurora.awf.multiprofile.coordination.single-active-session";
     public static final String DIRECTORY_KEY = "aurora.awf.multiprofile.directory";
     public static final String DIRECTORY_DEFAULT = "awf/profiles";
+    public static final String REPOSITORY_KEY = "aurora.awf.multiprofile.repository";
+    public static final String REDIS_REQUIRE_AOF_KEY = "aurora.awf.multiprofile.redis.require-aof";
+    public static final String REDIS_WAIT_FOR_AOF_KEY = "aurora.awf.multiprofile.redis.wait-for-aof";
 
     public static final List<String> KEYS = List.of(ENABLED_KEY, MODE_KEY, DEFAULT_SLOTS_KEY, MAX_SLOTS_KEY,
         SWITCHING_ENABLED_KEY, SWITCHING_TIMEOUT_KEY, SWITCHING_DURABLE_KEY,
@@ -99,11 +130,23 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         ProfileIsolation.EXPERIENCE_KEY, ProfileIsolation.HEALTH_KEY, ProfileIsolation.FOOD_KEY,
         ProfileIsolation.POTION_EFFECTS_KEY, ProfileIsolation.LOCATION_KEY,
         WORLDS_IDLE_KEY,
-        COORDINATION_PROVIDER_KEY, COORDINATION_FENCING_KEY, COORDINATION_SINGLE_SESSION_KEY, DIRECTORY_KEY);
+        COORDINATION_PROVIDER_KEY, COORDINATION_FENCING_KEY, COORDINATION_SINGLE_SESSION_KEY, DIRECTORY_KEY,
+        REPOSITORY_KEY, REDIS_REQUIRE_AOF_KEY, REDIS_WAIT_FOR_AOF_KEY);
+
+    /** The file repository; a server that sets no repository key keeps the behaviour of earlier builds. */
+    public static final Repository DEFAULT_REPOSITORY = new Repository(Backend.FILE, true, true);
 
     public static final ProfileSettings DEFAULT = new ProfileSettings(false, Mode.STANDALONE, 3, 8,
         new Switching(true, 15_000, true), ProfileIsolation.ALL, new Worlds(300),
-        new Coordination(Provider.LOCAL, true, true), DIRECTORY_DEFAULT);
+        new Coordination(Provider.LOCAL, true, true), DIRECTORY_DEFAULT, DEFAULT_REPOSITORY);
+
+    /** Settings with {@link #DEFAULT_REPOSITORY}. */
+    public ProfileSettings(final boolean enabled, final Mode mode, final int defaultSlots, final int maxSlots,
+                           final Switching switching, final ProfileIsolation isolation, final Worlds worlds,
+                           final Coordination coordination, final String directory) {
+        this(enabled, mode, defaultSlots, maxSlots, switching, isolation, worlds, coordination, directory,
+            DEFAULT_REPOSITORY);
+    }
 
     public ProfileSettings {
         Objects.requireNonNull(mode, "mode");
@@ -111,6 +154,7 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         Objects.requireNonNull(isolation, "isolation");
         Objects.requireNonNull(worlds, "worlds");
         Objects.requireNonNull(coordination, "coordination");
+        Objects.requireNonNull(repository, "repository");
         if (defaultSlots < 1 || maxSlots < 1 || defaultSlots > maxSlots || maxSlots > PlayerAccount.MAX_SLOTS) {
             throw new IllegalArgumentException("default-slots and max-slots must satisfy 1 <= default <= max <= "
                 + PlayerAccount.MAX_SLOTS);
@@ -121,9 +165,14 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         }
     }
 
-    /** Whether distributed mode was requested. Distributed additionally requires the Redis fabric. */
+    /** Whether distributed mode was requested. Distributed additionally requires the Redis repository. */
     public boolean distributed() {
         return this.mode == Mode.DISTRIBUTED;
+    }
+
+    /** Whether profiles are stored in the Aurora Redis Fabric instead of the directory. */
+    public boolean redisRepository() {
+        return this.repository.backend() == Backend.REDIS;
     }
 
     /** Settings and the keys that were present but unusable (each falls back to its default). */
@@ -187,8 +236,19 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         } else if (values.containsKey(DIRECTORY_KEY)) {
             invalid.add(DIRECTORY_KEY);
         }
+        Backend backend = DEFAULT_REPOSITORY.backend();
+        if (values.get(REPOSITORY_KEY) != null) {
+            try {
+                backend = Backend.parse(String.valueOf(values.get(REPOSITORY_KEY)));
+            } catch (final IllegalArgumentException bad) {
+                invalid.add(REPOSITORY_KEY);
+            }
+        }
+        final Repository repository = new Repository(backend,
+            flag(values, REDIS_REQUIRE_AOF_KEY, DEFAULT_REPOSITORY.requireAof(), invalid),
+            flag(values, REDIS_WAIT_FOR_AOF_KEY, DEFAULT_REPOSITORY.waitForAof(), invalid));
         return new Parsed(new ProfileSettings(enabled, mode, defaultSlots, maxSlots, switching, isolation, worlds,
-            coordination, directory), invalid);
+            coordination, directory, repository), invalid);
     }
 
     /** The configuration rows for {@code AuroraKeys}, in file order. */
@@ -214,6 +274,9 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         values.put(COORDINATION_FENCING_KEY, DEFAULT.coordination().fencingEnabled());
         values.put(COORDINATION_SINGLE_SESSION_KEY, DEFAULT.coordination().singleActiveSession());
         values.put(DIRECTORY_KEY, DEFAULT.directory());
+        values.put(REPOSITORY_KEY, DEFAULT.repository().backend().name().toLowerCase(Locale.ROOT));
+        values.put(REDIS_REQUIRE_AOF_KEY, DEFAULT.repository().requireAof());
+        values.put(REDIS_WAIT_FOR_AOF_KEY, DEFAULT.repository().waitForAof());
         return values;
     }
 

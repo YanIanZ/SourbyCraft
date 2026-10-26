@@ -9,7 +9,7 @@ diff --git a/net/minecraft/server/level/ServerChunkCache.java b/net/minecraft/se
 index 1b884e6da5fa046a2af87e9e9ef3adc445876702..108aa8546a9c753409d46071df50db90a7e5d878 100644
 --- a/net/minecraft/server/level/ServerChunkCache.java
 +++ b/net/minecraft/server/level/ServerChunkCache.java
-@@ -108,6 +108,17 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+@@ -108,6 +108,19 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
              // SourbyCraft end - relaxed thread checks
          }
          // Folia end - region threading
@@ -17,10 +17,12 @@ index 1b884e6da5fa046a2af87e9e9ef3adc445876702..108aa8546a9c753409d46071df50db90
 +        // scheduler halts before plugins disable (RegionShutdownThread "Scheduler halted"), so no thread runs
 +        // the scheduled load, and the shutdown thread has no region world data for the managedBlock pump, whose
 +        // pollTask then threw "Polling tasks from non-owned region" from a plugin's onDisable block write
-+        // (r48.3). Refuse it with an owned message instead of scheduling work nobody can run; a chunk that is
-+        // already loaded still serves the same call without reaching syncLoad.
++        // (r48.3). isShutdownThread() is also true on a WorldShutdownThread unloading one world while the
++        // scheduler keeps running, so the message does not claim the scheduler halted. Refuse it with an owned
++        // message instead of scheduling work nobody can run; a chunk that is already loaded still serves the
++        // same call without reaching syncLoad.
 +        if (ca.spottedleaf.moonrise.common.util.TickThread.isShutdownThread()) {
-+            throw new IllegalStateException("Chunk load refused on the region shutdown thread: the region scheduler has halted, so the load cannot complete, world="
++            throw new IllegalStateException("Chunk load refused on a region shutdown thread (server stop or world unload): this thread cannot complete a synchronous chunk load, world="
 +                + ca.spottedleaf.moonrise.common.util.WorldUtil.getWorldName(this.level) + ", chunk_pos=" + new ChunkPos(chunkX, chunkZ));
 +        }
 +        // SourbyCraft end

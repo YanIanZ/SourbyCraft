@@ -8,9 +8,11 @@ import java.util.UUID;
 /**
  * A player's immutable identity, with the profiles it owns and the one currently active.
  *
- * <p>{@code revision} increments on every change and is the compare-and-set value: a writer holding
- * an older revision is refused, so two asynchronous operations cannot silently overwrite each
- * other. The slot limit is stored on the account, not inferred from the number of profiles.</p>
+ * <p>{@code revision} increments on every change and is the compare-and-set value: a write passes
+ * the revision it read in its {@link ProfileWriteGuard}, and the repository refuses the write when the
+ * stored account has moved on, so two asynchronous operations cannot silently overwrite each other.
+ * The slot limit is stored on the account, not inferred from the number of profiles; an administrator
+ * changes it with {@link #withSlotLimit}.</p>
  *
  * @param playerId the Minecraft account id; never a name
  * @param profileIds owned profiles, in creation order
@@ -64,6 +66,11 @@ public record PlayerAccount(UUID playerId, java.util.List<UUID> profileIds, UUID
     public PlayerAccount withActive(final UUID profileId) {
         if (profileId != null && !owns(profileId)) throw new IllegalArgumentException("not an owned profile");
         return new PlayerAccount(this.playerId, this.profileIds, profileId, this.slotLimit, this.revision + 1);
+    }
+
+    /** A new slot limit; profiles beyond a lowered limit are kept, only creating more is refused. */
+    public PlayerAccount withSlotLimit(final int slots) {
+        return new PlayerAccount(this.playerId, this.profileIds, this.activeProfile, slots, this.revision + 1);
     }
 
     /** Immutable metadata view for diagnostics. */

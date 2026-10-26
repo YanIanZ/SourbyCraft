@@ -621,7 +621,7 @@ class RepositoryTest(unittest.TestCase):
         self.assertEqual(by_id["PrepareSpawnTask#1"]["decision"], "KEEP-OWNED")     # PlayerSpawnLocationEvent
         self.assertEqual(by_id["MinecraftServer#17"]["decision"], "KEEP-OWNED")     # level-data autosave (0056)
         self.assertEqual(by_id["ServerWaypointManager#1"]["decision"], "KEEP-OWNED")  # override found
-        self.assertEqual(by_id["ThrownEnderpearl#1"]["decision"], "REPLACE")        # no PlayerTeleportEvent
+        self.assertEqual(by_id["ThrownEnderpearl#1"]["decision"], "KEEP-OWNED")     # PlayerTeleportEvent (MC 0064)
         self.assertEqual(by_id["BukkitScheduler#1"]["decision"], "KEEP-OWNED")
         self.assertEqual(by_id["Metrics#1"]["origin"], "SourbyCraft")
         # Re-worded refusals keep the inherited origin; the block-comment entry is gone for good.

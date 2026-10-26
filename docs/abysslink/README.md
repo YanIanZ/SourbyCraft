@@ -2,7 +2,7 @@
 
 AbyssLink is an optional SourbyCraft client for Leviathan's separate control listener. It carries handshake, heartbeat, proxy player-latency queries, health reports and advisory threat signals. It is disabled by default. Gameplay forwarding and admission keep their existing behavior.
 
-The local settings, codec, metrics and client sources are implementation work. Published/deployed interoperability is not established by their presence. Verification results belong in the [workflow report](../../.workflow/ultracode/abysslink-v1/final-report.md); open checks are in [TESTING.md](TESTING.md).
+The local settings, codec, metrics and client sources are implementation work. Published/deployed interoperability is not established by their presence. Verification results and open checks are in [TESTING.md](TESTING.md); its 2026-10-24 interoperability result predates PR #62 and needs a rerun. Configuration errors and failed connection attempts are reported as described in [INTEGRATION.md](INTEGRATION.md#diagnostics).
 
 ## Wire agreement
 
@@ -10,7 +10,7 @@ Frames use a 20-byte big-endian header: `ABYL`, major/minor `1/0`, type, zero fl
 
 Types are HELLO 1, HELLO_ACK 2, HEARTBEAT 3, PING_QUERY 4, PING_RESULT 5, HEALTH_REPORT 6, THREAT_SIGNAL 7 and ERROR 255. Request IDs preserve their 64-bit pattern in Java longs.
 
-The design label **PROXY_PING** maps to the wire capability **`ping`**. It is never sent literally. Supported case-sensitive lowercase tokens are `heartbeat`, `ping`, `health`, `threat`; heartbeat is required.
+The design label **PROXY_PING** maps to the wire capability **`ping`**. It is never sent literally. Supported case-sensitive lowercase tokens are `heartbeat`, `ping`, `health`, `threat`; the backend offers all four and heartbeat is required. The proxy's accepted list may name only offered tokens, each once: an unknown, duplicate or malformed token, or a list without `heartbeat`, rejects the handshake (`AbyssLinkSession`).
 
 The v1 backend responds to proxy heartbeats without originating its own probes. Echo each peer request once. Backend control RTT therefore remains unavailable (`rttNanos=0`); do not render zero as a measured latency. Earlier bidirectional-probe work is superseded by this response-only policy.
 
@@ -26,4 +26,4 @@ See [INTEGRATION.md](INTEGRATION.md) for setup and [FOLIA-SAFETY.md](FOLIA-SAFET
 
 ## Compatibility reference
 
-`/Volumes/Ext/REA/Leviathan/docs/abysslink/PROTOCOL-v1.md` now exists; it was absent at initial discovery. That document and `/Volumes/Ext/REA/Leviathan/src/main/java/world/leviathan/abysslink/` were concurrent untracked work during this integration. Review current source and recorded harness evidence; these docs do not pin or certify an external release.
+The peer contract is Leviathan's `docs/abysslink/PROTOCOL-v1.md` and its `src/main/java/world/leviathan/abysslink/` sources, in the separate Leviathan repository (not in this tree). The protocol document was absent at initial discovery and appeared later; both were concurrent, untracked work during this integration. Review current source and recorded harness evidence; these docs do not pin or certify an external release.

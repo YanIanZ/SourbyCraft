@@ -2,9 +2,9 @@
 
 ## Purpose
 
-This document is the active development contract for the `26.2` branch. It consolidates the intent of `docs/PRD.md`, the technical rules of `docs/SPEC.md`, the execution direction of `docs/PLAN.md`, and the work already completed in builds 44–45.
+This document is the active development contract for the `26.2` branch. It consolidates the intent of the product requirements (`PRD.md`), the technical rules of the specification (`SPEC.md`), the execution direction of the plan (`PLAN.md`), and the work already completed in builds 44–45. Those three are internal planning documents: they left git in `c86b3be` (2026-10-22) and are kept outside the repository (`docs/README.md`). The in-repo sources of current priorities are [TODO.md](TODO.md) and the owner's build plan [releases/ROADMAP-47-50.md](releases/ROADMAP-47-50.md).
 
-The older documents remain useful historical and design references. This file defines what must happen next, what is already complete, what remains unfinished, and how SourbyCraft moves from a Canvas-derived downstream fork into an independently owned SourbyCraft runtime while preserving upstream attribution and compatibility.
+The older documents remain useful historical and design references. This file defines what must happen next, what is already complete, what remains unfinished, and how SourbyCraft moves from a Canvas-derived downstream fork into an independently owned SourbyCraft runtime while preserving upstream attribution and compatibility. (Status 2026-10-25: since the 2026-10-05 migration Paper is the only upstream, pinned by `paperRef`; the former Canvas/Folia region threading is SourbyCraft's own engine baseline, and Build 47+ carries a SourbyCraft-only public identity. §8 records where each independence stage stands.)
 
 The priority order is:
 
@@ -41,8 +41,9 @@ SourbyCraft Runtime
    └── lifecycle ownership
    │
    ▼
-Upstream implementation sources
-(Paper / Folia / Canvas components where still required)
+Upstream implementation source
+(Paper, the only upstream since 2026-10-05; the former Folia / Canvas
+ region threading is SourbyCraft's own engine baseline)
 ```
 
 Upstream code may remain beneath SourbyCraft. Runtime behavior must not depend on upstream branding, user-facing command identity, remote services, or a second server distribution being installed alongside SourbyCraft.
@@ -200,6 +201,15 @@ inconclusive
 
 Do not describe an instrumented subsystem as optimized until the measurements support that claim.
 
+(One vocabulary, 2026-10-25: these labels describe a *measurement's outcome*. The status of a
+*feature* uses the words of the truthfulness policy §2 below (PLANNED, IMPLEMENTED, EXPERIMENTAL,
+MEASURED, CERTIFIED, QUALIFIED) and `architecture/qualification-readiness.md` §8 (implemented,
+measured, certified run / soak / reference pair, qualified); `architecture/AURORA.md` adds PARTIAL
+and HELD. "instrumented" is IMPLEMENTED with telemetry and no measurement; "measured" is MEASURED;
+"improved" or "regressed" may only be said of a certified comparable pair; anything else is
+"inconclusive". Code that was written but not built or tested is none of these: say "code written
+and statically reviewed; not built; not tested by the owner".)
+
 ## 4.2 Async pathfinding audit remains incomplete
 
 `AsyncPathProcessor` exists and is optional. It still requires a deeper review covering:
@@ -336,7 +346,7 @@ Performance reports must record:
 ```text
 baseline SHA
 candidate SHA
-Canvas/Paper upstream ref where relevant
+Paper upstream ref (paperRef in gradle.properties) where relevant
 Java version
 JVM arguments
 OS
@@ -353,11 +363,18 @@ measurement duration
 
 # 8. SourbyCraft Independence Program
 
-Independence is delivered in stages.
+Independence is delivered in stages. The statuses below were re-checked against the code on
+2026-10-25; [architecture/independence.md](architecture/independence.md) holds the independence
+levels and [architecture/AURORA.md](architecture/AURORA.md) *Current state* the per-pillar evidence.
 
 ## Stage A — Identity independence
 
-Status: in progress.
+Status: implemented at source level. Public identity is SourbyCraft only since Build 47
+(`brand/BuildInfo#releaseIdentity`: `Build N — Aurora Nexus`, no upstream letter, enforced by
+`scripts/verify_build_identity.py` in CI); the server brand is `ServerBuildInfo.BRAND_SOURBYCRAFT_ID`
+(sourbyapi Paper patch 0002, replacing `BRAND_CANVAS_ID`); `/ver` shows the SourbyCraft identity
+with build provenance (`brand/BuildProvenance`), and Spark's platform version reads `BuildInfo`
+(`aurora/engine/spark/FoliaPlatformInfo`). Not qualified as a release gate by itself.
 
 Requirements:
 
@@ -368,7 +385,10 @@ Requirements:
 
 ## Stage B — Observability independence
 
-Status: in progress.
+Status: implemented. `perf/MetricsRuntime` publishes the immutable snapshot that `/tps`, `/mspt`,
+`/perf`, the HUD and the API read; Spark's tick statistics come from it
+(`aurora/engine/spark/plugin/FoliaTickStatistics` over `MetricsRuntime.provider()`); one certified
+2 h soak exists, no regression reference pair (not qualified; `architecture/qualification-readiness.md`).
 
 Requirements:
 
@@ -380,7 +400,14 @@ Requirements:
 
 ## Stage C — Configuration independence
 
-Status: partial.
+Status: largely implemented. SourbyCraft-owned settings live in `sourbycraft_config/sourbycraft_global_config.yml`
+and `sourbycraft_config/aurora.yml` (YAML since Build 49); Spark reports them as a config group
+with secret filtering (`spark/SourbyServerConfigProvider`); the engine files were renamed
+`config/aurora-*.yml` with a one-time, non-destructive boot migration (old file kept as
+`*.migrated`). Still open: the persisted legacy readers (`Canvas.Distance`, `data/canvas/pearls.dat`,
+the `canvas-*.yml` migration) await owner decision PM-179. PR #62 stops reading the pre-49 utility
+names, `perf.ai.async-pathfinding`, `-DCanvas.*` flags and `canvas.broadcasting.receiver` (code
+written and statically reviewed; not built; not tested by the owner).
 
 Requirements:
 
@@ -392,7 +419,11 @@ Requirements:
 
 ## Stage D — Runtime-service independence
 
-Status: planned.
+Status: partial. `core/SourbyCraftBootstrap` starts 19 lifecycle-managed services in a fixed order
+and stops them in an explicit order (`core/AuroraRuntime` publishes the state); many feature
+patches are narrow hooks into `dev.iyanz.sourbycraft` services (for example 0001 boot, 0081
+shutdown, 0013/0079 tick metrics, 0021 AWF). Not every behaviour has moved: several feature
+patches still carry their logic inline, and the Aurora Bridge starts lazily outside the stage list.
 
 Move Sourby-owned behavior into lifecycle-managed services under `dev.iyanz.sourbycraft`.
 
@@ -410,15 +441,21 @@ Sourby-owned state / metrics / logic
 
 ## Stage E — Build independence
 
-Status: planned and high-risk.
+Status: partial, by design dependent on a private toolchain. Paper is the only upstream, pinned by
+`paperRef`; the former Canvas/Folia engine is in the repository as the engine baseline (pinned by
+`build-data/engine-baseline.sha256`); no Canvas distribution artifact is used at build or run
+time. A clean checkout does **not** build from this repository alone: Gradle refuses to configure
+without the hash-verified private SourbyPatcher `paper-toolchain` (and the build needs the private
+SourbyClip launcher), pinned by `build-data/private-toolchain.lock.json` and the SHA-256 values in
+`gradle.properties` (`docs/development/PRIVATE-TOOLCHAIN.md`).
 
 Goals:
 
-- SourbyCraft builds reproducibly from its own repository
+- SourbyCraft builds reproducibly from its own repository (today: from this repository plus the pinned private toolchain)
 - no runtime dependency on Canvas distribution artifacts
 - upstream source revisions remain pinned and reproducible
 - Canvas-specific build assumptions are progressively isolated
-- legacy `sourbypatcher` use is either removed from the active line or clearly isolated to historical/release compatibility
+- ~~legacy `sourbypatcher` use is either removed from the active line or clearly isolated to historical/release compatibility~~ — superseded: SourbyPatcher is not legacy, it is the required private patch applier (owner build plan: "n/a while SourbyPatcher is the patch applier", `releases/ROADMAP-47-50.md`)
 
 Build independence does **not** require immediately deleting all Canvas-derived source.
 
@@ -505,7 +542,9 @@ Next required work:
 - expose Sourby runtime metadata where supported
 - keep TPS/MSPT values consistent with SourbyCraft metrics
 - classify region threads and Sourby runtime workers clearly
-- expose slow-region context to profiler metadata where technically appropriate
+- expose slow-region context to profiler metadata where technically appropriate (status 2026-10-25:
+  PR #62 adds `sourbycraft.slowestRegion` to the spark report metadata, `spark/SourbyMetadataProvider`;
+  code written and statically reviewed; not built; not tested by the owner)
 - avoid duplicating expensive metric scans solely for Spark
 
 Potential later step:
@@ -765,12 +804,22 @@ A release may not be marked performance-stable until:
 - controlled baseline comparison exists for major performance claims
 - a soak test has been completed for changes affecting concurrency/lifecycle
 - profiler/telemetry overhead is measured where significantly changed
-- config files are not silently rewritten
+- config files are not silently rewritten (current behaviour, 2026-10-25: a reload never rewrites a
+  SourbyCraft file; the engine files `config/aurora-server.yml` / `aurora-worlds.yml` are rewritten
+  by a load or reload only when a key is added or removed, and each added or removed key is
+  logged, otherwise they stay byte-identical; the Build 49 boot migrations rewrite a file once,
+  keeping the old one as `*.migrated`)
 - upstream attribution and licenses remain correct
 
 ---
 
 # 22. Development Phases from This Point
+
+> **Historical (annotated 2026-10-25).** Phases 46A–46G were the Build 46 plan. They are superseded
+> by the owner's build plan [releases/ROADMAP-47-50.md](releases/ROADMAP-47-50.md) (47 ship, 48
+> refinement, 49 full stable, 50 optimization) and the prioritized [TODO.md](TODO.md); the per-build
+> gates are in `docs/releases/`. The list is kept as the record of that plan. `docs/PRD.md`,
+> `docs/SPEC.md` and `docs/PLAN.md`, named in 46A, are kept outside the repository since `c86b3be`.
 
 ## Phase 46A — Consolidate and stabilize
 

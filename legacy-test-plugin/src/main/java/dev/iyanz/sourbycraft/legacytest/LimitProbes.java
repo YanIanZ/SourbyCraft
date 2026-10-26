@@ -179,8 +179,8 @@ final class LimitProbes {
      * on a latch: exactly {@code limit} run, the rest are cancelled when their callback starts and never run.
      * Needs at least {@code limit + 3} BRIDGE_IO lane threads ({@code aurora.scheduler.bridge-io-threads}), or the
      * lane, not the limit, serializes them. Then: the slots are released when the bodies end (a new async task
-     * runs), and a repeating async timer whose bodies overlap past the limit is cancelled (a rejected repeater
-     * loses its future runs).
+     * runs), and a repeating async timer whose bodies would overlap past the limit stays scheduled, its overlapping
+     * periods skipped instead of the timer cancelled.
      */
     private void asyncLimit(final int limit) {
         final BukkitScheduler scheduler = scheduler();
@@ -234,23 +234,39 @@ final class LimitProbes {
         }, after(1500));
     }
 
-    /** A repeating async timer whose body (300 ms) outlives its period (1 tick) overlaps past the limit. */
+    /**
+     * A repeating async timer whose body (300 ms) outlives its period (1 tick): the periods that would overlap past
+     * the limit are skipped, not the timer cancelled. It stays scheduled and keeps running, never more bodies at
+     * once than the limit; after it is cancelled the plugin has nothing pending.
+     */
     private void overlappingTimer(final int limit) {
         final AtomicInteger runs = new AtomicInteger();
+        final AtomicInteger concurrent = new AtomicInteger();
+        final AtomicInteger peak = new AtomicInteger();
         final BukkitTask timer = scheduler().runTaskTimerAsynchronously(this.plugin, () -> {
             runs.incrementAndGet();
+            peak.accumulateAndGet(concurrent.incrementAndGet(), Math::max);
             try {
                 Thread.sleep(300L);
             } catch (final InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
+            } finally {
+                concurrent.decrementAndGet();
             }
         }, 1L, 1L);
         CompletableFuture.runAsync(() -> {
             final int first = runs.get();
-            CompletableFuture.runAsync(() -> this.plugin.check(timer.isCancelled() && !scheduler().isQueued(timer.getTaskId())
-                    && runs.get() == first && first >= limit && ownPending() == 0, "LEGACY_LIMIT_ASYNC_TIMER",
-                "limit=" + limit + " runs=" + first + "->" + runs.get() + " cancelled=" + timer.isCancelled()
-                    + " pending=" + ownPending()), after(1500));
+            final boolean scheduledFirst = !timer.isCancelled() && scheduler().isQueued(timer.getTaskId());
+            CompletableFuture.runAsync(() -> {
+                final int second = runs.get();
+                final boolean scheduled = scheduledFirst && !timer.isCancelled() && scheduler().isQueued(timer.getTaskId());
+                timer.cancel();
+                // Past the last body (300 ms) still running when the timer was cancelled.
+                CompletableFuture.runAsync(() -> this.plugin.check(scheduled && second > first && peak.get() <= limit
+                        && ownPending() == 0, "LEGACY_LIMIT_ASYNC_TIMER",
+                    "limit=" + limit + " runs=" + first + "->" + second + " peak=" + peak.get() + " scheduled=" + scheduled
+                        + " pending=" + ownPending()), after(500));
+            }, after(1500));
         }, after(2000));
     }
 

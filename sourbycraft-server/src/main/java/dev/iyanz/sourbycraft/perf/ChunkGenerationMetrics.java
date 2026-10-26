@@ -23,7 +23,7 @@ public final class ChunkGenerationMetrics {
     /**
      * RESTART_REQUIRED: on when the JVM property or {@code aurora.diagnostics.chunk-generation-metrics}
      * is true. Read once at class init, which the chunk system triggers before configuration loads,
-     * so the TOML is read here directly, the way {@code AuroraBridge} reads its mode.
+     * so the YAML files are read here directly ({@link #readEarly}), the way {@code AuroraBridge} reads its mode.
      */
     public static final boolean ENABLED = Boolean.getBoolean(PROPERTY) || readEarly(AURORA_FILE, UNIFIED_FILE);
     // Fixed keys: never retain worlds, coordinates, tasks, or plugin-defined labels.

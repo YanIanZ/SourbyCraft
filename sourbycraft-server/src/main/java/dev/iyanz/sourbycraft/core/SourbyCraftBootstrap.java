@@ -61,14 +61,14 @@ public final class SourbyCraftBootstrap {
      * STOPPED reports completion of this sequence, not proof that every service stopped successfully.
      */
     public static void close() {
-        // Before the first service goes down, so anything consulting acceptingWork() stops
-        // admitting during the window when shutdown is in flight and work is still arriving.
+        // Before the first service goes down, so anything consulting stopping() (such as /awf, /speedtest
+        // and the async path offload) refuses new work while shutdown is in flight and work is still arriving.
         AuroraRuntime.transition(AuroraRuntime.State.STOPPING);
-        // Before the first AWF wait of the shutdown (the storage lane draining below, then the region
-        // saves, the chunk I/O drain and AwfEngine.closeAll): one deadline for all of them.
         // Mods first: they may still need Bukkit and every SourbyCraft service below.
         try { dev.iyanz.sourbycraft.mod.ModLoader.shutdown(); }
         catch (Throwable failure) { SourbyLogger.error("SourbyMod shutdown failed", failure); }
+        // Before the first AWF wait of the shutdown (the storage lane draining below, then the region
+        // saves, the chunk I/O drain and AwfEngine.closeAll): one deadline for all of them.
         try { dev.iyanz.sourbycraft.awf.AwfEngine.beginShutdown(); }
         catch (Throwable failure) { SourbyLogger.error("AWF shutdown deadline could not start", failure); }
         try { dev.iyanz.sourbycraft.hud.HudBars.close(); }
@@ -97,15 +97,22 @@ public final class SourbyCraftBootstrap {
     }
 
     /**
-     * Starts metrics, network counters, configuration, the stall recorder, plugin config provisioning, branding,
-     * diagnostics, the startup index, commands, listeners, player-slot settings, I/O workers, the
-     * updater and GC sampling, in that order.
+     * Prints the Engine section rule, then runs the boot stages in this order: metrics
+     * runtime, network counters, configuration, SourbyMods, stall recorder, Aurora Redis fabric, AuroraWorlds,
+     * AWF MultiProfile, plugin config provisioning, JVM advisor, plugin diagnostics, startup index, commands,
+     * messages (join/leave broadcasts and MOTD), player slots, I/O virtual executor, AbyssLink, auto-updater
+     * and GC tracker.
      * A second invocation is a no-op, including after a partially failed startup. Individual stage
      * failures are logged and counted without skipping subsequent stages.
      */
     public static synchronized void init() {
         if (started) return;
         started = true;
+
+        // The update rollback guard before every stage: a new jar that fails or hangs in any of them
+        // must leave the BOOTING phase behind so the next boot restores the previous jar. File I/O
+        // only; it logs its own errors and never throws.
+        AutoUpdateSettings.runBootGuard();
 
         AuroraRuntime.transition(AuroraRuntime.State.BOOTSTRAPPING);
         AuroraRuntime.transition(AuroraRuntime.State.STARTING);
@@ -125,7 +132,8 @@ public final class SourbyCraftBootstrap {
             dev.iyanz.sourbycraft.perf.NetworkMetrics.install();
         });
 
-        // The unified TOML: messages, /maxp, auto-updater settings.
+        // sourbycraft_global_config.yml and aurora.yml (messages, /maxp, auto-updater settings, Aurora services),
+        // the security limits and the engine files.
         stage("configuration", () -> {
             SourbyCraftConfig.init();
         });
@@ -159,8 +167,12 @@ public final class SourbyCraftBootstrap {
 
         // ORDERING: must precede CraftServer#enablePlugins, where Via reads its config in
         // onEnable. Writes the shipped default ViaVersion/ViaBackwards config only when absent.
+        // Read strictly: only an absent key (its default) or true provisions. A value that is not a
+        // boolean writes nothing; the early jar provisioning (BootstrapPluginSettings) also skips the
+        // group for an invalid value rather than taking the default.
         stage("plugin provisioning", () -> {
-            PluginProvisioner.provisionConfigs(SourbyCraftConfig.cfgBool(dev.iyanz.sourbycraft.config.UtilityKeys.VIAVERSION_AUTO_PROVISION.path(), true));
+            final Object provision = SourbyCraftConfig.cfgGet(dev.iyanz.sourbycraft.config.UtilityKeys.VIAVERSION_AUTO_PROVISION.path(), null);
+            PluginProvisioner.provisionConfigs(provision == null || Boolean.TRUE.equals(provision));
         });
 
         // Warning-only JVM flag advice, logged so it reaches logs/latest.log (no stdout banner since Build 49).

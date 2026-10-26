@@ -41,10 +41,14 @@ import java.util.Set;
  *                         interval applies. Bounds how much a crash can lose by size, not only by time. At
  *                         most one commit per storage runs at a time and the check runs once a second, so
  *                         this is a trigger threshold, not a hard cap on unsaved bytes.
- * @param shutdownDeadlineMillis one budget, in milliseconds, for every AWF wait at shutdown (flushes, final
- *                         commits, lock waits, backend calls, lease release), measured from the start of
- *                         shutdown. When it passes no further commit is attempted and the shutdown is reported
- *                         as incomplete, never as saved. Default 30000. See {@link AwfShutdownBudget}.
+ * @param shutdownDeadlineMillis one budget, in milliseconds, for the AWF waits at shutdown, measured from the
+ *                         start of shutdown: lock waits, the start of every commit attempt, Redis calls (their
+ *                         timeouts are cut to it and their connections aborted when it passes) and lease release.
+ *                         When it passes no further commit is attempted and the shutdown is reported as incomplete,
+ *                         never as saved. A FILE commit already writing is not interruptible: an fsync on a stalled
+ *                         disk holds the stop past the deadline. Also bounds how long an AuroraWorlds save waits for
+ *                         its world's chunk I/O to drain ({@link AwfEngine#saveDrainTimeoutMillis()}). Default 30000.
+ *                         See {@link AwfShutdownBudget}.
  */
 public record AwfSettings(Set<String> worlds, Set<String> export, String backend, PersistenceMode persistence, int commitIntervalSeconds,
                           int residentChunks, int retainedGenerations, int commitAttempts, boolean deltaGenerations,

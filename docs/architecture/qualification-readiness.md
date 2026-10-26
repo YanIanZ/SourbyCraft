@@ -1,17 +1,49 @@
 # T10 Qualification — Readiness
 
-What §16 of `docs/AURORA-FULL-TRANSITION.md` requires, against what exists. Written so the
-remaining work is a list rather than a rediscovery, and so nothing here reads as done when it
-is not.
+What T10 requires, against what exists. Written so the remaining work is a list rather than a
+rediscovery, and so nothing here reads as done when it is not. The requirements were §16 of
+`docs/AURORA-FULL-TRANSITION.md`, which was removed from the repository with the other planning
+documents in `c86b3be` (2026-10-22); they are copied in *T10 requirements* below, and the removed
+file is still in git history (`git show c86b3be^:docs/AURORA-FULL-TRANSITION.md`).
 
-T10 is the gate the rest of the transition waits on: §4.5 allows no optimization without
-measurement, so T5's engine domains cannot move from *documented* to *optimised* until this
-passes.
+T10 is the gate the rest of the transition waits on: §4.5 of the same document allowed no deep
+engine optimization without CPU, allocation, MSPT, I/O or reproducible workload evidence, so T5's
+engine domains cannot move from *documented* to *optimised* until this passes.
 
 2026-10-21: Build 47 is published as a full release (`release=true`) by owner decision, **not**
 labelled STABLE and not QUALIFIED; publication does not change any row below. The STABLE label and
 the stability rows are Build 49's; the certified rows are Build 50's
-([ROADMAP-47-50.md](../releases/ROADMAP-47-50.md)).
+([ROADMAP-47-50.md](../releases/ROADMAP-47-50.md)). Since then: Build 48 (`v26.2-r48`), Build 49
+(`v26.2-r49`) and its hotfix 49.1 (`v26.2-r49.1`) were published with `release=true`, Build 49
+explicitly without a STABLE claim because its gate list is not PASS
+([26.2-build-49-release.md](../releases/26.2-build-49-release.md)); Build 50 is a prerelease
+(`v26.2-r50`, `release=pre`, tagged at `5f5a167`). No published build is QUALIFIED.
+
+**Status 2026-10-25 (PR #62):** PR #61 and PR #62 landed after the `v26.2-r50` tag, so their work
+is in no published build; how it is published is owner decision PM-011. The PR #62 changes are
+code written and statically reviewed; not built; not tested by the owner. They touch AWF storage
+(eviction, commits, unload durability, the Redis client), MultiProfile, configuration loading, the
+auto-updater, the Aurora Bridge, spark and feature patches (owner-thread guards, shutdown). Every
+run recorded below was made on an older tree; for a build that contains PR #62 those results are
+NEEDS RETEST, and they stay listed with their tree or build label. Per-item status:
+[BUILD-50-PM-MATRIX.md](../releases/BUILD-50-PM-MATRIX.md).
+
+## T10 requirements
+
+Copied from §16 of the removed transition document:
+
+- **Workloads:** idle; 10 connected (or equivalent) players; 50 players; 100 players; entity
+  stress; AI stress; chunk traversal; generation stress; save stress; network stress; a
+  plugin-heavy representative workload (11 items).
+- **Metrics:** TPS; MSPT average; MSPT p50/p95/p99/max; CPU; heap; RSS; allocation rate; GC
+  pauses; queue depths; task latency; chunk latency; entity cost; network throughput; storage
+  backlog (14 items).
+- **Soak (minimum):** a 2 h+ concurrency soak; repeated joins/quits; chunk load/unload cycles; a
+  restart cycle; shutdown under load; heap recovery after load.
+- **Persistence:** clean shutdown, restart, chunk save integrity, player data, entity data, region
+  files, world metadata.
+- **Completion gate:** the seven rows of §1 except the T8 offline-boot row, which is carried here
+  because it was recorded with this gate.
 
 ---
 
@@ -19,18 +51,18 @@ the stability rows are Build 49's; the certified rows are Build 50's
 
 | Gate requirement | State | Evidence |
 |---|---|---|
-| representative benchmark exists | **partial** | 9 of 11 workloads (§2). Updated 2026-10-07: the plugin-heavy `plugins-10` is defined (`build-data/representative-plugins.json`; EssentialsX and Vault bridged, the SuperiorSkyblock2 Folia port native, spark) and was **measured** once, uncertified, on Sourby Demo (2026-10-06; `docs/BASELINE.md` *The plugin workload*). Its fidelity: plugins loaded, not driven by player commands. AI stress still missing |
+| representative benchmark exists | **partial** | 10 of 11 workloads (§2); only AI stress is missing. Updated 2026-10-07: the plugin-heavy `plugins-10` is defined (`build-data/representative-plugins.json`; EssentialsX and Vault bridged, the SuperiorSkyblock2 Folia port native, spark) and was **measured** once, uncertified, on Sourby Demo (2026-10-06; `docs/BASELINE.md` *The plugin workload*). Its fidelity: plugins loaded, not driven by player commands. AI stress still missing |
 | no unexplained >3% regression in affected workloads | **blocked** | needs a certified comparable before/after reference pair; a certified soak is not a regression pair. Still blocked on 2026-10-07: the newer observations are **measured**, not certified — Demo `players-10` (2026-10-05), Demo `plugins-10` (2026-10-06), and one exploring player's chunk delivery with 2 vs 6 workers (Demo, 2026-10-06: full view in 18–23 s vs 11–17 s; `chunk-workers.md`). None is a reference pair, and the chunk-worker result answers a different workload from the swarm A/B |
-| no known region ownership bug | **none open** | §5. Both sightings (`/say`, console command ~2 s after `Done` on an AWF reboot) were one startup bug, reproduced and fixed 2026-10-13 (MC 0028 `rebind-early-console-command-sources`), in CI since run 38427215968 (2026-10-13). The release gate itself stays OPEN on watchdog-specific acceptance and a soak without ownership violations (Build 49); the 2026-10-14 audit findings ENG-1/3/4 were fixed in `1c57a736` (2026-10-20, unit-tested; no boot drains a non-empty queue). Not in the current build: the held EDF backend (parked EDF patch, `minecraft-patches/parked/`, 2026-10-07) whose ownership acceptance is pending |
-| no known persistence bug | **no open bug known; not qualified** (2026-10-21) | Chunk, entity and player data: no bug found — RC tree `cbef3fb9` local laptop run 2026-10-13: persistence 105/105, crash 52/52 region files and 56/56 AWF (§4); earlier 104/104 local, 20/20 on Sourby Demo, crash 49/49 and 53/53 (2026-10-05). The game-time XFAIL is fixed by MC 0027 (XPASS on every recovery; XFAIL entry removed in `3cd33b3f`). Redis backend-failure defects D1–D3/D5/D7 fixed (`d97fe247`, local scenarios). The 2026-10-14 audit findings AWF-2 (`ebb9c1fb`), ENG-5 (`1c57a736`) and AWF-3 (`AwfMaintenanceDriver`, `6d4c41fe`) are fixed, unit-tested only. Functional agent test-server runs 2026-10-20 (laptop, no clients, not certified): region files 61/61, AWF FILE 65/65. Persistence/crash runs on the Build 49 tree with clients are a Build 49 gate |
+| no known region ownership bug | **none open** | §5. Both sightings (`/say`, console command ~2 s after `Done` on an AWF reboot) were one startup bug, reproduced and fixed 2026-10-13 (MC 0028 `rebind-early-console-command-sources`), in CI since run 38427215968 (2026-10-13). The release gate itself stays OPEN on watchdog-specific acceptance and a soak without ownership violations (Build 49); the 2026-10-14 audit findings ENG-1/3/4 were fixed in `1c57a736` (2026-10-20, unit-tested; no boot drains a non-empty queue). An ENG-3 follow-up found that a world unload ran the *bodies* of pending Bukkit entity tasks (saved, not removed, entities; a test-plugin unload fixture ran 16 far-future bodies and 0 retired callbacks); fixed in `63e4658` (2026-10-22, Paper feature 0021: a retired scheduler gets exactly its retired callback; fixture after the fix: 16 retired, 0 bodies run), in Build 48 and later. Not in the current build: the held EDF backend (parked EDF patch, `minecraft-patches/parked/`, 2026-10-07) whose ownership acceptance is pending |
+| no known persistence bug | **not met** (2026-10-25: AWF defects known in published builds, fixed only in the unbuilt PR #62); was *no open bug known; not qualified* on 2026-10-21 | Chunk, entity and player data: no bug found — RC tree `cbef3fb9` local laptop run 2026-10-13: persistence 105/105, crash 52/52 region files and 56/56 AWF (§4); earlier 104/104 local, 20/20 on Sourby Demo, crash 49/49 and 53/53 (2026-10-05). The game-time XFAIL is fixed by MC 0027 (XPASS on every recovery; XFAIL entry removed in `3cd33b3f`). Redis backend-failure defects D1–D3/D5/D7 fixed (`d97fe247`, local scenarios). The 2026-10-14 audit findings AWF-2 (`ebb9c1fb`), ENG-5 (`1c57a736`) and AWF-3 (`AwfMaintenanceDriver`, `6d4c41fe`) are fixed, unit-tested only. Functional agent test-server runs 2026-10-20 (laptop, no clients, not certified): region files 61/61, AWF FILE 65/65. Persistence/crash runs on the Build 49 tree with clients are a Build 49 gate. **2026-10-25 audit (PR #62):** AWF persistence defects were found in the published code and fixed only in PR #62 (code written and statically reviewed; not built; not tested by the owner): a write racing post-commit eviction could be dropped and then marked clean (PM-023), an unconfirmed final commit on world unload stopped the server, a Redis commit could be confirmed by `WAITAOF` on a different pooled connection. For published builds up to `v26.2-r50` these are known, open persistence bugs; for a build with PR #62 the row needs the owner AWF runs again |
 | no unbounded queue | **met** | `UnboundedQueueAuditTest`, 3 tests |
 | heap/threads/tasks stabilize after load | **partial** | certified 2h 10-player soak (2026-09-15, commit `1c883a55`, before Build 47) shows stable RSS, heap-after-GC and tick duration; thread/task stabilization still needs explicit gate evidence; no certified or complete soak of the Build 47 tree or with plugins (the 2026-10-07 `plugins-10` demo soak ran ~100 min, uncertified) |
-| cached runtime boots offline (T8) | **corrected** | a *populated* runtime boots offline; a *fresh* one does not boot at all — [slim-jar bootstrap failure](slim-jar-bootstrap-failure.md) |
+| cached runtime boots offline (T8) | **met in CI; remote qualification open** | The fresh-runtime failure of 2026-09-20 was fixed in SourbyClip 3.0.26 on 2026-09-21 ([slim-jar bootstrap failure](slim-jar-bootstrap-failure.md#resolution--2026-09-21)). The build job's step *Bootstrap failure recovery and offline boot* (`.github/workflows/build.yml`) boots a fresh directory three times: with no network it must fail within 120 s naming the file and source URL it could not fetch, leaving no `.tmp`; online it must reach `Done`; offline again it must reach `Done` from the cache (`Classpath prepared`) with no download attempt. It runs on every push build, and every published tag since `v26.2-r48` came from a build job that ran it (the release job `needs: [build, rebuild]`). Not run on the PR #62 tree (pull requests get no Gradle build or boot); that step now also feeds the Build 50 configuration migration, so its first push run after the merge is the retest. Remote-host cold download and fault-injection qualification remain open ([bootstrap download audit](bootstrap-download-audit.md)) |
 | shutdown completes predictably | **partial** | unit tests, clean console shutdowns and a live restart on the deployment server; under load (6 moving clients) only on a local fixture so far. 2026-10-06: every native plugin's disable logged an ERROR after Paper patch 0007 (reproduced on a real boot); fixed by patch 0009; its CI check passes since run 37515867230 (2026-10-07) |
 
 ---
 
-## 2. Workloads — 9 of 11
+## 2. Workloads — 10 of 11
 
 Defined in `scripts/baseline_workloads.py`:
 
@@ -48,33 +80,40 @@ Defined in `scripts/baseline_workloads.py`:
 
 ---
 
-## 3. Metrics — 10 of 14
+## 3. Metrics — 8 of 14 recorded by the harness (network throughput for network-stress only)
 
-From a real `baseline.json` (`idle`, 2026-09-20):
+The harness column is what `run_baseline.py` writes into `baseline.json` (field names from a real
+`idle` run, 2026-09-20; `baseline_metrics.py` reads JFR events and OS samples). The live column is
+what a running server shows; none of those views is sampled into `baseline.json`.
 
-| §16 requires | State | Source |
+| T10 requires | Harness (`baseline.json`) | Live source |
 |---|---|---|
-| TPS | ✔ | `metrics.tick.tps` (mean/min/p50/p95/p99/max) |
-| MSPT average | ✔ | `metrics.tick.mspt.mean` |
-| MSPT p50/p95/p99/max | ✔ | `metrics.tick.mspt` |
-| CPU | ✔ | `metrics.cpu` — process, machine and foreign fractions |
-| heap | ✔ | `metrics.tick.heap_used_bytes` |
-| RSS | ✔ | `metrics.rss` + `metrics.drift` |
-| allocation rate | ✔ | `metrics.allocation.bytes_per_second` |
-| GC pauses | ✔ | `metrics.gc` |
-| queue depths | **partial** | async-path pool only (`/perf async`); no chunk, network or save queue |
-| task latency | **partial** | async-path wait latency only |
-| chunk latency | ✘ | — |
-| entity cost | ✘ | — |
-| network throughput | ✘ | — |
-| storage backlog | ✘ | — |
+| TPS | ✔ `metrics.tick.tps` (mean/min/p50/p95/p99/max) | `/tps`, `/perf tick` |
+| MSPT average | ✔ `metrics.tick.mspt.mean` | `/perf tick` |
+| MSPT p50/p95/p99/max | ✔ `metrics.tick.mspt` | `/perf tick` (server estimates) |
+| CPU | ✔ `metrics.cpu` — process, machine and foreign fractions | `/perf cpu`, `/perf lanes` |
+| heap | ✔ `metrics.tick.heap_used_bytes` | `/perf memory` |
+| RSS | ✔ `metrics.rss` + `metrics.drift` | `/perf memory` |
+| allocation rate | ✔ `metrics.allocation.bytes_per_second` | none (`/perf memory` says it is not collected; use JFR or spark) |
+| GC pauses | ✔ `metrics.gc` | `/perf gc` |
+| queue depths | ✘ | `/perf async` (async-path pool), `/perf network` (outbound queues), `/perf storage` (pending chunk I/O), `/perf scheduler` (queued region tick and chunk tasks, approximate; the global tick's queue has no size accessor), `/perf governor` (lane queues and rejections) |
+| task latency | ✘ | `/perf scheduler` (region task wait latency, tick and chunk tasks), `/perf async` (async-path wait latency) |
+| chunk latency | ✘ | `/perf chunks` (generation-stage timing), `/perf storage` (region-file save and load timing) |
+| entity cost | ✘ | `/perf entities` (entity tick counters) |
+| network throughput | **network-stress only**: `network` block, client-observed round trips and bytes per second from the load generator | `/perf network` (wire and packet rates) |
+| storage backlog | ✘ | `/perf storage` (pending I/O) |
 
-The four absent ones are the T7 telemetry items that need hooks into upstream paths; see
+Owner decision needed: whether a console-only live source satisfies a T10 metric, or the harness
+must record it (sample the `/perf` views during the window or add JFR events, then parse them in
+`baseline_metrics.py`). Until then the rows the harness does not record stay open for T10. See
 [the network](engine-network.md) and [storage](engine-storage.md) domain documents.
 
 ---
 
-## 4. Persistence — covered and passing
+## 4. Persistence — covered and passing on the trees listed
+
+Every run below predates PR #62, which changed the AWF commit, eviction and unload paths and the
+Redis backend: for a build that contains it, these are NEEDS RETEST.
 
 `scripts/verify_persistence.py` writes known state, stops the server, inspects the files on
 disk while nothing holds them, boots a second server over the same directory and reads the
@@ -107,7 +146,7 @@ Two limits are stated rather than hidden:
 
 None open in source. The one recorded here was reproduced and fixed on 2026-10-13 (Minecraft feature
 patch 0028 `rebind-early-console-command-sources`, numbered 0029 before the same-day renumbering;
-SPEC B88). Verified locally and in CI run 38427215968 (head `8c70b53c`, run as `4275912f` before a message-only rewrite, 2026-10-13), whose boot step runs the early console probe.
+SPEC.md item B88; SPEC.md was removed in `c86b3be`, see git history). Verified locally and in CI run 38427215968 (head `8c70b53c`, run as `4275912f` before a message-only rewrite, 2026-10-13), whose boot step runs the early console probe.
 
 `/say` from the console threw, once, during a config reload on the deployment server, and a console
 command threw the same way ~2 s after `Done` on an AWF reboot:
@@ -164,8 +203,9 @@ references to obtain.
 1. ~~Persistence validation tooling~~ — **done**, §4.
 2. **`idle` + `chunk-stress` certified references** — one quiet window, no clients. Still the
    binding constraint: without a reference there is nothing to compare a regression against.
-3. **The remaining workloads**: AI stress, which needs clients, and a plugin-heavy
-   representative set, which needs a decision about which plugins represent the product.
+3. **The remaining workload**: AI stress, which needs clients. The plugin-heavy representative
+   set was decided on 2026-10-07 (`plugins-10`, `build-data/representative-plugins.json`); it still
+   needs a local harness run with clients.
 4. **Client-attached runs** for `players-*` and `entity-stress`.
 5. **The regression gate**, once two certified runs of the same workload exist.
 

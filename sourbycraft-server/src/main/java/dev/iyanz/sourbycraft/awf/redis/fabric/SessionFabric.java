@@ -11,13 +11,47 @@ import java.util.UUID;
  * <p>A session is claimed by one node at a time. A second node is refused while the first claim is
  * alive ({@code duplicate}); it may only take over after the claim expired, and that takeover
  * increments the epoch. Expiry is never treated as proof that the old node stopped writing: the
- * epoch is carried into every durable write, and {@link CoordinationFabric#validate} rejects a write
- * whose fence is no longer current.</p>
+ * epoch is carried into every durable write, and a write path checks {@link #valid} (session, owner,
+ * epoch and remaining TTL) before it commits. That check and a separate write are two steps, so a
+ * store that must never accept a stale writer has to compare the epoch in the same atomic step as
+ * the write: the MultiProfile Redis repository ({@code RedisProfileRepository}) reads this hash
+ * inside each of its write scripts, with {@link #key} and {@link #session} naming what it compares.</p>
+ *
+ * <p><b>Keys</b> (under the fabric namespace):</p>
+ * <ul>
+ *   <li>{@code session:<profile>} — hash {@code session, node, incarnation, owner, epoch, expiresAt,
+ *       state}, with a TTL equal to the claim's; {@code expiresAt} is Redis time in ms;</li>
+ *   <li>{@code session-epoch:<profile>} — the epoch counter; never expires and is never deleted, so a
+ *       released or lapsed session never restarts at an old epoch.</li>
+ * </ul>
+ *
+ * <p><b>Who holds a claim</b> is three values: the node id (stable across restarts, names the server
+ * for routing), the incarnation ({@link NodeIdentity}: one per process, fixed for this instance) and
+ * the owner token (one per claim). The {@code session} field is {@code node/incarnation/owner}, and
+ * refresh, validation and release compare it, so a process with the same node id but another
+ * incarnation (a restarted server, or a second server that shares the id) can never extend, validate
+ * or release a claim it did not make, even with the right owner token and epoch.</p>
+ *
+ * <p><b>Scripts</b> (each atomic in Redis):</p>
+ * <ul>
+ *   <li>{@code CLAIM}: no live claim, or an expired one — a new claim with the next epoch. A live
+ *       claim with the same {@code session} — refreshed, same epoch. A live claim by this node and
+ *       this incarnation with another owner token (a rejoin after a switch) — the token is replaced,
+ *       same epoch, since it is the same process. A live claim by this node's proven-stopped previous
+ *       incarnation ({@link NodeIdentity#previousIncarnation()}) — taken over with the next epoch. Any
+ *       other live claim, also by another process with this node id — refused ({@code duplicate}).</li>
+ *   <li>{@code RECLAIM}: operator recovery; takes the session over, with the next epoch, only when
+ *       the stored epoch is exactly the expected one.</li>
+ *   <li>{@code REFRESH} / {@code RELEASE}: extend or delete the claim when session, owner and epoch
+ *       all match.</li>
+ *   <li>{@code VALID}: the same match, and the claim has not expired by Redis time.</li>
+ * </ul>
  *
  * <p>Clock source: Redis {@code TIME}, so nodes with skewed clocks agree on expiry.</p>
  */
 public final class SessionFabric {
 
+    /** KEYS: session, epoch. ARGV: session, node, owner, ttl ms, incarnation, previous incarnation or ''. */
     private static final String CLAIM = """
         local key = KEYS[1]
         local epochKey = KEYS[2]
@@ -25,9 +59,11 @@ public final class SessionFabric {
         local node = ARGV[2]
         local owner = ARGV[3]
         local ttl = tonumber(ARGV[4])
+        local incarnation = ARGV[5]
+        local previous = ARGV[6]
         local now = redis.call('TIME')
         now = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
-        local cur = redis.call('HMGET', key, 'session', 'node', 'owner', 'epoch', 'expiresAt')
+        local cur = redis.call('HMGET', key, 'session', 'node', 'owner', 'epoch', 'expiresAt', 'incarnation')
         local epoch = tonumber(cur[4] or '0') or 0
         local expires = tonumber(cur[5] or '0') or 0
         if expires > now then
@@ -36,21 +72,25 @@ public final class SessionFabric {
             redis.call('PEXPIRE', key, ttl)
             return {1, epoch, cur[3] or owner, cur[2] or node}
           end
-          if cur[2] == node then
+          if cur[2] == node and cur[6] == incarnation then
             -- Same process, new owner token (for example a join after a switch): not a duplicate.
             redis.call('HSET', key, 'session', session, 'owner', owner, 'expiresAt', now + ttl)
             redis.call('PEXPIRE', key, ttl)
             return {1, epoch, owner, node}
           end
-          return {0, epoch, cur[3] or '', cur[2] or ''}
+          if previous == '' or cur[2] ~= node or cur[6] ~= previous then
+            return {0, epoch, cur[3] or '', cur[2] or ''}
+          end
+          -- This node's previous incarnation, proven stopped: taken over below with the next epoch.
         end
         epoch = redis.call('INCR', epochKey)
         redis.call('HSET', key, 'session', session, 'node', node, 'owner', owner, 'epoch', epoch,
-          'expiresAt', now + ttl, 'state', 'ACTIVE')
+          'expiresAt', now + ttl, 'state', 'ACTIVE', 'incarnation', incarnation)
         redis.call('PEXPIRE', key, ttl)
         return {1, epoch, owner, node}
         """;
 
+    /** KEYS: session, epoch. ARGV: expected epoch, session, node, owner, ttl ms, incarnation. */
     private static final String RECLAIM = """
         local key = KEYS[1]
         local epochKey = KEYS[2]
@@ -68,7 +108,7 @@ public final class SessionFabric {
         now = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
         epoch = redis.call('INCR', epochKey)
         redis.call('HSET', key, 'session', session, 'node', node, 'owner', owner, 'epoch', epoch,
-          'expiresAt', now + ttl, 'state', 'ACTIVE')
+          'expiresAt', now + ttl, 'state', 'ACTIVE', 'incarnation', ARGV[6])
         redis.call('PEXPIRE', key, ttl)
         return {1, epoch, owner, node}
         """;
@@ -111,23 +151,44 @@ public final class SessionFabric {
     private final RedisClient client;
     private final String prefix;
     private final FabricMetrics metrics;
+    /** Handed to the scripts in milliseconds; PEXPIRE and the Redis-TIME comparison are both ms. */
     private final int ttlSeconds;
-    /** Milliseconds handed to the scripts; PEXPIRE and the Redis-TIME comparison are both ms. */
+    /** This process's incarnation, written into every claim this instance makes. */
+    private final String incarnation;
+    /** This node's proven-stopped previous incarnation, or {@code ""}; see {@link NodeIdentity}. */
+    private final String previousIncarnation;
 
+    /** Claims as this JVM's incarnation, with no predecessor to take over. */
     SessionFabric(final RedisClient client, final String prefix, final FabricMetrics metrics, final int ttlSeconds) {
+        this(client, prefix, metrics, ttlSeconds, NodeIdentity.processIncarnation(), null);
+    }
+
+    SessionFabric(final RedisClient client, final String prefix, final FabricMetrics metrics, final int ttlSeconds,
+                  final String incarnation, final String previousIncarnation) {
         this.client = client;
         this.prefix = prefix;
         this.metrics = metrics;
         this.ttlSeconds = ttlSeconds;
+        this.incarnation = java.util.Objects.requireNonNull(incarnation, "incarnation");
+        this.previousIncarnation = previousIncarnation == null ? "" : previousIncarnation;
     }
 
     public String key(final UUID profileId) {
         return this.prefix + "session:" + profileId;
     }
 
-    /** The session field identifies one node's incarnation; the profile id alone is shared by all nodes. */
-    static String session(final String node, final UUID owner) {
-        return node + "/" + owner;
+    /** The incarnation this instance claims as. */
+    public String incarnation() {
+        return this.incarnation;
+    }
+
+    /**
+     * The session field of a claim this instance made: one claim of one process
+     * ({@code node/incarnation/owner}); the profile id alone is shared by all nodes, and the node id
+     * alone by every process that shares it.
+     */
+    public String session(final String node, final UUID owner) {
+        return node + "/" + this.incarnation + "/" + owner;
     }
 
     /** Never expires: the epoch must not restart when a session record's TTL lapses. */
@@ -136,12 +197,14 @@ public final class SessionFabric {
     }
 
     /**
-     * Claims the session for {@code node} or refreshes its own claim. A live claim by another node
-     * is refused as {@code duplicate}.
+     * Claims the session for {@code node} or refreshes its own claim. A live claim by another node,
+     * or by another incarnation of this node that is not its proven-stopped predecessor, is refused
+     * as {@code duplicate}; see the class comment for every case.
      */
     public ClaimResult claim(final UUID profileId, final String node, final UUID owner) throws IOException {
         final List<Object> reply = RedisReplies.list(this.client.eval(CLAIM, 2, key(profileId), epochKey(profileId),
-            session(node, owner), node, owner.toString(), Long.toString(this.ttlSeconds * 1000L)));
+            session(node, owner), node, owner.toString(), Long.toString(this.ttlSeconds * 1000L), this.incarnation,
+            this.previousIncarnation));
         if (reply.size() < 4) throw new IOException("session claim returned a malformed reply");
         final boolean granted = RedisReplies.number(reply.get(0), 0L) == 1L;
         final long epoch = RedisReplies.number(reply.get(1), 0L);
@@ -164,7 +227,7 @@ public final class SessionFabric {
         throws IOException {
         final List<Object> reply = RedisReplies.list(this.client.eval(RECLAIM, 2, key(profileId), epochKey(profileId),
             Long.toString(expectedEpoch), session(node, owner), node, owner.toString(),
-            Long.toString(this.ttlSeconds * 1000L)));
+            Long.toString(this.ttlSeconds * 1000L), this.incarnation));
         if (reply.size() < 2) throw new IOException("session reclaim returned a malformed reply");
         final boolean granted = RedisReplies.number(reply.get(0), 0L) == 1L;
         final long epoch = RedisReplies.number(reply.get(1), 0L);
@@ -187,6 +250,35 @@ public final class SessionFabric {
         return ok;
     }
 
+    /**
+     * {@link #refresh} for many claims of this instance in one pipeline (one round trip while Redis
+     * has the script cached). The results are in the order of {@code claims}. An error reply for any
+     * claim fails the whole call: which claims were renewed is then unknown, so a caller keeps every
+     * claim and retries, it drops none.
+     */
+    public List<Boolean> refreshAll(final List<OwnerClaim> claims) throws IOException {
+        if (claims.isEmpty()) return List.of();
+        final String ttl = Long.toString(this.ttlSeconds * 1000L);
+        final List<Object[]> calls = new java.util.ArrayList<>(claims.size());
+        for (final OwnerClaim claim : claims) {
+            final UUID owner = UUID.fromString(claim.owner());
+            calls.add(new Object[] {1, key(UUID.fromString(claim.id())), session(claim.node(), owner), owner.toString(),
+                Long.toString(claim.fence()), ttl});
+        }
+        final List<Object> replies = this.client.evalPipeline(REFRESH, calls);
+        if (replies.size() != claims.size()) throw new IOException("session refresh returned a malformed reply");
+        final List<Boolean> renewed = new java.util.ArrayList<>(replies.size());
+        for (final Object reply : replies) {
+            if (RedisReplies.isError(reply)) {
+                throw new IOException("session refresh failed: " + RedisReplies.errorText(reply));
+            }
+            final boolean ok = RedisReplies.number(reply, 0L) == 1L;
+            if (!ok) this.metrics.leaseRenewFailure();
+            renewed.add(ok);
+        }
+        return List.copyOf(renewed);
+    }
+
     /** Whether the claim is still held and unexpired. */
     public boolean valid(final UUID profileId, final String node, final UUID owner, final long epoch)
         throws IOException {
@@ -207,9 +299,27 @@ public final class SessionFabric {
 
     /** The current holder, or {@code null} when no session record exists. Never extends anything. */
     public OwnerClaim holder(final UUID profileId) throws IOException {
-        final String key = key(profileId);
-        final List<Object> reply = RedisReplies.list(this.client.call("HMGET", key, "node", "owner", "epoch", "expiresAt"));
-        if (reply.size() < 4) return null;
+        final List<Object> reply = RedisReplies.list(this.client.call("HMGET", key(profileId), "node", "owner", "epoch",
+            "expiresAt", "incarnation"));
+        return holderOf(profileId, reply);
+    }
+
+    /**
+     * The current holder when it is another process, or {@code null} when no session record exists or
+     * this process holds it. A process with this node id but another incarnation (a restarted server,
+     * or a second server sharing the id) is another process; a record without an incarnation (written
+     * before Build 50) is never this process's.
+     */
+    public OwnerClaim foreignHolder(final UUID profileId) throws IOException {
+        final List<Object> reply = RedisReplies.list(this.client.call("HMGET", key(profileId), "node", "owner", "epoch",
+            "expiresAt", "incarnation"));
+        final OwnerClaim holder = holderOf(profileId, reply);
+        if (holder == null || this.incarnation.equals(RedisReplies.text(reply.get(4)))) return null;
+        return holder;
+    }
+
+    private static OwnerClaim holderOf(final UUID profileId, final List<Object> reply) {
+        if (reply.size() < 5) return null;
         final String node = RedisReplies.text(reply.get(0));
         final String owner = RedisReplies.text(reply.get(1));
         final long epoch = RedisReplies.number(reply.get(2), 0L);

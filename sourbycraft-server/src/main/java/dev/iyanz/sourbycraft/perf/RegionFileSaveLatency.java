@@ -12,6 +12,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicLongArray;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.LongSupplier;
+import java.util.function.Predicate;
 
 /**
  * How long chunk-system saves take at the region-file (.mca) I/O stage, per world and storage type.
@@ -29,8 +30,10 @@ import java.util.function.LongSupplier;
  * <p><b>Recording cost.</b> The caller reads {@code System.nanoTime()} twice. {@link Recorder#record}
  * then does one {@code getAndIncrement} on the recorder's sequence, one volatile store into a fixed
  * {@code AtomicLongArray} slot, one read (and only on a new maximum, a CAS) of the all-time maximum,
- * and on failure one {@code LongAdder} increment. No lock, no allocation, no map lookup: the
- * {@link Recorder} is resolved once per {@code RegionFileStorage}, in its constructor.</p>
+ * and on failure one {@code LongAdder} increment, then one volatile read of whether the recorder was
+ * dropped (below). No lock, no allocation, no map lookup: the {@link Recorder} is resolved once per
+ * {@code RegionFileStorage}, in its constructor. Only a dropped recorder's next save takes the
+ * owner's lock, once, to put it back.</p>
  *
  * <p><b>Window.</b> Each recorder keeps its last {@link #CAPACITY} samples in a ring; a sample is a
  * single {@code long} packing the second (since the recorder's epoch) it ended in and its duration in
@@ -46,6 +49,13 @@ import java.util.function.LongSupplier;
  * usually drops); and if {@link #CAPACITY} or more saves are recorded between one writer's claim and its
  * store, two writers store into the same slot and one of those samples is lost from the window.</p>
  *
+ * <p><b>Bounded.</b> A recorder whose world is not loaded and that has recorded nothing for
+ * {@link #IDLE_SECONDS} is dropped from the listing, at a {@link #snapshot()} and before a recorder
+ * is created, so a server that keeps creating uniquely named worlds does not keep 8 KiB per storage
+ * for each of them (audit PM-308). A dropped recorder that records again (its storage was still in
+ * use, for instance under a level storage id Bukkit does not know as a world name) is put back with
+ * everything it counted; a storage created for the same key after the drop gets a fresh recorder.</p>
+ *
  * <p>Read-only to everyone but the patch: {@link #snapshot()} copies, nothing returned is live.</p>
  */
 public final class RegionFileSaveLatency {
@@ -54,6 +64,8 @@ public final class RegionFileSaveLatency {
     public static final int CAPACITY = 1024;
     /** The percentile window. */
     public static final int WINDOW_SECONDS = 60;
+    /** How long a recorder of an unloaded world must record nothing before it is dropped. */
+    static final long IDLE_SECONDS = TimeUnit.MINUTES.toSeconds(15L);
 
     public static final RegionFileSaveLatency GLOBAL = new RegionFileSaveLatency(System::nanoTime);
 
@@ -80,11 +92,18 @@ public final class RegionFileSaveLatency {
     private final LongSupplier nanoClock;
     private final long epochNanos;
     private final ConcurrentMap<Key, Recorder> recorders = new ConcurrentHashMap<>();
+    private final Predicate<String> loaded;
 
     /** @param nanoClock the same clock the caller's start/end times come from */
     RegionFileSaveLatency(final LongSupplier nanoClock) {
+        this(nanoClock, LoadedWorlds::byName);
+    }
+
+    /** @param loaded whether a world of that level storage id is loaded; its recorders are never dropped */
+    RegionFileSaveLatency(final LongSupplier nanoClock, final Predicate<String> loaded) {
         this.nanoClock = nanoClock;
         this.epochNanos = nanoClock.getAsLong();
+        this.loaded = loaded;
     }
 
     private record Key(String world, String dimension, String type) {}
@@ -96,12 +115,19 @@ public final class RegionFileSaveLatency {
     public Recorder recorder(final String world, final String dimension, final String type) {
         final Key key = new Key(Objects.requireNonNull(world, "world"),
             Objects.requireNonNull(dimension, "dimension"), Objects.requireNonNull(type, "type"));
-        return this.recorders.computeIfAbsent(key, k -> new Recorder(this.epochNanos));
+        final Recorder existing = this.recorders.get(key);
+        if (existing != null) {
+            return existing;
+        }
+        final long nowSecond = second(this.nanoClock.getAsLong(), this.epochNanos);
+        this.prune(nowSecond);
+        return this.recorders.computeIfAbsent(key, k -> new Recorder(this, k, nowSecond));
     }
 
-    /** Every recorder that has timed at least one save, sorted by world, dimension, type. */
+    /** Every recorder that has timed at least one save and has not been dropped, sorted by world, dimension, type. */
     public List<Snapshot> snapshot() {
         final long nowSecond = second(this.nanoClock.getAsLong(), this.epochNanos);
+        this.prune(nowSecond);
         final List<Snapshot> out = new ArrayList<>();
         for (final var entry : this.recorders.entrySet()) {
             final Recorder recorder = entry.getValue();
@@ -118,16 +144,43 @@ public final class RegionFileSaveLatency {
         return Math.max(0L, nanos - epochNanos) / TimeUnit.SECONDS.toNanos(1);
     }
 
+    /** Drops the recorders of unloaded worlds that have recorded nothing for {@link #IDLE_SECONDS}. */
+    private synchronized void prune(final long nowSecond) {
+        for (final var entry : this.recorders.entrySet()) {
+            final Recorder recorder = entry.getValue();
+            if (nowSecond - recorder.lastActiveSecond() >= IDLE_SECONDS && !this.loaded.test(entry.getKey().world())
+                && this.recorders.remove(entry.getKey(), recorder)) {
+                recorder.dropped = true;
+            }
+        }
+    }
+
+    /** Puts back a recorder that recorded after {@link #prune} dropped it: its storage is still in use. */
+    private synchronized void restore(final Recorder recorder) {
+        if (recorder.dropped) {
+            recorder.dropped = false;
+            this.recorders.putIfAbsent(recorder.key, recorder);
+        }
+    }
+
     /** Lock-free, allocation-free sink for one storage's save times. */
     public static final class Recorder {
+        private final RegionFileSaveLatency owner;
+        private final Key key;
         private final long epochNanos;
+        private final long createdSecond;
         private final AtomicLongArray ring = new AtomicLongArray(CAPACITY);
         private final AtomicLong sequence = new AtomicLong();
         private final LongAdder failures = new LongAdder();
         private final AtomicLong maxEverNanos = new AtomicLong();
+        /** Set by the owner's prune, cleared by its restore; both under the owner's lock. */
+        private volatile boolean dropped;
 
-        private Recorder(final long epochNanos) {
-            this.epochNanos = epochNanos;
+        private Recorder(final RegionFileSaveLatency owner, final Key key, final long createdSecond) {
+            this.owner = owner;
+            this.key = key;
+            this.epochNanos = owner.epochNanos;
+            this.createdSecond = createdSecond;
         }
 
         /**
@@ -147,10 +200,26 @@ public final class RegionFileSaveLatency {
             if (failed) {
                 this.failures.increment();
             }
+            if (this.dropped) {
+                this.owner.restore(this);
+            }
         }
 
         long saves() {
             return this.sequence.get();
+        }
+
+        /**
+         * The second (since the epoch) of the newest stored sample, or of creation before the first;
+         * {@link Long#MAX_VALUE} while the newest sample is claimed but not stored yet.
+         */
+        private long lastActiveSecond() {
+            final long saves = this.sequence.get();
+            if (saves == 0L) {
+                return this.createdSecond;
+            }
+            final long packed = this.ring.get((int) ((saves - 1L) & (CAPACITY - 1)));
+            return packed == 0L ? Long.MAX_VALUE : Math.max(this.createdSecond, (packed >>> 32) - 1L);
         }
 
         private Snapshot snapshot(final Key key, final long nowSecond) {

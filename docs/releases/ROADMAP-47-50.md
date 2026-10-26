@@ -2,6 +2,11 @@
 
 Current Build 50 closure: [BUILD-50-READINESS.md](BUILD-50-READINESS.md). The dated allocations below are historical; they do not close current code or evidence gaps.
 
+Outcome (status 2026-10-25): Builds 47, 48 and 49 (plus the test-only hotfix 49.1) were published as normal
+releases named Aurora Nexus, none labelled STABLE (which build carries it is owner decision PM-181); Build 48
+shipped as a full release, not a prerelease. Build 50 was published as the prerelease `v26.2-r50` (`5f5a167`);
+the later PR #61/#62 work is unpublished (route: owner decision PM-011).
+
 Status: PLAN (written 2026-10-21 from the tree at `c0ab0cc4` plus uncommitted work; nothing here is
 evidence that an item is done). Owner decision 2026-10-21, recorded in [docs/TODO.md](../TODO.md)
 *Keputusan owner*: "kita harus membagi menjadi 4 update, versi 47, 48 penyempurnaan, 49 full
@@ -134,8 +139,8 @@ architecture programs (Later).
 | `/tps`, `/mspt`, `/perf`, `/perfbar`, `/tpsbar`, `/rambar` unified with Sourby metrics — validation (bars need a real client) | docs/TODO.md:344; DEVELOPMENT-TASKS.md:69-75 | task_d4041de63b0b943a, task_9a9ecd24cb8988e5, task_e3a7ee2684706bc8 |
 | SourbyCraft/Aurora config renders correctly in the Spark web viewer; Spark Aurora metadata | docs/TODO.md:352; AURORA-ROADMAP.md:82 | task_4aefbb3aa94798c9 |
 | Expose region context to profiles where supported | DEVELOPMENT-TASKS.md:103 | task_c7b3c7df5a637f4e |
-| AWF dirty-age metric in `/perf awf` (byte-triggered commit is already opt-in) | docs/TODO.md:711 | — |
-| ASP→AWF port review leftovers (B76: PDC dropped by `.awf` conversion; service wiring untested on a server) | docs/TODO.md:687 | — |
+| AWF dirty-age metric in `/perf awf` (byte-triggered commit is already opt-in) — status 2026-10-25: `/perf awf` shows each storage's oldest dirty age (`5413a30`, PR #62; code written and statically reviewed, not built, not tested by the owner; unmeasured) | docs/TODO.md:711 | — |
+| ASP→AWF port review leftovers (B76: PDC dropped by `.awf` conversion; service wiring untested on a server) — status 2026-10-25: PR #62 stores a Slime world's PDC as `.awf` `plugin-data` and `/awf import` restores it (`5413a30`, `e7c8c57`; not built or tested); still open: exporting an existing world's PDC and the server wiring test | docs/TODO.md:687 | — |
 
 *Independence and migration refinements*
 
@@ -355,7 +360,7 @@ Not allocated to 47–50. Each needs an owner decision to enter a build.
 | Spark: adapter vs SourbySpark fork; GPL review if forking; `Aurora Engine` label in the viewer and viewer presentation | docs/TODO.md:591, 669; DEVELOPMENT-TASKS.md:105-106; AURORA-TASKS.md:164-166 | task_703368b1ec0dabeb, task_d6ee3f8300831c0d, task_4cacf56ef22d6a81, task_d5ae6e5c3d1f8078, task_1e43bee0af941492, task_233d8d2e9ae4d7d7, task_7397faaf95ffc79e | Only after the need is proven; the label needs an own viewer |
 | AWF MongoDB/MySQL backends | docs/TODO.md:698 | task_26ca07b825a3aff3 | New feature |
 | Existing executors under the Resource Governor | docs/TODO.md:699; AURORA-TASKS.md:242 | task_8449c0065dbdff0e, task_4da8e4a82c79f985 | Deferred; each already bounded (`executor-inventory.md`) |
-| `aurora.performance/chunk/memory/ai/world` namespaces | AURORA-TASKS.md:40-45; AURORA-ROADMAP.md:217-223 (docs/TODO.md:701 is already `[x]` "n/a until a key exists") | task_5e09e05139084368, task_d05ea20e8e79737e, task_765c1c3f627dceb6, task_1242fc6bffcc0d07, task_afe12657066c64f3, task_6ac4b9e8aeb98def, task_5f9120bec64abe72, task_663e4b3e5727b7f7, task_b7d57f3acb7e588a | Added only when a real key exists |
+| `aurora.performance/chunk/memory/ai/world` namespaces | AURORA-TASKS.md:40-45; AURORA-ROADMAP.md:217-223 (docs/TODO.md:701 is already `[x]` "n/a until a key exists") | task_5e09e05139084368, task_d05ea20e8e79737e, task_765c1c3f627dceb6, task_1242fc6bffcc0d07, task_afe12657066c64f3, task_6ac4b9e8aeb98def, task_5f9120bec64abe72, task_663e4b3e5727b7f7, task_b7d57f3acb7e588a | Added only when a real key exists. Status 2026-10-25: `aurora.world` exists since Build 48 (`aurora.world.command-blocks`, `aurora.world.tick-functions`); `performance`, `chunk`, `memory` and `ai` still have no key |
 | AWF point-in-time rollback operator command (store-level API exists) | docs/TODO.md:716 | — | New operator feature; owner decision on mapping |
 | Content-addressed object store shared by a template family | docs/TODO.md:718 | task_01c86f61c9f31e06 | New feature, needs a design |
 | Plugin cost attribution per region | docs/TODO.md:741 | task_34019620da849799 | Proposal |

@@ -29,9 +29,12 @@ public final class ResourceGovernor {
         /**
          * Async pathfinding solves ({@code perf/AsyncPathProcessor}): CPU-bound A* over an immutable
          * snapshot. Budget max(1, processors / 4) threads below normal priority and a queue of
-         * {@link #PATHFINDING_QUEUE}; not operator-configurable. A full queue is refused and the
-         * navigation runs its synchronous recompute instead, so rejections here are routine
-         * backpressure, counted once as the async path's {@code refused}.
+         * {@link #PATHFINDING_QUEUE}; not operator-configurable. The navigation asks for room
+         * before it builds a snapshot, so a full queue usually declines the offload there (the
+         * async path's {@code declined}, never offered to this lane); a submission the lane still
+         * rejects (the queue filled in between, or shutdown) is counted once as the async path's
+         * {@code refused}. Either way the navigation runs its synchronous recompute instead, so
+         * both are routine backpressure.
          */
         PATHFINDING("Pathfinding", "SourbyCraft-AsyncPath-");
 

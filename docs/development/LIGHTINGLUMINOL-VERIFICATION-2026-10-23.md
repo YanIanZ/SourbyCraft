@@ -82,6 +82,20 @@ The candidate, checksum and concise manifest are retained locally under `release
 worktree. They are not a published release. Pushing `hotfix/26.2-r48.3` can trigger automatic publication through
 `.github/workflows/build.yml`; that branch has not been pushed as part of this preparation.
 
+## Status 2026-10-25 (PR #62)
+
+- The relaxed thread checks verified here shipped from `v26.2-r49` (`guards/ThreadChecks` is first in that tag). No
+  `v26.2-r48.3` tag exists, so the hotfix candidate above was never published. The paragraph on pushing
+  `hotfix/26.2-r48.3` still matches the workflow: its `release` job runs for pushes to `26.2` and to
+  `hotfix/26.2-r*` branches and needs both the `build` and the `rebuild` job.
+- PR #62 (Build 50 branch; code written and statically reviewed, not built, not tested by the owner) changed
+  behaviour these runs covered: relaxed-hit log lines are rate-limited by base reason with bounded memory,
+  `TickGuard`'s LOG-mode line is rate-limited and off-tick-thread hits are counted once, repeating bridged async
+  timers keep at most one queued run and skip (not cancel) an overlap over `max-running-async-tasks-per-plugin`,
+  and MC 0084 again refuses the owning thread a reentrant entity add, remove or status change. The 31-marker
+  results above stay as Build 48 evidence for revisions `f44550cc` and `897075f7`; on the PR #62 tree they are
+  NEEDS RETEST. See [aurora-plugin-bridge.md](../architecture/aurora-plugin-bridge.md).
+
 ## Remaining owner acceptance
 
 Real plugins and players (including portal cancel/redirect and cross-world movement), representative Epic Skyblock

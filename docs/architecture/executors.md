@@ -1,5 +1,15 @@
 # Executor and common-pool audit
 
+> **Role:** an earlier executor and common-pool audit. **Status:** Historical. The current
+> inventory of SourbyCraft-owned executors, threads and shutdown hooks is
+> [executor-inventory.md](executor-inventory.md) §1 (re-measured 2026-10-25); "does a region
+> thread block on external I/O" is answered by [region-io-audit.md](region-io-audit.md)
+> (summary in executor-inventory.md §3). Status 2026-10-25 (PR #62):
+> the statements this audit made that the code no longer supports are marked inline below; the
+> findings are otherwise kept as recorded.
+>
+> Entry point: [docs/architecture/AURORA.md](AURORA.md).
+
 Covers task-matrix section E, "inventory all Sourby-owned executors" and "audit
 implicit common-pool usage", and the SourbyClip half of section L, "thread/executor
 ownership audit" and "concurrency/boundedness audit". PRD section 45 is the rule:
@@ -15,6 +25,12 @@ reaches them.
 No `ForkJoinPool.commonPool()`, no async call without an executor argument, and no
 parallel stream in any Sourby-owned source or patch.
 
+> Status 2026-10-25 (PR #62): this held for `dev.iyanz.*` but not for the spark class carried in
+> the tree (`me.lucko.spark...SamplerModule`), whose three sampler continuations ran on the common
+> pool. PR #62 passes spark's own async executor to them and adds `me/lucko/spark` to the policy's
+> roots; see [executor-inventory.md](executor-inventory.md) §2. Code written and statically
+> reviewed; not built; not tested by the owner.
+
 `scripts/concurrency_policy.py` enforces this going forward and is checked by
 `test_concurrency_policy.py`. It parses argument lists by balancing parentheses rather
 than matching lines, because these calls routinely span many lines and a line rule
@@ -26,10 +42,21 @@ CompletableFuture.supplyAsync(() -> {
 }, executor);          // the executor is four lines below the call
 ```
 
-Its source roots include `sourbyclip` deliberately. The first pass of this audit
-scoped the grep to the server package and silently skipped that project entirely.
+Its source roots included `sourbyclip` deliberately at the time: the first pass of this audit
+scoped the grep to the server package and silently skipped that project entirely. (Since then
+SourbyClip moved to the private `YanIanZ/SourbyClip` repository and is no longer a policy root;
+`scripts/concurrency_policy.py` says so beside `SOURCE_ROOTS`.)
 
-## Inventory
+## Inventory (as recorded by this audit; superseded)
+
+Superseded by [executor-inventory.md](executor-inventory.md) §1. What changed since this table:
+the two shutdown hooks it lists no longer exist (the only hook in `dev.iyanz.*` is the stall
+recorder's); `AsyncPathProcessor` no longer runs a refused solve on the caller (it runs on the
+Resource Governor's `PATHFINDING` lane with `AbortPolicy`, and a declined or refused offload runs
+the vanilla synchronous recompute on the mob's region thread); and SourbyCraft gained the three
+governed lanes, the startup-index pool, the `level.dat` writer, the stall recorder and its probe,
+the AWF maintenance, shutdown-deadline and Redis threads, the MultiProfile threads and the
+AbyssLink event loop. The two SourbyClip rows describe code that is no longer in this repository.
 
 | Executor / thread | Location | Bound | Named | Shutdown |
 |---|---|---|---|---|
@@ -42,7 +69,10 @@ scoped the grep to the server package and silently skipped that project entirely
 | `IPUtil` country lookup | `sourbyclip/.../IPUtil.java:19` | Fixed, one per API endpoint | No | `shutdownNow()` in `finally` |
 | `Sourbyclip.DOWNLOAD_EXECUTOR` | `sourbyclip/.../Sourbyclip.java:48` | **Unbounded** | No | **None** |
 
-Every Sourby server-side executor is bounded, named and explicitly shut down. The
+Every Sourby server-side executor is bounded, named and explicitly shut down. (Status
+2026-10-25: still bounded and named; three later daemon threads, the `level.dat` writer, the AWF
+shutdown-deadline timer and the Redis watchdog, are never shut down and end with the JVM; see
+[executor-inventory.md](executor-inventory.md) §1.) The
 naming matters beyond tidiness: the allocation ranking in a JFR recording attributes
 by thread name, so an unnamed pool appears as `pool-N-thread-M` with nothing to tie it
 to a subsystem.
@@ -52,6 +82,10 @@ to a subsystem.
 shuts the executor down in a `finally`. No defect.
 
 ## Finding — `DOWNLOAD_EXECUTOR` is unbounded and never shut down
+
+> Status 2026-10-25 (PR #62): SourbyClip now lives in the private `YanIanZ/SourbyClip`
+> repository, pinned by `build-data/private-toolchain.lock.json`. Whether this finding is still
+> open cannot be checked from this repository; it is tracked there.
 
 ```java
 public static final Executor DOWNLOAD_EXECUTOR = Executors.newCachedThreadPool();
@@ -83,10 +117,16 @@ to the download concurrency the bootstrap actually wants would close it.
   that it is bounded and owned.
 * Upstream executors were not inventoried. Paper, Canvas, Folia and Moonrise own many,
   and section E's "validate no region thread blocks on external I/O" is a separate
-  question this does not answer.
+  question this does not answer. (It is answered, as "not established; known not to hold in
+  every path", by [region-io-audit.md](region-io-audit.md) and the dated run it links; summary
+  in [executor-inventory.md](executor-inventory.md) §3.)
 * `AsyncPathProcessor`'s caller-runs rejection policy means a saturated queue executes
   the task on the submitting thread. Whether that thread can be a region thread, and
-  what that would cost, belongs to the open async-pathfinding audit.
+  what that would cost, belongs to the open async-pathfinding audit. — Status 2026-10-25:
+  no longer the policy. The pool is the governed `PATHFINDING` lane with `AbortPolicy`; the
+  navigation checks capacity before it builds a snapshot, and a declined or refused offload runs
+  the vanilla synchronous recompute on the mob's own region thread, the same cost as the feature
+  off (`perf/AsyncPathRecompute`, `perf/AsyncPathProcessor`).
 
 ## Measured lane load
 
@@ -123,4 +163,6 @@ Two caveats before anything is sized from this. Twenty-three of fifty threads la
 mapping only properly covers the lanes that are busy. And `CHUNK_WORKER` counts four
 threads here because the classifier folds `Worker-Main` in with `Paper Common Worker` —
 defensible, since Mojang's background executor does chunk work, but they are arguably two
-lanes and should be split before the number is used for tuning.
+lanes and should be split before the number is used for tuning. (Since split: `Worker-Main`
+now maps to its own `BACKGROUND` lane in `execution/ExecutionLane`. The measurement above was
+taken before the split and was not repeated.)

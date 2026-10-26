@@ -56,16 +56,16 @@ class BootstrapPluginSettingsTest {
 
     @Test
     void explicitTrueAndFalseInTheGroupTable() throws IOException {
-        assertTrue(on("[protocollib]\nauto-provision = true\n", "protocollib", false));
-        assertFalse(on("[protocollib]\nauto-provision = false\n", "protocollib", true));
+        assertTrue(on("[plugins.protocollib]\nauto-provision = true\n", "protocollib", false));
+        assertFalse(on("[plugins.protocollib]\nauto-provision = false\n", "protocollib", true));
     }
 
     @Test
     void groupsAreIndependent() throws IOException {
-        String body = "[protocollib]\nauto-provision = false\n\n[viaversion]\nauto-provision = true\n";
+        String body = "[plugins.protocollib]\nauto-provision = false\n\n[plugins.viaversion]\nauto-provision = true\n";
         assertFalse(on(body, "protocollib", true));
         assertTrue(on(body, "viaversion", false));
-        String reversed = "[viaversion]\nauto-provision = false\n[protocollib]\nauto-provision = true\n";
+        String reversed = "[plugins.viaversion]\nauto-provision = false\n[plugins.protocollib]\nauto-provision = true\n";
         assertTrue(on(reversed, "protocollib", false));
         assertFalse(on(reversed, "viaversion", true));
     }
@@ -80,8 +80,8 @@ class BootstrapPluginSettingsTest {
 
     @Test
     void dottedRootKeyIsAccepted() throws IOException {
-        assertFalse(on("protocollib.auto-provision = false\n", "protocollib", true));
-        assertTrue(on("protocollib.auto-provision = true\n", "protocollib", false));
+        assertFalse(on("plugins.protocollib.auto-provision = false\n", "protocollib", true));
+        assertTrue(on("plugins.protocollib.auto-provision = true\n", "protocollib", false));
     }
 
     @Test
@@ -101,7 +101,7 @@ class BootstrapPluginSettingsTest {
     void whitespaceAndCommentsAreTolerated() throws IOException {
         String body = "# header comment\n  [ protocollib ]   # table comment\n\t auto-provision\t=\t false   # off\n";
         assertFalse(on(body, "protocollib", true));
-        assertTrue(on("[protocollib]\n# auto-provision = false\nauto-provision=true\n", "protocollib", false));
+        assertTrue(on("[plugins.protocollib]\n# auto-provision = false\nauto-provision=true\n", "protocollib", false));
     }
 
     @Test
@@ -177,7 +177,7 @@ class BootstrapPluginSettingsTest {
     @Test
     void theShippedDefaultNamesTheSameGroupsTheCodeReads() throws IOException {
         // Both documented groups resolve independently from one realistic file.
-        String body = "[misc]\nx = 1\n\n[protocollib]\nauto-provision = true\n\n[viaversion]\nauto-provision = true\n";
+        String body = "[misc]\nx = 1\n\n[plugins.protocollib]\nauto-provision = true\n\n[plugins.viaversion]\nauto-provision = true\n";
         assertEquals(true, on(body, "protocollib", false));
         assertEquals(true, on(body, "viaversion", false));
     }

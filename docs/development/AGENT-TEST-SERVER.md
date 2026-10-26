@@ -42,7 +42,7 @@ python3 $S start --name perf-1 --exclusive   # waits for both slots, blocks new 
 python3 $S stop --name my-check             # console stop; kill after --timeout (180 s)
 python3 $S kill --name my-check             # crash test: SIGKILL, no console stop, no save
 python3 $S start --name my-check-2 --world-from my-check   # boot again over my-check's world
-python3 $S start --name awf-1 --aurora-toml awf.toml       # sourbycraft_config/aurora.yml (e.g. AWF worlds)
+python3 $S start --name awf-1 --aurora-toml awf.toml       # written as sourbycraft_config/aurora.toml; converted to aurora.yml at boot (e.g. AWF worlds)
 python3 $S start --name tp-1 --config-file plugins/SourbyCraft-Test-Plugin.jar=test-plugin/build/libs/test-plugin-1.0.0.jar \
     --jvm-property sourby.testplugin.probes=true    # plugin jar (bytes, <= 8 MiB, run.json keeps its sha256) + test-plugin probes
 python3 $S start --name ssb-1 --config-file plugins/SuperiorSkyblock2.jar=/path/SuperiorSkyblock2-2026.3.jar \
@@ -70,10 +70,18 @@ reached ready, jar SHA-256). It takes a free slot like `start`, is refused while
 the new boot is `ready` **or has ended** (a boot that dies is data, exit 1 unless ready). The jar provenance in
 `run.json` is recomputed from the directory's jar.
 
+**Configuration files the harness writes.** The harness still writes TOML: `sourbycraft_config/sourbycraft_global_config.toml`
+(its own default in the Build 49 key layout: plugin provisioning and the updater off, or the `--global-toml` file
+instead) and, with `--aurora-toml` or a `--world-from` source, `sourbycraft_config/aurora.toml`. It writes no YAML.
+On the first boot the server converts each `*.toml` to its `*.yml` (`ConfigFormatMigration`, values and comments
+kept, the old file renamed `*.toml.migrated`); the early plugin-provisioning reader reads the `.toml` because no
+`.yml` exists yet. A `--global-toml` file that uses pre-49 key names is rewritten by the one-time
+`ConfigMigration` at boot; since Build 50 an old name the rewrite cannot reach is ignored with a WARN.
+
 `start --auto-update KEY=VALUE` (keys: `apply_mode`, `restart_mode`, `restart_delay_seconds`, `repo`, `channel`,
-`check_interval_minutes`, `allow_prerelease`; written to the `[updater]` table under their Build 49 names, e.g.
-`apply-mode`, `repository`) enables the auto-updater, which the harness otherwise switches off. It cannot be
-combined with `--global-toml`.
+`check_interval_minutes`, `allow_prerelease`; written to the `[updater]` table of that TOML under their Build 49
+names, e.g. `apply-mode`, `repository`) enables the auto-updater, which the harness otherwise switches off. It
+cannot be combined with `--global-toml`.
 It is refused unless the start also passes `--jvm-property sourbycraft.update.api-base=http://127.0.0.1:PORT`
 (a loopback fake release server; the updater refuses any non-loopback value) and
 `--jvm-property sourbycraft.update.release-key-file=FILE` (a release public key, so signature and manifest checks
@@ -85,9 +93,13 @@ test-only (`UpdateOverrides`, `ReleaseSignatureVerifier.resolve`), unset by defa
 `--world-from RUN` copies a finished (exited/failed, lock released) run's world directories —
 the `level-name` directory and its `_nether`/`_the_end` siblings, nothing else — into the new run,
 so a restart-persistence or post-crash boot reads that run's saves; the source is never modified
-and `run.json` `world_from` records its name, exit code, stop reason, git head and jar hash. The
-source's `sourbycraft_config/aurora.yml` is carried over unless `--aurora-toml` is given, so a
-world stored through AWF comes back through AWF. `kill` exits 0 when the server was SIGKILLed on
+and `run.json` `world_from` records its name, exit code, stop reason, git head and jar hash. Unless
+`--aurora-toml` is given, the harness carries over the source's `sourbycraft_config/aurora.toml`
+(`Harness.aurora_config`), meant to bring a world stored through AWF back through AWF. **Known gap
+(2026-10-25, static reading):** a source that booted at least once on Build 49 or later had its `aurora.toml`
+converted to `aurora.yml` and renamed `aurora.toml.migrated`, so there is no `aurora.toml` left to carry over and
+the new run starts without the source's Aurora settings (a world stored through AWF does not come back through
+AWF). Pass `--aurora-toml` again for such a run until the harness reads the source's `aurora.yml`. `kill` exits 0 when the server was SIGKILLed on
 request (`stop_reason` "killed on request") and the lock was released.
 
 ### Files inside a plugin's data folder (`--plugin-file`)

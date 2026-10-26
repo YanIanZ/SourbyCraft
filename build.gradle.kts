@@ -285,7 +285,6 @@ subprojects {
         }
         mavenCentral()
         maven(paperMavenPublicUrl)
-        maven { url = uri("${rootDir}/sourby-maven") }
     }
 
     dependencies {

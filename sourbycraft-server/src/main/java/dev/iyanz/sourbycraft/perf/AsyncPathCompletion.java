@@ -22,12 +22,30 @@ public final class AsyncPathCompletion {
      */
     public static <O> void deliver(final OwnerHandoff<O> owner, final Consumer<? super O> apply,
                                    final Runnable release) {
+        deliver(owner, apply, release, () -> {});
+    }
+
+    /**
+     * As {@link #deliver(OwnerHandoff, Consumer, Runnable)}, and also says when the result never reached the owner.
+     *
+     * @param retired runs, right after {@code release}, only when {@code apply} never will: in the handoff's
+     *                retirement callback (the owner went away after admission) or when the handoff refused the
+     *                work. At most once, never together with {@code apply}. It runs in the retirement context
+     *                ({@link OwnerHandoff#submit}) or on the thread that called this method, so it may only count or release
+     *                bookkeeping: no world, chunk or entity access and no blocking.
+     */
+    public static <O> void deliver(final OwnerHandoff<O> owner, final Consumer<? super O> apply,
+                                   final Runnable release, final Runnable retired) {
         final Admission admission = owner.submit(delivered -> {
             release.run();
             apply.accept(delivered);
-        }, release);
+        }, () -> {
+            release.run();
+            retired.run();
+        });
         if (admission == Admission.REJECTED) {
             release.run();
+            retired.run();
         }
     }
 }

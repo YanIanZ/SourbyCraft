@@ -5,6 +5,22 @@ Claude. Tidak menjalankan Gradle, unit test, boot, atau benchmark. Temuan di baw
 belum merupakan reproduksi runtime; perbaikan dan pengujian regresi masih terbuka.
 Hasil tes sebelumnya di SPEC/TODO tidak memvalidasi temuan atau perubahan ini.
 
+## Status 2026-10-25 (PR #62)
+
+Perubahan PR #62 di bawah ini: kode sudah ditulis dan direview statis; belum dibangun; belum diuji
+owner. Tidak ada tes baru. Tidak ada di build yang sudah dipublikasikan (tag prerelease `v26.2-r50`
+dibuat sebelum PR #61 dan #62). Detail: [aurora-world-fabric.md](../architecture/aurora-world-fabric.md)
+bagian "Build 50 changes" dan [BUILD-50-PM-MATRIX.md](../releases/BUILD-50-PM-MATRIX.md). Tabel 2026-10-07
+di bawah tetap sebagai riwayat; baris ini menggantikan labelnya yang sudah usang.
+
+| Temuan | Status 2026-10-25 |
+| --- | --- |
+| A1 world PDC | `convertSlime` kini menyimpan `BukkitValues` dunia Slime di kunci metadata `.awf` opsional `plugin-data` (base64 NBT terkompresi gzip; hanya bila muat dalam satu nilai metadata, 65.535 karakter, bila tidak disebut di WARN konversi), dan import `.awf` (`AuroraWorlds.importWorld`, `/awf import`) menggabungkannya ke PDC dunia baru seperti `importSlime` (PR #62; belum ada tes). Koreksi tabel 2026-10-07: PDC dunia tersimpan ke `dimensions/<dim>/data/paper/persistent_data_container.dat` hanya lewat `saveLevelData` dunia itu, yaitu saat stop bersih dan saat dunia di-unload, bukan ke `level.dat` pada save berikutnya; autosave, `save-all` dan `/awf save` tidak menulisnya (lihat [persistence-save-paths.md](../architecture/persistence-save-paths.md)). Masih terbuka: `/awf export` dunia yang sudah ada tidak membawa PDC-nya. Spawn di luar batas dunia pada file Slime, dan pada file `.awf` yang diekspor sebelum Build 50, kini dibuang dan dicatat di WARN, tidak menggagalkan import. |
+| A3 lease Redis | Pelepasan lease setelah close tercakup oleh `AwfEngineStoreLifecycleTest.anUnpreparedStoreReleasesItsLease` (`redis-server` nyata: prepare mengambil lease, unprepare melepasnya) dan run backend-failure 2026-10-14 (stop bersih: 0 lock key); label "tidak diuji ulang" sudah usang. Sejak PR #62 `delete`/`retire` Redis masing-masing satu skrip yang ditolak selama masih ada lease. |
+| A5 | Pembuatan dunia bertahap sudah di-commit sebagai MC feature patch 0029 dan Paper feature patch 0014 (ada di tag `v26.2-r50`); label "belum di-commit, belum CI" sudah usang. Buktinya tetap run lokal; tidak ada tes server di CI. |
+| Unknown world flags (tabel "Perbandingan jalur format") | Sejak PR #62 setiap bit flag chunk v13 yang tidak dikenal disebut sebagai `chunk-flags.0x<bit>` dalam satu WARN "did not keep" per import/konversi; payload-nya tetap dilewati. |
+| Dokumentasi (bagian "Dokumentasi yang perlu diperbarui bersama fix") | Bagian "Slime import" di `aurora-world-fabric.md` kini menyebut v13 zlib atau zstd dan kedua layout entitas beserta tesnya (2026-10-25). |
+
 ## Status temuan 2026-10-07
 
 Sumber: [AGENT-COORDINATION.md](../../AGENT-COORDINATION.md) ("Aurora deepening round", agent "awf"),

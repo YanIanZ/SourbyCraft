@@ -14,6 +14,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>The fence is a per-profile counter that only increases. Expiry uses {@link System#nanoTime}, so
  * it is immune to wall-clock jumps; a claim that expired is reclaimed with a higher fence and the
  * previous holder's {@link #validate} fails.</p>
+ *
+ * <p>The counters live in memory and start at 1 in every process, so each instance has a random
+ * {@link #incarnation()}: recovery does not compare a fence a journal recorded before a restart with
+ * one issued after it.</p>
  */
 public final class LocalProfileOwnership implements ProfileOwnership {
 
@@ -23,6 +27,7 @@ public final class LocalProfileOwnership implements ProfileOwnership {
     private final ConcurrentHashMap<UUID, Long> fences = new ConcurrentHashMap<>();
     private final long leaseNanos;
     private final String nodeId;
+    private final String incarnation = "local:" + UUID.randomUUID();
 
     public LocalProfileOwnership(final String nodeId, final int leaseSeconds) {
         this.nodeId = Objects.requireNonNull(nodeId, "nodeId");
@@ -120,6 +125,13 @@ public final class LocalProfileOwnership implements ProfileOwnership {
         return lease.claim();
     }
 
+    /** Claims live in this process only, so a holder under another node id is the only foreign one. */
+    @Override
+    public CompletableFuture<OwnerClaim> foreignHolder(final UUID profileId) {
+        final OwnerClaim holder = holderNow(profileId);
+        return CompletableFuture.completedFuture(holder == null || holder.node().equals(this.nodeId) ? null : holder);
+    }
+
     /** Every live lease, for admin diagnostics. */
     public Map<UUID, OwnerClaim> live() {
         final Map<UUID, OwnerClaim> live = new java.util.LinkedHashMap<>();
@@ -128,6 +140,11 @@ public final class LocalProfileOwnership implements ProfileOwnership {
             if (lease.expiresAtNanos() - now > 0L) live.put(id, lease.claim());
         });
         return live;
+    }
+
+    @Override
+    public String incarnation() {
+        return this.incarnation;
     }
 
     @Override

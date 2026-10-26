@@ -267,10 +267,16 @@ public final class StallRecorder implements AutoCloseable {
         }
     }
 
-    /** Shutdown hook body: one final dump when a stall is open. Public for tests. */
+    /**
+     * Shutdown hook body: one final dump when a stall is open. Once the recorder is {@linkplain #close
+     * closed} (the hook was kept for this dump), the dumper is closed afterwards. Public for tests.
+     */
     public void onShutdown() {
         final Open current = this.open;
         if (current == null || this.finalWritten) {
+            if (this.closed) {
+                this.closeDumper();
+            }
             return;
         }
         this.finalWritten = true;
@@ -279,6 +285,10 @@ public final class StallRecorder implements AutoCloseable {
                 Kind.FINAL, current.lastStalled(), this.nanoClock.getAsLong() - current.startNanos(), current.file()));
         } catch (final Throwable ignored) {
             // The JVM is going down; there is nowhere left to report this.
+        } finally {
+            if (this.closed) {
+                this.closeDumper();
+            }
         }
     }
 
@@ -293,6 +303,11 @@ public final class StallRecorder implements AutoCloseable {
         return current == null ? 0 : current.dumps();
     }
 
+    /**
+     * Stops the watcher thread and closes the dumper (for {@link StallDumper}, its probe thread), unless a
+     * stall is still open: then the shutdown hook stays registered and closes the dumper after the final
+     * dump ({@link #onShutdown}).
+     */
     @Override
     public synchronized void close() {
         this.closed = true;
@@ -318,6 +333,19 @@ public final class StallRecorder implements AutoCloseable {
             }
         } else if (registered != null) {
             this.hook = registered;
+            return;
+        }
+        this.closeDumper();
+    }
+
+    /** Closes the dumper when it holds resources; idempotent for {@link StallDumper}. */
+    private void closeDumper() {
+        if (this.dumper instanceof AutoCloseable closeable) {
+            try {
+                closeable.close();
+            } catch (final Exception failure) {
+                this.safe(this.warn, "stall recorder could not close its dumper: " + failure);
+            }
         }
     }
 

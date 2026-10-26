@@ -68,6 +68,10 @@ by elapsed ticks and spawn completion after an ownership loss. A patch-shape tes
 pins the feature path, subject and hooks, and the removal of the dead region-local
 `getTraderData()` / `RegionizedWorldData.wanderingTraderData`.
 
+Status 2026-10-25: patch 0068 is in every published build since `v26.2-r48`; those builds passed CI's
+build job, which applies the patches and runs `:sourbycraft-server:test` (this suite included). PR #62
+does not change this feature. What follows is still open and belongs to the owner.
+
 The PM must apply patches, compile and run server tests, then verify multi-region
 worlds, merges/splits, join/leave/death and dimension transfers during handoff,
 gamerule changes, plugin spawn cancellation/teleports, boundary footprints,

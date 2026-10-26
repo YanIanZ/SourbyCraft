@@ -86,9 +86,10 @@ Use `java -jar JAR --sourbyclip-info` to inspect launcher identity without start
 ## Local terminal/toolchain upgrade candidates — 2026-10-05
 
 Historical candidate record: at 2026-10-05 the pins selected Patcher 3.0.0 and Clip 3.0.26.
-As of the SEC-5 integration, Clip 3.1.2 is selected; the following upgrades
-are implemented in local private commits and published to Maven Local for review/testing.
-Their private commits have not been pushed or selected by the public revision lock.
+At the SEC-5 integration (2026-10-20) Clip 3.1.2 was selected (it contains the Clip 3.1.1 work below); Clip
+3.1.3 is selected since 2026-10-22 (last section). The table records the candidates as they were then: local
+private commits published to Maven Local for review/testing, not pushed and not selected by the public revision
+lock at that time. Patcher 3.1.0 is still not selected (the pin is 3.0.0).
 
 | Tool | Candidate | Local revision | JAR SHA-256 |
 | --- | --- | --- | --- |
@@ -149,7 +150,8 @@ with these keys. Credentials are not persisted in checkouts.
 
 Private build inputs, Gradle caches and intermediate server/test-plugin JARs are not uploaded
 to public workflow artifacts. Build, tests, boot/JFR and Docker checks share one runner. Only
-the existing release branch publishes a server JAR after those checks pass. Diagnostic logs/JFR
+pushes to the release branch `26.2` (and `hotfix/26.2-r<N>.<M>` branches) publish a server JAR, after those
+checks and the independent rebuild pass; `release/26.2-canvas` was retired on 2026-10-21. Diagnostic logs/JFR
 remain available as workflow artifacts. Removing old artifacts/history is outside this migration.
 
 ## Bootstrap qualification
@@ -172,8 +174,9 @@ Clip 3.1.2 is selected by `gradle.properties` and the private revision lock:
 That private commit removes geo-IP lookup from download-context selection. The source
 checkout HEAD and installed Maven Local artifact were verified in this session;
 Patcher remains 3.0.0. Terminal controls, worker lifecycle and prepare mode from
-Clip 3.1.1 are included. These launcher changes are RESTART_REQUIRED. Packaging,
-launcher probes and isolated boot evidence are recorded in `AGENT-COORDINATION.md`.
+Clip 3.1.1 are included. These launcher changes are RESTART_REQUIRED. The packaging,
+launcher-probe and isolated boot evidence of that day was kept in the untracked `AGENT-COORDINATION.md`
+and is not retained in the repository. Superseded by the 3.1.3 re-pin below.
 
 ## Clip 3.1.3 re-pin — 2026-10-22
 
@@ -182,6 +185,14 @@ Clip 3.1.3 (bounded transfers: whole-transfer deadline, byte cap, bounded single
 `e5de0f4ba2d10fc81e95b0d23069b3b9d59d73bf` (local branch `feat/transfer-deadline` in the private
 clone), SHA-256 `56d317b81044d8d618901ef46d5b418de59ffdc9bb8940b6745aa1a732c4435e`, protocol 1
 (unchanged, so no Patcher release). The jar hash was identical across two local clean builds;
-cross-host reproduction is unverified. **Until that commit is pushed to `YanIanZ/SourbyClip`, CI
-cannot check out the pinned revision and the build job fails at the private-toolchain step.**
+cross-host reproduction is unverified. The 2026-10-22 text warned that CI would fail at the private-toolchain
+step until the commit was pushed to `YanIanZ/SourbyClip`.
+
+**Status 2026-10-25: pushed and CI-built.** Tags `v26.2-r48`, `v26.2-r49`, `v26.2-r49.1` and `v26.2-r50` all
+carry `clipVersion=3.1.3` and lock revision `e5de0f4b`. A tag is created only by the release job, which `needs`
+the build and rebuild jobs; both check out the private SourbyClip at the lock revision (`build.yml`, "Read approved
+private revisions" and "Checkout private SourbyClip") and publish it with `private_toolchain.py --publish`, which
+refuses any other revision. So the pinned commit is reachable by CI and was built there. No CI run id is recorded
+in the repository (owner to add one if wanted). Still open for 3.1.3: qualification on a remote host and under
+fault injection (slow, stalled and oversized transfers against the bounded-transfer limits).
 

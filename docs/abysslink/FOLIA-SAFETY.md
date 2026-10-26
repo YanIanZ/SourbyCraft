@@ -24,4 +24,4 @@ Bound pending work, cache, frame lengths and writes. The v1 backend only echoes 
 
 Do not add blocking network work to region/boot/shutdown threads. If sharing an executor, account for its capacity and lifecycle; the existing VirtualExecutor is a 64-task administrative pool. Stop reconnect scheduling and owned I/O resources on shutdown. World unload/retirement must not wait for remote replies.
 
-Metric snapshots may be read without touching world state. LongAdder sums are independent diagnostic observations, not an atomic state-machine check. Validation remains tracked in [TESTING.md](TESTING.md) and the [workflow report](../../.workflow/ultracode/abysslink-v1/final-report.md).
+Metric snapshots may be read without touching world state. LongAdder sums are independent diagnostic observations, not an atomic state-machine check. Validation status and evidence are tracked in [TESTING.md](TESTING.md).

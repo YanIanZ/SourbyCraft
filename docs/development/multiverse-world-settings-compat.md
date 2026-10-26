@@ -46,3 +46,18 @@ asynchronously`), so on a fresh server Multiverse reports `Failed to load worlds
 UNLOADED. Worlds whose Multiverse config already stores a spawn (bytecode: `getSpawnLocation()` non-null and not
 `NullSpawnLocation`) skip that read. Relaxing region ownership for startup block reads is a separate decision (it
 would read and possibly load chunks off any region); Multiverse-Core declares no `folia-supported`.
+
+## Status 2026-10-25 (PR #62)
+
+The runs above used v26.2-r48.1 and a jar of that time, whose ownership checks behave like today's
+`aurora.bridge.thread-checks = enforced`. Since Build 49 the checks are a setting; with `aurora.bridge.mode = safe`
+the default is `relaxed` (owner decision 2026-10-22, unsafe and unqualified).
+
+- *Remaining limit:* the startup block read is refused only with `enforced` (or `bridged`, since plugin enable is
+  not a bridged body) or with the bridge off. Under `relaxed` the ownership check does not refuse it: the read
+  proceeds on the server thread and is counted as a relaxed hit outside bridged bodies. Whether Multiverse's import
+  then succeeds was not tested.
+- *Decision table, "any other thread, scheduler not started":* since PR #62 `WorldSettingsOwner.ensure` asks
+  `guards/ThreadChecks.refuse` before refusing. Under `relaxed` (or `bridged` inside a bridged body) the change
+  proceeds and is counted; `enforced` still throws the `IllegalStateException` and logs. Code written and statically
+  reviewed; not built; not tested by the owner. `WorldSettingsOwnerTest` was not extended (unit tests run enforced).

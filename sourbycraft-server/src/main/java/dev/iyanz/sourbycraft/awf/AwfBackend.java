@@ -44,8 +44,10 @@ public interface AwfBackend {
 
     /**
      * Shutdown has begun: bound every later backend call by {@code budget}'s deadline, and when it
-     * passes stop background work (lease renewal) and abort calls in flight. Default: nothing (the
-     * FILE backend's commits are local and are bounded by the lock and attempt checks around them).
+     * passes stop background work (lease renewal) and abort calls in flight. Default: nothing. The
+     * FILE backend's commits are local: the lock waits and new commit attempts around them are
+     * bounded by the budget, but a commit that is already writing (its files and their fsync) is
+     * not interrupted and can run past the deadline.
      */
     default void beginShutdown(final AwfShutdownBudget budget) {
     }

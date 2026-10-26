@@ -16,8 +16,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * {@code canvas.broadcasting.receiver} renamed to {@code aurora.broadcasting.receiver}: holders of the old node still
- * receive engine broadcasts until Build 50, with one deprecation line per player.
+ * {@code canvas.broadcasting.receiver} renamed to {@code aurora.broadcasting.receiver}: since Build 50 holders of only
+ * the old node receive no engine broadcasts, with one line per player saying the old node is ignored.
  */
 @ResourceLock("dev.iyanz.aurora.engine.util.LegacyNames")
 class BroadcastPermissionTest {
@@ -51,19 +51,19 @@ class BroadcastPermissionTest {
     }
 
     @Test
-    void anExplicitGrantOfTheOldNodeStillReceivesAndWarnsOncePerPlayer() {
+    void anExplicitGrantOfTheOldNodeNoLongerReceivesAndWarnsOncePerPlayer() {
         final Player alice = player("alice", false, true, true);
         final Player bob = player("bob", false, true, true);
 
-        assertTrue(BroadcastPermission.receives(alice));
-        assertTrue(BroadcastPermission.receives(alice));
-        assertTrue(BroadcastPermission.receives(bob));
+        assertFalse(BroadcastPermission.receives(alice));
+        assertFalse(BroadcastPermission.receives(alice));
+        assertFalse(BroadcastPermission.receives(bob));
 
         assertEquals(2, this.warnings.size(), this.warnings.toString());
         assertTrue(this.warnings.getFirst().contains("canvas.broadcasting.receiver"));
         assertTrue(this.warnings.getFirst().contains("aurora.broadcasting.receiver"));
         assertTrue(this.warnings.getFirst().contains("alice"));
-        assertTrue(this.warnings.getFirst().contains("Build 50"));
+        assertTrue(this.warnings.getFirst().contains("ignored since Build 50"));
     }
 
     @Test

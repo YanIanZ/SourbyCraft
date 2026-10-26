@@ -18,7 +18,10 @@ import org.slf4j.LoggerFactory;
  *
  * <p>Owner, in order: the shutdown thread (owns everything once regions stop); once regions tick, only the global
  * tick thread (unchanged, {@link RegionOwnership#ensureGlobalTickThread}); before that, only the server's running
- * thread. Anything else is refused with the same {@link IllegalStateException} and message.
+ * thread. Anything else is refused with the same {@link IllegalStateException} and message, unless
+ * {@code aurora.bridge.thread-checks} relaxes the check ({@link ThreadChecks#refuse}): then the hit is counted and
+ * logged like any other relaxed ownership check and the change proceeds, as {@code TickGuard.ensureGlobalOrStartup}
+ * does for the same startup rule.
  */
 public final class WorldSettingsOwner {
 
@@ -49,7 +52,7 @@ public final class WorldSettingsOwner {
 
     /**
      * Throws {@link IllegalStateException} with {@code reason} unless the current thread owns server-wide world
-     * settings now.
+     * settings now or the region-ownership checks are relaxed for it ({@link ThreadChecks#refuse}).
      */
     public static void ensure(final String reason) {
         final RegionOwnership ownership = RegionOwnership.current();
@@ -61,6 +64,9 @@ public final class WorldSettingsOwner {
             }
             case GLOBAL_TICK_REQUIRED -> ownership.ensureGlobalTickThread(reason);
             case REFUSED -> {
+                if (!ThreadChecks.refuse(reason)) {
+                    return;
+                }
                 LOGGER.error("Thread failed startup thread check: {}, thread={}", reason, Thread.currentThread().getName(), new Throwable());
                 throw new IllegalStateException(reason);
             }

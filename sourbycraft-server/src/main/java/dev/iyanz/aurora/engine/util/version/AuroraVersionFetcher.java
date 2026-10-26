@@ -44,6 +44,9 @@ public class AuroraVersionFetcher implements VersionFetcher {
 
     private static final AtomicBoolean USE_CACHE = new AtomicBoolean(true);
 
+    /** What replaces a JVM argument's value in the version output ({@link #redactArgument}). */
+    static final String REDACTED = "***";
+
     @Override
     public long getCacheTime() {
         if (!USE_CACHE.get()) {
@@ -143,7 +146,9 @@ public class AuroraVersionFetcher implements VersionFetcher {
         final String osName = System.getProperty("os.name");
         final String osVersion = System.getProperty("os.version");
         final String osArch = System.getProperty("os.arch");
-        final List<String> inputArguments = ManagementFactory.getRuntimeMXBean().getInputArguments();
+        // Shown to every sender of /bukkit:version (default permission true): values may hold
+        // secrets (-D tokens, agent options) and host paths, so only the option names are shown.
+        final List<String> inputArguments = redactArguments(ManagementFactory.getRuntimeMXBean().getInputArguments());
 
         builder.append(text("Java ", PRIMARY));
         builder.append(text(javaSpecVersion, INFORMATION));
@@ -168,7 +173,7 @@ public class AuroraVersionFetcher implements VersionFetcher {
                     text(" (", PRIMARY),
                     text(osArch, INFORMATION),
                     text(")\n", PRIMARY),
-                    text("FLAGS:", PRIMARY),
+                    text("FLAGS (values hidden):", PRIMARY),
                     formatList(inputArguments),
                     text("\nClick to copy flags to clipboard", PRIMARY)
                 )
@@ -200,6 +205,33 @@ public class AuroraVersionFetcher implements VersionFetcher {
     /** The commit page in {@link #REPOSITORY}, or the repository itself when the commit is unknown. */
     static String commitUrl(final @Nullable String commit) {
         return commit == null || commit.isBlank() ? REPOSITORY : REPOSITORY + "commit/" + commit;
+    }
+
+    /** The JVM arguments with every value replaced by {@link #redactArgument}, in order. */
+    static List<String> redactArguments(final List<String> arguments) {
+        return arguments.stream().map(AuroraVersionFetcher::redactArgument).toList();
+    }
+
+    /**
+     * One JVM argument with its value replaced by {@code ***}, keeping the option name: agent options
+     * ({@code -javaagent:}, {@code -agentpath:}, {@code -agentlib:}) and {@code -X<name>:} options keep
+     * the text up to the first {@code :}; every other option keeps the text up to the first {@code =}
+     * ({@code -Dkey=***}, {@code -XX:Name=***}, {@code --add-opens=***}). Options without a separated
+     * value ({@code -XX:+UseG1GC}, {@code -Xmx4G}, {@code -Dflag}) are kept, and an argument that is not
+     * an option (the value of a preceding option, such as {@code --module-path <dir>}) is replaced whole.
+     */
+    static String redactArgument(final String argument) {
+        if (!argument.startsWith("-")) {
+            return REDACTED;
+        }
+        final boolean colonValue = argument.startsWith("-javaagent:") || argument.startsWith("-agentpath:")
+            || argument.startsWith("-agentlib:") || (argument.startsWith("-X") && !argument.startsWith("-XX:"));
+        final int colon = colonValue ? argument.indexOf(':') : -1;
+        if (colon >= 0) {
+            return argument.substring(0, colon + 1) + REDACTED;
+        }
+        final int equals = argument.indexOf('=');
+        return equals < 0 ? argument : argument.substring(0, equals + 1) + REDACTED;
     }
 
     private Status computeStatus() {

@@ -4,6 +4,7 @@ import dev.iyanz.sourbycraft.SourbyCraftColors;
 import dev.iyanz.sourbycraft.brand.BuildInfo;
 import dev.iyanz.sourbycraft.update.AutoUpdateSettings;
 import dev.iyanz.sourbycraft.update.SourbyUpdater;
+import dev.iyanz.sourbycraft.update.UpdateApplier;
 import dev.iyanz.sourbycraft.update.UpdateRollbackGuard;
 import dev.iyanz.sourbycraft.util.VirtualExecutor;
 import net.kyori.adventure.text.Component;
@@ -12,8 +13,11 @@ import org.bukkit.command.CommandSender;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -27,13 +31,19 @@ import static net.kyori.adventure.text.Component.text;
  *   <li>{@code /update} / {@code /update check} — run one check now with the CONFIGURED apply
  *       mode (so an auto server downloads+applies, a notify server just reports).</li>
  *   <li>{@code /update apply} — force a full download + verify + swap + self-restart regardless
- *       of the configured mode. This is the "update me NOW" button.</li>
- *   <li>{@code /update status} — running build, channel/mode config, staged/applied markers and
- *       the rollback-guard state.</li>
+ *       of the configured mode, also for a release whose earlier apply failed. This is the "update me
+ *       NOW" button.</li>
+ *   <li>{@code /update status} — running build, channel/mode config, staged/applied/apply-failed
+ *       markers and the rollback-guard state.</li>
  *   <li>{@code /update resume} — lift a rollback hold ({@link UpdateRollbackGuard#clearHold()}).</li>
  * </ul>
  *
- * <p>The check does network + disk I/O, so it runs off-thread; the result goes back to the sender
+ * <p>A check shares {@link SourbyUpdater#tryCheck}'s guard with the scheduled checks: while one runs,
+ * {@code /update} answers that a check is already running instead of starting a second download.
+ * While the server is stopping or after a failed startup
+ * ({@link dev.iyanz.sourbycraft.core.AuroraRuntime#stopping()}), check and apply start nothing.
+ *
+ * <p>The check and the status read do network or disk I/O, so they run off-thread; the result goes back to the sender
  * through {@link SourbyReply#run}, the Folia-correct hop for that sender (a command block's reply
  * writes block-entity state and must run on the block's region thread — a direct
  * {@code sendMessage} from the worker throws there). The constructor seams exist for the test
@@ -79,6 +89,11 @@ public class UpdateCommand extends Command {
     }
 
     private void runCheck(CommandSender s, SourbyUpdater.@org.jetbrains.annotations.Nullable ApplyMode override) {
+        if (dev.iyanz.sourbycraft.core.AuroraRuntime.stopping()) {
+            // No download, stage or swap starts while shutdown is in flight or after startup failed.
+            s.sendMessage(text("Update check not started: the server is stopping or failed to start.", SourbyCraftColors.DANGER));
+            return;
+        }
         SourbyUpdater updater = updaterSource.get();
         if (updater == null) {
             s.sendMessage(text("Updater unavailable (config module not loaded).", SourbyCraftColors.DANGER));
@@ -86,16 +101,23 @@ public class UpdateCommand extends Command {
         }
         s.sendMessage(text(override == SourbyUpdater.ApplyMode.AUTO
             ? "Checking + applying latest release..." : "Checking for updates...", SourbyCraftColors.LABEL));
-        async.accept(() -> {
-            SourbyUpdater.Outcome outcome;
-            try {
-                outcome = updater.check(override);
-            } catch (Throwable t) {
-                reply(s, text("Update check failed: " + t.getMessage(), SourbyCraftColors.DANGER));
-                return;
-            }
-            reply(s, describe(outcome));
-        });
+        try {
+            async.accept(() -> {
+                Optional<SourbyUpdater.Outcome> outcome;
+                try {
+                    // The scheduled checks share this guard: never two downloads/stages at once.
+                    outcome = updater.tryCheck(override);
+                } catch (Throwable t) {
+                    reply(s, text("Update check failed: " + t.getMessage(), SourbyCraftColors.DANGER));
+                    return;
+                }
+                reply(s, outcome.map(UpdateCommand::describe).orElseGet(() -> text(
+                    "An update check is already running — try again when it has finished (see console).",
+                    SourbyCraftColors.DIM)));
+            });
+        } catch (RejectedExecutionException stopped) {
+            s.sendMessage(text("Update check not started: the server's I/O workers are stopped.", SourbyCraftColors.DANGER));
+        }
     }
 
     /** One line per outcome; public so the test can assert every outcome has one. */
@@ -104,9 +126,10 @@ public class UpdateCommand extends Command {
             case DISABLED   -> text("Updater is disabled (updater.apply-mode=off).", SourbyCraftColors.DIM);
             case NO_RELEASE -> text("No matching release on this channel.", SourbyCraftColors.DIM);
             case UP_TO_DATE -> text("Already up to date (build " + BuildInfo.load().build() + ").", SourbyCraftColors.SUCCESS);
-            case NOTIFIED   -> text("Update available — see console (apply-mode=notify; use /update apply to install).", SourbyCraftColors.PRIMARY);
-            case STAGED     -> text("Update staged — applies on the next restart.", SourbyCraftColors.SUCCESS);
+            case NOTIFIED   -> text("Update available — see console (not installed automatically; use /update apply to install).", SourbyCraftColors.PRIMARY);
+            case STAGED     -> text("Update downloaded and verified — a restart does NOT install it; run /update apply.", SourbyCraftColors.SUCCESS);
             case APPLYING   -> text("Update downloaded — restart countdown started.", SourbyCraftColors.SUCCESS);
+            case APPLY_FAILED -> text("Update downloaded but it cannot be installed here — nothing restarted (see console for the manual steps).", SourbyCraftColors.DANGER);
             case STAGE_FAILED -> text("Download/verify failed — see console.", SourbyCraftColors.DANGER);
             case HELD       -> text("Updater is HELD after a rollback — see console; /update resume lifts it.", SourbyCraftColors.DANGER);
             case RATE_LIMITED -> text("GitHub rate limit — check skipped until the backoff window ends (see console).", SourbyCraftColors.DIM);
@@ -140,29 +163,46 @@ public class UpdateCommand extends Command {
         }
     }
 
+    /** The marker and state files are read off the command thread; the lines come back through the reply hop. */
     private void status(CommandSender s) {
+        try {
+            async.accept(() -> {
+                List<Component> lines = statusLines();
+                replyHop.accept(s, () -> lines.forEach(s::sendMessage));
+            });
+        } catch (RejectedExecutionException stopped) {
+            s.sendMessage(text("Status unavailable: the server's I/O workers are stopped.", SourbyCraftColors.DANGER));
+        }
+    }
+
+    private List<Component> statusLines() {
+        List<Component> lines = new ArrayList<>();
         BuildInfo info = BuildInfo.load();
-        s.sendMessage(text()
+        lines.add(text()
             .append(text("Running: ", SourbyCraftColors.LABEL))
             .append(text(info.version() + " build " + info.build() + " (Minecraft " + info.mcVersion() + ")", SourbyCraftColors.VALUE))
             .build());
-        s.sendMessage(text()
+        lines.add(text()
             .append(text("Updater: ", SourbyCraftColors.LABEL))
             .append(text((AutoUpdateSettings.enabled ? "enabled" : "disabled")
                 + " mode=" + AutoUpdateSettings.applyMode
                 + " interval=" + AutoUpdateSettings.intervalSummary(runningInterval(), AutoUpdateSettings.checkIntervalMinutes)
                 + " repo=" + AutoUpdateSettings.repo, SourbyCraftColors.VALUE))
             .build());
-        appendMarker(s, "Applied", Path.of("auto_update", "applied.tag"));
-        appendMarker(s, "Pending", Path.of("auto_update", "pending.tag"));
+        appendMarker(lines, "Applied", Path.of("auto_update", "applied.tag"));
+        appendMarker(lines, "Apply failed (checks only announce it; /update apply retries)",
+            Path.of("auto_update", UpdateApplier.APPLY_FAILED_FILE));
+        appendMarker(lines, "Apply failed (older build's marker)", Path.of("auto_update", UpdateApplier.LEGACY_PENDING_FILE));
         if (Files.isRegularFile(Path.of("auto_update", "core.path"))) {
-            s.sendMessage(text("A staged jar is waiting for the next restart.", SourbyCraftColors.PRIMARY));
+            lines.add(text("A verified jar is staged (auto_update/core.path); a restart does not install it — /update apply does.",
+                SourbyCraftColors.PRIMARY));
         }
-        guard.state().ifPresent(st -> s.sendMessage(text()
+        guard.state().ifPresent(st -> lines.add(text()
             .append(text("Rollback guard: ", SourbyCraftColors.LABEL))
             .append(text(st.phase() + " " + st.tag() + (st.note().isBlank() ? "" : " — " + st.note()),
                 guard.isHeld() ? SourbyCraftColors.DANGER : SourbyCraftColors.VALUE))
             .build()));
+        return lines;
     }
 
     /** The interval of the schedule built at boot, or -1 when none runs in this process. */
@@ -171,10 +211,10 @@ public class UpdateCommand extends Command {
         return updater == null ? -1 : updater.runningIntervalMinutes();
     }
 
-    private static void appendMarker(CommandSender s, String label, Path file) {
+    private static void appendMarker(List<Component> lines, String label, Path file) {
         try {
             if (Files.isRegularFile(file)) {
-                s.sendMessage(text()
+                lines.add(text()
                     .append(text(label + ": ", SourbyCraftColors.LABEL))
                     .append(text(Files.readString(file).trim(), SourbyCraftColors.VALUE))
                     .build());

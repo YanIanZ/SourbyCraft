@@ -21,8 +21,10 @@ import org.jspecify.annotations.Nullable;
 public class LockedReference<E> {
     private final ReentrantLock writeLock = new ReentrantLock(true);
 
+    // Swapped only under writeLock (the constructors set the initial value); volatile so getValue() and isSet(),
+    // which take no lock, see the latest swap from another thread, and the object it published fully built.
     @UnknownNullability
-    private E value;
+    private volatile E value;
 
     public LockedReference(final @Nullable E default_) {
         this.value = default_;

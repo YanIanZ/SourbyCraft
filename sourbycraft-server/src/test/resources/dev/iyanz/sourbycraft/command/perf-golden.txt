@@ -84,7 +84,7 @@ SourbyCraft performance diagnostics
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Recent maximum: "}
 {"bold":true,"color":"#C084FC","text":"  CPU"}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Process CPU / system CPU: "}
-{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Available processors / live platform threads: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Available processors / live Java threads: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Uptime: "}
 {"bold":true,"color":"#C084FC","text":"  Memory"}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable / unavailable"}],"text":"  Heap used / committed / maximum: "}
@@ -127,7 +127,7 @@ SourbyCraft performance diagnostics
 {"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / cpu"}],"text":"╭─ "}
 {"bold":true,"color":"#C084FC","text":"  CPU"}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Process CPU / system CPU: "}
-{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Available processors / live platform threads: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Available processors / live Java threads: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Uptime: "}
 {"color":"#64748B","text":"  Freshness: UNAVAILABLE"}
 {"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
@@ -199,10 +199,10 @@ UNAVAILABLE
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"16.0ms"}],"text":"  Recent maximum: "}
 {"bold":true,"color":"#C084FC","text":"  CPU"}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Process CPU / system CPU: "}
-{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Available processors / live platform threads: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Available processors / live Java threads: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Uptime: "}
 {"bold":true,"color":"#C084FC","text":"  Memory"}
-{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"512M / unavailable / 1.0G"}],"text":"  Heap used / committed / maximum: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"512M / unavailable / 1.00G"}],"text":"  Heap used / committed / maximum: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"50.0% of maximum"}],"text":"  Heap usage: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Non-heap: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Process RSS: "}
@@ -242,7 +242,7 @@ UNAVAILABLE
 {"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / cpu"}],"text":"╭─ "}
 {"bold":true,"color":"#C084FC","text":"  CPU"}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Process CPU / system CPU: "}
-{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Available processors / live platform threads: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Available processors / live Java threads: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Uptime: "}
 {"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
 {"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
@@ -250,7 +250,7 @@ UNAVAILABLE
 ## render snapshot#1 memory
 {"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Memory"}],"text":"╭─ "}
 {"bold":true,"color":"#C084FC","text":"  Memory"}
-{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"512M / unavailable / 1.0G"}],"text":"  Heap used / committed / maximum: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"512M / unavailable / 1.00G"}],"text":"  Heap used / committed / maximum: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"50.0% of maximum"}],"text":"  Heap usage: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Non-heap: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Process RSS: "}
@@ -314,10 +314,10 @@ EXCELLENT
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"24.0ms"}],"text":"  Recent maximum: "}
 {"bold":true,"color":"#C084FC","text":"  CPU"}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Process CPU / system CPU: "}
-{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Available processors / live platform threads: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Available processors / live Java threads: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Uptime: "}
 {"bold":true,"color":"#C084FC","text":"  Memory"}
-{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"512M / unavailable / 1.0G"}],"text":"  Heap used / committed / maximum: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"512M / unavailable / 1.00G"}],"text":"  Heap used / committed / maximum: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"50.0% of maximum"}],"text":"  Heap usage: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Non-heap: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Process RSS: "}
@@ -357,7 +357,7 @@ EXCELLENT
 {"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / cpu"}],"text":"╭─ "}
 {"bold":true,"color":"#C084FC","text":"  CPU"}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Process CPU / system CPU: "}
-{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Available processors / live platform threads: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Available processors / live Java threads: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Uptime: "}
 {"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
 {"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
@@ -365,7 +365,7 @@ EXCELLENT
 ## render snapshot#2 memory
 {"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Memory"}],"text":"╭─ "}
 {"bold":true,"color":"#C084FC","text":"  Memory"}
-{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"512M / unavailable / 1.0G"}],"text":"  Heap used / committed / maximum: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"512M / unavailable / 1.00G"}],"text":"  Heap used / committed / maximum: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"50.0% of maximum"}],"text":"  Heap usage: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Non-heap: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Process RSS: "}
@@ -429,13 +429,13 @@ EXCELLENT
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"120.0ms"}],"text":"  Recent maximum: "}
 {"bold":true,"color":"#C084FC","text":"  CPU"}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"87.3% / 93.0%"}],"text":"  Process CPU / system CPU: "}
-{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"8 / 97"}],"text":"  Available processors / live platform threads: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"8 / 97"}],"text":"  Available processors / live Java threads: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"3725s"}],"text":"  Uptime: "}
 {"bold":true,"color":"#C084FC","text":"  Memory"}
-{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"3.0G / 4.0G / 6.0G"}],"text":"  Heap used / committed / maximum: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"3.00G / 4.00G / 6.00G"}],"text":"  Heap used / committed / maximum: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"50.0% of maximum"}],"text":"  Heap usage: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"300M"}],"text":"  Non-heap: "}
-{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"5.0G"}],"text":"  Process RSS: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"5.00G"}],"text":"  Process RSS: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"71.5%"}],"text":"  Container memory usage: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (allocation rate is not collected)"}],"text":"  Allocation rate: "}
 {"bold":true,"color":"#C084FC","text":"  Garbage collection"}
@@ -472,7 +472,7 @@ EXCELLENT
 {"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / cpu"}],"text":"╭─ "}
 {"bold":true,"color":"#C084FC","text":"  CPU"}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"87.3% / 93.0%"}],"text":"  Process CPU / system CPU: "}
-{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"8 / 97"}],"text":"  Available processors / live platform threads: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"8 / 97"}],"text":"  Available processors / live Java threads: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"3725s"}],"text":"  Uptime: "}
 {"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
 {"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
@@ -480,10 +480,10 @@ EXCELLENT
 ## render snapshot#3 memory
 {"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Memory"}],"text":"╭─ "}
 {"bold":true,"color":"#C084FC","text":"  Memory"}
-{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"3.0G / 4.0G / 6.0G"}],"text":"  Heap used / committed / maximum: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"3.00G / 4.00G / 6.00G"}],"text":"  Heap used / committed / maximum: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"50.0% of maximum"}],"text":"  Heap usage: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"300M"}],"text":"  Non-heap: "}
-{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"5.0G"}],"text":"  Process RSS: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"5.00G"}],"text":"  Process RSS: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"71.5%"}],"text":"  Container memory usage: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (allocation rate is not collected)"}],"text":"  Allocation rate: "}
 {"bold":true,"color":"#C084FC","text":"  Garbage collection"}
@@ -544,10 +544,10 @@ CRITICAL
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"16.0ms"}],"text":"  Recent maximum: "}
 {"bold":true,"color":"#C084FC","text":"  CPU"}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Process CPU / system CPU: "}
-{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Available processors / live platform threads: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Available processors / live Java threads: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Uptime: "}
 {"bold":true,"color":"#C084FC","text":"  Memory"}
-{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"512M / unavailable / 1.0G"}],"text":"  Heap used / committed / maximum: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"512M / unavailable / 1.00G"}],"text":"  Heap used / committed / maximum: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"50.0% of maximum"}],"text":"  Heap usage: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Non-heap: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Process RSS: "}
@@ -587,7 +587,7 @@ CRITICAL
 {"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / cpu"}],"text":"╭─ "}
 {"bold":true,"color":"#C084FC","text":"  CPU"}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Process CPU / system CPU: "}
-{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Available processors / live platform threads: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Available processors / live Java threads: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Uptime: "}
 {"color":"#64748B","text":"  Freshness: STALE (12000ms old): collector late"}
 {"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
@@ -595,7 +595,7 @@ CRITICAL
 ## render snapshot#4 memory
 {"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Memory"}],"text":"╭─ "}
 {"bold":true,"color":"#C084FC","text":"  Memory"}
-{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"512M / unavailable / 1.0G"}],"text":"  Heap used / committed / maximum: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"512M / unavailable / 1.00G"}],"text":"  Heap used / committed / maximum: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"50.0% of maximum"}],"text":"  Heap usage: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Non-heap: "}
 {"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Process RSS: "}

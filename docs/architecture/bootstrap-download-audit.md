@@ -1,47 +1,72 @@
 # Bootstrap download audit
 
-AURORA-TASKS I: downloader timeouts, SHA/cache validation, bounded concurrency, retry and
+AURORA-TASKS I (`docs/AURORA-TASKS.md`, removed in `c86b3be`; git history): downloader timeouts, SHA/cache validation, bounded concurrency, retry and
 failure handling, first-boot recovery and offline-after-success. Audited 2026-09-27.
 
-In scope: the two downloads in this repository that run before the server starts, `bootstrap/LibDownloader`
-(libraries the slim jar omits) and `bootstrap/PluginProvisioner` (the pinned ViaVersion and ViaBackwards jars).
+In scope at audit time (2026-09-27): the two downloads in this repository that ran before the
+server started, `bootstrap/LibDownloader` (then also the manifest downloader for the libraries the
+slim jar omits) and `bootstrap/PluginProvisioner` (the pinned ViaVersion and ViaBackwards jars).
 **Historical scope (2026-09-27):** SourbyClip was excluded from that utility audit. The
 2026-10-05 source audit of private local upgrade candidates is recorded separately below.
 The historic CI probes do not qualify these new candidates.
 
+**Current state.** The manifest downloader and its retry loop were removed with the former
+`SourbyBootstrap` entrypoint (audit SEC-4): the slim jar's launcher is SourbyClip, which downloads
+the omitted libraries itself (sections below). `LibDownloader` is now only the bounded HTTPS
+transport that `PluginProvisioner` uses for the pinned ViaVersion, ViaBackwards and ProtocolLib
+jars. Rows marked *historical* below describe the removed manifest path; the tests they cite no
+longer exist.
+
 ## Findings and fixes
 
-| Concern | Before | Now | Evidence |
-| --- | --- | --- | --- |
-| Connect timeout | 15 s | 15 s | `HttpClient.connectTimeout` |
-| Stalled body | `HttpRequest.timeout` bounds only the response headers, so a body stalling after them could hang boot indefinitely | Whole transfer bounded by `TRANSFER_DEADLINE` (10 min): `sendAsync` + `get(deadline)`, cancelled on expiry | `LibDownloader.httpsFetch` |
-| Oversized body | Written in full, then compared with the pinned size, so it could fill the disk | Cut off as soon as it passes the pinned size (`LimitedSubscriber`) | `LibDownloaderTest.theHttpsBodyIsCutOffOnceItExceedsThePinnedSize` |
-| Retry | None: one transient failure meant `exit 3` | 3 attempts per library, 2 s then 4 s apart. Refusals (non-https, path escape) are not retried | `aTransientFailureIsRetriedWithBackoff`, `nonHttpsAndEscapingPathsAreRefusedWithoutRetry` |
-| Partial files | A failure during the transfer left `.tmp` behind | Every attempt deletes its `.tmp`; the destination is replaced only by a verified file | `everyAttemptFailingKeepsNothingAndReportsTheLastError` |
-| Hash / size | Checked before install | Unchanged; wrong bytes are never installed | `wrongBytesAreNeverInstalled` |
-| Cache | Existing file used only if its SHA-256 matches | Unchanged; a corrupt cached file is re-downloaded | `aCorruptCacheIsReplaced` |
-| Offline after success | Cache hit touches no network | Unchanged, now tested | `aVerifiedCacheIsReusedWithoutTheNetwork` |
-| Concurrency | One download at a time, manifest order | Unchanged | the former `SourbyBootstrap` loop (deleted in SEC-4); library downloads now run in SourbyClip and its concurrency was not re-audited here |
-| Plugin jars | Same stall and size issues as above | Use the same bounded transport. Failures still never block boot (the provisioner is wrapped) | `PluginProvisioner` |
+| Concern | Before | Now | Status | Evidence |
+| --- | --- | --- | --- | --- |
+| Connect timeout | 15 s | 15 s | current | `LibDownloader` `HttpClient.connectTimeout` |
+| Stalled body | `HttpRequest.timeout` bounds only the response headers, so a body stalling after them could hang boot indefinitely | Whole transfer bounded by `TRANSFER_DEADLINE` (10 min): `sendAsync` + `get(deadline)`, cancelled on expiry | current | `LibDownloader.httpsFetch`, `LibDownloaderTest.theTransferDeadlineCoversTheBody` |
+| Oversized body | Written in full, then compared with the pinned size, so it could fill the disk | Cut off as soon as it passes the pinned size (`LimitedSubscriber`) | current | `LibDownloaderTest.theHttpsBodyIsCutOffOnceItExceedsThePinnedSize` |
+| Retry | None: one transient failure meant `exit 3` | Manifest libraries: 3 attempts, 2 s then 4 s apart; refusals not retried | *historical* (removed with the manifest path; cited tests `aTransientFailureIsRetriedWithBackoff`, `nonHttpsAndEscapingPathsAreRefusedWithoutRetry` no longer exist). **Current plugin provisioning has no retry**: a transient failure logs one WARN, leaves that jar unprovisioned for this boot and the next boot tries again. Proposal, not implemented: a bounded retry (for example 2 attempts with backoff) in `PluginProvisioner.ensureJar` for a transport `IOException` | `PluginProvisionerTest.aFailedDownloadDoesNotPoisonALaterSuccessfulRun` |
+| Partial files | A failure during the transfer left `.tmp` behind | No temporary file survives a failed download; the destination is replaced only by a verified file | current for plugin jars (the manifest-path test `everyAttemptFailingKeepsNothingAndReportsTheLastError` is gone) | `PluginProvisionerTest.transportFailureLeavesNoPartialFile`, `hashMismatchLeavesNoJarAndNoTempFile`, `sizeMismatchLeavesNoJarAndNoTempFile` |
+| Hash / size | Checked before install | Unchanged; wrong bytes are never installed | current | the two mismatch tests above (`wrongBytesAreNeverInstalled` is gone) |
+| Cache | Existing file used only if its SHA-256 matches | Unchanged; a verified jar is not downloaded again, a corrupt file with the pinned name is moved aside and replaced | current | `PluginProvisionerTest.anAlreadyVerifiedJarIsNotDownloadedAgain`, `aCorruptFileWithOurExactNameIsMovedAsideAndReplaced` (`aCorruptCacheIsReplaced` is gone) |
+| Offline after success | Cache hit touches no network | Unchanged; with `-Dsourbyclip.offline=true` a verified jar is still used and a missing one is not downloaded | current | `PluginProvisionerTest.aVerifiedJarIsUsedEvenOfflineAndEvenWithANonHttpsUrl`, `offlineModeRefusesTheDownloadAndCreatesNoJar` (`aVerifiedCacheIsReusedWithoutTheNetwork` is gone) |
+| Concurrency | One download at a time, manifest order | Manifest path removed | *historical*; library downloads now run in SourbyClip's bounded worker pool (*Concurrency bound and its limit* below) | the former `SourbyBootstrap` loop (deleted in SEC-4) |
+| Plugin jars | Same stall and size issues as above | Use the same bounded transport. Failures never block boot: each group (ProtocolLib, ViaVersion) is isolated and a failure is logged. Since PR #62 a group whose setting cannot be used (only the pre-Build-49 key, an invalid value, an unreadable file) is skipped for that boot: nothing downloaded, installed or quarantined (code written and statically reviewed; not built; not tested by the owner) | current | `PluginProvisioner.provisionJars`, `BootstrapPluginSettings` |
 
-## Still open
+## CI coverage (done)
 
-- CI step "Bootstrap failure recovery and offline boot" (added 2026-09-27) runs a fresh
-  server three times: with no network (a private network namespace with only loopback) it
-  must fail within 2 minutes, name what it could not download and leave no `.tmp`; online it
-  must reach `Done`; with no network again it must reach `Done` without downloading.
-  On a fresh directory the first network use is SourbyClip fetching the Mojang server jar.
-  Current SourbyClip (3.1.2) logs `INFO]: [Sourbyclip] Downloading mojang_26.2.jar` and, when the
-  network is down, `ERROR]: [Sourbyclip] Failed to download original jar` followed by
+- CI step "Bootstrap failure recovery and offline boot" (added 2026-09-27, build job of
+  `.github/workflows/build.yml`) runs a fresh server three times: with no network (a private
+  network namespace with only loopback) it must fail within 2 minutes, name what it could not
+  download and leave no `.tmp`; online it must reach `Done`; with no network again it must reach
+  `Done` without downloading. On a fresh directory the first network use is SourbyClip fetching
+  the Mojang server jar. The pinned SourbyClip 3.1.3 logs, as 3.1.2 did,
+  `INFO]: [Sourbyclip] Downloading mojang_26.2.jar` and, when the network is down,
+  `ERROR]: [Sourbyclip] Failed to download original jar` followed by
   `java.io.IOException: Cannot prepare original JAR mojang_26.2.jar at cache/mojang_26.2.jar; source: https://piston-data.mojang.com/...`.
   The step asserts these strings (CI run 39398396573 logs). A cached offline boot prints
-  `[4/4] Classpath prepared: N entries`.
+  `[4/4] Classpath prepared: N entries`. The step runs on every push build; every published tag
+  since `v26.2-r48` came from a build job that ran it (the release job `needs: [build, rebuild]`).
 - **CI run 450 (`52568fb0`, 2026-09-27), green.** Fresh directory without network: failed with
   SourbyClip's download error and no `.tmp` left. Online: `Done`. Without network again:
   `Done (9.282s)` with nothing downloaded. The only network error in that boot was Mojang's
   `api.minecraftservices.com/publickeys` lookup (logged, not fatal, `online-mode=false`).
-- SourbyClip whole-transfer deadline/size cap: **implemented in SourbyClip 3.1.3** (`e5de0f4b`, 2026-10-22, see the section below); pin rolled in the working change, private push pending. Remote cold-download qualification remains open.
-- The utility manifest in the historical scope has one URL per library. SourbyClip
+- SourbyClip whole-transfer deadline/size cap: **implemented in SourbyClip 3.1.3** (`e5de0f4b`,
+  2026-10-22, see the section at the end), pushed and CI-built: tags `v26.2-r48`, `v26.2-r49`,
+  `v26.2-r49.1` and `v26.2-r50` carry `clipVersion=3.1.3` and lock revision `e5de0f4b`, and the
+  build job checks out that private revision before any published jar is built.
+
+**Status 2026-10-25 (PR #62):** the CI step's directory is now also the one boot that feeds the
+Build 50 configuration migration (it keeps a pre-Build-49 TOML on purpose). PR #62 changed that
+migration path and was not built (pull requests get no Gradle build or boot), so the step's first
+push run after the merge is its retest.
+
+## Still open
+
+- Remote-host cold download and fault injection (proxies, a real-network trickle or a tampered
+  cache in a booted server): see *Verification and remaining limits* and the 3.1.3 section below.
+- Full POM/dependency content pins (see *Verification and remaining limits*).
+- Plugin provisioning has no retry on a transient failure (proposal in the table above).
+- The utility manifest in the historical scope had one URL per library. SourbyClip
   has a separate Maven fallback list; see the current launcher audit below.
 
 
@@ -104,7 +129,8 @@ Settings introduced here (`sourbyclip.console`, `sourbyclip.downloadThreads`) ar
   `https://repo.spongepowered.org/maven`.
   HTTP failure or SHA-256 mismatch advances to the next mirror. `libraries.list` uses
   `group:artifact:version[:classifier]` and the pinned bootstrap resolver chooses JAR bytes directly.
-- `sourbyclip.offline=true` prevents launcher downloads and IP lookup. Valid cache/embedded bytes
+- `sourbyclip.offline=true` prevents launcher downloads (earlier docs also said "and IP lookup": the
+  geo-IP lookup was removed in 3.1.2, so there is none left to refuse). Valid cache/embedded bytes
   remain usable. Missing/corrupt requirements fail with a path or coordinate; this does not govern
   server/plugin traffic. Identity/help use only the launcher identity; prepare honors existing
   auto-update target resource selection.
@@ -118,14 +144,15 @@ stores and reuses configuration cache. These results are controlled tests/local 
 not cross-host reproducibility, a remote cold boot, a performance claim or server/plugin qualification.
 
 Still open (re-checked against SourbyClip 3.1.3 / `e5de0f4b`, 2026-10-22): full
-POM/dependency content pins; remote cold-download and cached/offline Minecraft boot
-qualification. Done since: the private pushes and the official revision/hash rollout (`5a3806f1`).
+POM/dependency content pins; remote cold-download qualification (the cached/offline Minecraft boot
+is covered on the CI runner by the step under *CI coverage*). Done since: the private pushes and the official revision/hash rollout (`5a3806f1`).
 The previously pinned artifacts still validate unchanged.
 
 ## SourbyClip 3.1.3 bounded transfers — 2026-10-22
 
-**IMPLEMENTED in the private repo; pinned in this change; not yet pushed or CI-built.**
-SourbyClip `e5de0f4ba2d10fc81e95b0d23069b3b9d59d73bf` (local branch `feat/transfer-deadline`),
+**IMPLEMENTED; pushed and CI-built since `v26.2-r48`** (as written on 2026-10-22: pinned in the
+working change, not yet pushed; tags `v26.2-r48` to `v26.2-r50` now carry this pin, see *CI coverage*).
+SourbyClip `e5de0f4ba2d10fc81e95b0d23069b3b9d59d73bf` (local branch `feat/transfer-deadline` at the time),
 jar SHA-256 `56d317b81044d8d618901ef46d5b418de59ffdc9bb8940b6745aa1a732c4435e`. New
 `downloader/BoundedTransfer` is the only network path of the launcher (`DownloadContext.download`,
 `MavenDependencyResolver.downloadFile`/`downloadString`); HTTP(S) uses `java.net.http.HttpClient`

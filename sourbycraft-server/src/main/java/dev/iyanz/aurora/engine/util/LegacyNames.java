@@ -10,10 +10,10 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.LoggerFactory;
 
 /**
- * Former Canvas names that are still read after the rename to Aurora/SourbyCraft names (owner decision
- * 2026-10-21). Each old name is honoured with a one-line deprecation warning, logged once per name (or once per
- * name and subject), until {@link #REMOVAL_BUILD}; then the fallback is deleted. The new name always wins when both
- * are present.
+ * Former Canvas JVM flag names, renamed to Aurora names in Build 48 (owner decision 2026-10-21) and no longer read
+ * since {@link #REMOVAL_BUILD}. Only the new name decides. An old name that is set while its new name is not gets a
+ * one-line warning, logged once per name (or once per name and subject), saying it is ignored and naming the
+ * replacement, so an operator who still passes it learns why it has no effect.
  *
  * <p>Deliberately free of Minecraft types: {@code SharedConstants} and {@code MoonriseCommon} call it from their
  * static initialisers.</p>
@@ -33,7 +33,7 @@ public final class LegacyNames {
 
     /**
      * A lenient boolean JVM flag ({@code -Dname} alone means {@code true}, like {@link Util#isFlagEnabled}) that
-     * was renamed from {@code legacyName}.
+     * was renamed from {@code legacyName}; the old name is not read.
      */
     public static boolean flag(final String name, final String legacyName) {
         final String value = property(name, legacyName);
@@ -42,24 +42,23 @@ public final class LegacyNames {
 
     /**
      * A strict boolean JVM flag (only {@code =true} counts, like {@link Boolean#getBoolean}) that was renamed from
-     * {@code legacyName}.
+     * {@code legacyName}; the old name is not read.
      */
     public static boolean strictFlag(final String name, final String legacyName) {
         return Boolean.parseBoolean(property(name, legacyName));
     }
 
-    /** The raw value of {@code name}, else of {@code legacyName} (warning once), else {@code null}. */
+    /**
+     * The raw value of {@code name}, else {@code null}. {@code legacyName} is never returned: when it is set and
+     * {@code name} is not, one warning says it is ignored.
+     */
     public static @Nullable String property(final String name, final String legacyName) {
         final String value = properties.apply(name);
-        if (value != null) {
-            return value;
+        if (value == null && properties.apply(legacyName) != null) {
+            warnOnce("property:" + legacyName, "JVM flag -D" + legacyName + " is ignored since " + REMOVAL_BUILD
+                + "; use -D" + name + " instead.");
         }
-        final String legacy = properties.apply(legacyName);
-        if (legacy != null) {
-            warnOnce("property:" + legacyName, "JVM flag -D" + legacyName + " is deprecated and stops working in "
-                + REMOVAL_BUILD + "; use -D" + name + " instead.");
-        }
-        return legacy;
+        return value;
     }
 
     /**

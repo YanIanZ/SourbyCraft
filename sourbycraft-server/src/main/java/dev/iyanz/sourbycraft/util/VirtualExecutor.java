@@ -13,6 +13,12 @@ import java.util.logging.Logger;
  * Virtual-thread-based executor replacing AsyncExecutor and SwmIoExecutor.
  * Java 25 blocking administrative I/O, at most 64 admitted tasks, no pending queue.
  * Bootstrap owns initialization; shutdown is terminal until an explicit init.
+ *
+ * <p>It does not consult {@link dev.iyanz.sourbycraft.core.AuroraRuntime#stopping()}: AWF world
+ * operations (a world save, for one) run here and must still be able to complete after STOPPING is
+ * published, until {@link #shutdown()}. Work that should not start during shutdown is refused by
+ * its own entry point (for example {@code /speedtest}, {@code /awf}, {@code /sourbycraft reload},
+ * {@code /update check} and {@code apply}, the GeoIP download).</p>
  */
 public final class VirtualExecutor {
 

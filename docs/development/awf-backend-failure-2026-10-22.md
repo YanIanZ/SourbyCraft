@@ -11,6 +11,33 @@ players. It is **not** the G09 run: that needs the release jar, at least 2 playe
 separate host over a real network, and it stays owner-run. Nothing here is a qualification or a
 performance claim. Timings are single observations on a shared machine.
 
+**Status 2026-10-25 (PR #62).** The logging change of § 3 is on 26.2 as commit `9a6d0c7` and in the
+`v26.2-r50` tag (the gate table's "not yet applied to 26.2" was true on 2026-10-22). PR #62 (code
+written and statically reviewed; not built; not tested by the owner; not in any published build)
+changed code these runs exercised, so every result here is **NEEDS RETEST** on the Build 50
+candidate; the results stay as recorded, labelled with their jars (`7c4c731e…`, `0075add7…`) on
+`001b86f1`:
+- *Commit confirmation.* In these runs `WAITAOF` was a separate call after the commit script
+  (`RedisBackend.awaitDurable`) that could run on another pooled connection, and `WAITAOF` waits
+  only for the last write of its own connection, so a "durable" answer did not prove that commit
+  was in the append-only file. The marker read-backs after reboots (§ 1, § 2) are unaffected as
+  observations. PR #62 sends the script and `WAITAOF` as one pipeline on one connection, with
+  `WAITAOF` waiting half of the remaining client timeout.
+- *Lease identity.* Tokens are `owner/incarnation/store` since PR #62; the take-backs here were
+  this process retaking its own lapsed leases, which the change keeps, but a server restart after
+  a crash now takes its leases over at once only when the `awf/node.lock` handoff proves the
+  previous process stopped.
+- *Silent take-back (§ 2 finding, S1/N2).* PR #62 logs one WARN per renewal pass when a renewal
+  succeeds more than `lease-seconds` after the lease was last extended, which is this case, and
+  `/perf awf` gains an `AWF Redis leases` row. Not run.
+- *Shutdown report.* PR #62 closes prepared-but-unused stores, counts a throwing close as FAILED
+  and reports each storage once. With `WAITAOF` in the commit's pipeline, the separate post-commit
+  wait whose deadline cut was reported UNCERTAIN ("after Redis ran the commit and before it
+  confirmed") no longer exists: a commit whose deadline has passed is refused before anything is
+  sent (REFUSED), and a cut inside the pipeline is UNCERTAIN.
+- Still open from this report: Redis on a separate host over a real network (G09, owner-run), and
+  the `timeout-ms` / shutdown-deadline defaults on a slow link (§ 4 findings).
+
 ## Setup
 
 | Item | Value |
@@ -20,7 +47,7 @@ performance claim. Timings are single observations on a shared machine.
 | Jars | run 1: `7c4c731e8579…` (001b86f1, unchanged code); runs 2–4: `0075add72b24…` (001b86f1 + the log change below, `/ver` "Build 48-dirty") |
 | Harness | `scripts/agent_testserver.py`, 2048 MiB heap, view distance 4, seed 440044, `online-mode=false` |
 | Redis | `redis-server` 8.10.2 on 127.0.0.1:6402 (slot-2 convention), `appendonly yes`, `appendfsync everysec`, `noeviction`, started for these runs |
-| `aurora.toml` | `[aurora.awf] worlds=["world"]`, `backend="redis"`, `commit-interval-seconds=5`, `resident-chunks=1`, `commit-attempts=3`; `[aurora.awf.redis] lease-seconds=15`, `timeout-ms` 5000 (default), `shutdown-deadline-ms` 30000 (default) |
+| `aurora.toml` (pre-Build-49 TOML, as these runs used it) | `[aurora.awf] worlds=["world"]`, `backend="redis"`, `commit-interval-seconds=5`, `resident-chunks=1`, `commit-attempts=3`, `shutdown-deadline-ms` 30000 (default); `[aurora.awf.redis] lease-seconds=15`, `timeout-ms` 5000 (default). *(Corrected 2026-10-25: this row listed `shutdown-deadline-ms` under `[aurora.awf.redis]`; the key is `aurora.awf.shutdown-deadline-ms`. It was left at its default either way.)* |
 | Faults | `kill -STOP`/`-CONT`/`-9` on the redis-server PID; for the network approximation a userspace TCP proxy (below) |
 | Probes | marker blocks placed with `setblock`; presence checked after reloads/reboots with `clone X 100 Z X 100 Z X Y' Z filtered <block>` ("cloned 1" = present) |
 | Raw evidence | `/Volumes/Ext/DevCache/agent-tmp/sourbycraft/opus-49-backend/` (`events.txt` timeline, `run1..4-server.log`, `s3-sofar.log`, `s4-outage.log`, `s5-outage.log`, `n2.log`, `s2-stop.json`, `n4-stop.json`, `faultproxy.py`) |

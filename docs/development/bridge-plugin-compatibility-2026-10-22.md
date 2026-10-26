@@ -95,6 +95,15 @@ With players online, a global timer that touches players or their blocks is refu
 as a violation. An adapter can only help there when the callback's target can be read from its captured state.
 A loop over `Bukkit.getOnlinePlayers()` has no single owner, so it needs a native port.
 
+**Status 2026-10-25 (PR #62).** These runs used Build 48 base `6176d517`, whose region-ownership checks behave
+like today's `aurora.bridge.thread-checks = enforced`. Since Build 49 the checks are a setting, and with
+`aurora.bridge.mode = safe` the default is `relaxed` (owner decision 2026-10-22). The refusals above and in this
+section then apply only to `enforced` (or to the bridge off): under `relaxed`, a global timer touching players or
+their blocks, and the ntdLuckyBlock console `onCommand`, proceed on the wrong thread and are counted as relaxed
+ownership hits, not refused and not violations; under `bridged`, the timer body is relaxed and the console command
+(not a bridged body) is still refused. Relaxed is unsafe and unqualified. The PR #62 bridge changes (code written and
+statically reviewed; not built; not tested by the owner) are not covered by these runs: NEEDS RETEST.
+
 ## Harness notes (for the harness owner)
 
 - **EssentialsX breaks the harness's console probes.** Essentials registers `/time` and `/help`. The readiness
@@ -115,4 +124,6 @@ A loop over `Bukkit.getOnlinePlayers()` has no single owner, so it needs a nativ
 - No load, soak, region split/merge, world unload or reload (`/reload`, PlugMan) with these plugins.
 - One boot per group on a shared, partly sleeping laptop. No timing in this document is evidence.
 - Bridged means "loaded, enabled, no fatal violation counted yet". See
-  [aurora-plugin-bridge.md, Qualification](../architecture/aurora-plugin-bridge.md#qualification).
+  [aurora-plugin-bridge.md, Qualification](../architecture/aurora-plugin-bridge.md#qualification). (Corrected
+  2026-10-25: the code shows Bridged while the plugin is not quarantined; fatal violations below
+  `quarantine-after` and relaxed ownership hits do not change the state.)

@@ -327,9 +327,10 @@ jobs:
           echo "eula=true" > eula.txt
           # keep the console-log short and offline so CI runs deterministically
           printf 'online-mode=false\nmax-players=1\nlevel-type=minecraft\\:normal\nspawn-protection=0\n' > server.properties
-          # no plugin provisioning or auto-update during CI boots (provisioning has its own probe test)
+          # no plugin provisioning or auto-update during CI boots (provisioning has its own probe test), in the
+          # Build 49 YAML layout: Build 50 reads no older key name
           mkdir -p sourbycraft_config
-          printf '[viaversion]\nauto-provision = false\n[protocollib]\nauto-provision = false\n[misc.auto_update]\nenabled = false\n' > sourbycraft_config/sourbycraft_global_config.toml
+          printf 'plugins:\n  viaversion:\n    auto-provision: false\n  protocollib:\n    auto-provision: false\nupdater:\n  enabled: false\n' > sourbycraft_config/sourbycraft_global_config.yml
           echo "Booting $jar ..."
           mkfifo stdin.pipe
           # sourby.testplugin.probes enables the test plugin's unload fixture (UnloadFixtureProbe): it
@@ -556,7 +557,11 @@ jobs:
           me=$(id -un)
           echo "eula=true" > eula.txt
           printf 'online-mode=false\nmax-players=1\nlevel-type=minecraft\\:flat\n' > server.properties
-          # no plugin provisioning or auto-update during CI boots (provisioning has its own probe test)
+          # no plugin provisioning or auto-update during CI boots (provisioning has its own probe test).
+          # Deliberately the pre-Build-49 TOML layout: the one CI boot directory that feeds the configuration
+          # migration. Build 50 does not read the old names: the online boot skips provisioning for a group whose
+          # only key is the old one, converts the file to YAML and renames the keys before the updater reads
+          # them, and the cached offline boot below then runs from the rewritten file.
           mkdir -p sourbycraft_config
           printf '[viaversion]\nauto-provision = false\n[protocollib]\nauto-provision = false\n[misc.auto_update]\nenabled = false\n' > sourbycraft_config/sourbycraft_global_config.toml
 
@@ -646,8 +651,8 @@ jobs:
           cp ../fixture/legacy-test-plugin-1.0.0.jar plugins/
           echo "eula=true" > eula.txt
           printf 'online-mode=false\nmax-players=1\nlevel-type=minecraft\\:flat\nspawn-protection=0\n' > server.properties
-          printf '[aurora.bridge]\nmode = "safe"\n' > sourbycraft_config/aurora.toml
-          printf '[viaversion]\nauto-provision = false\n[protocollib]\nauto-provision = false\n[misc.auto_update]\nenabled = false\n' > sourbycraft_config/sourbycraft_global_config.toml
+          printf 'aurora:\n  bridge:\n    mode: "safe"\n' > sourbycraft_config/aurora.yml
+          printf 'plugins:\n  viaversion:\n    auto-provision: false\n  protocollib:\n    auto-provision: false\nupdater:\n  enabled: false\n' > sourbycraft_config/sourbycraft_global_config.yml
           mkfifo stdin.pipe
           java -Xmx2G -XX:+UseG1GC -jar "$jar" --nogui < stdin.pipe > server.log 2>&1 &
           PID=$!
@@ -893,8 +898,8 @@ jobs:
           test -n "$jar"
           echo "eula=true" > eula.txt
           printf 'online-mode=false\nmax-players=1\nlevel-type=minecraft\\:flat\nspawn-protection=0\n' > server.properties
-          printf '[aurora.awf]\nworlds = ["world"]\ncommit-interval-seconds = 5\n' > sourbycraft_config/aurora.toml
-          printf '[viaversion]\nauto-provision = false\n[protocollib]\nauto-provision = false\n[misc.auto_update]\nenabled = false\n' > sourbycraft_config/sourbycraft_global_config.toml
+          printf 'aurora:\n  awf:\n    worlds: ["world"]\n    commit-interval-seconds: 5\n' > sourbycraft_config/aurora.yml
+          printf 'plugins:\n  viaversion:\n    auto-provision: false\n  protocollib:\n    auto-provision: false\nupdater:\n  enabled: false\n' > sourbycraft_config/sourbycraft_global_config.yml
 
           boot() {
             # $2 runs right after Done; $3 runs 10 s later, then stop.
@@ -957,9 +962,8 @@ jobs:
           set -- $reads
           test "${1:-0}" -gt "${2:-0}" || { echo "the second boot read no chunk back from AWF"; exit 1; }
 
-          # Third boot: export the world back to region files. The first boot converted the
-          # fixture TOML to aurora.yml, so the change goes into the YAML file (a new .toml beside
-          # it would be ignored: *.yml always wins).
+          # Third boot: export the world back to region files. The change goes into the same
+          # aurora.yml (a .toml beside it would be ignored, with a WARN: *.yml always wins).
           printf 'aurora:\n  awf:\n    worlds: []\n    export: ["world"]\n' > sourbycraft_config/aurora.yml
           boot third.log ''
           echo "----- AWF export boot -----"
@@ -1240,9 +1244,24 @@ jobs:
           # rollout % from gradle.properties, yank list from build-data/yanked-releases.txt.
           python3 scripts/release_manifest.py generate --tag "$RELEASE_TAG" --jar "$jar" -o "$manifest"
           python3 scripts/release_manifest.py check "$manifest" --tag "$RELEASE_TAG" --jar "$jar"
+          # The key file may hold several trusted keys (a rotation); servers accept a signature that any of them
+          # verifies (ReleaseSignatureVerifier). openssl reads only the first PEM block of a file, so each block is
+          # split out and tried on its own.
+          pubs="$RUNNER_TEMP/release-pub"
+          mkdir -p "$pubs"
+          awk -v dir="$pubs" '/-----BEGIN PUBLIC KEY-----/ { n++; out = sprintf("%s/key-%d.pem", dir, n) } out { print > out } /-----END PUBLIC KEY-----/ { close(out); out = "" }' "$RELEASE_PUBLIC_KEY"
+          ls "$pubs"/key-*.pem > /dev/null || { echo "no PEM public key block in $RELEASE_PUBLIC_KEY" >&2; exit 1; }
           for file in "$jar" "$manifest"; do
             openssl pkeyutl -sign -rawin -inkey "$key" -in "$file" -out "$file.sig"
-            openssl pkeyutl -verify -rawin -pubin -inkey "$RELEASE_PUBLIC_KEY" -in "$file" -sigfile "$file.sig"
+            verified=
+            for pub in "$pubs"/key-*.pem; do
+              if openssl pkeyutl -verify -rawin -pubin -inkey "$pub" -in "$file" -sigfile "$file.sig" > /dev/null 2>&1; then
+                verified=$pub
+                break
+              fi
+            done
+            test -n "$verified" || { echo "$file.sig does not verify under any key in $RELEASE_PUBLIC_KEY" >&2; exit 1; }
+            echo "$(basename "$file").sig verifies under $(basename "$verified") of $RELEASE_PUBLIC_KEY"
             test "$(wc -c < "$file.sig")" -eq 64
           done
 

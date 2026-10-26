@@ -31,6 +31,26 @@
 >   old-name migration stays until the owner schedules its removal
 >   ([26.2-build-50-aurora-nexus.md](../releases/26.2-build-50-aurora-nexus.md)).
 >
+> **Status 2026-10-25 (PR #62, Build 50 candidate; not in the published `v26.2-r50`).** Code written
+> and statically reviewed; not built; not tested by the owner
+> ([Tester Owner](../tester%20owner.md) TO-CFG-07, -08, -16, -17):
+>
+> - **Rewrite on load (§2.2, Q6, Q9):** `ConfigurationProvider.buildSolidConfiguration` now writes an
+>   engine file only when the load added or removed a key (each logged); a load or reload that changes
+>   no key leaves `aurora-server.yml` / `aurora-worlds.yml` byte-identical (PM-115). When it does write,
+>   the write is still truncate-then-write: making it atomic (Q9) was not done.
+> - **Spark path mismatch (Q10): fixed.** The Spark report reads each world's `canvas-patch.yml` from
+>   the dimension storage folder the engine merges, the same path as the new `WorldConfig.patchFile`
+>   (spelled out in `SourbyServerConfigProvider`, which may not reference the engine package) (PM-281).
+> - **Reload:** `/sourbycraft reload`, engine part included, runs on a SourbyCraft I/O virtual thread
+>   instead of the dispatching tick thread (PM-105).
+> - **Deprecation end (Q4):** the non-persisted Canvas-era names (`-DCanvas.*` flags, the
+>   `canvas.broadcasting.receiver` permission) are no longer read. The `canvas-*.yml` →
+>   `aurora-*.yml` migration this plan describes is kept, with the readers of persisted data, pending
+>   owner decision PM-179.
+> - **Engine pending-key tracking (Q11):** unchanged; engine keys are still not in the pending-restart
+>   report. Current contract: [AURORA-CONFIG.md](../AURORA-CONFIG.md) §1 and §4.
+>
 > Original header: "PLANNED / PROPOSED — nothing in this document is implemented. Per
 > [docs/DEVELOPMENT.md](../DEVELOPMENT.md#development-truthfulness-and-non-misleading-policy), every
 > statement below is tagged with what was actually verified." Superseded in part on 2026-10-21 (names
@@ -61,7 +81,8 @@ Out of scope, called out so it is not forgotten:
   not under `config/`. The two resolutions agree for the overworld and can differ for other
   dimensions (section 13, note on F11). A rename would need a per-world migration plus a different
   Spark key. **Recommendation: leave it, and name that decision explicitly in the release notes**
-  if the two global files are renamed.
+  if the two global files are renamed. *Status 2026-10-25 (PR #62): the Spark reader now resolves
+  the dimension storage folder like the runtime (`WorldConfig.patchFile`); see the box at the top.*
 - `sourbycraft_config/*.toml` and `sourbycraft-security.yml` — different surfaces, same names.
 - The Java identifiers `GlobalConfiguration`, `WorldConfig`, `Level.canvasConfig()`,
   `reloadCanvasConfig()` (`minecraft-patches/sources/net/minecraft/world/level/Level.java.patch:74-82`).
@@ -111,7 +132,8 @@ Consequences that matter for a rename:
 - **The file is rewritten on every load, not only when it changed.** So "writing" to a config
   file is not new behaviour; a read-only config directory already fails today. The rewrite is a
   truncate-then-write, so a crash mid-write can leave an empty or partial file (pre-existing; see
-  section 10, Q9).
+  section 10, Q9). *Status 2026-10-25 (PR #62): the file is now written only when a load adds or
+  removes a key; the write that remains is still truncate-then-write.*
 - Operator values survive; keys the class no longer has are **removed** (reported through
   `Resolver.onDiffRemove`); unknown keys are not preserved. Pinned by
   `ConfigurationUpgradeTest` (`sourbycraft-server/src/test/java/dev/iyanz/aurora/engine/configuration/ConfigurationUpgradeTest.java:28-43`, real-class cases at `:307` and `:353`; in the
@@ -642,8 +664,8 @@ Expect the known `*TestSuite > initializationError` filter artifacts (four suite
 | Q6 | Read-only config directories | Not a new risk: the loader already writes on every load (2.2). Mention in the release note. |
 | Q7 | Dead `FoliaServerConfigProvider` | Resolved 2026-10-20: deleted. |
 | Q8 | Concurrent-agent ownership | Todos: tests under `dev/iyanz/aurora/engine/` are `eng-sonnet`'s; `docs/README.md`, `docs/TODO.md` and `TEST-COVERAGE-GAPS.md` are PM's; `awf/perf` is `awf3-opus`'s. Sequence P1/P2 after those blocks close, or hand the tests to their owner. |
-| Q9 | **Pre-existing:** every ordinary load truncates and rewrites the live file (`ConfigurationProvider.java:397`). A crash mid-write can leave an empty or partial `aurora-*.yml`, and an empty file is then flood-filled with defaults. This plan makes only the migration atomic (rule 9). | Owner decision: make every write atomic (temp file + `ATOMIC_MOVE`). Recommended as a separate change; it is not caused by the rename. |
-| Q10 | **Spark path mismatch:** the runtime resolves the per-world override under the dimension storage directory (`WorldConfig.java:127`), while the Spark reader uses `world.getWorldFolder()` (`SourbyServerConfigProvider.java:298`). For non-overworld dimensions these can differ, so Spark can report a different file than the one applied. | Pre-existing; fix in the Spark change of P2 by resolving through the same helper as the runtime, or note it. Verify on a Nether/End world before choosing. |
+| Q9 | **Pre-existing:** every ordinary load truncates and rewrites the live file (`ConfigurationProvider.java:397`). A crash mid-write can leave an empty or partial `aurora-*.yml`, and an empty file is then flood-filled with defaults. This plan makes only the migration atomic (rule 9). | Owner decision: make every write atomic (temp file + `ATOMIC_MOVE`). Recommended as a separate change; it is not caused by the rename. *Status 2026-10-25 (PR #62): ordinary loads no longer write when no key changed; the atomic write is still not done.* |
+| Q10 | **Spark path mismatch:** the runtime resolves the per-world override under the dimension storage directory (`WorldConfig.java:127`), while the Spark reader uses `world.getWorldFolder()` (`SourbyServerConfigProvider.java:298`). For non-overworld dimensions these can differ, so Spark can report a different file than the one applied. | Pre-existing; fix in the Spark change of P2 by resolving through the same helper as the runtime, or note it. Verify on a Nether/End world before choosing. *Status 2026-10-25 (PR #62): fixed in code (same path as `WorldConfig.patchFile`); the Nether/End check is owner test TO-CFG-16.* |
 | Q11 | Engine YAML keys have no pending-restart reporting (B5). | Owner decision: add engine pending-key tracking to the proposed scope, or keep the current generic caveat. This plan assumes the second. |
 
 ---

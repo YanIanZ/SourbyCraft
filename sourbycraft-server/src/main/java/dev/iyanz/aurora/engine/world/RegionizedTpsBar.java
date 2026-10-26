@@ -41,6 +41,11 @@ public class RegionizedTpsBar extends RegionResourceBar {
 
     Pair<Component, Float> buildComponent() {
         final TickData.TickReportData tickReportData = getWorldData().regionData.getRegionSchedulingHandle().getTickReport5s(System.nanoTime());
+        if (tickReportData == null) {
+            // TickData's contract: null when the window holds no sample. This runs inside the region
+            // tick, where an exception fails the region and shuts the server down (audit PM-102).
+            return new Pair<>(Component.text("Waiting for region update..."), 0.0F);
+        }
         final TickData.SegmentedAverage tpsAverage = tickReportData.tpsData();
         final TickData.SegmentedAverage msptAverage = tickReportData.timePerTickData();
 

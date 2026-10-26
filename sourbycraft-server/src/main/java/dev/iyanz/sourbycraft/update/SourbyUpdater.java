@@ -15,6 +15,7 @@ import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.BufferedReader;
+import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -59,16 +60,22 @@ import java.util.zip.ZipFile;
  *       derives its {@link UpdateChannel}, and only considers releases whose tag is on the SAME
  *       channel. A REL server never offers a DEV/EXP build. Newer-ness is a numeric
  *       {@link SemVer} compare of the channel-stripped cores.</li>
- *   <li><b>Same Minecraft version only.</b> A release whose tag core ({@code v26.3-r50} → 26.3)
- *       differs from the running build's Minecraft version is announced but never staged or
- *       applied (audit SEC-3); crossing a Minecraft version is an operator decision.</li>
- *   <li><b>Verify.</b> The download is bounded BEFORE it is read (the asset's declared size, else
- *       {@link #MAX_JAR_BYTES}; an oversize {@code Content-Length} is refused without reading the
- *       body and a stream that runs past the bound is cut off). The file then must match the
- *       declared size, its SHA-256 must equal the release asset {@code digest} (mandatory), it must
- *       open as a ZIP/JAR, and — when this build ships a release public key — its detached
- *       Ed25519 signature asset must verify ({@link ReleaseSignatureVerifier}). A failing download
- *       is deleted and never staged.</li>
+ *   <li><b>Same Minecraft version only.</b> Releases whose tag core ({@code v26.3-r100} → 26.3)
+ *       names another Minecraft version than the running build are kept apart from the rest: the
+ *       newest newer one is announced as a manual upgrade but never staged or applied (audit SEC-3),
+ *       and it never hides a newer release for this Minecraft version, which is selected, staged
+ *       and applied on its own.</li>
+ *   <li><b>Verify.</b> Asset URLs must be https (plain http only on a loopback host while the
+ *       {@link UpdateOverrides} test override is set). The asset name must be a plain file name
+ *       ending in {@code .jar}. The download is bounded BEFORE it is read (the asset's declared size,
+ *       which may not exceed {@link #MAX_JAR_BYTES}, else {@link #MAX_JAR_BYTES}; an oversize
+ *       {@code Content-Length} is refused without reading the body, a stream that runs past the bound
+ *       is cut off, and the whole transfer has {@link #MAX_DOWNLOAD_TIME}). It is written to a fresh
+ *       temporary file, which then must match the declared size, its SHA-256 must equal the release
+ *       asset {@code digest} (mandatory), it must open as a ZIP/JAR, and — when this build ships a
+ *       release public key — its detached Ed25519 signature asset must verify
+ *       ({@link ReleaseSignatureVerifier}). A failing download is deleted and never staged. A staged
+ *       jar that already has the release digest is reused instead of downloaded again.</li>
  *   <li><b>Launcher gate (SEC-4).</b> The authentic jar must also declare an embedded SourbyClip
  *       this server can hand over to ({@link LauncherCompatibility}: protocol 1, version at least
  *       3.0.23, manifest and {@code META-INF/sourbyclip.properties} agreeing). Anything else,
@@ -76,10 +83,20 @@ import java.util.zip.ZipFile;
  *       {@link Outcome#CLIP_INCOMPATIBLE}.</li>
  *   <li><b>Safe apply modes.</b> {@code notify} (default) logs + op-notifies only; {@code stage}
  *       additionally downloads+verifies and places the jar in {@code auto_update/sourbycraft} plus
- *       writes {@code auto_update/core.path}; {@code auto} also swaps the launch jar and restarts
- *       ({@link UpdateApplier}); {@code off} disables checks. The running jar is NEVER hot-swapped.</li>
+ *       writes the pointer {@code auto_update/core.path}, and nothing installs it on restart: an
+ *       operator runs {@code /update apply} (which reuses the verified copy) or swaps it by hand;
+ *       {@code auto} also swaps the launch jar and restarts ({@link UpdateApplier}); {@code off}
+ *       disables checks. The running jar is NEVER hot-swapped. When an apply of the newest release
+ *       failed ({@value UpdateApplier#APPLY_FAILED_FILE}, or an older build's
+ *       {@value UpdateApplier#LEGACY_PENDING_FILE}), scheduled checks only announce it until
+ *       {@code /update apply} succeeds.</li>
+ *   <li><b>One check at a time.</b> Scheduled checks and {@code /update} share one guard
+ *       ({@link #tryCheck}); a check that finds another running is skipped, never run alongside.</li>
  *   <li><b>Rollback hold.</b> While {@link UpdateRollbackGuard} holds after a failed boot on an
- *       applied update, every check returns {@link Outcome#HELD} without touching the network.</li>
+ *       applied update, every check returns {@link Outcome#HELD} without touching the network.
+ *       {@code applied.tag} keeps an applied release from being offered again, except when the
+ *       guard confirmed that release and this server nevertheless runs an older build (the launch
+ *       jar was replaced outside the updater, e.g. a container recreated from an older image).</li>
  *   <li><b>Polite polling.</b> The releases listing is a conditional request ({@code ETag} /
  *       {@code If-None-Match}; a 304 reuses the cached listing) and a {@code 429}/{@code 403} with
  *       {@code Retry-After} or an exhausted {@code X-RateLimit-Remaining} puts the updater in a
@@ -100,14 +117,19 @@ public final class SourbyUpdater {
     /** Production releases endpoint prefix; the test fixture can redirect it ({@link UpdateOverrides}). */
     private static final String GITHUB_API = UpdateOverrides.DEFAULT_REPOS_BASE;
     private static final long DAILY_MILLIS = TimeUnit.DAYS.toMillis(1);
-    /** Ceiling for a release jar download when the asset declares no size. */
+    /** Ceiling for a release jar download: the bound when the asset declares no size, and the largest size it may declare. */
     static final long MAX_JAR_BYTES = 512L * 1024 * 1024;
     /** Ceiling for a detached signature asset download. */
     static final long MAX_SIGNATURE_BYTES = 16L * 1024;
+    /** Total time one asset download may take, on top of the transport's per-read timeout. */
+    static final Duration MAX_DOWNLOAD_TIME = Duration.ofMinutes(15);
+    /** A release jar asset name: a plain file name of letters, digits, '.', '_' and '-' ending in .jar. */
+    private static final java.util.regex.Pattern SAFE_ASSET_NAME =
+        java.util.regex.Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]*\\.jar", java.util.regex.Pattern.CASE_INSENSITIVE);
     /**
      * How many newer releases one check inspects through their signed manifests (newest first)
-     * before giving up: bounds the requests a check makes when several releases are yanked or
-     * still rolling out.
+     * before giving up, counted separately for this Minecraft version and for newer ones: bounds the
+     * requests a check makes when several releases are yanked or still rolling out.
      */
     static final int MAX_MANIFEST_CANDIDATES = 5;
     /** Backoff window bounds applied to whatever the server asks for. */
@@ -128,8 +150,8 @@ public final class SourbyUpdater {
     private final Supplier<String> rolloutServerId;
 
     // Conditional-request state for the releases listing, and the rate-limit backoff window.
-    // Scheduled checks are serialised by checkRunning; an operator's /update may run alongside,
-    // so the ETag pair is guarded by its own lock (never the start()/stop() monitor: a network
+    // Scheduled checks and /update are serialised by checkRunning (tryCheck); the ETag pair keeps
+    // its own lock for any direct check() caller (never the start()/stop() monitor: a network
     // call must not block shutdown).
     private final Object listingLock = new Object();
     private @Nullable String releasesEtag;
@@ -293,16 +315,13 @@ public final class SourbyUpdater {
     // ------------------------------------------------------------------ check
 
     private void checkSafely() {
-        if (!checkRunning.compareAndSet(false, true)) {
-            SourbyLogger.info("auto-updater: a check is already running, skipping.");
-            return;
-        }
         try {
-            check();
+            if (tryCheck(null).isEmpty()) {
+                SourbyLogger.info("auto-updater: a check is already running, skipping.");
+                return;
+            }
         } catch (Throwable t) {
             SourbyLogger.warn("auto-updater check failed (non-fatal): " + t.getMessage());
-        } finally {
-            checkRunning.set(false);
         }
         // Recover missing reviewed Via pins on the same cadence (own try/catch); preserve installed jars.
         try {
@@ -312,16 +331,25 @@ public final class SourbyUpdater {
         }
     }
 
-    /** Run one channel-aware update check with the configured apply mode. */
-    public Outcome check() {
-        return check(null);
+    /**
+     * Run one check unless another one (scheduled or {@code /update}) is running; empty when it is.
+     * {@code overrideMode} as for {@link #check}.
+     */
+    public Optional<Outcome> tryCheck(@Nullable ApplyMode overrideMode) {
+        if (!checkRunning.compareAndSet(false, true)) return Optional.empty();
+        try {
+            return Optional.of(check(overrideMode));
+        } finally {
+            checkRunning.set(false);
+        }
     }
 
     /**
      * Run one check; {@code overrideMode} (e.g. from {@code /update apply}) wins over the
      * configured mode, letting an operator force a download+apply on a notify-configured server.
+     * Callers outside this package go through {@link #tryCheck}, so two checks never stage at once.
      */
-    public Outcome check(@Nullable ApplyMode overrideMode) {
+    Outcome check(@Nullable ApplyMode overrideMode) {
         ApplyMode mode = overrideMode != null ? overrideMode : ApplyMode.parse(Config.mode());
         if (mode == ApplyMode.OFF) return Outcome.DISABLED;
 
@@ -340,6 +368,8 @@ public final class SourbyUpdater {
 
         BuildInfo info = buildInfo.get();
         String currentVersion = info.version();
+        BuildVersion own = ownBuildVersion(info);
+        String runningMc = runningMinecraftVersion(info);
         UpdateChannel channel = resolveChannel();
 
         final String reposBase;
@@ -356,39 +386,63 @@ public final class SourbyUpdater {
         }
         Listing listing = fetchReleases(reposBase + Config.repo() + "/releases?per_page=100");
         if (listing.rateLimited()) return Outcome.RATE_LIMITED;
-        ReleaseInfo latest = listing.releases() == null ? null : latestForChannel(listing.releases(), channel);
-        if (latest == null) {
+        // Releases for this Minecraft version are selected, staged and applied; the newest release
+        // for another one is only announced, and never hides a newer release for this one.
+        ReleaseInfo latest = listing.releases() == null ? null : latestForChannel(listing.releases(), channel, runningMc, true);
+        ReleaseInfo otherMc = listing.releases() == null ? null : latestForChannel(listing.releases(), channel, runningMc, false);
+        if (latest == null && otherMc == null) {
             SourbyLogger.info("auto-updater: no matching " + channel.suffix()
                 + " release found for repo " + Config.repo() + " (up to date, or none published yet).");
             UpdateNotifier.clearPending();
             return Outcome.NO_RELEASE;
         }
-
-        if (!isNewerThanRunning(latest.tagName, currentVersion, ownBuildVersion(info))) {
+        String newestTag = latest != null ? latest.tagName : otherMc.tagName;
+        if (latest != null && !isNewerThanRunning(latest.tagName, currentVersion, own)) latest = null;
+        if (otherMc != null && !isNewerThanRunning(otherMc.tagName, currentVersion, own)) otherMc = null;
+        if (latest == null && otherMc == null) {
             SourbyLogger.info("auto-updater: already up to date on channel "
-                + channel.suffix() + " (current " + currentVersion + " build " + ownBuildVersion(info)
-                + ", latest " + latest.tagName + ").");
+                + channel.suffix() + " (current " + currentVersion + " build " + own
+                + ", latest " + newestTag + ").");
             UpdateNotifier.clearPending();
             return Outcome.UP_TO_DATE;
         }
         // Signed release manifest (staged rollout + yank list): enforced under the same rule as the
         // SEC-2 jar signature, i.e. only when this build ships the release public key. Runs before
         // the announcement, so a yanked or not-yet-rolled-out release is neither announced nor staged.
+        Outcome withoutSameMc = Outcome.UP_TO_DATE;
         if (signatures.isActive()) {
-            Selection selection = selectByManifest(listing.releases(), channel, currentVersion, ownBuildVersion(info));
-            if (selection.release() == null) {
-                UpdateNotifier.clearPending();
-                return selection.outcome();
-            }
+            Selection selection = selectByManifest(listing.releases(), channel, currentVersion, own, runningMc);
             latest = selection.release();
+            otherMc = selection.otherMinecraft();
+            withoutSameMc = selection.outcome();
+        }
+        if (otherMc != null) {
+            SourbyLogger.warn("auto-updater: " + otherMc.tagName + " targets Minecraft " + coreOf(otherMc.tagName)
+                + " but this server runs " + runningMc + "; it is announced, never staged. Crossing a Minecraft "
+                + "version is a manual upgrade (worlds, plugins, data formats).");
+            UpdateNotifier.announce(currentVersion, otherMc.tagName, channel, otherMc.htmlUrl, otherMc.notesSummary());
+            if (latest == null) {
+                return withoutSameMc == Outcome.MANIFEST_REJECTED ? withoutSameMc
+                    : mode == ApplyMode.NOTIFY ? Outcome.NOTIFIED : Outcome.MC_VERSION_MISMATCH;
+            }
+        } else if (latest == null) {
+            UpdateNotifier.clearPending();
+            return withoutSameMc;
         }
 
-        String appliedTag = readApplied();
-        if (latest.tagName.equals(appliedTag)) {
-            // Already swapped to this tag (waiting for/after restart, or a pre-r6 jar whose build
-            // number was not stamped from the release counter). Never re-download or re-restart.
+        if (latest.tagName.equals(readMarker("applied.tag")) && !appliedButReplaced(latest.tagName, own, latest.sha256)) {
+            // Already swapped to this tag (waiting for/after restart, rolled back, or a pre-r6 jar whose
+            // build number was not stamped from the release counter). Never re-download or re-restart.
             SourbyLogger.info("auto-updater: " + latest.tagName + " already applied; nothing to do.");
             return Outcome.UP_TO_DATE;
+        }
+
+        // An apply of this very release failed here before: the next try is the operator's.
+        if (overrideMode == null && mode != ApplyMode.NOTIFY && (latest.tagName.equals(readMarker(UpdateApplier.APPLY_FAILED_FILE))
+                || latest.tagName.equals(readMarker(UpdateApplier.LEGACY_PENDING_FILE)))) {
+            SourbyLogger.info("auto-updater: an earlier apply of " + latest.tagName + " failed on this server (auto_update/"
+                + UpdateApplier.APPLY_FAILED_FILE + "); this check only announces it. /update apply tries again.");
+            mode = ApplyMode.NOTIFY;
         }
 
         // An update exists. notify + (optionally) stage.
@@ -397,28 +451,26 @@ public final class SourbyUpdater {
         if (mode == ApplyMode.NOTIFY) {
             return Outcome.NOTIFIED;
         }
-
-        String runningMc = runningMinecraftVersion(info);
-        if (!sameMinecraftVersion(latest.tagName, runningMc)) {
-            SourbyLogger.warn("auto-updater: NOT staging " + latest.tagName + ": it targets Minecraft "
-                + coreOf(latest.tagName) + " but this server runs " + runningMc
-                + ". Crossing a Minecraft version is a manual upgrade (worlds, plugins, data formats).");
-            return Outcome.MC_VERSION_MISMATCH;
+        // Stage as well as auto: the countdown copies the staged jar, which a second stage must not
+        // replace or (after a failed re-check) delete under it.
+        if (UpdateApplier.inFlight()) {
+            SourbyLogger.info("auto-updater: an apply is already counting down; not staging " + latest.tagName + " again.");
+            return Outcome.APPLYING;
         }
 
-        // stage/auto: download + verify + place in the stage dir.
+        // stage/auto: download + verify + place in the stage dir (latest is for this Minecraft version).
         try {
             Path staged = downloadAndStage(latest);
             writePath(corePathFile, staged);
             writePath(latestPathFile, staged);
-            SourbyLogger.info("auto-updater: staged " + latest.tagName + " at "
-                + staged.toAbsolutePath() + " and updated auto_update/core.path."
-                + (mode == ApplyMode.AUTO ? "" : " Restart to apply."));
             if (mode == ApplyMode.AUTO) {
-                UpdateApplier.scheduleApplyAndRestart(latest.tagName, staged,
-                    Config.restartDelaySeconds(), Config.restartMode());
-                return Outcome.APPLYING;
+                SourbyLogger.info("auto-updater: staged " + latest.tagName + " at " + staged.toAbsolutePath() + ".");
+                return UpdateApplier.scheduleApplyAndRestart(latest.tagName, staged, latest.sha256,
+                    Config.restartDelaySeconds(), Config.restartMode()) ? Outcome.APPLYING : Outcome.APPLY_FAILED;
             }
+            SourbyLogger.info("auto-updater: staged " + latest.tagName + " at " + staged.toAbsolutePath()
+                + " (auto_update/core.path points at it). A restart does NOT install it: run /update apply, or stop"
+                + " the server and copy it over the launch jar by hand.");
             return Outcome.STAGED;
         } catch (LauncherRefusedException e) {
             SourbyLogger.warn("auto-updater: NOT staging " + latest.tagName + ": " + e.getMessage()
@@ -540,13 +592,38 @@ public final class SourbyUpdater {
         }
     }
 
-    private @Nullable String readApplied() {
+    /** The trimmed contents of a marker file in the auto_update dir, or {@code null} when absent or unreadable. */
+    private @Nullable String readMarker(String name) {
         try {
-            Path f = autoUpdateDir.resolve("applied.tag");
+            Path f = autoUpdateDir.resolve(name);
             return Files.isRegularFile(f) ? Files.readString(f, StandardCharsets.UTF_8).trim() : null;
         } catch (IOException e) {
             return null;
         }
+    }
+
+    /**
+     * True when the update {@code applied.tag} names was confirmed by the rollback guard
+     * ({@link UpdateRollbackGuard.Phase#OK} for {@code tag}), this server runs an older build (callers
+     * only ask about a release newer than the running build) and the launch jar the guard recorded no
+     * longer has the release's SHA-256: it was replaced outside the updater (a container recreated
+     * from an older image keeps {@code auto_update} on its volume). Any other guard state, including
+     * none after {@code /update resume}, an unknown digest or a launch jar that cannot be read, keeps
+     * the marker in force.
+     */
+    private boolean appliedButReplaced(String tag, BuildVersion own, @Nullable String releaseSha256) {
+        Optional<UpdateRollbackGuard.State> state = rollbackGuard.state();
+        if (releaseSha256 == null || state.isEmpty() || state.get().phase() != UpdateRollbackGuard.Phase.OK
+                || !tag.equals(state.get().tag())) {
+            return false;
+        }
+        Path launch = state.get().launchJar();
+        String onDisk = launch != null && Files.isRegularFile(launch) ? sha256(launch) : null;
+        if (onDisk == null || onDisk.equalsIgnoreCase(releaseSha256)) return false;
+        SourbyLogger.warn("auto-updater: " + tag + " was applied and confirmed on this server, but it now runs build "
+            + own + " and " + launch + " is no longer that release: the launch jar was replaced outside the updater "
+            + "(for example a container recreated from an older image). Offering " + tag + " again.");
+        return true;
     }
 
     private UpdateChannel resolveChannel() {
@@ -673,8 +750,11 @@ public final class SourbyUpdater {
         return d;
     }
 
-    /** The release a manifest-enforcing check settles on, or the outcome when there is none. */
-    private record Selection(@Nullable ReleaseInfo release, Outcome outcome) {}
+    /**
+     * What a manifest-enforcing check settles on: the release for this Minecraft version to take (or
+     * the outcome when there is none), and the newer-Minecraft release that may be announced.
+     */
+    private record Selection(@Nullable ReleaseInfo release, Outcome outcome, @Nullable ReleaseInfo otherMinecraft) {}
 
     /**
      * A newer release as seen by the policy pass: its tag and manifest assets always, and the
@@ -711,9 +791,11 @@ public final class SourbyUpdater {
 
     /**
      * Pick the newest release newer than the running build that the signed release policy lets this
-     * server take. Newer releases on the channel are inspected newest first (at most
-     * {@link #MAX_MANIFEST_CANDIDATES}) <b>whether or not they still have a jar</b>, so deleting a
-     * newer release's jar cannot hide its yanks.
+     * server take, and the newest newer-Minecraft release it may announce. Newer releases on the
+     * channel are inspected newest first <b>whether or not they still have a jar</b>, so deleting a
+     * newer release's jar cannot hide its yanks: first those for a newer Minecraft version (they rank
+     * above every tag of this one; only their yanks and the newest announceable one matter), then
+     * those for this Minecraft version, at most {@link #MAX_MANIFEST_CANDIDATES} of each.
      *
      * <ul>
      *   <li>Missing, unsigned, tampered, malformed or mis-bound manifest: stop with
@@ -721,39 +803,50 @@ public final class SourbyUpdater {
      *   <li>Every authentic manifest adds its yanks, even when expired or older than the revision
      *       already accepted for its tag; yanks also persist in {@link ReleasePolicyState}.</li>
      *   <li>Only a <i>fresh</i> manifest (not expired, {@code policy_revision} at least the highest
-     *       accepted for that tag) can make its release installable; a stale one is skipped.</li>
+     *       accepted for that tag) can make its release installable (or, for another Minecraft
+     *       version, announceable); a stale one is skipped.</li>
      * </ul>
      */
-    private Selection selectByManifest(JsonArray releases, UpdateChannel channel, String currentVersion, BuildVersion own) {
+    private Selection selectByManifest(JsonArray releases, UpdateChannel channel, String currentVersion, BuildVersion own,
+                                       String runningMc) {
         ReleasePolicyState state;
         try {
             state = ReleasePolicyState.load(autoUpdateDir);
         } catch (IOException e) {
             SourbyLogger.error("auto-updater: release policy state unreadable (" + e.getMessage() + "); refusing every update. "
                 + "Delete " + autoUpdateDir.resolve(ReleasePolicyState.FILE) + " to reset it (trust on first use).");
-            return new Selection(null, Outcome.MANIFEST_REJECTED);
+            return new Selection(null, Outcome.MANIFEST_REJECTED, null);
         }
-        List<PolicyCandidate> newer = new ArrayList<>();
+        List<PolicyCandidate> sameMc = new ArrayList<>();
+        List<PolicyCandidate> otherMc = new ArrayList<>();
         for (JsonElement el : releases) {
             if (!el.isJsonObject()) continue;
             PolicyCandidate c = policyCandidate(el.getAsJsonObject(), channel);
-            if (c != null && isNewerThanRunning(c.tag(), currentVersion, own)) newer.add(c);
+            if (c != null && isNewerThanRunning(c.tag(), currentVersion, own)) {
+                (sameMinecraftVersion(c.tag(), runningMc) ? sameMc : otherMc).add(c);
+            }
         }
-        newer.sort((a, b) -> compareTags(b.tag(), a.tag()));
+        sameMc.sort((a, b) -> compareTags(b.tag(), a.tag()));
+        otherMc.sort((a, b) -> compareTags(b.tag(), a.tag()));
+        List<PolicyCandidate> inspected = new ArrayList<>(otherMc.subList(0, Math.min(otherMc.size(), MAX_MANIFEST_CANDIDATES)));
+        inspected.addAll(sameMc.subList(0, Math.min(sameMc.size(), MAX_MANIFEST_CANDIDATES)));
         java.util.Set<String> yanked = new java.util.HashSet<>(state.yanked());
         boolean deferred = false, stale = false, incomplete = false;
         String serverId = null;
         boolean serverIdRead = false;
         Instant now = clock.instant();
         Selection result = null;
-        for (PolicyCandidate c : newer.subList(0, Math.min(newer.size(), MAX_MANIFEST_CANDIDATES))) {
+        ReleaseInfo announce = null;
+        for (PolicyCandidate c : inspected) {
+            boolean other = !sameMinecraftVersion(c.tag(), runningMc);
+            if (other && announce != null) continue; // the newest announceable one is all an announcement needs
             ReleaseManifest manifest;
             try {
                 manifest = fetchManifest(c);
             } catch (Exception e) {
                 SourbyLogger.warn("auto-updater: NOT taking " + c.tag() + " or anything older: signed release manifest rejected ("
                     + e.getMessage() + "). This build enforces release manifests (its release key is present).");
-                result = new Selection(null, Outcome.MANIFEST_REJECTED);
+                result = new Selection(null, Outcome.MANIFEST_REJECTED, other ? null : announce);
                 break;
             }
             yanked.addAll(manifest.yanked());
@@ -767,7 +860,7 @@ public final class SourbyUpdater {
             }
             if (c.installable() == null) {
                 SourbyLogger.warn("auto-updater: " + c.tag() + " has no installable jar asset; its signed yanks count, it is skipped.");
-                incomplete = true;
+                incomplete |= !other;
                 continue;
             }
             if (expired || rolledBack) {
@@ -775,7 +868,7 @@ public final class SourbyUpdater {
                     + (expired ? "expired (expires_at " + manifest.expiresAt() + ")" : "older (policy_revision "
                     + manifest.policyRevision() + ") than the revision " + state.revision(c.tag()) + " already accepted")
                     + ". Its yanks still count.");
-                stale = true;
+                stale |= !other;
                 continue;
             }
             if (!serverIdRead) {
@@ -786,10 +879,14 @@ public final class SourbyUpdater {
             if (bucket >= manifest.rolloutPercent()) {
                 SourbyLogger.info("auto-updater: " + c.tag() + " is rolling out to " + manifest.rolloutPercent()
                     + "% of servers and has not reached this one yet (bucket " + bucket + ").");
-                deferred = true;
+                deferred |= !other;
                 continue;
             }
-            result = new Selection(c.installable(), Outcome.NOTIFIED);
+            if (other) {
+                announce = c.installable();
+                continue;
+            }
+            result = new Selection(c.installable(), Outcome.NOTIFIED, announce);
             break;
         }
         try {
@@ -797,14 +894,15 @@ public final class SourbyUpdater {
         } catch (IOException e) {
             SourbyLogger.warn("auto-updater: could not persist the release policy state (" + e.getMessage()
                 + "); refusing to install on knowledge that would not survive a restart.");
-            return new Selection(null, Outcome.MANIFEST_REJECTED);
+            return new Selection(null, Outcome.MANIFEST_REJECTED, null);
         }
         if (result != null) return result;
-        Outcome none = stale ? Outcome.MANIFEST_REJECTED
+        Outcome none = sameMc.isEmpty() ? Outcome.UP_TO_DATE
+            : stale ? Outcome.MANIFEST_REJECTED
             : deferred ? Outcome.ROLLOUT_DEFERRED
             : incomplete ? Outcome.NO_RELEASE
             : Outcome.YANKED;
-        return new Selection(null, none);
+        return new Selection(null, none, announce);
     }
 
     /**
@@ -832,19 +930,31 @@ public final class SourbyUpdater {
 
     private byte[] fetchBounded(String url, long declaredSize, long limit, String what) throws IOException {
         if (declaredSize > limit) throw new IOException(what + " asset is " + declaredSize + " bytes");
-        try (HttpTransport.Response resp = transport.get(url, Map.of("Accept", "application/octet-stream"))) {
+        try (HttpTransport.Response resp = getAsset(url, what)) {
             if (resp.status() >= 400) throw new IOException(what + " download returned HTTP " + resp.status());
             if (resp.contentLength() > limit) throw new IOException(what + " Content-Length " + resp.contentLength() + " exceeds the bound");
-            return readBounded(resp.bodyOrEmpty(), limit);
+            return readBounded(new DeadlineInputStream(resp.bodyOrEmpty(), MAX_DOWNLOAD_TIME), limit);
         }
     }
 
-    private @Nullable ReleaseInfo latestForChannel(JsonArray releases, UpdateChannel channel) {
+    /** GET a release asset; refuses a URL that is not https (plain http only as {@link UpdateOverrides#assetUrlAllowed} allows). */
+    private HttpTransport.Response getAsset(String url, String what) throws IOException {
+        if (url == null || !UpdateOverrides.assetUrlAllowed(url)) {
+            throw new IOException("refusing to download the " + what + " from " + url + ": release assets must use https");
+        }
+        return transport.get(url, Map.of("Accept", "application/octet-stream"));
+    }
+
+    /**
+     * The highest installable release on the channel whose Minecraft version is ({@code sameMc}) or
+     * is not ({@code !sameMc}) {@code runningMc}.
+     */
+    private @Nullable ReleaseInfo latestForChannel(JsonArray releases, UpdateChannel channel, String runningMc, boolean sameMc) {
         ReleaseInfo best = null;
         for (JsonElement el : releases) {
             if (!el.isJsonObject()) continue;
             ReleaseInfo info = parseRelease(el.getAsJsonObject(), channel);
-            if (info == null) continue;
+            if (info == null || sameMinecraftVersion(info.tagName, runningMc) != sameMc) continue;
             if (best == null || compareTags(info.tagName, best.tagName) > 0) {
                 best = info;
             }
@@ -908,37 +1018,103 @@ public final class SourbyUpdater {
     // ------------------------------------------------------------------ download + verify + stage
 
     private Path downloadAndStage(ReleaseInfo info) throws IOException, GeneralSecurityException {
+        Path target = stagedPath(info);
+        if (info.declaredSize > MAX_JAR_BYTES) {
+            throw new IOException("refusing " + info.assetName + ": it declares " + info.declaredSize
+                + " bytes, more than the " + MAX_JAR_BYTES + "-byte ceiling");
+        }
         Files.createDirectories(stageDir);
-        Path temp   = stageDir.resolve(info.assetName + ".part");
-        Path target = stageDir.resolve(info.assetName);
 
-        Files.deleteIfExists(temp);
+        // A copy staged by an earlier check that still has the release digest is not downloaded again.
+        if (info.sha256 != null && Files.isRegularFile(target) && info.sha256.equalsIgnoreCase(sha256(target))) {
+            SourbyLogger.info("auto-updater: " + target.getFileName() + " is already staged with the release's SHA-256; "
+                + "not downloading it again.");
+            if (signatures.isActive()) {
+                verifySignatureOrThrow(target, info);
+            }
+            verifyLauncherOrThrow(target, info);
+            return target;
+        }
+
         long limit = info.declaredSize > 0 ? info.declaredSize : MAX_JAR_BYTES;
-        try (HttpTransport.Response resp = transport.get(info.downloadUrl, Map.of("Accept", "application/octet-stream"))) {
-            if (resp.status() >= 400) {
-                throw new IOException("download of " + info.assetName + " returned HTTP " + resp.status());
+        // A fresh name per download: nothing else ever writes into this file.
+        Path temp = Files.createTempFile(stageDir, info.assetName + ".", ".part");
+        boolean staged = false;
+        try {
+            try (HttpTransport.Response resp = getAsset(info.downloadUrl, info.assetName)) {
+                if (resp.status() >= 400) {
+                    throw new IOException("download of " + info.assetName + " returned HTTP " + resp.status());
+                }
+                long advertised = resp.contentLength();
+                if (advertised > limit) {
+                    throw new IOException("refusing " + info.assetName + ": Content-Length " + advertised
+                        + " exceeds the " + limit + "-byte bound; nothing was read");
+                }
+                copyBounded(new DeadlineInputStream(resp.bodyOrEmpty(), MAX_DOWNLOAD_TIME), temp, limit);
             }
-            long advertised = resp.contentLength();
-            if (advertised > limit) {
-                throw new IOException("refusing " + info.assetName + ": Content-Length " + advertised
-                    + " exceeds the " + limit + "-byte bound; nothing was read");
+
+            verifyOrThrow(temp, info);
+            if (signatures.isActive()) {
+                verifySignatureOrThrow(temp, info);
             }
-            try {
-                copyBounded(resp.bodyOrEmpty(), temp, limit);
-            } catch (IOException e) {
-                fail(temp, e.getMessage());
+            // Authentic bytes are still not necessarily a jar this server can hand over to (SEC-4).
+            verifyLauncherOrThrow(temp, info);
+
+            Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
+            staged = true;
+            return target;
+        } finally {
+            if (!staged) {
+                try { Files.deleteIfExists(temp); } catch (IOException ignored) {}
             }
         }
+    }
 
-        verifyOrThrow(temp, info);
-        if (signatures.isActive()) {
-            verifySignatureOrThrow(temp, info);
+    /** Where {@code info}'s jar is staged; refuses an asset name that is not a plain {@code .jar} file name. */
+    private Path stagedPath(ReleaseInfo info) throws IOException {
+        if (!SAFE_ASSET_NAME.matcher(info.assetName).matches()) {
+            throw new IOException("refusing asset name '" + info.assetName + "': only letters, digits, '.', '_' and '-'"
+                + " ending in .jar are staged");
         }
-        // Authentic bytes are still not necessarily a jar this server can hand over to (SEC-4).
-        verifyLauncherOrThrow(temp, info);
-
-        Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
+        Path target = stageDir.resolve(info.assetName);
+        Path base = stageDir.toAbsolutePath().normalize();
+        if (!base.equals(target.toAbsolutePath().normalize().getParent())) {
+            throw new IOException("refusing asset name '" + info.assetName + "': it resolves outside " + stageDir);
+        }
         return target;
+    }
+
+    /**
+     * Fails a read once a total time budget has passed: an overall deadline on top of the
+     * transport's per-read timeout, so a slow drip cannot keep a download open indefinitely.
+     */
+    static final class DeadlineInputStream extends FilterInputStream {
+        private final long deadlineNanos;
+        private final Duration budget;
+
+        DeadlineInputStream(InputStream in, Duration budget) {
+            super(in);
+            this.budget = budget;
+            this.deadlineNanos = System.nanoTime() + budget.toNanos();
+        }
+
+        private void checkDeadline() throws IOException {
+            if (System.nanoTime() - deadlineNanos > 0) {
+                throw new IOException("download took longer than " + budget.toMinutes() + " minutes; aborted");
+            }
+        }
+
+        @Override
+        public int read() throws IOException {
+            checkDeadline();
+            return super.read();
+        }
+
+        @Override
+        public int read(byte[] b, int off, int len) throws IOException {
+            checkDeadline();
+            return super.read(b, off, len);
+        }
     }
 
     /**
@@ -974,7 +1150,7 @@ public final class SourbyUpdater {
     /**
      * Verify a downloaded jar before it is staged for execution. Order: non-empty -> declared size
      * (when known) -> <b>mandatory SHA-256</b> against the release asset digest -> valid-ZIP/JAR open.
-     * A staged jar is executed on the next restart, so integrity verification is REQUIRED: an asset
+     * A staged jar becomes the launch jar once it is applied, so integrity verification is REQUIRED: an asset
      * whose release publishes no SHA-256 digest is refused (size + zip-validity alone do not prove the
      * bytes are the genuine release — a MITM or tampered mirror can forge both). Any failure deletes
      * the file and throws so it is never staged.
@@ -1047,14 +1223,14 @@ public final class SourbyUpdater {
             fail(file, "signature asset is " + info.signatureSize + " bytes; refusing");
         }
         byte[] sig;
-        try (HttpTransport.Response resp = transport.get(info.signatureUrl, Map.of("Accept", "application/octet-stream"))) {
+        try (HttpTransport.Response resp = getAsset(info.signatureUrl, info.assetName + ReleaseSignatureVerifier.SIGNATURE_SUFFIX)) {
             if (resp.status() >= 400) {
                 fail(file, "signature download returned HTTP " + resp.status());
             }
             if (resp.contentLength() > MAX_SIGNATURE_BYTES) {
                 fail(file, "signature Content-Length " + resp.contentLength() + " exceeds the bound");
             }
-            sig = readBounded(resp.bodyOrEmpty(), MAX_SIGNATURE_BYTES);
+            sig = readBounded(new DeadlineInputStream(resp.bodyOrEmpty(), MAX_DOWNLOAD_TIME), MAX_SIGNATURE_BYTES);
         }
         try {
             signatures.verifyOrThrow(file, sig);
@@ -1119,7 +1295,15 @@ public final class SourbyUpdater {
 
     /** Outcome of a single check — returned so an on-demand check (e.g. a command) can report it. */
     public enum Outcome {
-        DISABLED, NO_RELEASE, UP_TO_DATE, NOTIFIED, STAGED, STAGE_FAILED, APPLYING,
+        DISABLED, NO_RELEASE, UP_TO_DATE, NOTIFIED,
+        /** Downloaded, verified and placed in the stage dir; nothing installs it until {@code /update apply}. */
+        STAGED,
+        STAGE_FAILED, APPLYING,
+        /**
+         * Staged and verified, but the swap cannot run here (launch jar unknown, its directory not
+         * writable, too little free space); nothing was broadcast or restarted.
+         */
+        APPLY_FAILED,
         /** A rollback hold is in force ({@link UpdateRollbackGuard}); nothing was checked. */
         HELD,
         /** Inside a GitHub rate-limit backoff window; nothing was checked. */
@@ -1144,7 +1328,8 @@ public final class SourbyUpdater {
 
     /**
      * Safe apply mode. {@code notify} = log + op-notify only (default, safest); {@code stage} =
-     * download + verify + place in stage dir for a next-restart swap; {@code off} = disabled.
+     * download + verify + place in the stage dir, installed only by {@code /update apply} or by hand;
+     * {@code auto} = stage, swap the launch jar and restart; {@code off} = disabled.
      */
     public enum ApplyMode {
         NOTIFY, STAGE, AUTO, OFF;

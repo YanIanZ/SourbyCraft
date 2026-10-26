@@ -5,34 +5,91 @@ SourbyCraft plugin (and any Bukkit/Paper plugin running on SourbyCraft) compiles
 
 ## What this actually is
 
-**`sourbyapi` republishes the Paper API surface under the SourbyCraft group id, plus the
-region-threading API additions (formerly Canvas's API, now `dev.iyanz.sourbycraft.api.*` since
-Build 48) and `dev.iyanz.sourbycraft.api.metrics`.** It is not a reimplementation of the upstream APIs. Its
-`build.gradle.kts` (materialized from Paper's `paper-api/build.gradle.kts` by paperweight — see
-`sourbyapi/build.gradle.kts.patch` and the `upstreams.paper { ... }` block in the root
-`build.gradle.kts`) points its Gradle source sets at:
+**`sourbyapi` republishes the Paper API surface under the SourbyCraft group id, plus
+SourbyCraft's own `dev.iyanz.sourbycraft.api.*` packages: the region-threading API additions
+(formerly Canvas's API, moved here in Build 48), the read-only metrics contract, the Aurora World
+Fabric world and MultiProfile services, and the Aurora Bridge scheduler markers.** It is not a
+reimplementation of the upstream APIs. Its `build.gradle.kts` (materialized from Paper's
+`paper-api/build.gradle.kts` by paperweight — see `sourbyapi/build.gradle.kts.patch` and the
+`upstreams.paper { ... }` block in the root `build.gradle.kts`) points its Gradle source sets at:
 
 - `../paper-api/src/main/java` — upstream Paper's public API (`org.bukkit.*`, `io.papermc.paper.*`)
-- `src/main/java` — SourbyCraft-owned API: the region-threading additions
-  (`dev.iyanz.sourbycraft.api.{event,region,simd,world}`, `Unsupported`) and the read-only metrics
-  service contract
+- `src/main/java` — the SourbyCraft-owned API packages listed under *SourbyCraft API packages*
 
-Upstream classes retain their existing `org.bukkit` and `io.papermc.paper` package names. `paper-patches/files/` holds the changes to the *upstream Paper API sources* that used to come
-from Canvas (region-threading API hooks, javadoc); they apply before the sources land in `paper-api/`.
+Upstream classes retain their existing `org.bukkit` and `io.papermc.paper` package names.
+`paper-patches/files/` holds the changes to the *upstream Paper API sources* that used to come
+from Canvas (region-threading API hooks, javadoc); they apply before the sources land in
+`paper-api/`. SourbyCraft's own edits to those sources are the feature patches in
+`paper-patches/features/` (*API feature patches* below).
 
 What SourbyCraft *does* change is the packaging:
 
 - **Group id**: published as `dev.iyanz.sourbycraft:sourbyapi` instead of `io.papermc.paper:paper-api`.
 - **Automatic-Module-Name**: still `org.bukkit` — deliberately, so the module name plugins see on the
   module path is unchanged.
-- **Capability aliases**: the jar declares the same Gradle module capabilities as
-  `io.papermc.paper:paper-mojangapi`, `com.destroystokyo.paper:paper-api`,
-  `org.spigotmc:spigot-api` and `org.bukkit:bukkit`, so it can substitute for any of those
-  coordinates in a dependency graph without a conflict.
+- **Capability aliases**: upstream `paper-api/build.gradle.kts` declares Gradle module
+  capabilities for `io.papermc.paper:paper-mojangapi`, `com.destroystokyo.paper:paper-api`,
+  `org.spigotmc:spigot-api` and `org.bukkit:bukkit`, so the jar can substitute for those
+  coordinates in a dependency graph. That block is inherited, not added by
+  `build.gradle.kts.patch`, and cannot be checked in this tree before `applyAllPatches`
+  materializes the build file; confirm it in the generated `.module` metadata of a published jar.
+- **POM licence**: `GPL-3.0-only` (`build.gradle.kts.patch`; it read `GPL-3.0` before PR #62).
 
-In short: **this is the branded upstream API surface plus SourbyCraft's metrics contract.** A plugin
+In short: **this is the branded upstream API surface plus SourbyCraft's own API packages.** A plugin
 built against `sourbyapi` compiles against the exact same `org.bukkit`/`io.papermc.paper` classes it
-would against upstream Paper and may also consume the SourbyCraft metrics service.
+would against upstream Paper and may also use the SourbyCraft services below.
+
+## SourbyCraft API packages
+
+| Package | Contents | Documentation |
+| --- | --- | --- |
+| `dev.iyanz.sourbycraft.api` | `Unsupported` (marks upstream API members the region-threaded server does not support) | *Breaking change in Build 48* below |
+| `dev.iyanz.sourbycraft.api.event`, `.event.world` | Region-threading async events (teleport, portal, respawn, player save, end credits, world unload) | *Breaking change in Build 48* below |
+| `dev.iyanz.sourbycraft.api.region` | `RegionThreadingTickManager`, `RegionTickData`, `WorldRegionizer` | *Breaking change in Build 48* below |
+| `dev.iyanz.sourbycraft.api.simd` | `SIMDChecker`, `SIMDDetection`, `VectorMapPalette` | *Breaking change in Build 48* below |
+| `dev.iyanz.sourbycraft.api.metrics` | `SourbyMetrics` and its immutable snapshots: the read-only metrics service | *Consuming it* below |
+| `dev.iyanz.sourbycraft.api.world` | `AuroraWorlds` (Aurora World Fabric worlds and templates at runtime), `WorldRequest`, `WorldProperties`, `UnloadResult`, `WorldOperationBusyException`; also `WorldUnloadResult` from the former Canvas API | [developing-awf.md](../docs/guides/developing-awf.md), [aurora-world-fabric.md](../docs/architecture/aurora-world-fabric.md) |
+| `dev.iyanz.sourbycraft.api.profile` | `AuroraProfiles` (AWF MultiProfile: durable player profiles), its requests, results, error codes and `ProfileStateAdapter` | [MultiProfile API](../docs/awf/multiprofile/API.md) |
+| `dev.iyanz.sourbycraft.api.scheduler` | `RegionTask`, `EntityTask`: markers that name the owning chunk or entity of a sync Bukkit scheduler callback for the Aurora Bridge | [aurora-plugin-bridge.md](../docs/architecture/aurora-plugin-bridge.md) |
+
+`AuroraWorlds` and `AuroraProfiles` are obtained from Bukkit's `ServicesManager`; both are
+optional (a server without the feature has no registration, and `AuroraProfiles.isEnabled()` can
+be false).
+
+### API changes in PR #62 (Build 50 candidate)
+
+Not in any published build: the `v26.2-r50` prerelease tag predates PR #61 and PR #62, and how
+this work is published is an open owner decision. Code written and statically reviewed; not built;
+not tested by the owner; no API test was added.
+
+- `AuroraProfiles.setProfileLocked(UUID profileId, boolean locked)` puts an inactive profile on
+  administrative hold (still listed, switching to it is refused) or releases it; the active profile
+  cannot be locked, and the call is refused during an account transition or while a transition
+  journal is pending. `AuroraProfiles.setProfileSlotLimit(UUID accountId, int slots)` sets how many
+  profiles an account may own, from 1 to the server's `max-slots`; profiles above a lowered limit
+  are kept. Both are `default` methods whose default implementation completes exceptionally with
+  `UnsupportedOperationException`, so a service implementation built against the older interface
+  still links; SourbyCraft's own service implements them.
+- `AuroraProfiles.registerProfileStateAdapter` documents its refusals: `IllegalArgumentException`
+  for a malformed id, an `id:version` key over 64 characters, a version below 1, an id another
+  enabled plugin holds, or a 33rd adapter; `ProfileOperationException(INVALID_REQUEST)` for a plugin
+  that is not enabled. `ProfileStateAdapter` documents the limits (2 MiB per adapter, 6 MiB for all
+  adapters of one snapshot, 32 adapters) and which stored data is carried forward.
+- `ProfileErrorCode.STATE_TOO_LARGE`: a player state over the 8 MiB snapshot limit; nothing is
+  stored. It was added before `INTERNAL_ERROR`, so that constant's ordinal changed; persist the
+  name, not the ordinal.
+- `WorldProperties.Spawn` rejects non-finite or out-of-world values with
+  `IllegalArgumentException`: `x` and `z` from -29999984 to 29999984, `y` from -2032 up to but not
+  including 2032, a finite yaw. A spawn stored before this change outside those limits is dropped
+  with a WARN when `aurora-worlds.json` or a template's `template.json` is read; importing an
+  `.awf` file whose recorded spawn is outside them still fails the whole import (open).
+- `AuroraWorlds` javadoc: `importWorld` also applies the file's properties and merges recorded
+  plugin data into the world's persistent data container before its future completes, and fails
+  before creating anything when either is malformed; `unload(name, true)` first saves a world
+  created through this API durably and fails, leaving it loaded, when that save fails; while the
+  server is stopping that save is skipped and the engine normally answers `SERVER_STOPPING`;
+  `UnloadResult.FAILED` can also mean the world was unloaded but its final AWF commit was not
+  confirmed (`isLoaded` tells the two apart).
 
 ## Breaking change in Build 48: the Canvas API package was removed
 
@@ -88,6 +145,17 @@ SourbyCraft package (`scripts/baseline_policy.py`), so it names these types by s
 SourbyCraft feature patches add the imports (Minecraft, Paper server, and this module's first API
 feature patch, `paper-patches/features/0001-…`). `scripts/test_independence_policy.py` fails on any
 `io.canvasmc` string in this module's sources, the server sources or any patch tree.
+
+## API feature patches
+
+SourbyCraft's edits to the upstream Paper API sources, applied after the engine baseline in
+`paper-patches/files/`:
+
+| Patch | Change |
+| --- | --- |
+| `0001-SourbyCraft-plugin-API-types-from-dev.iyanz.sourbycraft.api` | Adds the `dev.iyanz.sourbycraft.api` imports the baseline names by simple name |
+| `0002-SourbyCraft-BRAND_SOURBYCRAFT_ID-replaces-BRAND_CANVAS_ID` | `ServerBuildInfo.BRAND_SOURBYCRAFT_ID`; see the next section |
+| `0003-SourbyCraft-ServerTickManager-is-supported` | Drops `@Unsupported` from `org.bukkit.ServerTickManager` and documents how the server-wide tick state applies to regions: it takes effect at the next global tick, each region observes it at the start of its own next tick, stepping and sprinting count global ticks, and a region's own pause/sprint stays separate |
 
 ## Breaking change in Build 48: `ServerBuildInfo.BRAND_CANVAS_ID` was removed
 
@@ -174,8 +242,13 @@ api-version: '26.2'
 - `build.gradle.kts` / `build.gradle.kts.patch` — the paperweight-materialized build script + the
   patch that produced it from Paper's `paper-api/build.gradle.kts`.
 - `paper-patches/` — patches applied to the upstream `paper-api` sources before they land in the
-  sibling `paper-api/` project that this module's source set reads from.
-- `src/main/java/dev/iyanz/sourbycraft/api/{event,region,simd,world}`, `api/Unsupported.java` —
-  region-threading API additions (formerly Canvas's API; see *Breaking change in Build 48*).
+  sibling `paper-api/` project that this module's source set reads from: `files/` (engine
+  baseline) and `features/` (*API feature patches*).
+- `src/main/java/dev/iyanz/sourbycraft/api/{event,region,simd}`, `api/Unsupported.java`,
+  `api/world/WorldUnloadResult.java` — region-threading API additions (formerly Canvas's API; see
+  *Breaking change in Build 48*).
 - `src/main/java/dev/iyanz/sourbycraft/api/metrics/` — SourbyCraft's public read-only metrics API.
+- `src/main/java/dev/iyanz/sourbycraft/api/world/` — `AuroraWorlds` and its types.
+- `src/main/java/dev/iyanz/sourbycraft/api/profile/` — `AuroraProfiles` (AWF MultiProfile) and its types.
+- `src/main/java/dev/iyanz/sourbycraft/api/scheduler/` — `RegionTask` and `EntityTask`.
 - `src/test/` — API contract tests.

@@ -50,6 +50,8 @@ public class FoliaSparkPlugin implements PaperSparkModule, SparkPlugin {
     private final FoliaTickReporter tickReporter;
     private final ThreadDumper gameThreadDumper;
     private final SparkPlatform platform;
+    /** Whether a class lookup failure other than class-not-found has been logged (once per module). */
+    private final java.util.concurrent.atomic.AtomicBoolean classLookupFailureLogged = new java.util.concurrent.atomic.AtomicBoolean();
 
     private FoliaSparkPlugin(
         final Server server, final Logger logger, final PaperScheduler scheduler, final PaperClassLookup classLookup
@@ -170,7 +172,15 @@ public class FoliaSparkPlugin implements PaperSparkModule, SparkPlugin {
         return (className) -> {
             try {
                 return this.classLookup.lookup(className);
-            } catch (final Throwable ignored) {
+            } catch (final Exception | LinkageError failure) {
+                // Spark's ClassFinder has no failure channel: null means "no class". A class this loader
+                // cannot see is that case; any other lookup failure is reported once, with its cause,
+                // instead of passing silently for a missing class (engine-source guard #100). Errors
+                // other than linkage errors (out of memory, stack overflow) are not caught.
+                if (!(failure instanceof ClassNotFoundException) && this.classLookupFailureLogged.compareAndSet(false, true)) {
+                    this.logger.log(Level.WARNING, "spark class lookup failed for " + className
+                        + "; spark treats the class as not found, and further lookup failures are not logged", failure);
+                }
                 return null;
             }
         };

@@ -24,12 +24,19 @@ import java.util.concurrent.TimeUnit;
  * unloaded, clean stop) or has expired (crash). Every commit checks the lease inside its script,
  * so a server that lost its lease cannot overwrite the new owner's chunks.</p>
  *
- * <p>A lease names its server: a hash of the host name and the server directory. The same server
- * restarting after a crash takes its own lease over at once instead of waiting for it to expire;
- * any other server still has to wait. Two processes cannot share a server directory (the world's
- * {@code session.lock} prevents it), so the name only repeats for a restart. A copied server
- * directory on the same host is a different directory; a container recreated with a new host name
- * waits for the lease like any other server.</p>
+ * <p>A lease token names its holder: {@code owner/incarnation/store}, where the owner is this
+ * server's lease owner (a hash of the node id persisted in {@code awf/node-id}, the host name and
+ * the server directory), the incarnation is this process's (one per boot) and the store part is
+ * random per open; see {@link dev.iyanz.sourbycraft.awf.redis.fabric.NodeIdentity}. While a lease is
+ * live only the incarnation holding it may take it over (a store of this process opened again before
+ * the old one was closed); any other process waits for it to be released or to expire, also one with
+ * the same owner, such as a copied server directory on a host with the same name and path. The one
+ * exception is a restart after a crash: this server's previous incarnation, proven stopped by the
+ * process-lifetime lock on {@code awf/node.lock}, is taken over at once. Lease renewal and commits
+ * compare the whole token.</p>
+ *
+ * <p>Deleting or retiring a store is refused while any server holds its lease; the check and the
+ * change are one script, so no server can acquire the lease in between.</p>
  *
  * <p>Requirements: Redis 7.0 or newer ({@code #!lua} scripts), an eviction policy that never
  * evicts these keys ({@code noeviction} or a {@code volatile-*} policy — the keys have no expiry),
@@ -42,14 +49,46 @@ public final class RedisBackend implements AwfBackend {
         if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end
         return 0
         """;
-    /** KEYS: lock. ARGV: new token, this server's id, lease ms. OK, or the current holder. */
+    /**
+     * KEYS: lock. ARGV: new token, this incarnation's token prefix ({@code owner/incarnation/}), the
+     * proven-stopped previous incarnation's prefix or {@code ''}, lease ms. OK, TAKEN_OVER (from this
+     * incarnation), TAKEN_OVER_PREVIOUS (from the previous one), or the current holder.
+     */
     static final String ACQUIRE_SCRIPT = """
         #!lua
         local holder = redis.call('GET', KEYS[1])
-        if holder and string.sub(holder, 1, string.len(ARGV[2]) + 1) ~= ARGV[2] .. '/' then return holder end
-        redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[3])
-        if holder then return 'TAKEN_OVER' end
-        return 'OK'
+        local result = 'OK'
+        if holder then
+          if string.sub(holder, 1, string.len(ARGV[2])) == ARGV[2] then
+            result = 'TAKEN_OVER'
+          elseif ARGV[3] ~= '' and string.sub(holder, 1, string.len(ARGV[3])) == ARGV[3] then
+            result = 'TAKEN_OVER_PREVIOUS'
+          else
+            return holder
+          end
+        end
+        redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[4])
+        return result
+        """;
+    /** KEYS: lock, chunks, deleted, gen, writer. Deletes the data, refused while a lease is held. */
+    static final String DELETE_SCRIPT = """
+        #!lua
+        if redis.call('EXISTS', KEYS[1]) == 1 then return redis.error_reply('AWFLEASE the store is open on a server') end
+        return redis.call('DEL', KEYS[2], KEYS[3], KEYS[4], KEYS[5])
+        """;
+    /**
+     * KEYS: lock, chunks, deleted, gen, writer, then the new names of chunks, deleted and gen (the same
+     * hash tag, so the same cluster slot). Renames the data and drops the writer, refused while a lease
+     * is held.
+     */
+    static final String RETIRE_SCRIPT = """
+        #!lua
+        if redis.call('EXISTS', KEYS[1]) == 1 then return redis.error_reply('AWFLEASE the store is open on a server') end
+        for i = 2, 4 do
+          if redis.call('EXISTS', KEYS[i]) == 1 then redis.call('RENAME', KEYS[i], KEYS[i + 4]) end
+        end
+        redis.call('DEL', KEYS[5])
+        return 1
         """;
     /**
      * KEYS: lock, gen, writer. ARGV: token, lease ms, the generation the store last saw. 1 renewed,
@@ -69,8 +108,12 @@ public final class RedisBackend implements AwfBackend {
 
     private final RedisSettings settings;
     private final RedisClient client;
-    /** This server's identity in leases; see the class comment. */
+    /** This server's lease owner; see the class comment. */
     private final String owner;
+    /** This process's incarnation, the second part of every token it creates. */
+    private final String incarnation;
+    /** This server's proven-stopped previous incarnation, whose leases are taken over at once, or {@code null}. */
+    private final String previousIncarnation;
     /** How long an acquired or renewed lease lasts; {@code lease-seconds} in production. */
     private final long leaseMillis;
     /** The renewal cadence; a third of the lease (at least a second) in production. */
@@ -82,12 +125,19 @@ public final class RedisBackend implements AwfBackend {
     private final Map<String, RedisStore> leased = new ConcurrentHashMap<>();
     /** Tokens whose lease is currently lost, so the loss is logged once rather than every renewal. */
     private final java.util.Set<String> lost = ConcurrentHashMap.newKeySet();
+    /**
+     * When each leased store's lease was last set or extended ({@link System#nanoTime}): acquired,
+     * renewed or taken back. Created at open and removed at release; renewal only updates an entry
+     * that exists, so a store released during a renewal pass leaves nothing behind.
+     */
+    private final Map<String, Long> extendedNanos = new ConcurrentHashMap<>();
     private final ScheduledExecutorService renewals;
     private volatile boolean waitForAof;
     private volatile boolean novaluesUnsupported;
 
+    /** @throws IllegalArgumentException when the settings have an {@link RedisSettings#invalidReason()} */
     public RedisBackend(final RedisSettings settings) {
-        this(settings, new RedisClient(RedisClient.Endpoint.parse(settings.uri()), settings.poolSize(),
+        this(settings, new RedisClient(RedisClient.Endpoint.parse(usable(settings).uri()), settings.poolSize(),
             settings.timeoutMillis()));
     }
 
@@ -95,15 +145,25 @@ public final class RedisBackend implements AwfBackend {
      * A backend over a caller-owned, independently bounded client, for example the Aurora Redis
      * Fabric's STORAGE workload. The fabric keeps ownership of the client's lifetime; closing this
      * backend closes it too, which is safe to repeat.
+     *
+     * @throws IllegalArgumentException when the settings have an {@link RedisSettings#invalidReason()}
      */
     public static RedisBackend sharing(final RedisSettings settings, final RedisClient client) {
         return new RedisBackend(settings, client);
     }
 
+    /** As this process: its lease owner, incarnation and proven-stopped predecessor. */
     RedisBackend(final RedisSettings settings, final RedisClient client) {
-        this(settings, client, serverId());
+        this(settings, client, dev.iyanz.sourbycraft.awf.redis.fabric.NodeIdentity.current());
     }
 
+    private RedisBackend(final RedisSettings settings, final RedisClient client,
+                         final dev.iyanz.sourbycraft.awf.redis.fabric.NodeIdentity identity) {
+        this(settings, client, identity.leaseOwner(), identity.incarnation(), identity.previousIncarnation(),
+            settings.leaseSeconds() * 1000L, renewalPeriodMillis(settings));
+    }
+
+    /** Test seam: a lease owner of its own, with this JVM's incarnation and no predecessor. */
     RedisBackend(final RedisSettings settings, final RedisClient client, final String owner) {
         this(settings, client, owner, settings.leaseSeconds() * 1000L, renewalPeriodMillis(settings));
     }
@@ -115,9 +175,19 @@ public final class RedisBackend implements AwfBackend {
      */
     RedisBackend(final RedisSettings settings, final RedisClient client, final String owner,
                  final long leaseMillis, final long renewalMillis) {
+        this(settings, client, owner, dev.iyanz.sourbycraft.awf.redis.fabric.NodeIdentity.processIncarnation(), null,
+            leaseMillis, renewalMillis);
+    }
+
+    private RedisBackend(final RedisSettings settings, final RedisClient client, final String owner,
+                         final String incarnation, final String previousIncarnation, final long leaseMillis,
+                         final long renewalMillis) {
+        usable(settings);
         this.leaseMillis = leaseMillis;
         this.renewalMillis = renewalMillis;
         this.owner = owner;
+        this.incarnation = incarnation;
+        this.previousIncarnation = previousIncarnation;
         this.settings = settings;
         this.client = client;
         this.waitForAof = settings.waitForAof();
@@ -130,25 +200,18 @@ public final class RedisBackend implements AwfBackend {
         this.renewals.scheduleAtFixedRate(this::renewAll, renewalMillis, renewalMillis, TimeUnit.MILLISECONDS);
     }
 
-    /** A hash of this host's name ({@code HOSTNAME} or {@code /etc/hostname}) and the server directory. */
+    /**
+     * This server's lease owner: 16 hex digits of the hash of the persisted node id, the host name
+     * and the server directory ({@code NodeIdentity#leaseOwner}). Names the server, not the process.
+     */
     static String serverId() {
-        // No DNS lookup here: resolving the local host name can block for seconds.
-        String host = System.getenv("HOSTNAME");
-        if (host == null || host.isBlank()) {
-            try {
-                host = java.nio.file.Files.readString(java.nio.file.Path.of("/etc/hostname")).trim();
-            } catch (final IOException | RuntimeException none) {
-                host = "";
-            }
-        }
-        final String identity = host + "|" + java.nio.file.Path.of("").toAbsolutePath().normalize();
-        try {
-            final byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
-                .digest(identity.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            return java.util.HexFormat.of().formatHex(digest, 0, 8);
-        } catch (final java.security.NoSuchAlgorithmException impossible) {
-            throw new IllegalStateException(impossible);
-        }
+        return dev.iyanz.sourbycraft.awf.redis.fabric.NodeIdentity.current().leaseOwner();
+    }
+
+    /** The settings themselves, refused when they say the configured server is unusable. */
+    private static RedisSettings usable(final RedisSettings settings) {
+        if (settings.invalidReason().isPresent()) throw new IllegalArgumentException(settings.invalidReason().get());
+        return settings;
     }
 
     RedisSettings settings() {
@@ -195,20 +258,31 @@ public final class RedisBackend implements AwfBackend {
 
     @Override
     public AwfStore open(final String storageId, final WorldRole role, final int retainedGenerations) throws IOException {
-        final String token = role.acceptsCommits() ? this.owner + "/" + UUID.randomUUID() : null;
+        final String prefix = this.owner + "/" + this.incarnation + "/";
+        final String token = role.acceptsCommits() ? prefix + UUID.randomUUID() : null;
         final RedisStore store = new RedisStore(this, storageId, role, token);
         if (token != null) {
             final String claimed = RedisClient.text(this.client.eval(ACQUIRE_SCRIPT, "1", store.lockKey, token,
-                this.owner, Long.toString(this.leaseMillis)));
+                prefix, this.previousIncarnation == null ? "" : this.owner + "/" + this.previousIncarnation + "/",
+                Long.toString(this.leaseMillis)));
             if ("TAKEN_OVER".equals(claimed)) {
+                SourbyLogger.info("Aurora World Fabric: took over the Redis lease on " + storageId + " from a store"
+                    + " this process opened earlier and did not close");
+            } else if ("TAKEN_OVER_PREVIOUS".equals(claimed)) {
                 SourbyLogger.info("Aurora World Fabric: took over this server's Redis lease on " + storageId
-                    + " from a previous run that did not release it");
+                    + " from its previous run (incarnation " + this.previousIncarnation + "), which stopped without"
+                    + " releasing it");
             } else if (!"OK".equals(claimed)) {
                 final Object ttl = this.client.call("PTTL", store.lockKey);
-                throw new IOException("AWF store " + storageId + " is held by another server (lease "
-                    + (ttl instanceof Long ms && ms > 0 ? "expires in " + (ms / 1000 + 1) + " s" : "held")
-                    + "); it is open there, or that server stopped without releasing it");
+                final boolean sameOwner = claimed != null && claimed.startsWith(this.owner + "/");
+                throw new IOException("AWF store " + storageId + " is held by "
+                    + (sameOwner ? "another process with this server's identity (a second process in this server"
+                        + " directory, a copy of it on a host with the same name, or a previous run not proven stopped)"
+                        : "another server")
+                    + " (lease " + (ttl instanceof Long ms && ms > 0 ? "expires in " + (ms / 1000 + 1) + " s" : "held")
+                    + "); it is open there, or that process stopped without releasing it");
             }
+            this.extendedNanos.put(token, System.nanoTime());
             this.leased.put(token, store);
         }
         try {
@@ -243,34 +317,48 @@ public final class RedisBackend implements AwfBackend {
         return fields;
     }
 
-    /** Waits for the last write to reach Redis's append-only file, if configured and possible. */
-    void awaitDurable() throws IOException {
-        if (!this.waitForAof) return;
-        // The commit already ran on Redis: a deadline here leaves its durability unknown, never "not applied".
-        final int waitMillis;
-        try {
-            waitMillis = this.client.remainingTimeoutMillis();
-        } catch (final dev.iyanz.sourbycraft.awf.AwfDeadlineExceeded passed) {
-            throw new dev.iyanz.sourbycraft.awf.AwfDeadlineExceeded("the AWF shutdown deadline passed after Redis ran the"
-                + " commit and before it confirmed the append-only file write", true, passed);
-        }
-        try {
-            final Object reply = this.client.call("WAITAOF", "1", "0", Integer.toString(waitMillis));
-            if (reply instanceof List<?> counts && !counts.isEmpty() && counts.getFirst() instanceof Long local && local < 1) {
-                throw new IOException("Redis did not write the commit to its append-only file within "
-                    + waitMillis + " ms");
-            }
-        } catch (final RedisClient.RedisError unsupported) {
+    /**
+     * How long the {@code WAITAOF} sent behind a commit may wait, or {@code 0} when commits are
+     * acknowledged from memory ({@code wait-for-aof} off, or found unsupported). Half the time a call
+     * may still take ({@link RedisClient#remainingTimeoutMillis}, cut by the shutdown deadline), so
+     * Redis answers before the connection's read timeout ends. Called before the commit is sent.
+     *
+     * @throws dev.iyanz.sourbycraft.awf.AwfDeadlineExceeded once the shutdown deadline has passed;
+     *     nothing was sent
+     */
+    int aofWaitMillis() throws IOException {
+        if (!this.waitForAof) return 0;
+        return Math.max(1, this.client.remainingTimeoutMillis() / 2);
+    }
+
+    /** {@code WAITAOF 1 0 <millis>}: one local append-only file write, no replica. */
+    static Object[] waitAof(final int millis) {
+        return new Object[] {"WAITAOF", "1", "0", Integer.toString(millis)};
+    }
+
+    /**
+     * Applies the reply of the {@code WAITAOF} that ran behind a commit on the same connection, after
+     * Redis applied the commit: confirmed returns; not confirmed within {@code waitMillis} throws; an
+     * error reply (no append-only file, or Redis older than 7.2) is logged once, and from then on
+     * commits are acknowledged from Redis's memory.
+     */
+    void confirmDurable(final Object reply, final int waitMillis) throws IOException {
+        if (reply instanceof RedisClient.RedisError unsupported) {
             this.waitForAof = false;
             SourbyLogger.warn("Redis cannot confirm writes to its append-only file (" + unsupported.getMessage()
                 + "); AWF commits are acknowledged from Redis's memory and are as durable as its persistence"
                 + " settings. Enable appendonly on Redis 7.2+, or set aurora.awf.redis.wait-for-aof = false.");
+            return;
+        }
+        if (reply instanceof List<?> counts && !counts.isEmpty() && counts.getFirst() instanceof Long local && local < 1) {
+            throw new IOException("Redis did not write the commit to its append-only file within " + waitMillis + " ms");
         }
     }
 
     /** A commit took the store's lapsed lease back: renewal continues for it (it never stopped). */
     void retaken(final RedisStore store) {
         this.lost.remove(store.token());
+        this.extendedNanos.put(store.token(), System.nanoTime());
         this.leased.putIfAbsent(store.token(), store);
         SourbyLogger.warn("Aurora World Fabric: the Redis lease on " + store.id() + " had lapsed with no other holder"
             + " and no other server's commit since; a commit took it back and renewal continues");
@@ -280,6 +368,7 @@ public final class RedisBackend implements AwfBackend {
         if (store.token() == null) return;
         this.leased.remove(store.token());
         this.lost.remove(store.token());
+        this.extendedNanos.remove(store.token());
         this.client.eval(RELEASE_SCRIPT, "1", store.lockKey, store.token());
     }
 
@@ -294,6 +383,11 @@ public final class RedisBackend implements AwfBackend {
      * is logged, since a few of those in a row are how a lease is lost. The renewals call the script
      * by its SHA-1 ({@code EVALSHA}); only a pass that finds Redis without it cached (after a restart
      * or {@code SCRIPT FLUSH}) takes a second round trip, sending the text once.</p>
+     *
+     * <p>A renewal that succeeds more than the lease time after the store's lease was last extended
+     * is logged once, as a WARN naming every such store of the pass: the lease may have lapsed in
+     * between and been taken back by a request Redis ran late (after a stall, a frozen Redis or a
+     * partition), with no reply that would have said so.</p>
      *
      * @return how long the pass took, in nanoseconds
      */
@@ -315,7 +409,18 @@ public final class RedisBackend implements AwfBackend {
                 + " store(s): " + failed.getMessage());
         }
         if (replies != null) {
-            for (int i = 0; i < stores.size(); i++) renewed(stores.get(i), replies.get(i));
+            final long answered = System.nanoTime();
+            final List<String> late = new ArrayList<>();
+            for (int i = 0; i < stores.size(); i++) {
+                if (renewed(stores.get(i), replies.get(i), answered)) late.add(stores.get(i).id());
+            }
+            if (!late.isEmpty()) {
+                SourbyLogger.warn("Aurora World Fabric: renewed the Redis lease on " + String.join(", ", late)
+                    + " more than " + this.leaseMillis / 1000L + " s (the lease) after it was last extended. It may"
+                    + " have lapsed in between (this server stalled, or Redis was unreachable or frozen) and been"
+                    + " taken back by a request Redis ran late; no other server committed to the world meanwhile,"
+                    + " or the renewal would have been refused");
+            }
         }
         final long elapsed = System.nanoTime() - started;
         if (slowPass(elapsed, this.renewalMillis)) {
@@ -341,45 +446,102 @@ public final class RedisBackend implements AwfBackend {
         return elapsedNanos > TimeUnit.MILLISECONDS.toNanos(periodMillis) / 2;
     }
 
-    private void renewed(final RedisStore store, final Object renewed) {
+    /**
+     * Applies one store's renewal reply.
+     *
+     * @return whether it renewed a lease last extended more than the lease time before {@code answeredNanos}
+     */
+    private boolean renewed(final RedisStore store, final Object renewed, final long answeredNanos) {
         if (renewed instanceof RedisClient.RedisError error) {
             SourbyLogger.warn("Aurora World Fabric could not renew its Redis lease on " + store.id() + ": "
                 + error.getMessage());
         } else if (renewed instanceof Long n && n == 2) {
             this.lost.remove(store.token());
+            extended(store.token(), answeredNanos);
             SourbyLogger.warn("Aurora World Fabric: the Redis lease on " + store.id() + " had lapsed (this"
                 + " server stalled or Redis was unreachable for longer than lease-seconds, or another holder"
                 + " released it); nobody else held it or committed since, so it was taken back");
         } else if (renewed instanceof Long n && n == 1) {
             this.lost.remove(store.token());
+            return extended(store.token(), answeredNanos) > TimeUnit.MILLISECONDS.toNanos(this.leaseMillis);
         } else if (this.lost.add(store.token())) {
             SourbyLogger.error("Aurora World Fabric lost its Redis lease on " + store.id() + ": another server"
                 + " holds it or has committed to the world since. Commits to it are refused and its unsaved"
                 + " chunks stay in memory; this server takes the lease back only if it becomes free with no"
                 + " other server's commit since");
         }
+        return false;
+    }
+
+    /**
+     * Records that a store's lease was extended at {@code nowNanos}.
+     *
+     * @return nanoseconds since the previous extension, or {@code -1} for a store no longer leased
+     */
+    private long extended(final String token, final long nowNanos) {
+        final long[] gap = {-1L};
+        this.extendedNanos.computeIfPresent(token, (key, previous) -> {
+            gap[0] = nowNanos - previous;
+            return Math.max(previous, nowNanos);
+        });
+        return gap[0];
+    }
+
+    /**
+     * One line for {@code /perf awf}: how many writable stores hold their lease, then every store
+     * whose lease is lost, or was not extended for longer than two renewal periods (renewals are
+     * failing; it expires after three), by storage id. Reads only in-memory state.
+     */
+    public String leaseSummary() {
+        final List<RedisStore> stores = List.copyOf(this.leased.values());
+        if (stores.isEmpty()) return "no world open for writing";
+        final long now = System.nanoTime();
+        final long overdue = TimeUnit.MILLISECONDS.toNanos(2 * this.renewalMillis);
+        int held = 0;
+        final List<String> attention = new ArrayList<>();
+        for (final RedisStore store : stores) {
+            final Long last = this.extendedNanos.get(store.token());
+            if (this.lost.contains(store.token())) {
+                attention.add(store.id() + " lost");
+            } else if (last != null && now - last > overdue) {
+                attention.add(store.id() + " not renewed for " + TimeUnit.NANOSECONDS.toSeconds(now - last) + " s");
+            } else {
+                held++;
+            }
+        }
+        return held + " held" + (attention.isEmpty() ? "" : "; " + String.join(", ", attention))
+            + " (lease " + this.leaseMillis / 1000L + " s)";
     }
 
     @Override
     public String retire(final String storageId) throws IOException {
         final RedisStore store = new RedisStore(this, storageId, WorldRole.READ_ONLY, null);
         final String suffix = ":exported-" + System.currentTimeMillis();
-        for (final String key : List.of(store.chunksKey, store.deletedKey, store.genKey)) {
-            if (this.client.call("EXISTS", key) instanceof Long n && n > 0) {
-                this.client.call("RENAME", key, key + suffix);
-            }
+        try {
+            this.client.eval(RETIRE_SCRIPT, "8", store.lockKey, store.chunksKey, store.deletedKey, store.genKey,
+                store.writerKey, store.chunksKey + suffix, store.deletedKey + suffix, store.genKey + suffix);
+        } catch (final RedisClient.RedisError refused) {
+            throw leaseHeld(storageId, refused);
         }
-        this.client.call("DEL", store.writerKey);
         return "Redis keys " + store.chunksKey + suffix + " (and :deleted, :gen)";
     }
 
     @Override
     public void delete(final String storageId) throws IOException {
         final RedisStore store = new RedisStore(this, storageId, WorldRole.READ_ONLY, null);
-        if (this.client.call("EXISTS", store.lockKey) instanceof Long n && n > 0) {
-            throw new IOException("AWF store " + storageId + " is open on a server; unload it there first");
+        try {
+            this.client.eval(DELETE_SCRIPT, "5", store.lockKey, store.chunksKey, store.deletedKey, store.genKey,
+                store.writerKey);
+        } catch (final RedisClient.RedisError refused) {
+            throw leaseHeld(storageId, refused);
         }
-        this.client.call("DEL", store.chunksKey, store.deletedKey, store.genKey, store.writerKey);
+    }
+
+    /** The refusal of {@link #DELETE_SCRIPT} or {@link #RETIRE_SCRIPT} in words; any other error reply as is. */
+    private static IOException leaseHeld(final String storageId, final RedisClient.RedisError reply) {
+        if (reply.getMessage() == null || !reply.getMessage().startsWith("AWFLEASE")) return reply;
+        return new IOException("AWF store " + storageId + " is open on a server (or a server stopped without releasing"
+            + " its lease, which then expires after lease-seconds); unload it there first");
     }
 
     /**
@@ -423,6 +585,7 @@ public final class RedisBackend implements AwfBackend {
                 final RedisStore store = stores.get(i);
                 this.leased.remove(store.token());
                 this.lost.remove(store.token());
+                this.extendedNanos.remove(store.token());
                 if (replies != null && replies.get(i) instanceof RedisClient.RedisError error) {
                     SourbyLogger.warn("Aurora World Fabric could not release its Redis lease on " + store.id() + " ("
                         + error.getMessage() + "); it expires in " + this.settings.leaseSeconds() + " s");

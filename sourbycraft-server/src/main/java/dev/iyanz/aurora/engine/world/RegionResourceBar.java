@@ -10,15 +10,19 @@ import io.papermc.paper.threadedregions.TickRegionScheduler;
 import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import net.kyori.adventure.bossbar.BossBar;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.minimessage.MiniMessage;
+import net.kyori.adventure.text.minimessage.ParsingException;
 import net.minecraft.network.protocol.game.ClientboundSetActionBarTextPacket;
 import net.minecraft.server.level.ServerPlayer;
 import org.bukkit.craftbukkit.entity.CraftPlayer;
 import org.jetbrains.annotations.Contract;
+import org.slf4j.LoggerFactory;
 
 public abstract class RegionResourceBar {
     protected static final MiniMessage MINI_MESSAGE = MiniMessage.miniMessage();
@@ -183,6 +187,13 @@ public abstract class RegionResourceBar {
     }
 
     record FormatEntry(String raw, List<Segment> segments) {
+        /**
+         * Formats whose text MiniMessage refused, each warned about once. Bounded: formats come from
+         * the world configuration, and a bar recompiles its format whenever the effective one changes.
+         */
+        private static final Set<String> WARNED_FORMATS = ConcurrentHashMap.newKeySet();
+        private static final int MAX_WARNED_FORMATS = 64;
+
         static FormatEntry compile(final String effectiveRaw, final RegionResourceBar resourceBar) {
             final String normalized = effectiveRaw.isEmpty() ? resourceBar.getDefaultFormat() : resourceBar.normalize(effectiveRaw);
             return new FormatEntry(effectiveRaw, buildSegments(normalized, resourceBar.getKeys()));
@@ -204,12 +215,12 @@ public abstract class RegionResourceBar {
                 }
 
                 if (earliestKey == null) {
-                    result.add(parseStatic(remaining));
+                    result.add(parseStatic(remaining, normalized));
                     break;
                 }
 
                 if (earliestIdx > 0) {
-                    result.add(parseStatic(remaining.substring(0, earliestIdx)));
+                    result.add(parseStatic(remaining.substring(0, earliestIdx), normalized));
                 }
                 result.add(new Segment.Dynamic(earliestKey));
                 remaining = remaining.substring(earliestIdx + earliestKey.length() + 2); // +2 for '<' and '>'
@@ -218,11 +229,19 @@ public abstract class RegionResourceBar {
             return result;
         }
 
-        @Contract("_ -> new")
-        private static Segment.Static parseStatic(final String text) {
+        /**
+         * One piece of static text. Text MiniMessage refuses is shown literally, with one WARN per
+         * distinct format rather than one per compile; any other exception is a bug and propagates.
+         */
+        @Contract("_, _ -> new")
+        private static Segment.Static parseStatic(final String text, final String format) {
             try {
                 return new Segment.Static(MINI_MESSAGE.deserialize(text));
-            } catch (final Exception e) {
+            } catch (final ParsingException malformed) {
+                if (WARNED_FORMATS.size() < MAX_WARNED_FORMATS && WARNED_FORMATS.add(format)) {
+                    LoggerFactory.getLogger("Aurora").warn("Region bar format '{}' is not valid MiniMessage ({}); its"
+                        + " text '{}' is shown literally", format, malformed.getMessage(), text);
+                }
                 return new Segment.Static(Component.text(text));
             }
         }

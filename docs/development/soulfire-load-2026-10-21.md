@@ -83,6 +83,10 @@ End state: panel restored and verified after the abort (state running; `server.p
 
 ## Tool change for the PM (not applied, not committed)
 
+**Status 2026-10-25:** applied. `scripts/external_swarm.py` and the `bench_panel.py` options (`--external-clients-cmd`,
+`relaxed_connection_guard`) were committed in `d6dddd9` (2026-10-22, "feat(bench): drive bench clients with an
+external command (SoulFire)"), after the vpsbench changes (`a3ebda7`). The text below is the state of 2026-10-21.
+
 Worktree `sc-worktrees/sonnet-soulfire`: new `scripts/external_swarm.py` (`ExternalSwarm`: start a command in its own session, count clients from the server's `list`, SIGTERM/SIGKILL the group), `scripts/bench_panel.py`
 (`--external-clients-cmd`, `--external-clients-timeout`, `relaxed_connection_guard`: per-address limits in `sourbycraft-security.yml` raised for the window and restored with the other files; the throttle in bukkit.yml is already handled), `scripts/test_bench_panel.py`
 (+4 tests, 9 pass). The worktree is based on main; because sonnet-vpsbench's version of `bench_panel.py` differs, an incremental diff against it is in the raw directory (`bench_panel_external_on_vpsbench.diff`; the merged file that actually ran is `merged-scripts/scripts/bench_panel.py`). Apply the vpsbench worktree first.

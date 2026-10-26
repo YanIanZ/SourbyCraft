@@ -2,6 +2,12 @@
 
 Aurora Bridge adapts supported classes of legacy Paper/Spigot plugin behavior to SourbyCraft's region-threaded runtime.
 
+> **Status 2026-10-25 (Build 50 branch, PR #62).** Changes marked *PR #62* on this page are code written and
+> statically reviewed; not built; not tested by the owner. They are in no published build: tag `v26.2-r50`
+> (prerelease) predates them, and how they ship is owner decision PM-011. No new test was written for them (owner
+> rule for that PR). `aurora.bridge.thread-checks` keeps its `relaxed` default (owner decision 2026-10-22,
+> unqualified). Per-item status: [Build 50 PM matrix](../releases/BUILD-50-PM-MATRIX.md).
+
 ## States
 - NATIVE — declares Folia or SourbyCraft support.
 - BRIDGED — legacy plugin successfully enabled through supported mappings.
@@ -29,7 +35,7 @@ library and not reported; the record is a bounded recent history (16 jars); a pl
 after it ran) is not reported.
 
 ## Safety
-Default mode is OFF. Operators can enable SAFE on a test server; unknown/unsafe world mutation is rejected and diagnosed rather than run on an arbitrary thread -- **unless** `aurora.bridge.thread-checks` relaxes the region-ownership checks (owner decision 2026-10-22, the default since then; see *Thread checks* below). With relaxed checks a bridged plugin's cross-region access runs on the wrong thread and is only counted.
+Default mode is OFF. Operators can enable SAFE on a test server. The bridge routes a bridged plugin's **scheduler tasks** only; it does not intercept the plugin's direct world access, which the engine's own checks decide. With `aurora.bridge.thread-checks = enforced` a cross-region access is refused, or, at a `TickGuard` site under `region-scheduler.guard-severity: LOG`, allowed, logged and (inside a bridged body) counted toward quarantine. With `relaxed` (owner decision 2026-10-22, the default since then; see *Thread checks* below) it runs on the wrong thread and is only counted. `BridgeRouter.Kind.UNKNOWN_WORLD_MUTATION` routes to REJECT but is reserved: nothing produces it at runtime.
 
 ## Thread checks (owner decision 2026-10-22)
 
@@ -57,27 +63,28 @@ and effective value, and `/perf plugins` shows the relaxed-hit counters (total, 
 What relaxing changes, each site owned by SourbyCraft and asking `guards/ThreadChecks.refuse(reason)` instead of
 being commented out as upstream did:
 
-- `TickThread.ensureTickThread` (all overloads, Paper feature patch "relaxed thread checks"), `RegionizedServer.ensureGlobalTickThread` and the six `RegionizedWorldData` "is not under this region's control" checks (MC feature patch "relaxed region-ownership checks"), `TickGuard`'s off-tick-thread refusal and startup/hard-throw helpers. The access then proceeds on the wrong thread.
-- Bridge accounting: a guard hit inside a bridged body is counted as a **relaxed ownership hit** (per plugin, `/plugins <name>`, `/perf plugins`) and logged once per (plugin, reason) per 60 s; it is **not** a fatal violation and never quarantines (`BridgeRuntime.relaxedViolation`). Hits outside any bridged body log once per reason per 60 s on the hitting thread (`-Daurora.bridge.thread-checks.trace=true` adds a stack trace). `quarantine-after` still applies to exceptions a body throws.
-- Supporting pieces LightingLuminol needs so a relaxed server does not fail at once, all gated on the `static final` `ThreadChecks.RELAXED_SCOPE` (folded away on an enforced server): the cross-region world-data pool (`compat/luminol/RegionizedWorldDataPool`, LightingLuminol's `ReferenceCountedRegionizedWorldDataPool`; `WorldDataAccess` leases at ~50 Minecraft sites route an off-thread entity/chunk/block-event/neighbour/scheduled-tick write to the region that owns the chunk, holding a ticket while it runs), Moonrise's entity-section reentrancy guard skipped and entity slices locked during add/remove, `NearbyPlayers`, `ReferenceList` and `IteratorSafeOrderedReferenceSet` locked, the `RegionizedWorldData` block-entity ticker hand-off, block events, broadcast set and explosion cache locked at their cross-thread touch points (LightingLuminol swapped the containers for synchronized or concurrent ones; the upstream containers stay, so the policy that pins upstream defaults is satisfied and the capture maps keep the insertion order Paper's replay needs -- they are **not** locked: a foreign thread writing into another region's capture map while that region captures is one of the accepted races), the global tick allowed to load a chunk synchronously while pumping global chunk tasks (a non-owning *region* thread is still refused, as in LightingLuminol: its wait could need its own tick, Folia#280).
-- `Entity#teleport` on the `ASYNC` route waits for the move (LightingLuminol's `teleportAsync(location, cause).join()`), bounded (30 s on a tick thread, 60 s elsewhere): threads that tick nothing always wait; the global tick waits too (stalling the global tick, as upstream); a region thread waits only when it owns the entity and the destination is loaded in a region it does not own -- an unloaded destination is scheduled and returns `false` as before, because its region may be merged into the blocked one (`TeleportRoute.joinsWhenRelaxed`, unit-tested).
+- `TickThread.ensureTickThread` (all overloads, Paper feature patch "relaxed thread checks"), `RegionizedServer.ensureGlobalTickThread` and the six `RegionizedWorldData` "is not under this region's control" checks (MC feature patch "relaxed region-ownership checks"), `TickGuard`'s off-tick-thread refusal and startup/hard-throw helpers, and (*PR #62*) `guards/WorldSettingsOwner`'s refusal of a foreign thread changing world time, weather or game rules before regions tick. The access then proceeds on the wrong thread.
+- Bridge accounting: a failed check inside a bridged body is counted as a **relaxed ownership hit** (per plugin, `/plugins <name>`, `/perf plugins`); it is **not** a fatal violation and never quarantines (`BridgeRuntime.relaxedViolation`). Since *PR #62* a relaxed hit becomes the plugin's last failure only while none is recorded, so it no longer hides the last exception the plugin threw. `quarantine-after` still applies to exceptions a body throws.
+- Log lines (*PR #62*, `guards/LogWindows`): one line per key per 60 s, keyed by the reason without TickThread's per-hit `, context=...` suffix, so a sweep over many positions logs once rather than once per position. Inside bridged bodies the key is (plugin, reason), at most 1024 windows; outside, the reason, logged on the hitting thread, at most 256 windows. Past the cap, new keys share one overflow window. A line that opens a window ends with `(N more suppressed in the last 60 s)` when the previous window suppressed any. `-Daurora.bridge.thread-checks.trace=true` adds a stack trace to the lines logged outside bridged bodies.
+- Supporting pieces LightingLuminol needs so a relaxed server does not fail at once, all gated on the `static final` `ThreadChecks.RELAXED_SCOPE` (folded away on an enforced server): the cross-region world-data pool (`compat/luminol/RegionizedWorldDataPool`, LightingLuminol's `ReferenceCountedRegionizedWorldDataPool`; `WorldDataAccess` leases at ~50 Minecraft sites route an off-thread entity/chunk/block-event/neighbour/scheduled-tick write to the region that owns the chunk, holding a ticket while it runs), Moonrise's entity-section reentrancy guards skipped only for a caller that does not own the entity (the owning thread is still refused a reentrant add, remove or section-status change, as upstream; MC 0084, *PR #62*) and entity slices locked during add/remove, `NearbyPlayers`, `ReferenceList` and `IteratorSafeOrderedReferenceSet` locked, the `RegionizedWorldData` block-entity ticker hand-off, block events, broadcast set and explosion cache locked at their cross-thread touch points (LightingLuminol swapped the containers for synchronized or concurrent ones; the upstream containers stay, so the policy that pins upstream defaults is satisfied and the capture maps keep the insertion order Paper's replay needs -- they are **not** locked: a foreign thread writing into another region's capture map while that region captures is one of the accepted races), the global tick allowed to load a chunk synchronously while pumping global chunk tasks (a non-owning *region* thread is still refused, as in LightingLuminol: its wait could need its own tick, Folia#280).
+- `Entity#teleport` on the `ASYNC` route waits for the move (LightingLuminol's `teleportAsync(location, cause).join()`), bounded (30 s on a tick thread, 60 s elsewhere): threads that tick nothing always wait; a tick thread waits only when it owns the entity and the destination is loaded in a region it does not own -- an unloaded destination is scheduled and returns `false` as before, because its region may be merged into the blocked one. The global tick thread owns no entity, so it schedules and returns `false` instead of waiting; LightingLuminol's global tick waits (`TeleportRoute.joinsWhenRelaxed`, pinned by `TeleportRouteTest`: "a tick thread that does not own the entity never blocks").
 
 Independent of the setting (safe techniques, all modes): `Bukkit.getCurrentTick()`/`MinecraftServer.getTickCount()` return the global tick counter off every region instead of throwing; `Entity#teleportAsync` fires `PlayerTeleportEvent` for players (cancel aborts, `getTo()` is honoured, never twice for one call) and the portal route fires `PlayerPortalEvent` once the exit is known (cancel places the player back where it stood) -- `entity/teleport/AsyncTeleportEvents`, escape hatch `-Daurora.compat.async-teleport-events=false`.
 
 Not ported, deliberately: running every Bukkit sync task on the global tick (the bridge routes by owner instead), redirecting a legacy plugin's Folia region/entity scheduler calls to Bukkit, admitting every plugin (`mode = off` stays the default), `AsyncCatcher.catchOp` (LightingLuminol leaves it too), the `CraftScoreboard` changes.
 
-**Honesty.** Nothing here makes a legacy plugin region-safe; it removes the refusal. The owner accepted: data races on chunk sections, entity lists and player containers (item duplication); writes that reach disk corrupted; a write into a region's data that is merged into another region before it ticks is lost; deadlocks where a blocked thread's wait needs its own tick. A relaxed server is **not qualified** and must not be called stable. Evidence so far is unit tests and agent test-server boots listed in the coordination entry `fable-lightingluminol-compat`; the owner runs real-player testing.
+**Honesty.** Nothing here makes a legacy plugin region-safe; it removes the refusal. The owner accepted: data races on chunk sections, entity lists and player containers (item duplication); writes that reach disk corrupted; a write into a region's data that is merged into another region before it ticks is lost; deadlocks where a blocked thread's wait needs its own tick. A relaxed server is **not qualified** and must not be called stable. Evidence so far is unit tests and isolated agent test-server boots on a Build 48 tree ([2026-10-23 verification](../development/LIGHTINGLUMINOL-VERIFICATION-2026-10-23.md)), before the *PR #62* changes; the owner runs real-player testing.
 
 ## Routing
-Entity-owned -> entity owner. Location-owned -> region owner. Global-safe -> global region. I/O -> plugin/I/O lane. Unknown unsafe -> reject.
+Entity-owned -> entity owner. Location-owned -> region owner. Global-safe -> global region. I/O -> bridge I/O lane. Only scheduler tasks are routed: a bridged plugin's direct world access is not intercepted (see *Safety*).
 
 | Request (bridged plugin, Bukkit scheduler) | Route | Caller |
 | --- | --- | --- |
-| Sync callback wrapped in `EntityTask` | Entity owner (Folia entity scheduler); follows the entity; entity removed first -> cancelled, counted rejected, not a violation | `EntityTask` (patch 0011), IMPLEMENTED, unit-tested; boot fixture not yet run in CI |
+| Sync callback wrapped in `EntityTask` | Entity owner (Folia entity scheduler); follows the entity; entity removed first -> cancelled, counted rejected, not a violation | `EntityTask` (patch 0011), IMPLEMENTED, unit-tested; boot markers `LEGACY_ENTITY_TASK_OK` / `LEGACY_ENTITY_RETIRED_OK` pass in CI since run 37515867230 (2026-10-07) |
 | Sync callback wrapped in `RegionTask`, or the fingerprinted SSB2 spawn callback | Region owning that chunk | patch 0010 |
-| Other sync callback scheduled while a **player's** event is dispatched or a player's command executes, or from a bridged body that carries that player (its async continuation, or a sync task already anchored to the player) | That player's owner (entity scheduler), following the player; player already gone when scheduled -> the caller-region/global route below; player leaves afterwards -> cancelled, counted rejected, not a violation | `SchedulingContext` (patch 0026, 2026-10-22), IMPLEMENTED, unit-tested; headless fixture `LEGACY_CONTEXT_*` |
+| Other sync callback scheduled while a **player's** event is dispatched or a player's command executes, or from a bridged body that carries that player (its one-shot async continuation, or a sync task already anchored to the player) | That player's owner (entity scheduler), following the player; player already gone when scheduled -> the caller-region/global route below; player leaves afterwards -> cancelled, counted rejected, not a violation | `SchedulingContext` (patch 0026, 2026-10-22), IMPLEMENTED, unit-tested; headless fixture `LEGACY_CONTEXT_*` |
 | Other sync callback | Caller region (`sync-route = caller-region`) or global region | default |
-| Explicit global request, async task | Global region / I/O lane; target metadata never consulted. An async body carries the scheduling context it was scheduled from; an explicit global body carries none | 0007, 0003 |
+| Explicit global request, async task | Global region / I/O lane; target metadata never consulted. A one-shot async body carries the scheduling context it was scheduled from; a repeating async body (*PR #62*) and an explicit global body carry none | 0007, 0003 |
 
 Precedence: explicit entity (`EntityTask`) > explicit region (`RegionTask`, adapter) > entity anchor
 (the player of the scheduling context) > caller region > global.
@@ -101,12 +108,16 @@ Paper feature patch 0026 publishes it from two sites, each one call into `Aurora
 senders only). `BridgeRuntime.submit` takes the frame's player as the task's entity anchor when the
 plugin named no `EntityTask`/`RegionTask` target, and routes it exactly like an `EntityTask`
 (`executor.entity`, retired callback). Every bridged body runs under its own anchor: an entity-anchored
-sync body publishes its player (a `runTaskLater` chain follows the player), an async body publishes
-the frame it was scheduled from (the two cases above), a region or global body publishes nothing (and
-never inherits a frame that happens to be open on the tick thread it runs on). Both hooks return at
+sync body publishes its entity (a `runTaskLater` chain follows the player; an explicit `EntityTask` body
+publishes the entity it names, player or not), a one-shot async body publishes the frame it was
+scheduled from (the two cases above), a repeating async body publishes nothing (*PR #62*: a timer
+started from a player's command is not that player's work, and holding the player would route every
+later run's sync tasks to them and keep them reachable after they leave), and a region or global body
+publishes nothing (and never inherits a frame that happens to be open on the tick thread it runs on). Both hooks return at
 once while no plugin has been admitted (one volatile read per event dispatch).
 
-Rules, each pinned by `BridgeContextRoutingTest`, `EventAnchorsTest`, `AuroraBridgeContextHooksTest`:
+Rules, each pinned by `BridgeContextRoutingTest`, `EventAnchorsTest`, `AuroraBridgeContextHooksTest`, except the
+*PR #62* changes, which have no test yet:
 
 - **Players only.** `PlayerEvent`, `PlayerDeathEvent`, an `EntityEvent` whose entity is a player,
   `InventoryEvent` (the viewer), `BlockBreakEvent`/`BlockPlaceEvent`/`SignChangeEvent`. A mob dies
@@ -114,17 +125,25 @@ Rules, each pinned by `BridgeContextRoutingTest`, `EventAnchorsTest`, `AuroraBri
   than a global run, so non-player entities never anchor (fixture `LEGACY_CONTEXT_MOB_EVENT_OK`).
 - **Leaving or unplaced players anchor nothing**: `PlayerQuitEvent`, `PlayerKickEvent`,
   `PlayerLoginEvent`, `PlayerSpawnLocationEvent`. A cleanup task scheduled from a quit handler must
-  run; the entity scheduler of a gone or not-yet-placed player would retire or hold it.
+  run; the entity scheduler of a gone or not-yet-placed player would retire or hold it. Since *PR #62*
+  these events also hide the enclosing frame's player (`EventAnchors.CLEAR`): a `PlayerKickEvent` fired
+  inside another player's command (`/kick X`) no longer ties the handler's cleanup to the kicker, whose
+  leaving would cancel it.
 - **An event about no player keeps the enclosing frame** (`AsyncUserDataLoadEvent` fired inside the
   carried join frame), so plugin-to-plugin events do not erase the player.
 - **Player already gone at scheduling time** (Folia's entity scheduler reports it synchronously): the
   inference is dropped and the task takes the route it would have taken without it (caller region or
   global). Nothing has run, so this is a routing decision, not a retry after a violation; it is not
-  counted as rejected. **Player leaves after scheduling**: cancelled, rejected, last failure names it,
+  counted as rejected. Only that synchronous report, on the scheduling thread inside the scheduling call,
+  counts as "already gone" (*PR #62*); a retirement on another thread that races the call cancels the task
+  like a later leave and never re-routes it. **Player leaves after scheduling**: cancelled, rejected, last failure names it,
   never a violation, no per-task log line, same as `EntityTask`. A repeating task anchored this way
   therefore stops when its player leaves (Folia semantics; on Paper it would keep running until it
   cancelled itself).
-- **Explicit targets and explicit global requests are untouched**; async tasks only carry the frame.
+- **Explicit targets and explicit global requests are untouched**; one-shot async tasks only carry the frame,
+  repeating async tasks carry none (*PR #62*). An explicit `EntityTask` body publishes its entity even when it
+  is not a player, so its continuations follow that entity (CI marker `LEGACY_CONTEXT_CHAIN_OK` pins this with
+  an armor stand); whether explicit anchors should follow the players-only rule is owner decision PM-234.
 - **No retry.** A body that already ran and violated ownership is never re-dispatched to another owner.
 
 What this does not cover is listed under *Not bridgeable* below.
@@ -147,7 +166,7 @@ online. Fixture run `fable-routing-fixture1`: 22 `LEGACY_*_OK`, 0 `_WRONG`, 36 r
 (`logs/fable-real2.log`, `fable-real3.log`, `fable-fixture1.log`). No Sourby Demo run: owner-run.
 
 ## Telemetry
-Per-plugin compatibility state, scheduler redirects, owner handoffs, rejected operations, fatal violations, quarantine, startup duration/cache state and last failure.
+Per-plugin compatibility state, scheduler redirects, owner handoffs, rejected operations, fatal violations, quarantine, startup duration/cache state and last failure. Relaxed ownership hits are shown by `/plugins <name>` while the checks are relaxed and by `/perf plugins`. Skipped runs of repeating async tasks are counted (`skippedRuns` in `BridgeTelemetry`) but neither `/plugins` nor `/perf plugins` displays them yet; each skip becomes the plugin's last failure and is logged through a WARN rate-limited per (plugin, reason).
 
 - **Task body time** (IMPLEMENTED, LIVE, no setting): per plugin and lane, `/plugins <name>` shows "Sync body time (region / global)" and "Async body time" (count, mean, p50, p99, max; percentiles over the last 256 bodies) and `/perf plugins` shows sync body total / p99. This is the wall time of the task body on the thread that ran it, including bodies that threw; queue wait is not included.
 
@@ -156,7 +175,10 @@ Per-plugin compatibility state, scheduler redirects, owner handoffs, rejected op
 Code: `dev.iyanz.sourbycraft.bridge` plus bridge feature patches under
 `sourbycraft-server/paper-patches/features` (0003, 0006, LightingLuminol port 0007
 and worker/query follow-up 0008, native-disable fix 0009, explicit callback owners 0010,
-entity callback owners 0011, one-line OFF-mode refusal 0024, scheduling-context hooks 0026).
+entity callback owners 0011, admission reopened on re-enable 0012, per-plugin onLoad/onEnable
+wall time 0013, retired entity scheduler runs the retired callback 0021, one-line OFF-mode refusal
+0024, scheduling-context hooks 0026, `World#getChunkAt` off a tick thread 0028, relaxed thread
+checks 0029).
 Feature patches are the source of truth for edits
 to Paper classes. Since Build 50 (2026-10-22) every `CraftScheduler` site those patches add is one
 call into `AuroraBridge` (`cancelTask`, `cancelTasks`, `currentlyRunning`, `knows`,
@@ -164,13 +186,16 @@ call into `AuroraBridge` (`cancelTask`, `cancelTasks`, `currentlyRunning`, `know
 `targetRegion`, `targetEntity`) or `FoliaSchedulerCompatibility` (`isGlobalCallback`,
 `bridgeCancelled`); the only scheduler code left in the patch is 0003's `bridgeTask` adapter, whose
 methods read package-private `CraftTask` state (`getPeriod`, `cancel0`, `CraftFuture`) or make one
-such call. Behaviour is unchanged and pinned by `CraftSchedulerHooksTest`. The 0007/0008 materialized sources are present; build/testing of
-this increment remains assigned to Claude.
+such call. Behaviour is unchanged and pinned by `CraftSchedulerHooksTest`. The boot markers of these
+patches (`LEGACY_GLOBAL_*`, `LEGACY_REGION_TASK_OK`, `LEGACY_ENTITY_*`, `LEGACY_DISABLE_*`) pass in CI
+since run 37515867230 (2026-10-07).
 
-- **Mode.** `aurora.bridge.mode` in `aurora.toml` (or the unified file): `off` (default) keeps the
+- **Mode.** `aurora.bridge.mode` in `sourbycraft_config/aurora.yml` (a value in
+  `sourbycraft_global_config.yml` is read too, and `aurora.yml` wins; a legacy `*.toml` is read only
+  where its `*.yml` does not exist): `off` (default) keeps the
   base's refusal; `safe` admits. Under `off`, Paper patch 0024 skips such a jar in `FileProviderSource`
   with one WARN (`Not loading <name> ... aurora.bridge.mode = off ...`, no stack trace) and records it
-  for `/plugins` (FAILED, with the reason) and `/perf plugins`; the provider factories' refusal stays as backstop. It is read straight from the TOML files on first use, because
+  for `/plugins` (FAILED, with the reason) and `/perf plugins`; the provider factories' refusal stays as backstop. It is read straight from those files on first use, because
   plugin providers are built during Paper bootstrap, before `SourbyCraftBootstrap`; it is
   RESTART_REQUIRED. A malformed value means `off`. `off` is the default rather than SAFE because
   correctness outranks compatibility in the safety order: admitting unqualified code is the
@@ -197,43 +222,66 @@ this increment remains assigned to Claude.
   it infers one from the **scheduling frame** (the player whose event or command is being handled,
   carried through bridged async continuations; see *Entity anchor from the scheduling context*
   above). Caller-region fallback does not establish ownership of other locations accessed by a task.
-- **Violations.** A task body's `UnsupportedOperationException`/`IllegalStateException` from the
-  base's region checks counts as a fatal violation. Other exceptions are recorded as the last
-  failure, as the plain server would log them. After `aurora.bridge.quarantine-after` (LIVE,
-  default 3) violations, the plugin's bridged tasks are cancelled and new ones are rejected. The
-  plugin is not disabled: disabling would run plugin code on whichever thread noticed the
-  violation.
-- **Guard hits under `guard-severity: LOG` (2026-10-14, audit ENG-1; unit-tested, no boot
-  fixture yet).** With the engine default `LOG`, a cross-region access the tick guard notices
-  (`TickGuard`, 13 call sites: block placement, entity tracking, menus, potion effects, game
-  mode, ...) is logged and proceeds; it never throws, so the rule above never saw it. While a
-  bridged body runs, `BridgeRuntime` publishes its plugin to the running thread, and the guard
-  reports the hit to `GuardViolations`: it counts as one fatal violation of that plugin per body
-  run (however many hits the run makes) through the same quarantine path, and its log line is
-  rate-limited to one per (plugin, reason) per 60 s with a suppressed count. The access itself is
-  still allowed (LOG decides that). A hit outside any bridged body (native plugins, the server)
-  keeps the engine's own log line, unchanged. Attribution is by thread: a hit inside a bridged
-  body is charged to that body's plugin even when something it called made the access. An
-  off-tick-thread refusal from `TickGuard` (an async body opening an inventory) is now classified
-  as a violation too.
+- **Violations.** A task body's exception counts as a fatal violation when `ViolationClassifier`
+  recognises a region-ownership refusal: SourbyCraft's own refusals (`guards/RegionRefusal`, matched
+  by exception type), the base's refusal messages matched whole (`Unsupported in region threading`,
+  `Not on any region`, the teleport-async messages, `Use region threading hooks`), TickThread's
+  "off owning region" reason, or an `UnsupportedOperationException`/`IllegalStateException` thrown
+  from a `TickThread.ensureTickThread` or `TickGuard` frame. Since *PR #62* (PM-233) an unrelated
+  exception whose message merely mentions region threading no longer counts. Other exceptions are
+  recorded as the last failure, as the plain server would log them. After
+  `aurora.bridge.quarantine-after` (LIVE, default 3) violations, the plugin's bridged tasks are
+  cancelled and new ones are rejected. The plugin is not disabled: disabling would run plugin code
+  on whichever thread noticed the violation. Mode matters: under `thread-checks = relaxed` (the
+  default with `mode = safe`) the ownership checks that ask `ThreadChecks` do not throw, so those
+  accesses never reach this rule; refusals that are not ownership checks (`RegionRefusal`'s
+  unsupported operations, for example) still do.
+- **Guard hits under `guard-severity: LOG` (2026-10-14, audit ENG-1; changed in *PR #62*).** With
+  the engine default `LOG`, a cross-region access the tick guard notices on a tick thread
+  (`TickGuard.guard`, 13 call sites in the engine baseline: block placement, entity tracking, menus,
+  potion effects, game mode, ...) is allowed and logged; it never throws, so the rule above never
+  sees it. While a bridged body runs, `BridgeRuntime` publishes its plugin to the running thread and
+  the guard reports the hit to `GuardViolations`. With `thread-checks = enforced` the hit counts as
+  one fatal violation of that plugin per body run (however many hits the run makes) through the
+  same quarantine path, logged once per (plugin, reason) per 60 s with a suppressed count; with
+  `relaxed` or `bridged` it is a relaxed ownership hit and never quarantines (*Thread checks*). A
+  hit on a tick thread outside any bridged body (native plugins, the server) keeps the engine's own
+  WARN with its stack trace; since *PR #62* that line is logged once per (reason, innermost plugin
+  on the stack, or `server`) per 60 s with a suppressed count (`GuardViolations.admitEngineLog`, at
+  most 256 keys, then one shared window; the stack walk that finds the plugin runs on every hit and
+  its cost is not measured). Attribution is by thread: a hit inside a bridged body is charged to
+  that body's plugin even when something it called made the access. A hit off any tick thread (an
+  async body opening an inventory) is decided by `TickGuard`'s off-tick-thread check through
+  `ThreadChecks`: refused with an `IllegalStateException` that the classifier counts as a violation
+  when enforced (or `bridged` outside a bridged body), allowed and counted once as a relaxed hit
+  otherwise (*PR #62* removed a second report that counted it twice). Unit-tested before
+  *PR #62*; no CI boot runs an enforced LOG-mode bridge (PM-103).
 - **Full `BRIDGE_IO` lane (2026-10-14, ENG-6).** A one-shot async task the lane refuses is
-  cancelled, as before. A repeating async task only skips that run: it stays scheduled, the run
-  is counted (`skippedRuns` in the plugin's telemetry), and the log line is rate-limited. Before,
-  one plugin filling the lane cancelled other plugins' timers for good.
+  cancelled, as before; since *PR #62* its WARN is rate-limited per (plugin, reason) and carries
+  no stack trace. A repeating async task only skips that run: it stays scheduled, the run is
+  counted as a skipped run, and the log line is rate-limited. Before, one plugin filling the lane
+  cancelled other plugins' timers for good. Since *PR #62* (PM-100) a repeating async task also
+  keeps at most one run waiting in the lane's queue: a period that fires while the previous run has
+  not started is skipped the same way (`... its previous run is still queued on the BRIDGE_IO lane;
+  the task stays scheduled`) instead of queued behind it, so a slow timer cannot fill the shared
+  queue and get other plugins' one-shot tasks refused. Runs that have started may still overlap,
+  as on Paper.
 - **Fair lane, not wired (2026-10-20).** `execution/FairLane` is a per-owner lane: one total
   queue plus a per-owner sub-queue limit, and queued work started in weighted round-robin over
   owners (an owner's turn starts up to `weight` of its tasks). `BRIDGE_IO` still runs on the FIFO
   `GovernedLane`, so one plugin's backlog still delays the others' tasks; switching it, the
-  setting names (per-plugin queue limit, weights) and their defaults are open, and nothing is
-  measured (`FairLaneTest` 8, unit only).
+  setting names (per-plugin queue limit, weights) and their defaults are an open owner decision
+  (PM-178), and nothing is measured (`FairLaneTest` 8, unit only).
 - **Quarantine outlives a reload (ENG-12).** Re-admitting a quarantined plugin by name (a reload
   after disable) still admits it and still rejects every task it schedules; the bridge now logs
   that once per admission instead of saying nothing.
 - **Telemetry.** Per plugin: scheduler redirects, owner handoffs (region- and entity-owner task routing),
-  rejected operations, fatal violations, quarantine, startup cache state and last
-  failure. `/plugins <name>` shows them.
+  rejected operations, fatal violations, quarantine, relaxed ownership hits, startup cache state and
+  last failure. `/plugins <name>` shows them (relaxed hits only while the checks are relaxed); skipped
+  runs are counted but not shown (see *Telemetry* above).
 - **Not intercepted.** A bridged plugin calling world API directly from a bridged task on the
-  global region is not rewritten; the base's own thread checks decide what happens. Async tasks
+  global region is not rewritten; the base's own thread checks, as `aurora.bridge.thread-checks`
+  configures them, decide what happens. Async tasks
   run on the governed lane; the worker follow-up below exposes those threads to Bukkit callers.
 - **`World#getChunkAt` from an async task (paper 0028, 2026-10-22).** Not a bridge rule but an engine
   one, for every thread that is not a `TickThread` (bridge I/O lane, Bukkit async task, plugin
@@ -293,7 +341,12 @@ this increment remains assigned to Claude.
   flows are untested (owner-run).
 
 ## Qualification
-A plugin cannot be presented as BRIDGED until load, enable and bridge initialization succeed and no fatal compatibility violation is present.
+A plugin is presented as BRIDGED when load, enable and bridge initialization succeeded and the bridge
+has not quarantined it (`CompatibilityClassifier`, fed by `AuroraBridge.bridgeInitialized` and
+`AuroraBridge.fatalViolation`, which both read the quarantine flag). A quarantined plugin is FAILED.
+Fatal violations below `quarantine-after`, and relaxed ownership hits, do not change the state: the
+plugin stays green while `/plugins <name>` shows "Rejected / fatal operations" and "Relaxed ownership
+hits". BRIDGED therefore does not mean that no violation happened, and it is not a compatibility verdict.
 
 ## What the bridge is not
 
@@ -321,14 +374,18 @@ plugins that have not had one. BRIDGED is not a compatibility verdict (see *Qual
 
 ### Not bridgeable (2026-10-22)
 
-Patterns the owner precedence above cannot place, with what the bridge offers for each. None of them
-weakens a guard; the engine's refusal stands and counts toward quarantine as before.
+Patterns the owner precedence above cannot place, with what the bridge offers for each. The bridge
+weakens no guard for them. With `thread-checks = enforced` the engine's refusal stands and counts toward
+quarantine (the live examples below were seen that way on Sourby Demo on 2026-10-22, before the checks
+became a setting; `guards/ThreadChecks` first shipped in `v26.2-r49`). Under the default `relaxed`, and under `bridged` for these task bodies, the same access
+proceeds on the wrong thread and is counted as a relaxed ownership hit: no refusal, no quarantine, and
+not qualified.
 
 | Pattern | Example (live, Sourby Demo 2026-10-22) | Why routing cannot fix it | What the bridge does |
 | --- | --- | --- | --- |
-| **Whole-world sweep from one task**: a global-routed timer iterates `world.getEntities()` / every chunk and touches each | ClearLag 3.2.2 `ClearTask -> EntityManager.removeEntities -> ClearModule.getRemovables -> CraftItem.getItemStack` ("Accessing entity state off owning region's thread" on the global tick; quarantined after 3) | The body is one Runnable over entities owned by many regions. A task can be handed to one owner; a loop inside a plugin cannot be split per region by anyone but its author. A hash-pinned adapter would have to re-implement the sweep, which is a port of the plugin, not an adapter | The violation/quarantine line says so: an untargeted global task's violation carries "The task named no owner and ran on the global region ...; a body that sweeps entities or blocks across the world cannot be routed to one owner and needs a region-aware (folia-supported) plugin version." Decision: documented not-bridgeable; replace with a Folia-supported plugin (or a native port). |
+| **Whole-world sweep from one task**: a global-routed timer iterates `world.getEntities()` / every chunk and touches each | ClearLag 3.2.2 `ClearTask -> EntityManager.removeEntities -> ClearModule.getRemovables -> CraftItem.getItemStack` ("Accessing entity state off owning region's thread" on the global tick; quarantined after 3) | The body is one Runnable over entities owned by many regions. A task can be handed to one owner; a loop inside a plugin cannot be split per region by anyone but its author. A hash-pinned adapter would have to re-implement the sweep, which is a port of the plugin, not an adapter | With enforced checks, the violation/quarantine line says so: an untargeted global task's violation carries "The task named no owner and ran on the global region ...; a body that sweeps entities or blocks across the world cannot be routed to one owner and needs a region-aware (folia-supported) plugin version." Decision: documented not-bridgeable; replace with a Folia-supported plugin (or a native port). |
 | **Console command targeting a player** | `dm open <menu> <player>` from the console | The frame is the console's (global tick); the player is a command argument the bridge cannot read | Caller-region/global as before. Run the command as the player, or the plugin names the player (`EntityTask`). |
-| **Per-player work scheduled from `onEnable` or a global timer** (iterate online players, open/teleport each) | typical "scoreboard refresh" timers | No single owner; same class as the sweep | As before: global; each cross-region access is a violation. |
+| **Per-player work scheduled from `onEnable` or a global timer** (iterate online players, open/teleport each) | typical "scoreboard refresh" timers | No single owner; same class as the sweep | As before: global; each cross-region access is a violation with enforced checks, a relaxed ownership hit otherwise. |
 | **A task that acts on a different player than the frame's** | trade GUI opened for both parties from one click | The anchor is the frame's player; the other party is usually in the same region, but not necessarily | Same as the caller-region route today (one hop, no retry). |
 
 Considered and not done (2026-10-22): making `openInventory`/`teleport` hand themselves to the entity
@@ -339,11 +396,8 @@ was assigned and the open packet sent) leaves half-applied state. A fail-closed 
 the top of `CraftHumanEntity#openInventory` (refuse before any side effect, same violation count)
 is the recommended follow-up; it is a guard decision for `inherited-guards.md`, not routing.
 
-Bridge telemetry so far has been counts with no time dimension: it records how many tasks a plugin
-had redirected, handed off, rejected or failed, never how long they ran, so it cannot attribute tick
-time to a plugin. Per-plugin execution timing of bridged task bodies is being added on 2026-10-07
-by another agent (in progress, untested); its description belongs in *Telemetry* above once it
-lands.
+Per-plugin execution timing of bridged task bodies, planned here on 2026-10-07, has landed: see
+*Telemetry* above. Event-listener and command time per plugin is still not measured (PM-458, owner decision).
 
 ## Multi-plugin task lifecycle (2026-10-06)
 
@@ -364,7 +418,8 @@ per plugin; one plugin's cancellation/quarantine does not drain another plugin's
 If scheduling throws, the task is cancelled, removed and diagnosed instead of left pending.
 When the existing bounded `BRIDGE_IO` lane rejects a timed async invocation, the task (including
 its repeating timer, if any) is cancelled and the plugin receives a warning, a last-failure
-message and a rejected-operation count. Saturation does not count as a fatal region violation.
+message and a rejected-operation count. (Superseded for repeating tasks since 2026-10-14, ENG-6:
+only a one-shot task is cancelled, a repeating one skips that run; see *Full `BRIDGE_IO` lane*.) Saturation does not count as a fatal region violation.
 Work is never run on a region thread as an overload fallback. This is fail-closed overload
 handling, not a guarantee of fair capacity distribution between plugins.
 
@@ -380,7 +435,7 @@ admission, duplicate IDs and overlapping async invocation state. The isolated fu
 suites also pass; command/log/report provenance and skipped counts are in SPEC §155. This
 is bookkeeping/failure-isolation evidence, not qualification of 100 real legacy plugins.
 
-## LightingLuminol / Luminol port (source materialized; Claude testing pending)
+## LightingLuminol / Luminol port (global scheduler and disable cleanup)
 
 Feature patch 0007 and `FoliaSchedulerCompatibility` adapt Bacteriawa's upstream
 global scheduler compatibility and Bukkit task cleanup on disable. Explicit global
@@ -399,19 +454,20 @@ the second LightingLuminol port, from its "Base Dirty Patches").
 
 Credit: **Luminol**, **LightingLuminol**, **Bacteriawa**, and contributors. The derived
 adapter and patch retain upstream GPL v3 licensing. Exact source revision, imported
-files, adaptations, packaged notices and Claude's pending acceptance cases are in
-[the port handoff](../development/LIGHTINGLUMINOL-BRIDGE-PORT.md). Patch 0007 is present
-in the materialized Paper source at commit `425610c83`; no new build/test result is
-claimed here. The earlier functional evidence above does not cover this increment.
+files, adaptations, packaged notices and the acceptance cases are in
+[the port handoff](../development/LIGHTINGLUMINOL-BRIDGE-PORT.md). The `LEGACY_GLOBAL_*` boot
+markers pass in CI since run 37515867230 (2026-10-07); local acceptance cases 1-3 and 5-7 passed on
+2026-10-22 (case 4 at unit level only) and the three fixes found there are merged (`dae9d99`, in every tag since `v26.2-r48`).
+Case 8 (real plugins, players, soak, AWF interaction) is the owner's.
 
-## Per-plugin limits and async worker follow-up (Claude testing pending)
+## Per-plugin limits and async worker follow-up
 
-Two optional LIVE settings in `[aurora.bridge]` default to `0` (disabled):
+Two optional LIVE settings in the `aurora.bridge` section of `sourbycraft_config/aurora.yml` default to `0` (disabled):
 
 | Setting | Admission point | On reaching the limit |
 | --- | --- | --- |
 | `max-pending-tasks-per-plugin` | Submission, under that plugin's index monitor | Cancel/reject the new task before scheduling or inserting either index |
-| `max-running-async-tasks-per-plugin` | Async callback start, under that plugin's admission monitor | Cancel the rejected task and its timer; already-running bodies drain |
+| `max-running-async-tasks-per-plugin` | Async callback start, under that plugin's admission monitor | One-shot callback: cancelled. Repeating task (*PR #62*): that run is skipped (skipped runs, last failure, rate-limited WARN) and the timer stays scheduled. Already-running bodies drain |
 
 Values are integers in `0..100000`. Invalid values fall back to `0` and are diagnosed
 as invalid config. Limits are independent per plugin. Pending means indexed tasks,
@@ -421,7 +477,8 @@ same task each consume a slot. Cancellation/disable removes the pending entries 
 does not release running slots until each body actually finishes.
 
 Capacity rejections update rejected operations, last failure and the warning log;
-they do not increment fatal region violations or quarantine the plugin. Ordinary
+a skipped repeating run (*PR #62*) updates skipped runs instead of rejected operations;
+neither increments fatal region violations or quarantines the plugin. Ordinary
 completion/cancellation frees capacity for subsequent submissions. Lowering a LIVE
 limit does not cancel existing pending work or interrupt running bodies; it changes
 admission of new submissions/async callbacks. Sync work does not consume async slots.
@@ -429,7 +486,8 @@ admission of new submissions/async callbacks. Sync work does not consume async s
 These settings bound indexed tasks and running async callbacks, respectively. They
 do not reserve the shared I/O queue or guarantee fair CPU time between plugins.
 The Resource Governor's existing queue and worker budget still apply. There is no
-extra executor, waiting admission queue, task coalescing or silent inline fallback.
+extra executor, waiting admission queue or silent inline fallback; the only coalescing is
+that a repeating async task keeps at most one run queued (*PR #62*, see *Full `BRIDGE_IO` lane*).
 
 `/plugins <name>` exposes pending/running async counts and their active limits.
 Worker snapshots retain the actual plugin, Bukkit task ID and governed-lane thread
@@ -437,9 +495,11 @@ until the body drains, including after cancellation/quarantine/disable. They are
 best-effort snapshots rather than an atomic view across every query. Task-ID
 allocation excludes indexed and still-running bridge IDs when its counter wraps.
 
-Source and patch 0008 are written/materialized. Unit/boundary tests ran on 2026-10-07 (see
-*Review 2026-10-07* below); no boot, real-plugin or performance result is claimed. Acceptance
-cases are in the linked port handoff.
+Unit/boundary tests ran on 2026-10-07 (see *Review 2026-10-07* below) and local runtime probes
+(`LEGACY_LIMIT_*_OK`) passed on 2026-10-22 ([port doc](../development/LIGHTINGLUMINOL-BRIDGE-PORT.md),
+case F3). *PR #62* changed the repeating-timer outcome; the console-only probe `legacybridge
+async-limit` now expects skip-not-cancel and NEEDS RETEST. No real-plugin or performance result is
+claimed.
 
 ## Review 2026-10-07 (uncommitted bridge work: 0007/0008/0010, limits, body timing)
 
@@ -468,7 +528,8 @@ Defects found and fixed (unit-tested only; no boot or real-plugin run):
 Checked and judged correct, with regression/boundary tests added in `BridgeReviewTest`:
 pending limit admits exactly N and rejects N+1 before the executor, per plugin, freed by
 completion, not fatal; `0` is unlimited; running-async limit rejects only the overlapping
-invocation (cancelling the repeater, as documented) and releases its slot in `finally`; a cancelled
+invocation (cancelling the repeater, as documented then; since *PR #62* it skips only the overlapping
+run and keeps the repeater, and the `BridgeReviewTest` assertion was edited to match) and releases its slot in `finally`; a cancelled
 async body stays visible to `running`/`activeWorkers`/`runningAsync` until it finishes;
 `RegionTask.at` floors negative coordinates and snapshots them. Also reviewed without new tests:
 `FoliaSchedulerCompatibility` state machine against `bridgeCancelled` and `cancel()` (including
@@ -484,22 +545,29 @@ Correct but fragile:
   `max-pending-tasks-per-plugin` until disable. A region task for a world that unloads no longer
   does (2026-10-22): `WorldUnloadDrain` calls `AuroraBridge.worldUnloaded`, which releases the
   `REGION_OWNER` entries anchored in that world (rejected, never a violation; `BridgeWorldUnloadTest`,
-  fixture `legacybridge unload` -> `LEGACY_UNLOAD_RELEASED_OK`).
+  fixture `legacybridge unload` -> `LEGACY_UNLOAD_RELEASED_OK`). *Status 2026-10-25 (PR #62):* a
+  repeating `EntityTask` whose own body removes its entity is now released too: `AuroraBridge.FoliaExecutor`
+  checks `CraftEntity.isPurged()` on the owner right after the body and calls the retired callback
+  (rejected, never a violation; no test or fixture yet). A plugin calling Folia `AsyncScheduler#cancelTasks`
+  directly still leaves its entries until disable: `AuroraBridge.cancelAsync` exists, but its call site needs a
+  Paper feature patch made from the materialized sources (PM-099).
 - `GlobalRegionScheduler#cancelTasks` also drains ordinary Bukkit sync tasks that fell back to the
   global region, because the native cancellation already cancels them.
 - Body-time count/total and the percentile ring are each consistent, not one atomic snapshot.
 - `ViolationClassifier` matches on exception type plus message/stack shape; an unrelated
-  `IllegalStateException` whose message contains "region threading" would count.
+  `IllegalStateException` whose message contains "region threading" would count. *Fixed in PR #62*
+  (PM-233): base messages are matched whole and `RegionRefusal` by type (see *Violations*).
 
 Entity-owner routing (added after this review, unit-tested in `BridgeTargetRoutingTest` `v39*`,
 SPEC V39): entity bodies are timed in the existing region lane, so `/plugins <name>` rows are
 unchanged. Fragile: a repeating `EntityTask` whose own body removes its entity is dropped by
 Folia's entity scheduler without a retired call, so it stays indexed until disable (same class
-as the dropped-work case above). Fixture markers `LEGACY_ENTITY_TASK_OK` and
+as the dropped-work case above; released since *PR #62*, see above). Fixture markers `LEGACY_ENTITY_TASK_OK` and
 `LEGACY_ENTITY_RETIRED_OK` are required by CI; the plugin cannot read bridge counters, so the
 retired marker means "body did not run within 3 s, task cancelled and not queued". Not yet run
-in CI.
+in CI (they pass since CI run 37515867230, 2026-10-07).
 
 The fixture now logs `LEGACY_REGION_TASK_OK|_WRONG` for `RegionTask.at` scheduled from
-`onEnable`; CI requires `_OK`. Its first CI run has not happened yet. A pending-limit fixture
-case was skipped: the limit is read only from `sourbycraft_config` TOML, not the plugin's config.
+`onEnable`; CI requires `_OK`. Its first CI run has not happened yet (it passes since CI run
+37515867230). A pending-limit fixture case was skipped: the limit is read only from
+`sourbycraft_config` (since Build 49 `aurora.yml`), not the plugin's config.

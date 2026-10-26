@@ -1,6 +1,27 @@
 # Aurora Engine — Engine System & Patch Innovation Architecture
 
-> **Role:** engine design guide — Path A/B/C, patch innovation pipeline, per-domain metric lists. **Status:** Plan/design guidance, not a description of what exists. §23's AuroraScheduler adapter is superseded by AURORA-FULL-TRANSITION.md T4 (*No AuroraScheduler wrapper*) and [execution-contract.md](execution-contract.md).
+> **Role:** engine design guide — Path A/B/C, patch innovation pipeline, per-domain metric lists. **Status:** Plan/design guidance, not a description of what exists.
+>
+> **Superseded sections (banner corrected 2026-10-25).** §4 (runtime flow), §23 (scheduler path),
+> §27 (scheduler migration example) and §32 (vision) are built on an `AuroraRuntime.start()` →
+> `AuroraExecution` → `AuroraScheduler` → `AuroraTelemetry` wrapper stack that was deliberately not
+> built; none of those wrapper classes exists. They are superseded by
+> [execution-contract.md](execution-contract.md). What the code has instead:
+> `core/SourbyCraftBootstrap` (the ordered boot stages and the shutdown order),
+> `core/AuroraRuntime` (a lifecycle-state holder only: NEW, BOOTSTRAPPING, STARTING, RUNNING,
+> DEGRADED, STOPPING, STOPPED, FAILED; it holds and starts no service), `config/AuroraConfig`,
+> `execution/ResourceGovernor` (the only Aurora execution fabric: three governed lanes),
+> `execution/region/RegionBackend` and `RegionOwnership` (the region system, one backend adapter,
+> `FoliaRegionBackend`), `execution/OwnerHandoff` (owner handoff, adapter `RegionOwnerHandoff`) and
+> `perf/MetricsRuntime` (telemetry). Owned services use the published
+> `io.papermc.paper.threadedregions.scheduler` API directly, and scheduler internals are confined
+> by `UpstreamDependencyLedgerTest` and `scripts/test_independence_policy.py`. (This banner used to
+> cite AURORA-FULL-TRANSITION.md T4, which left the repository in `c86b3be`, 2026-10-22.)
+>
+> **Upstream wording.** Where this guide names Canvas as an upstream or as an implementation behind
+> an adapter, read "engine baseline (former Canvas/Folia)": since 2026-10-05 Paper is the only
+> upstream (`paperRef` in `gradle.properties`) and the region-threading engine is SourbyCraft's own
+> code.
 >
 > Entry point: [docs/architecture/AURORA.md](AURORA.md).
 
@@ -151,8 +172,8 @@ Use an adapter when Aurora needs to retain compatibility with an upstream system
 
 Examples:
 
-- Folia scheduler adapter
-- Canvas config adapter
+- region scheduler adapter (`execution/region/FoliaRegionBackend`, `execution/RegionOwnerHandoff`)
+- engine configuration adapter (`config/upstream/UpstreamConfigBridge`, implemented by `CanvasConfigBridge`)
 - Spark adapter
 - Paper API adapter
 - upstream build metadata adapter
@@ -164,7 +185,7 @@ Aurora contract
      ↓
 compat adapter
      ↓
-Canvas / Folia / Paper implementation
+engine baseline (former Canvas/Folia) / Paper implementation
 ```
 
 The dependency direction matters.
@@ -174,7 +195,7 @@ Aurora must not become:
 ```text
 Aurora core
    ↓
-direct Canvas internals everywhere
+direct engine internals everywhere
 ```
 
 The preferred direction is:
@@ -205,7 +226,7 @@ The full engine is divided into runtime domains.
    Runtime        Execution   Engine    Telemetry      Compatibility
       │               │       Domains      │               │
       │               │         │         │               │
- Config/Lifecycle  Scheduler    │      Metrics/Spark   Paper/Folia/Canvas
+ Config/Lifecycle  Scheduler    │      Metrics/Spark   Paper / engine baseline
                                │
        ┌───────────────┬───────┼──────────┬───────────────┐
        │               │       │          │               │
@@ -217,6 +238,9 @@ The full engine is divided into runtime domains.
 ---
 
 # 4. Runtime Flow
+
+> **Superseded design (see the banner).** The flow below was the plan; the classes it names after
+> `AuroraConfig` were never built. What runs is written after it.
 
 Aurora runtime owns startup, services, and shutdown.
 
@@ -238,7 +262,16 @@ engine services
 RUNNING
 ```
 
-Shutdown:
+What the code does (checked 2026-10-25): feature patch 0001 calls `SourbyCraftBootstrap.init()`
+from `DedicatedServer#initServer`, after Paper command registration and before plugin loading. It
+runs the update rollback guard, publishes BOOTSTRAPPING then STARTING on `AuroraRuntime`, runs the
+19 boot stages in a fixed order (metrics runtime, network counters, configuration, sourby mods,
+stall recorder, aurora redis fabric, aurora worlds, awf multiprofile, plugin provisioning, jvm
+advisor, plugin diagnostics, startup index, commands, messages, player slots, virtual executor,
+abysslink, auto updater, gc tracker), logs the thread ledger, and publishes RUNNING, DEGRADED (some
+stages failed) or FAILED (all failed).
+
+Shutdown (planned shape):
 
 ```text
 STOPPING
@@ -256,7 +289,22 @@ shutdown executors
 STOPPED
 ```
 
-No subsystem should own an executor that Aurora runtime does not know about.
+What the code does: `SourbyCraftBootstrap.close()` (feature patch 0081, after plugin disable)
+publishes STOPPING, then stops SourbyMods, starts the AWF shutdown deadline, closes the HUD,
+updater, stall recorder, metrics, GC sampler, async-path pool, AbyssLink, the I/O executor and
+AWF MultiProfile, stops the Resource Governor lanes last, and publishes STOPPED. "Reject new work"
+is not global: only the admission points that check `AuroraRuntime.stopping()` refuse new work
+(async-path submission, `/awf`, `/speedtest`, `/update` check and apply, `/sourbycraft reload`,
+the GeoIP download), which also refuse after a FAILED bootstrap. Persistence keeps draining by
+design: the storage lane, AWF commits, region saves and the `VirtualExecutor` that AWF world
+operations use. `AuroraRuntime.acceptingWork()` is a status query with no production admission
+consumer. The region saves and `AwfEngine.closeAll()` (the final AWF commits, on the stopping
+thread) run after `close()`.
+
+No subsystem should own an executor that Aurora runtime does not know about. (Not met: several
+SourbyCraft-owned executors run outside the Resource Governor, each with its own bound and
+shutdown owner; they are listed in [executor-inventory.md](executor-inventory.md) §1. Moving them
+is a separate, owner-approved change.)
 
 ---
 
@@ -679,7 +727,9 @@ KEEP / REWORK / REVERT
 
 # 17. Patch Categories
 
-Use these logical categories when naming/documenting patches:
+Use these logical categories when documenting patches. They go in the commit subject or body of
+the change in the materialized repository (for example `SourbyCraft - [AURORA-ENTITY] reduce
+tracker lookup`), never in the patch file name, which is generated (§18):
 
 ```text
 AURORA-RUNTIME
@@ -705,21 +755,28 @@ AURORA-INTEGRATION
 
 One patch should solve one coherent problem.
 
-Preferred:
+Patch file names are not chosen by hand. A feature patch is one commit in the materialized
+repository, and `rebuildMinecraftFeaturePatches` / `rebuildPaperServerPatches` write it as
+`NNNN-SourbyCraft-<commit subject>.patch` (AGENTS.md "Where code lives"; for example
+`0006-SourbyCraft-async-pathfinding-offload-periodic-path-.patch`). Renaming a file by hand breaks
+the next rebuild. So the commit subject is where the coherent problem is named (corrected
+2026-10-25; this section used to prescribe `AURORA-<CATEGORY>-*.patch` file names).
+
+Preferred commit subjects:
 
 ```text
-AURORA-ENTITY-reduce-tracker-lookup.patch
-AURORA-AI-snapshot-path-solve.patch
-AURORA-CHUNK-reduce-holder-lookup.patch
-AURORA-NETWORK-reduce-chunk-packet-copy.patch
+SourbyCraft - [AURORA-ENTITY] reduce tracker lookup
+SourbyCraft - [AURORA-AI] snapshot path solve
+SourbyCraft - [AURORA-CHUNK] reduce holder lookup
+SourbyCraft - [AURORA-NETWORK] reduce chunk packet copy
 ```
 
 Avoid:
 
 ```text
-performance-fixes.patch
-misc-optimizations.patch
-aurora-improvements.patch
+SourbyCraft - performance fixes
+SourbyCraft - misc optimizations
+SourbyCraft - aurora improvements
 ```
 
 because they become impossible to benchmark, rebase, and revert independently.
@@ -860,6 +917,12 @@ shutdown correctness
 ---
 
 # 23. Aurora Scheduler Evolution Path
+
+> **Superseded (see the banner).** Step 1's `AuroraScheduler` wrapper was deliberately not built.
+> The current statement of scheduler isolation is [execution-contract.md](execution-contract.md):
+> owned services use the published `threadedregions.scheduler` API directly, owner handoff goes
+> through `execution/OwnerHandoff`, and scheduler internals are named only in the files the
+> independence policy pins ([AURORA.md](AURORA.md) *Current state*, "scheduler stages").
 
 Aurora scheduler transition should happen in four steps.
 
@@ -1013,6 +1076,10 @@ This is not a direct one-method patch because the problem spans a subsystem.
 
 # 27. Example: Scheduler Migration
 
+> **Superseded (see the banner).** No `AuroraScheduler` or `FoliaSchedulerAdapter` exists; the
+> "Current" shape below (a service calling the published scheduler API directly) is still what the
+> code does, and it is the intended shape under [execution-contract.md](execution-contract.md).
+
 Current:
 
 ```text
@@ -1149,14 +1216,17 @@ If it is not measurable:
 
 This document complements:
 
-- `PRD.md` — product requirements
 - `docs/AURORA-ROADMAP.md` — complete milestone roadmap
-- `docs/AURORA-FULL-TRANSITION.md` — transition completion plan
-- `docs/architecture/AURORA.md` — architecture definition
+- `docs/architecture/AURORA.md` — architecture definition and the verified current state
 - `docs/architecture/AURORA-INDEPENDENT-ENGINE.md` — independence model
+- `docs/architecture/execution-contract.md` — the execution contract that supersedes §4, §23, §27 and §32
 - `docs/AURORA-CONFIG.md` — configuration implementation
-- `docs/AURORA-TASKS.md` — current task matrix
+- `docs/TODO.md` — the prioritized to-do list
 - `docs/AURORA-UX.md` — operator experience
+
+Kept outside the repository since `c86b3be` (2026-10-22; `docs/README.md`), so not linkable here:
+`PRD.md` (product requirements), `AURORA-FULL-TRANSITION.md` (transition plan, T-gates) and
+`AURORA-TASKS.md` (task matrix).
 
 This document specifically defines:
 
@@ -1165,6 +1235,11 @@ This document specifically defines:
 ---
 
 # 32. Final Vision
+
+> **Superseded in part (see the banner).** The vision's `AuroraScheduler` box was not built; read it
+> as the execution contracts of [execution-contract.md](execution-contract.md). Its
+> "Paper/Folia/Canvas adapters" box is today the Paper upstream plus the owned engine baseline
+> behind the pinned adapters.
 
 Aurora should eventually behave like this:
 

@@ -24,7 +24,17 @@ import java.util.Map;
  *
  * <p>{@code properties} is the registry's {@link dev.iyanz.sourbycraft.api.world.WorldProperties}
  * as JSON, written when the world has any. A file without it (every file written before it was
- * added) imports with no properties, exactly as before.</p>
+ * added) imports with no properties, exactly as before. A spawn in it that is outside the world or
+ * not finite (an older file) is dropped with a WARN and the rest imports ({@link #properties}).</p>
+ *
+ * <p>{@code plugin-data} ({@link #PLUGIN_DATA}) is the world's persistent data container as base64
+ * of the gzip-compressed NBT compound. Only {@link #convertSlime} writes it, from the Slime world's
+ * {@code BukkitValues}, and only when it fits in one metadata value; {@link #export} does not (the
+ * world's own container is not read). {@link dev.iyanz.sourbycraft.api.world.AuroraWorlds#importWorld}
+ * (and {@code /awf import}) merges it into the new world's persistent data container once the world
+ * is created ({@code AuroraWorldsService.importWorldInternal}, with
+ * {@link SlimeImporter#restorePluginData}). It is optional: a file without it has no plugin data, and
+ * a build that does not know the key ignores it, as every reader ignores keys it does not use.</p>
  *
  * <p>The {@code /awf} command reads files from {@link #IMPORTS} and writes them to
  * {@link #EXPORTS} only ({@link #confine}); the {@link dev.iyanz.sourbycraft.api.world.AuroraWorlds}
@@ -35,6 +45,10 @@ public final class AuroraWorldFiles {
     public static final String FORMAT = "awf-world";
     /** Metadata key of the world's properties, as JSON. */
     static final String PROPERTIES = "properties";
+    /** Metadata key of the world's plugin data: base64 of the gzip-compressed NBT compound. */
+    static final String PLUGIN_DATA = "plugin-data";
+    /** The longest metadata value a file holds ({@code writeUTF}); base64 is one byte per character. */
+    static final int MAX_METADATA_VALUE = 65_535;
     private static final com.google.gson.Gson GSON = new com.google.gson.GsonBuilder().disableHtmlEscaping().create();
 
     /** What an export or a conversion wrote. */
@@ -153,9 +167,24 @@ public final class AuroraWorldFiles {
         }
     }
 
-    /** The registry entry a file describes, under a new name. */
+    /**
+     * The registry entry a file describes, under a new name. Without the file's path, the WARN of a
+     * dropped spawn ({@link #properties}) names the world being imported and the file's recorded
+     * {@code source}; {@link #describe(AwfWorldFile, Path, String, boolean)} names the path.
+     */
     static AuroraWorldRegistry.Entry describe(final AwfWorldFile file, final String name, final boolean autoload)
         throws IOException {
+        return describe(file, null, name, autoload);
+    }
+
+    /**
+     * The registry entry a file describes, under a new name.
+     *
+     * @param path where {@code file} was opened from, named in the WARN of a dropped spawn
+     *     ({@link #properties}); {@code null} when not known
+     */
+    static AuroraWorldRegistry.Entry describe(final AwfWorldFile file, final Path path, final String name,
+                                              final boolean autoload) throws IOException {
         final Map<String, String> meta = file.metadata();
         if (!FORMAT.equals(meta.get("format"))) throw new IOException("not an AWF world file (format " + meta.get("format") + ")");
         final String environment = meta.getOrDefault("environment", "normal").toLowerCase(Locale.ROOT);
@@ -170,16 +199,39 @@ public final class AuroraWorldFiles {
                 throw new IOException("seed " + meta.get("seed") + " is not a number");
             }
         }
+        final String shown = path != null ? path.toString()
+            : "the .awf file imported as '" + name + "' (recorded source: " + meta.getOrDefault("source", "none") + ")";
         return new AuroraWorldRegistry.Entry(name, environment, seed, meta.get("generator"), meta.get("world-type"),
-            null, autoload, properties(meta.get(PROPERTIES)));
+            null, autoload, properties(meta.get(PROPERTIES), shown, name));
     }
 
-    /** The properties a file records, or {@code null} when it records none (an older file). */
-    static dev.iyanz.sourbycraft.api.world.WorldProperties properties(final String json) throws IOException {
+    /**
+     * The properties a file records, or {@code null} when it records none (an older file). A stored
+     * spawn that {@link dev.iyanz.sourbycraft.api.world.WorldProperties.Spawn} refuses (outside the
+     * world, or not finite) is dropped with one WARN naming {@code file}, and the rest of the file
+     * imports: spawns were not range-checked before (builds up to and including v26.2-r50 exported
+     * them unchecked), so refusing the whole import would strand such a file. The same helper drops
+     * such a spawn from the registry and from templates ({@link AuroraWorldRegistry#dropInvalidSpawn});
+     * a spawn that is not numbers is still refused.
+     *
+     * @param file the file as the WARN names it
+     * @param world the name the world is imported under, for the WARN's {@code /awf set} hint
+     * @throws IOException when the value is not JSON properties, or holds other properties that are
+     *     refused (save bounds with min above max, a default biome that is not a key)
+     */
+    static dev.iyanz.sourbycraft.api.world.WorldProperties properties(final String json, final String file,
+                                                                      final String world) throws IOException {
         if (json == null) return null;
         try {
+            final com.google.gson.JsonElement stored = GSON.fromJson(json, com.google.gson.JsonElement.class);
+            if (stored == null || stored.isJsonNull()) throw new IOException("the file's properties are empty");
+            // dropInvalidSpawn reads a registry entry's shape, {"properties": {...}}. The holder shares the tree,
+            // so a spawn it drops is gone from stored as well.
+            final com.google.gson.JsonObject holder = new com.google.gson.JsonObject();
+            holder.add("properties", stored);
+            final java.util.Optional<String> droppedSpawn = AuroraWorldRegistry.dropInvalidSpawn(holder);
             final dev.iyanz.sourbycraft.api.world.WorldProperties parsed =
-                GSON.fromJson(json, dev.iyanz.sourbycraft.api.world.WorldProperties.class);
+                GSON.fromJson(stored, dev.iyanz.sourbycraft.api.world.WorldProperties.class);
             if (parsed == null) throw new IOException("the file's properties are empty");
             // Validated as the registry would use them: bounds and the void biome key.
             if (parsed.saveBounds() != null) {
@@ -190,9 +242,45 @@ public final class AuroraWorldFiles {
             if (parsed.defaultBiome() != null && org.bukkit.NamespacedKey.fromString(parsed.defaultBiome()) == null) {
                 throw new IOException("default biome " + parsed.defaultBiome() + " is not a key");
             }
+            droppedSpawn.ifPresent(reason -> dev.iyanz.sourbycraft.util.SourbyLogger.warn("Aurora World Fabric:"
+                + " ignoring the stored spawn in " + file + " (" + reason + "), as a file written before spawns were"
+                + " range-checked can hold one; '" + world + "' is imported without a spawn property (set one with"
+                + " /awf set " + world + " spawn <x> <y> <z> [yaw])"));
             return parsed;
         } catch (final RuntimeException malformed) {          // JsonParseException, a refused record constructor
             throw new IOException("the file's properties are not valid: " + malformed.getMessage(), malformed);
+        }
+    }
+
+    /**
+     * The {@link #PLUGIN_DATA} value for a world's plugin data, or {@code null} when it does not fit
+     * in one metadata value ({@value #MAX_METADATA_VALUE} base64 characters, about 48 KiB compressed).
+     */
+    static String encodePluginData(final net.minecraft.nbt.CompoundTag data) throws IOException {
+        final java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        try (java.io.DataOutputStream out = new java.io.DataOutputStream(new java.util.zip.GZIPOutputStream(bytes))) {
+            net.minecraft.nbt.NbtIo.write(data, out);
+        }
+        final String encoded = java.util.Base64.getEncoder().encodeToString(bytes.toByteArray());
+        return encoded.length() > MAX_METADATA_VALUE ? null : encoded;
+    }
+
+    /**
+     * The plugin data a file records, or {@code null} when it records none (every file written
+     * before the key existed, and every {@link #export}). Decoded within the Slime import's size
+     * limit ({@link SlimeImporter#MAX_BYTES_PROPERTY}). To be merged into the world's container with
+     * {@link SlimeImporter#restorePluginData} where the container may be written.
+     *
+     * @throws IOException when the value is not base64 of gzip-compressed NBT
+     */
+    static net.minecraft.nbt.CompoundTag pluginData(final Map<String, String> meta) throws IOException {
+        final String encoded = meta.get(PLUGIN_DATA);
+        if (encoded == null) return null;
+        try (java.io.InputStream in = new java.util.zip.GZIPInputStream(
+            new java.io.ByteArrayInputStream(java.util.Base64.getDecoder().decode(encoded)))) {
+            return SlimeImporter.decode(in);
+        } catch (final RuntimeException malformed) {          // not base64, an NBT reader's own exception
+            throw new IOException("the file's plugin data is not valid: " + malformed.getMessage(), malformed);
         }
     }
 
@@ -222,11 +310,17 @@ public final class AuroraWorldFiles {
             final dev.iyanz.sourbycraft.api.world.WorldProperties properties = converted.world().properties();
             final Map<String, String> meta = metadata(new AuroraWorldRegistry.Entry(source, environment, null,
                 "void", null, null, false, properties), "slime " + source);
-            // An .awf file does not carry a world's persistent data container yet, so the plugin data is dropped here.
-            final java.util.List<String> dropped = converted.world().dropped(false);
+            // The world's plugin data (BukkitValues) is kept under plugin-data when it fits in one value.
+            final net.minecraft.nbt.CompoundTag pluginData = converted.world().pluginData();
+            final String encodedPluginData = pluginData == null ? null : encodePluginData(pluginData);
+            if (encodedPluginData != null) meta.put(PLUGIN_DATA, encodedPluginData);
+            final java.util.List<String> dropped = converted.world().dropped(encodedPluginData != null);
             if (!dropped.isEmpty()) {
                 dev.iyanz.sourbycraft.util.SourbyLogger.warn("Aurora World Fabric: converting " + source
-                    + " did not keep " + dropped + " (not representable in AWF yet)");
+                    + " did not keep " + dropped + " (not representable in AWF yet, or a value that does not fit,"
+                    + " such as a spawn outside the world"
+                    + (pluginData != null && encodedPluginData == null ? "; the world's plugin data is larger than one"
+                        + " .awf metadata value holds" : "") + ")");
             }
             meta.put("data-version", Integer.toString(converted.dataVersion()));
             writer.finish(meta);

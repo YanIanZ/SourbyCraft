@@ -28,6 +28,8 @@ import java.util.function.Supplier;
  *   <li>Each step runs in its own try/catch: one failing never skips the other or a later pass.
  *       Failures are logged at most once a minute per step, with the number not logged.</li>
  *   <li>{@link #close()} is idempotent; see there for what it waits for.</li>
+ *   <li>A stall is visible from outside: {@link #nanosSinceLastPass()} grows, and the metrics
+ *       collector WARNs once it passes {@link #STALL_NANOS} ({@code MetricsRuntime}).</li>
  * </ul>
  *
  * <p>The steps do no I/O and do not wait for a commit: a commit is only handed to the storage
@@ -45,6 +47,11 @@ public final class AwfMaintenanceDriver implements AutoCloseable {
     static final long PERIOD_NANOS = TimeUnit.SECONDS.toNanos(1L);
     static final long ERROR_LOG_INTERVAL_NANOS = TimeUnit.MINUTES.toNanos(1L);
     static final long STOP_WAIT_NANOS = TimeUnit.SECONDS.toNanos(2L);
+    /**
+     * How long a running driver may go without finishing a pass (30 periods) before the metrics
+     * collector reports it stalled; see {@link #nanosSinceLastPass()}.
+     */
+    public static final long STALL_NANOS = TimeUnit.SECONDS.toNanos(30L);
 
     /** One named piece of upkeep. */
     record Step(String name, Runnable action) {
@@ -94,6 +101,8 @@ public final class AwfMaintenanceDriver implements AutoCloseable {
     private Cancellation cancellation;
     private final AtomicLong passes = new AtomicLong();
     private final AtomicLong overlaps = new AtomicLong();
+    /** {@link #nanoClock} when the last pass finished, or when the schedule started before the first. */
+    private volatile long lastPassNanos;
 
     AwfMaintenanceDriver(final List<Step> steps, final Scheduler scheduler, final long periodNanos,
                          final LongSupplier nanoClock, final BiConsumer<String, Throwable> errorLogger) {
@@ -165,9 +174,21 @@ public final class AwfMaintenanceDriver implements AutoCloseable {
     public void start() {
         synchronized (this.lifecycleLock) {
             if (this.started || this.stopped) return;
+            this.lastPassNanos = this.nanoClock.getAsLong();
             this.cancellation = this.scheduler.start(this::pass, this.periodNanos);
             this.started = true;
         }
+    }
+
+    /**
+     * Nanoseconds since the last pass finished (since {@link #start()} before the first), or 0 when
+     * the driver is not running. For a watcher on another thread: passes run one period apart, so a
+     * value of many periods means a step is stuck or the thread is gone, and no commit has been
+     * started since.
+     */
+    public long nanosSinceLastPass() {
+        if (!running()) return 0L;
+        return this.nanoClock.getAsLong() - this.lastPassNanos;
     }
 
     /** Whether the schedule was started and not closed. */
@@ -216,6 +237,7 @@ public final class AwfMaintenanceDriver implements AutoCloseable {
                     this.report(i, failure);
                 }
             }
+            this.lastPassNanos = this.nanoClock.getAsLong();
         } finally {
             this.passLock.unlock();
             // A close that gave up waiting for this pass, or that ran inside it, finishes here.

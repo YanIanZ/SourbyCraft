@@ -287,7 +287,8 @@ class ProfileEngineTest {
     void recoveryRefusesAJournalOlderThanTheCurrentFence() throws Exception {
         final ProfileInfo target = create("skyblock");
         final ProfileTransition journal = ProfileTransition.started(this.player, null, target.id(),
-            System.currentTimeMillis() + 10_000L, 99L).at(TransitionPhase.SAVING);
+            System.currentTimeMillis() + 10_000L, 99L).withToFence(99L, this.ownership.incarnation())
+            .at(TransitionPhase.SAVING);
         this.repository.saveTransition(journal);
         this.repository.saveAccount(this.repository.loadAccount(this.player, 3).withActive(target.id()));
         final ProfileSwitchResult refused = this.engine.recover(journal.transitionId()).join();
