@@ -23,9 +23,9 @@ import org.bukkit.plugin.Plugin;
  * {@code CraftScheduler} patches call, and what {@code /plugins} reads.
  *
  * <p>Plugin providers are built during Paper's bootstrap, before {@code SourbyCraftBootstrap}
- * loads configuration, so the bridge reads its own keys straight from the TOML files on first
- * use, read-only. {@code aurora.bridge.mode} is therefore fixed for the run (RESTART_REQUIRED);
- * {@code aurora.bridge.quarantine-after} follows later reloads (LIVE).</p>
+ * loads configuration, so the bridge reads its own keys straight from the YAML files on first
+ * use, read-only ({@link #earlySettings()}). {@code aurora.bridge.mode} is therefore fixed for
+ * the run (RESTART_REQUIRED); {@code aurora.bridge.quarantine-after} follows later reloads (LIVE).</p>
  */
 public final class AuroraBridge {
 
@@ -44,7 +44,10 @@ public final class AuroraBridge {
 
     private AuroraBridge() {}
 
-    /** The bridge settings as the TOML files held them when first asked; read once, never creates the runtime. */
+    /**
+     * The bridge settings as the YAML files held them when first asked (a legacy TOML file only while its YAML
+     * file does not exist yet); read once, never creates the runtime.
+     */
     private static volatile AuroraConfig.Bridge earlySettings;
     // ThreadChecks class initialization reads these settings while runtime() invokes ThreadChecks
     // under AuroraBridge.class. A separate monitor prevents a class-initialization lock cycle.
@@ -52,7 +55,8 @@ public final class AuroraBridge {
 
     /**
      * {@code aurora.bridge.*} as configured on disk, read once on first use (before the plugin scan, or earlier
-     * when the region-ownership checks ask: {@code guards/ThreadChecks}). Never creates the bridge runtime.
+     * when the region-ownership checks ask: {@code guards/ThreadChecks}) from {@code sourbycraft_config/aurora.yml}
+     * over {@code sourbycraft_global_config.yml} ({@code readEarly}). Never creates the bridge runtime.
      */
     public static AuroraConfig.Bridge earlySettings() {
         AuroraConfig.Bridge settings = earlySettings;

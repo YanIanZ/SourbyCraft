@@ -271,7 +271,10 @@ public final class AuroraKeys {
         restart("aurora.awf.redis.fabric.services.sessions", true,
             "Profile session ownership with a never-resetting epoch (the fence)."),
         restart("aurora.awf.redis.fabric.services.coordination", true,
-            "Fenced ownership claims for profiles and worlds; the durable write path validates the fence."),
+            "Fenced ownership claims (profiles, worlds) for server code that calls them; /awf redis ownership reads "
+                + "them. Nothing in this build takes one or checks one before a write: MultiProfile ownership is a "
+                + "session claim (services.sessions), and a repository: redis write made under one checks it inside "
+                + "Redis."),
         restart("aurora.awf.redis.fabric.services.events", false,
             "Redis Streams internal events: consumer groups, acks, pending recovery, retry budget, dead-letter stream. "
                 + "Off by default because this build ships no consumer: an unconsumed stream reaches its retention "
