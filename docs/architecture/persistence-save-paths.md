@@ -3,14 +3,16 @@
 > **Role:** who writes which piece of world state, on which thread, and when. **Status:** Active source ledger,
 > reviewed against the materialized sources on 2026-10-21 (Paper `9240f586`, engine baseline + feature patches
 > 0027/0056; 0067 source review only, not compiled). Line numbers are those of the materialized files on that day; re-check with `rg` before
-> relying on one. Entry point: [AURORA.md](AURORA.md); storage ownership: [engine-storage.md](engine-storage.md).
+> relying on one. The scheduled-functions row and the command-storage status were updated on 2026-10-25 from the feature patches
+> (0065, 0069) and the 2026-10-22 run, and the world-unload note under §1 from the engine baseline patches, without materialized
+> sources. Entry point: [AURORA.md](AURORA.md); storage ownership: [engine-storage.md](engine-storage.md).
 
 Vanilla saves everything from one main-thread autosave (`MinecraftServer.tickServer` →
 `saveEverything` → players, `saveGlobalData` (`level.dat` + the server `data/`), every level's
 `saveLevelData` (its `data/`) and its chunks). Folia split that: chunks, entities, POI and players are
 saved by the region that owns them, a short whitelist of global data is saved by the global tick, and
 **everything else was written only at a clean stop** (`RegionShutdownThread`). Canvas widened the
-whitelist; SourbyCraft widened it again (0027, 0056, 0067). This document is the ledger of what is left.
+whitelist; SourbyCraft widened it again (0027, 0056, 0067, 0068). This document is the ledger of what is left.
 
 ## 1. The five save paths
 
@@ -21,6 +23,13 @@ whitelist; SourbyCraft widened it again (0027, 0056, 0067). This document is the
 | Dragon fight autosave | the region owning the fight | every `bukkit.yml ticks-per.autosave` ticks of wall time | `ender_dragon_fight.dat` (`saveSpecific(EnderDragonFight)`); `save-all` forces it on the next region tick. | `EnderDragonFight.java:226-252`, `ServerLevel.java:923-925`, `SaveAllCommand.java:47-50` |
 | `/save-all [flush]`, `World#save` | global tick + every region | command / plugin | `save-all`: `autosaveSafeGlobalData(true, true)` and `autosaveSafeWorldData(true, true, world)` for every world (forced, joined; the 0027/0056 selections and 0067 snapshot included), then a `SaveAllTicket` per region (chunks via `saveAllChunksRegionised`, local players). **Bukkit `World#save` only propagates the region tickets**: chunks and players, no level data of any kind. | `SaveAllCommand.java:32-80`, `MinecraftServer.java:1886-1897`, `CraftWorld.java:1147-1157` |
 | Clean shutdown | `RegionShutdownThread` (after `TickRegionScheduler.halt`, so no tick runs) | `stop` | players + in-flight pearls; per world: chunks of every region, then `ServerLevel.saveLevelData(true)` = `scheduleSave().join()` of **every** dirty `SavedData` of that world; then `MinecraftServer.saveGlobalData(true)` = scoreboard store, **`level.dat`**, `saveAndJoin` of every dirty server `SavedData`; then `PlayerList.saveAll()`; `stopPart2` closes the storages (another `saveAndJoin`). | `RegionShutdownThread.java:273-357` (`saveLevelData` 72-77 and 338, `saveGlobalData(true)` 346), `MinecraftServer.java:1026-1036,1146-1152`, `SavedDataStorage.java:243-283,320-328` |
+
+Not a periodic path, so not in the table (added 2026-10-25 from the engine baseline patches): a
+world unload through the engine (`CraftServer.unloadWorldAsync` → `WorldShutdownThread`, which
+`AuroraWorlds.unload` and `/awf unload` use) saves that world's region chunks and then runs
+`saveLevelData` for it (`WorldShutdownThread.java.patch:192` → `RegionShutdownThread.saveLevelData`
+→ `ServerLevel.saveLevelData(true)`), so every dirty `SavedData` of that one world, the world PDC
+included, is written when the world unloads, whatever its save flag.
 
 The vanilla `autoSave()` (`MinecraftServer.java:1772-1776`) is reachable only from the
 `pause-when-empty` block, which is `if (false && …)` (`:1627`). `saveEverything` is never called during
@@ -34,7 +43,8 @@ AWF.
 ## 2. Per kind of data
 
 "Periodic" means written during a normal run without an operator command. "Shutdown" means only the
-clean-stop path above; a crash (SIGKILL, OOM, power) loses every change since boot.
+clean-stop path above (and, for one world's own data, that world's unload, see the note under §1); a
+crash (SIGKILL, OOM, power) loses every change since boot.
 
 | Data | File | Owner thread of the mutation | Written | Since |
 |---|---|---|---|---|
@@ -57,7 +67,7 @@ clean-stop path above; a crash (SIGKILL, OOM, power) loses every change since bo
 | Raids | `dimensions/<dim>/data/minecraft/raids.dat` | each raid on its region (`Raids.tick`), the map thread-safe but `Raid` fields and `heroes_of_the_village` (a `HashSet`) are not | **still shutdown-only** | 0067 review: no owner-consistent snapshot of mutable `Raid` fields, hero set or raid PDC; concurrent raid-map iteration does not protect its values |
 | Forceload tickets | `dimensions/<dim>/data/minecraft/chunk_tickets.dat` | regions via Moonrise ticket manager (concurrent index, section-locked ticket sets); startup activation of deactivated tickets | **periodic now** (global snapshot/encode), `save-all`, shutdown; code only, no compile/runtime evidence yet | **0067**; detached serialized fields under existing section locks, startup map locked separately; see §5 |
 | Wandering trader timers (0068) | `dimensions/<dim>/data/minecraft/wandering_trader.dat` | global tick; region results handed back through `RegionOwnership` | global autosave / save-all (separate contained type), clean shutdown | countdown, delay and chance saved; Java tests and server validation **not run**; [details](wandering-traders.md) |
-| Scheduled functions (`/schedule`) | `dimensions/<dim>/data/minecraft/scheduled_events.dat` | command thread | **shutdown only**, and the queue is **never ticked** (`ServerLevel.java:1027`, commented out by Folia with a TODO), so `/schedule` stores entries that never fire | Folia; **open** |
+| Scheduled functions (`/schedule`) | `dimensions/<dim>/data/minecraft/scheduled_events.dat` | global tick since 0065: `/schedule` and its suggestions run there (`ScheduledFunctionTicker.onGlobal`, `suggest`), and the queue is ticked once per world after game time advances (`ScheduledFunctionTicker.tick` from `RegionizedServer`); the per-region drain Folia commented out (`ServerLevel.java:1027`) stays disabled | **still shutdown-only**: not in `WorldMetadataAutosave.WORLD_CONTAINED_TYPES` until `TimerQueue` is confirmed to be a `SavedData` held in the world's data storage | Folia; **0065** (ticking, 2026-10-21); persistence **open** |
 | World PDC (plugins) | `dimensions/<dim>/data/paper/persistent_data_container.dat` | any plugin thread | **still shutdown-only** (`ServerLevel.saveLevelData` copies the live PDC first) | 0067 review: `CraftPersistentDataContainer` has an unsynchronized `HashMap`, exposes `getRaw()` and mutable tags; `getTagsCloned()` has no lock. A global copy can throw or be torn; locking only the reader would not protect plugin writers. |
 | Structure data | written with the chunk (structure starts/references are chunk data) | owning region | with their chunk | baseline |
 
@@ -189,6 +199,12 @@ storage/block/entity operations still require ownership of every non-storage sou
 no cross-region read is permitted. Console block-data commands now refuse before looking up
 world data, with a message to run from a player or command block in the owning region.
 
-Status: code and tests written; Java compilation and runtime verification pending PM validation.
-This is command routing, not a LIVE configuration toggle; deployment requires a new jar/restart.
+Status: MC feature patch 0069 (`data-command-threading`, in `v26.2-r50`). Functional run
+`opus-fix6869-data-1` (2026-10-22, jar `6d096680…`, §4): storage `get`/`modify` and
+`execute store … run data get storage` from the console, `data get|modify block` handed to the
+owning region, a console `data modify storage … from block` refused, and the command-block
+variants behaved as described above; no exception, `stop` exited 0. Functional evidence on an
+agent test server only, no players. Still unit/patch-shape only: `/function … with storage` from
+a region. This is command routing, not a LIVE configuration toggle; deployment requires a new
+jar/restart.
 Autosave timing remains the existing LIVE `autosave.autosave-frequency` setting.

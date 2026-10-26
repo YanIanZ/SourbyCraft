@@ -1,9 +1,11 @@
 # Blocking I/O and region threads — audit
 
 AURORA-TASKS E: "verify no external I/O blocks region execution". This is a source audit of
-`sourbycraft-server/src/main/java` as of 2026-09-26. It covers SourbyCraft's own code, not
-upstream. `BlockingIoBoundaryTest` pins the network list below, so a new file that opens network
-connections fails the build until it is added here with its thread context.
+`sourbycraft-server/src/main/java` as of 2026-09-26; the two tables were brought up to date on
+2026-10-25 for the Build 50 candidate (PR #62: code written and statically reviewed; not built;
+not tested by the owner). It covers SourbyCraft's own code, not upstream. `BlockingIoBoundaryTest`
+pins the network list below, so a new file that opens network connections fails the build until it
+is added here with its thread context.
 
 ## Network I/O
 
@@ -11,13 +13,14 @@ connections fails the build until it is added here with its thread context.
 | --- | --- | --- |
 | `update/HttpTransport.java` | GitHub release checks and downloads (the one HTTP seam of `SourbyUpdater`, which holds no network call itself since 2026-10-20) | Folia async scheduler (`runAtFixedRate`/`runDelayed`) via `SourbyUpdater`; never the start/stop monitor |
 | `update/HttpTransport.java` (Via caller) | Pinned Via metadata/download check; bounds + SHA-256 checked by `ViaAutoUpdate` | Called from `SourbyUpdater`'s async check |
-| `command/SpeedtestCommand.java` | Speed test | `VirtualExecutor` (bounded virtual threads); the reply hops back to the sender's owner |
-| `util/GeoUtil.java` | GeoIP lookup for `/ping` (local `.mmdb`) | `VirtualExecutor`, from `PingCommand` |
+| `command/SpeedtestCommand.java` | Speed test, and the download of its pinned binary. Since PR #62 the binary's SHA-256 is recorded beside it (`speedtest.sha256`, written last, after the binary was moved into place) and re-checked before every run; a missing or mismatching record deletes the binary and downloads the pinned archive again | `VirtualExecutor` (bounded virtual threads); the reply hops back to the sender's owner |
+| `util/GeoUtil.java` | GeoIP lookup for `/ping` (local `.mmdb`), and the database download | Lookup on `VirtualExecutor`, from `PingCommand` (the address is captured on the target entity's owner first). Since PR #62 a missing database starts its download as its own `VirtualExecutor` task and the lookup returns at once (never inside the ping worker); a failed download or open is retried after 1 h instead of never |
+| `abysslink/AbyssLinkConnectionManager.java` | AbyssLink control connection: DNS resolution, PEM trust and client-key loading and nonce generation; then connect, verified TLS and bounded frame I/O | Preparation on `VirtualExecutor`; connect, TLS and frames asynchronously on its own single-thread Netty event loop. Never a region thread or the global tick; startup never waits for the endpoint; shutdown closes without a synchronous network wait (details below) |
 | `bootstrap/LibDownloader.java`, `bootstrap/PluginProvisioner.java` | Library and plugin provisioning, including ProtocolLib | Plugin JAR/config work runs on the startup path before Paper's plugin scan / plugin enable, before region threads start; library fetch is bootstrap-only |
 | `net/HandshakeAddresses.java` | Parses IP literals for the handshake address (Guava `InetAddresses`); opens no connection and never resolves a name. Listed only because it matches the scan pattern | Netty event loop (`ServerHandshakePacketListenerImpl.handleIntention`) |
 | `security/SecurityGuards.java` | Reads the numeric bytes of a peer/forwarded `InetSocketAddress` for connection-guard admission limits (SEC-11); opens no connection and never resolves a name (unresolved addresses bypass). Listed only because it matches the scan pattern | Netty event loop (`ServerConnectionListener` `initChannel`, `ServerLoginPacketListenerImpl.handleHello` / Velocity forwarding) |
 | `update/UpdateOverrides.java` | Validates the test-only `sourbycraft.update.api-base` JVM property (loopback `http(s)` URL only) with `java.net.URI`; opens no connection and never resolves a name. Listed only because it matches the scan pattern | Async scheduler, inside `SourbyUpdater.check` |
-| `awf/redis/RedisClient.java` | The `redis` AWF backend (`aurora.awf.backend = "redis"`) | Store opening: the I/O lane (`AwfEngine.prepare`) for runtime worlds, the main thread at boot. Commits: the storage lane, refused on a region thread like FILE commits. Chunk reads: wherever the engine reads a region file for that chunk — the same exposure the FILE backend's reads have. Lease renewal: its own daemon thread. Every socket read is bounded by `timeout-ms`. |
+| `awf/redis/RedisClient.java` | The `redis` AWF backend (`aurora.awf.backend: redis`), the Aurora Redis Fabric (`awf/redis/fabric`) and MultiProfile's Redis repository (`RedisProfileRepository`). The fabric owns one bounded client per workload (storage, coordination, events, control); the AWF world backend and the profile repository share its storage client when the fabric is enabled | AWF backend — store opening: the I/O lane (`AwfEngine.prepare`) for runtime worlds, the main thread at boot; commits: the storage lane, refused on a region thread like FILE commits; chunk reads: wherever the engine reads a region file for that chunk, the same exposure the FILE backend's reads have (traced below); lease renewal: `SourbyCraft-Storage-redis-lease`. Fabric and MultiProfile — profile I/O on the governed `STORAGE` lane, shared with AWF commits (`ProfileRuntime`); session-claim renewal scheduled by `SourbyCraft-AWF-profile-heartbeat` and run on that profile I/O lane, the routing advertisement on the heartbeat thread itself; `/awf redis` diagnostics on `VirtualExecutor` since PR #62 (before: the `STORAGE` lane). The fabric is documented as I/O-thread-only, which its callers, not the fabric, enforce. Every socket read and stalled write is bounded by `timeout-ms` (write watchdog `SourbyCraft-Storage-redis-watchdog`). |
 | `mod/ModLoader.java` | SourbyMod (ML1) jar loading through `URLClassLoader` over `file:` URLs; opens no connection and never resolves a name. Listed only because it matches the scan pattern | `sourby mods` boot stage on the main thread, before worlds and plugins |
 
 ## File I/O
@@ -26,12 +29,13 @@ connections fails the build until it is added here with its thread context.
 | --- | --- | --- |
 | `update/UpdateApplier.java`, `command/UpdateCommand.java` | Staging and swapping the jar | Async scheduler / `VirtualExecutor` |
 | `startup/*` (`StartupCache`, `SourceFingerprint`, `StartupProfile`) | Startup index and profile | Boot stage (before plugins load), and once at `ServerLoadEvent(STARTUP)` |
-| `bridge/AuroraBridge.java` | Reads two TOML keys once | Plugin loading during bootstrap |
+| `bridge/AuroraBridge.java` | Reads its `aurora.bridge.*` keys from `aurora.yml` over the global file once (YAML since Build 49) | First use of `AuroraBridge.earlySettings`: plugin loading during bootstrap, or earlier when `guards/ThreadChecks` initializes |
 | `spark/SourbyServerConfigProvider.java` | Config files for a Spark report | Spark's report thread |
-| `perf/RuntimeSampler.java`, `util/ContainerMemory.java` | `/proc`/cgroup pseudo-files | Metrics collector thread; `/spec` reads `memory.current` on the command thread (a kernel pseudo-file, no disk or network) |
+| `perf/RuntimeSampler.java`, `util/ContainerMemory.java` | `/proc`/cgroup pseudo-files | Metrics collector thread, which since PR #62 also samples swap (`ContainerMemory.sampleSwap()` from `RuntimeSampler`); the HUD's RAM bar on the global tick reads only the published `ContainerMemory.lastSwapSample()` (no file access; swap hidden until the first collection). Before PR #62 the HUD read the swap pseudo-files itself on the global tick, which this row did not list. `/spec` reads `memory.current` on the command thread (a kernel pseudo-file, no disk or network) |
 | `bootstrap/*` | CDS, hashes, libraries | Before server start |
 | `awf/*` | World storage | Commits: `STORAGE` lane, or synchronously in `flush`/`close` off region threads (on a region thread `flush` only starts an async commit, and `GenerationStore` throws). `AwfRegionStorage.read` of a chunk no longer in memory reads its object on whatever thread the engine asks, like the region-file read it replaces |
-| `awf/AwfSettings.java` | Reads the `aurora.awf` TOML keys once | The first `RegionFileStorage` construction (world load) |
+| `awf/AwfSettings.java` | Reads the `aurora.awf` keys from `aurora.yml` over the global file once (YAML since Build 49) | The first `RegionFileStorage` construction (world load) |
+| `SourbyCraftConfig.java` (`/sourbycraft reload`) | Reads and applies the configuration files, including the engine's (`GlobalConfiguration`, whose `INSTANCE` is `volatile` since PR #62 so region threads see the reloaded object) | Since PR #62 a `VirtualExecutor` thread, with the report delivered to the sender's owner; before, the thread that ran the command (the global tick for the console). Refused while the server is stopping or failed to start, and while the I/O workers are stopped or at capacity |
 
 ## Result
 
@@ -84,8 +88,9 @@ plugin listener) whose blocking behaviour this repository cannot see.
 
 - **SourbyCraft code on the loop.** `PacketDecoder.java:24-50` + `security/SecurityGuards.java`:
   a channel attribute, a thread-local scope, `AtomicLongArray` counters and arithmetic; the YAML
-  file is read only by `SecurityGuards.load`, called from `SourbyCraftConfig.java:261` (boot and
-  `/sourbycraft reload`, not the loop). The scope closes when `decode` returns, before
+  file is read only by `SecurityGuards.load`, called from `SourbyCraftConfig` (boot and
+  `/sourbycraft reload`, not the loop; `SourbyCraftConfig.java:462` on 2026-10-25, `:261` when this
+  audit was written). The scope closes when `decode` returns, before
   `ByteToMessageDecoder` fires the packet onward, so NBT checks in storage or in packet handlers
   are outside it (`check` returns early with no scope). `DiscardedPayload.java:15` and
   `ServerboundSetCreativeModeSlotPacket.java:19` run inside decode. `perf/NetworkMetrics.java`

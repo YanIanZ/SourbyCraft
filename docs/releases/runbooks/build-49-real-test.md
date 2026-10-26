@@ -1,5 +1,18 @@
 # Build 49 real-test runbook
 
+> **Status 2026-10-25 (PR #62).** This runbook still targets the published Build 49 jar (`v26.2-r49`).
+> Whether it stays a Build 49 runbook, is retargeted to the Build 50 candidate or is forked into a Build 50
+> runbook is owner decision **PM-013** (pending; [Build 50 readiness](../BUILD-50-READINESS.md)). The Build 50
+> candidate (`26.2` with PR #61 and PR #62, not published) has its own manual handoff,
+> [Tester Owner](../../tester%20owner.md); its status is: code written and statically reviewed; not built;
+> not tested by the owner. The `v26.2-r50` prerelease (`5f5a167`) predates both pull requests, and the
+> route that publishes them is owner decision PM-011. No result recorded against the r49 jar carries over
+> to the candidate: [Repeating gates for the Build 50 candidate](#repeating-gates-for-the-build-50-candidate)
+> lists what to rerun and where the candidate procedure is. The same edit corrected statements that were
+> stale for the r49 tag itself (YAML configuration files, the landed feature patches 0066–0068, 0071, 0072
+> and Paper 0021, the shipped release key, the SourbyClip 3.1.3 pin, the test-plugin probes, thread checks);
+> each was checked against the tag's tree with git.
+
 ## One-page tester checklist
 
 Human testers and operators own all testing from Build 49 onward (owner direction,
@@ -13,15 +26,15 @@ The gate sections retain the authoritative order; this checklist orders executio
 - [ ] [r08-teleport — Owned teleport plugin API](#r08-teleport)
 - [ ] [r02-command-blocks — Command blocks across two regions](#r02-command-blocks)
 - [ ] [r04-respawn — Bed-less respawn and End credits](#r04-respawn)
-- [ ] [r03-functions — Scheduled functions and datapack — CONDITIONAL on MC 0066](#r03-functions)
-- [ ] [r06-trader — Wandering trader spawn — CONDITIONAL on MC 0068](#r06-trader)
+- [ ] [r03-functions — Scheduled functions and datapack (MC 0065/0066)](#r03-functions)
+- [ ] [r06-trader — Wandering trader spawn (MC 0068)](#r06-trader)
 - [ ] [g02-ownership — Region ownership](#g02-ownership)
 - [ ] [g03-persistence — World load/unload/save + crash recovery](#g03-persistence)
 - [ ] [g09-backend — Backend failure](#g09-backend)
 - [ ] [g10-cache — Cache corruption](#g10-cache)
 - [ ] [g11-security — Security](#g11-security)
 - [ ] [g12-bootstrap — Bootstrap / network](#g12-bootstrap)
-- [ ] [r07-forceload — Forceload after crash — CONDITIONAL on MC 0067](#r07-forceload)
+- [ ] [r07-forceload — Forceload after crash (MC 0067)](#r07-forceload)
 - [ ] [g08-shutdown — Shutdown](#g08-shutdown)
 - [ ] [g04-soak — Soak](#g04-soak)
 - [ ] [g05-recovery — Heap/thread/queue stabilization](#g05-recovery)
@@ -31,6 +44,44 @@ The gate sections retain the authoritative order; this checklist orders executio
 - [ ] [g15-claims — Claims audit](#g15-claims)
 - [ ] [r05-hud — HUD bars with a real client](#r05-hud)
 - [ ] [g16-publication — Publication](#g16-publication)
+
+<a id="repeating-gates-for-the-build-50-candidate"></a>
+
+## Repeating gates for the Build 50 candidate
+
+Applies until owner decision PM-013 is recorded; matrix rows PM-013, PM-021 (repeat the Build 49 stability
+gates on the candidate) and PM-020 (soak) in the [PM matrix](../BUILD-50-PM-MATRIX.md). Run each repeat on the
+candidate's own jar with its full commit SHA recorded, never on the `v26.2-r49` or `v26.2-r50` jar. Build,
+identity and evidence rules: [Tester Owner](../../tester%20owner.md) §0–§2 (a local build is the DEV channel
+and `/ver` shows `Build 50 — Aurora Nexus (DEV, <branch>@<sha>)`). The gate steps below stay valid as
+procedure; where the candidate behaves differently, the Tester Owner case named here decides the expected
+result.
+
+| Gate / check | Repeat on the candidate? | What changed after `v26.2-r49` (code) | Tester Owner cases |
+| --- | --- | --- | --- |
+| G01 | Yes | Different tree. A pull request runs no Gradle build, Java test or boot test; those run after merge, on push | B50-01, TO-PATCH-01…05 |
+| G02 | Yes; ownership evidence with `aurora.bridge.thread-checks: "enforced"` | Feature patches 0033, 0084 and 0087 edited; relaxed-hit log windows keyed by the base reason and bounded in number | TO-PATCH-02, TO-BR-01, TO-BR-02, TO-BR-06 |
+| G03 | Yes | AWF store integrity, resident-eviction race, durable save before unload, registry and store lifecycle | B50-02…04, TO-AWF-01…20 |
+| G04, G05 | Yes, for any Build 50 stability statement | MultiProfile and the Redis fabric are new since r49; bridge timers, telemetry and AWF changed | Same steps on the candidate; TO-TEL-01…15 |
+| G06 | Yes | AWF Redis client hardened; a Redis commit waits for `WAITAOF` on its own connection; `/awf redis` runs on the administrative I/O executor | TO-RF-01…10 |
+| G07 | Yes | A repeating bridged async timer keeps at most one queued run and skips a run over the limit; provisioning is skipped for that boot when only a pre-49 key or an invalid value is set | TO-BR-03, TO-UP-14…16 |
+| G08 | Yes | AWF shutdown deadline and close path, feature patch 0087 (refused sync chunk loads on the shutdown thread) | TO-AWF-17, TO-PATCH-04, B50-15 |
+| G09 | Yes | As G06, plus an invalid `aurora.awf.redis.uri` refuses the backend instead of falling back | TO-RF-01…09 |
+| G10 | Recommended | Startup-cache code unchanged since r49; different jar | Same steps |
+| G11 | Yes | Updater: apply preflight fails closed and writes `auto_update/apply-failed.tag`, atomic swap, stage mode says a restart does not install the staged jar (and reuses one with the release digest), other-Minecraft releases only announced, rollback to a pre-49 jar restores its `*.migrated` files | TO-UP-01…13 |
+| G12 | Yes | Provisioning fail-closed (as G07); SourbyClip pin unchanged (3.1.3) | TO-UP-14…17 |
+| G13–G16 | At the candidate's publication (PM-011) | Gradle distribution pinned; new release notes and tag | Tester Owner §17 |
+| Configuration migration | Yes | Build 50 no longer reads pre-49 names (the one-time rewrite stays); WARN per unknown key and per `*.toml` beside its `*.yml` | TO-CFG-01…18 |
+| R05 | Yes | Sizes print with two decimals; tick reports under sprint return partial data | TO-TEL-02, TO-TEL-10 |
+| R01–R04, R06–R08 | Before any Build 50 claim | Owned code unchanged since r49 (patches 0055, 0064–0068, owned teleport) | Same steps |
+| — (not in Build 49) | Yes | AWF MultiProfile and the Aurora Redis Fabric (new in r50; distributed mode EXPERIMENTAL, unqualified) | Tester Owner §8–§9, MP-010 |
+
+Commands and settings the candidate changed that these steps touch: `/awf delete|import|export|convert|clone|set`,
+`template delete` and `unload … nosave` also check `sourbycraft.command.awf.admin` (implied by
+`sourbycraft.command.awf` unless set explicitly on the sender); `/update status` shows the `apply-failed.tag`
+marker; `-DCanvas.*` flags, `canvas.broadcasting.receiver` and pre-49 key names are ignored with one WARN each.
+Full list: [Build 50 release notes](../26.2-build-50-aurora-nexus.md#operator-visible-changes-in-the-candidate-not-in-v262-r50)
+and [commands.md](../../guides/commands.md).
 
 ## Shared run requirements
 
@@ -51,6 +102,12 @@ baselines and optimization belong to Build 50.
   **SHA-256: <fill in from release tag>**. Record the tag commit and `/ver` output.
   If the release or digest is unavailable, mark BLOCKED. Pre-tag CI evidence must
   identify the same commit and bytes eventually published; reconcile it after tagging.
+  `v26.2-r49.1` is a later hotfix tag on top of r49 whose notes describe a test-only change
+  ([26.2-build-49.1-hotfix.md](../26.2-build-49.1-hotfix.md)); record which of the two jars a run used.
+  Probe fixtures (`test-plugin`, `legacy-test-plugin`) are not in the release jar: build them from the
+  same tag (`./gradlew -PincludeTestPlugin=true :test-plugin:jar :legacy-test-plugin:jar`; needs the
+  private toolchain, [PRIVATE-TOOLCHAIN.md](../../development/PRIVATE-TOOLCHAIN.md)) and record
+  their SHA-256; they belong on disposable test servers only.
 - Use a human-operated, backed-up test server, not a production world for destructive
   checks. Host: named OS/version, **Temurin JDK 25**, CPU model/core quota, RAM/heap,
   disk type/free space, container limits, network class and competing load recorded.
@@ -62,19 +119,40 @@ baselines and optimization belong to Build 50.
 - Preserve and attach sanitized effective copies of `config/aurora-server.yml`,
   `config/aurora-worlds.yml` (Build 49 names; note any `*.migrated` copies present), `config/paper-global.yml` (especially `threaded-regions`:
   `threads`, `grid-exponent`, `scheduler`), `sourbycraft-security.yml`, and
-  `sourbycraft_config/sourbycraft_global_config.toml`. List **every non-default value**;
-  use `<fill in>` until captured. Also attach `server.properties`, JVM flags and,
-  where used, `sourbycraft_config/aurora.toml`. Do not infer current defaults from
+  `sourbycraft_config/sourbycraft_global_config.yml`. List **every non-default value**;
+  use `<fill in>` until captured. Also attach `server.properties`, JVM flags and
+  `sourbycraft_config/aurora.yml`. Both `sourbycraft_config` files are YAML in the r49 jar: an
+  older `*.toml` is converted once at boot and kept as `*.toml.migrated`, and the pre-49 key
+  rewrite keeps `*.yml.migrated`; list any such copies. Do not infer current defaults from
   historical runs. Start a fresh JVM after config changes unless a cited consumer
   explicitly supports LIVE changes. Scheduler sizing is in Paper global YAML,
   not the Canvas files. Record `region-scheduler.guard-severity` (default `LOG`).
+- Record the `/ver` line **Thread checks** and the effective `aurora.bridge.thread-checks`
+  (RESTART_REQUIRED; read once before plugins load; `-Daurora.bridge.thread-checks=` overrides the
+  file). With `aurora.bridge.mode: "safe"` the owner default is `relaxed` (owner decision 2026-10-22):
+  a failed region-ownership check never throws, never counts as a fatal violation and never
+  quarantines; it is only counted (`/perf plugins` "Thread checks … relaxed hits", `/plugins <name>`
+  "Relaxed ownership hits"). `bridged` does the same inside bridged task bodies only. Under `relaxed` a
+  zero ownership-violation count is true by construction and detects nothing (under `bridged`, for
+  bridged plugins): label such runs **unqualified** and record the relaxed-hit counts
+  as non-qualifying evidence. Ownership evidence for G02, G04 and G07 needs a separate run with
+  `-Daurora.bridge.thread-checks=enforced`. Which mode a release qualifies is owner decision PM-012.
 - Unless a section says otherwise, install **P10**: the `plugins-10` set from
   [representative-plugins.json](../../../build-data/representative-plugins.json):
   EssentialsX (`Essentials`, 2.22.1-dev+25-cfb6f12) and MilkBowl Vault 1.7.3-b131
   bridged; SuperiorSkyblock2 2026.3 Folia port native with its SSB-AuroraWorlds module;
   spark bundled (no replacement spark jar). Record actual jar versions and hashes.
-  `plugins-10` names a workload, not ten plugin jars. Set `aurora.bridge.mode = "safe"`
-  in Aurora TOML and restart before testing. Record any real-site additions separately,
+  `plugins-10` names a workload, not ten plugin jars. Set the bridge mode in
+  `sourbycraft_config/aurora.yml` and restart before testing (RESTART_REQUIRED; quote the value, as
+  the CI legacy-bridge boot does):
+
+  ```yaml
+  aurora:
+    bridge:
+      mode: "safe"
+  ```
+
+  Record any real-site additions separately,
   including EconomyShopGUI, ViaVersion/ViaBackwards, ProtocolLib and dependents.
 - Minimum counts below are runbook coverage minima where the gate specifies no number.
   They mean real people on real game clients, with operator-observed joins and actions;
@@ -113,18 +191,24 @@ when it starts. Download the **whole directory** before restarting the server wh
 answering or dies, and attach it to the evidence folder next to `logs/latest.log` and the panel console
 history; `memory.events` `oom_kill > 0` in a dump is the kernel's own record of an OOM kill. An empty or
 missing `logs/stalls/` after a hang is itself a result (recorder disabled with
-`aurora.diagnostics.stall-recorder.enabled = false`, a boot hang before the first tick, or a kill before
+`aurora.diagnostics.stall-recorder.enabled: false` in `aurora.yml`, a boot hang before the first tick, or a kill before
 the first dump): record it, do not infer a cause. The recorder detects "no tick completed for 10 s",
 not slow ticks; it is RESTART_REQUIRED and on by default.
 
 Owned command registration and syntax were checked in `SourbyCraftCommands`,
 `PerfViews`, `AwfCommand`, `PluginsCommand`, `UpdateCommand`, `HudBarCommand` and
 `PerfBarCommand` under `sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/command/`.
-Use leading `/` in game, omit it in the console. Vanilla console `stop` is documented
-by the harness and watchdog sources; its registration is outside owned command code
-**(verify command exists)**. Vanilla commands explicitly flagged below also need
-runtime help/registration verification before use. Do not invent plugin test commands:
+Use leading `/` in game, omit it in the console. Vanilla registration is static: the engine
+baseline (`sourbycraft-server/minecraft-patches/sources/net/minecraft/commands/Commands.java.patch`)
+comments out only `debug`, `function`, `item`, `reload`, `return`, `schedule`, `test`, `tick` and the
+vanilla `perf`; MC feature patch 0065 registers `schedule` again and 0066 `function` and `return`
+(both in the r49 tag). So `stop`, `save-all`, `setblock`, `fill`, `fillbiome`, `clone`, `data`,
+`scoreboard`, `forceload`, `loot` and `execute` are registered vanilla commands, and `/item`, `/reload`,
+`/tick`, `/debug` and `/test` are not (the bare `/perf` is SourbyCraft's). Check exact argument syntax with
+in-game tab completion before entering it. Do not invent plugin test commands:
 record the installed plugin's documented command or GUI action before running it.
+Test-plugin probes used below (`/stallprobe`, `/tpprobe`, `unloadprobe`, the pearl listener) exist only with
+`-Dsourby.testplugin.probes=true` and the test plugin built from the tag.
 
 ### Failure procedure F (every gate and runtime check)
 
@@ -146,7 +230,7 @@ before a successful automatic swap; a manual jar install does not guarantee one.
 If missing, mark rollback BLOCKED and ask the operator for the known prior artifact.
 This restores jar bytes only; no world/config restoration is promised.
 
-For the **automatic** server-side rollback scenario (current `clipVersion=3.1.2`): apply writes `APPLIED`; the first boot
+For the **automatic** server-side rollback scenario (`clipVersion=3.1.3` at the r49 tag): apply writes `APPLIED`; the first boot
 records `BOOTING`; `ServerLoadEvent STARTUP` marks `OK`. A later boot seeing `BOOTING`
 copies `.prev` over the launch jar and records `ROLLED_BACK`, holding updates.
 That JVM still runs the updated bytes: stop/restart again to execute the restored
@@ -155,7 +239,10 @@ jar, so a rollback costs two failed boots. A jar that never reaches the bootstra
 `rollback.state` stays `APPLIED` and every boot dies the same way until an operator copies
 `<jar>.prev` over the launch jar (shown by the fixture's `dead-launcher` scenario). Missing/failed copies yield `RESTORE_FAILED`. Capture `/update status`;
 use `/update resume` only after diagnosis. Windows file locking may refuse the swap;
-do not report a POSIX apply/rollback PASS from that fallback.
+do not report a POSIX apply/rollback PASS from that fallback. The Build 50 candidate differs here: a
+failed apply preflight or swap never restarts the server, logs one ERROR with the manual steps and writes
+`auto_update/apply-failed.tag`; later scheduled checks only announce that tag until a successful
+`/update apply` or the file is deleted (Tester Owner TO-UP-02).
 
 ## Build 49 gates
 
@@ -189,18 +276,18 @@ Each Pass criteria field below reproduces its gate's **Evidence required** cell 
 
 **Goal:** Show that ownership checks survive watchdog changes and normal client load.
 
-**Preconditions:** Shared requirements; P10; minimum 2 players in demonstrably distinct regions. Use a disposable server and an operator-reviewed stall/wrong-owner probe; probe invocation is (unverified), BLOCKED until supplied.
+**Preconditions:** Shared requirements; P10; minimum 2 players in demonstrably distinct regions. Deliberate faults (steps 2–3) run on a separate disposable instance with **no players**, using the probe fixtures built from the tag (shared preconditions). **Thread checks:** step 3 and the ownership counts of step 4 are evidence only with `-Daurora.bridge.thread-checks=enforced`; a run under the default `relaxed` is unqualified and records relaxed-hit counts instead (shared preconditions, PM-010).
 
 **Steps:**
 
 1. Run watchdog acceptance cases 1–4 from [REGION-WATCHDOG.md](../../development/REGION-WATCHDOG.md): new JVM unset, then explicit `-Dsourbycraft.region-watchdog.enabled=false`; confirm no `Folia Watchdog Thread`, normal ticks, saves and clean stop.
-2. Restart with `-Dsourbycraft.region-watchdog.enabled=true` (RESTART_REQUIRED). Trigger the reviewed controlled stall and capture diagnostics. Repeat disabled direct-start/add/remove retention checks; the diagnostic loop must not accumulate records.
-3. Trigger the reviewed wrong-owner probe with the flag off and on; record the ownership error, scheduler handling and bridge quarantine. Do not count this deliberate fault as a clean soak.
+2. Restart with `-Dsourbycraft.region-watchdog.enabled=true` (RESTART_REQUIRED). Controlled stall: the test plugin with `-Dsourby.testplugin.probes=true`, console `stallprobe region sleep 30` (blocks the region at the first world's spawn; the global tick keeps running), then `stallprobe global sleep 30` (stops the global tick); `lock` and `spin` vary the thread state, 1–600 s. The stall recorder (`aurora.diagnostics.stall-recorder`, on by default, RESTART_REQUIRED) watches the global tick and every active region, so either stall longer than its `after-seconds` (default 10) writes `logs/stalls/stall-<time>.txt`. Each run logs `STALLPROBE start …` and `STALLPROBE end …`. Capture diagnostics. Repeat disabled direct-start/add/remove retention checks; the diagnostic loop must not accumulate records.
+3. Controlled wrong-owner access, with the flag off and on, under `-Daurora.bridge.thread-checks=enforced`: the synthetic fixture is `legacy-test-plugin` (bridged, `aurora.bridge.mode: "safe"`), whose four `LEGACY_RELAXED_*` probes (sweep, block write, global chunk, teleport join) run once when the plugin enables and reach entities, blocks and chunks another region owns, so each mode needs its own boot; `LEGACY_RELAXED_MODE effective=…` names the mode the plugin saw. With `enforced` each probe must log `_REFUSED` (with `relaxed` they log `_OK` and count relaxed hits). Record the ownership error, scheduler handling and the bridge's fatal-violation and quarantine counters as observed. A wrong-owner probe from a native (non-bridged) plugin is not supplied by the repository; mark that part BLOCKED until an operator-reviewed one exists. Do not count this deliberate fault as a clean soak.
 4. Run the separate clean 2 h+ soak in G04 and inspect every ownership violation. Attach the tag CI fixture that queues region/entity work and then unloads its world (the `SOURBY_UNLOAD_FIXTURE_*` markers of the CI boot step; how to read them is below).
 
 **The unload fixture (step 4's CI fixture).** The test plugin's `UnloadFixtureProbe` (loaded only with `-Dsourby.testplugin.probes=true`, which the CI boot step now passes; the other probes need players or commands) runs once after `ServerLoadEvent` STARTUP and on the console command `unloadprobe`. It creates a temporary AWF world (`unloadfixture`, void generator, through `AuroraWorlds`), keeps four chunks 256 chunks apart loaded with plugin tickets so the world has at least four regions, and on each region's own thread summons two armor stands and schedules region-scheduler and entity-scheduler tasks that are only due in an hour (delayed and fixed-rate). It then puts one task on each region that queues more work for the region's next tick (`RegionScheduler#execute`, `#run`, entity `#run`) and holds the region thread (at most 2 s plus 150 ms, the only blocking in the fixture) while the global tick calls `Server#unloadWorldAsync`, so that work is still queued when the engine drains the world. Afterwards it reads every task's fate, waits 60 global ticks, checks that the world is gone from Bukkit and that this JVM holds no open file under the world folder (`/proc/self/fd`, else `lsof`; `openFiles=unchecked` when neither exists, which is not a pass), then deletes the world through `AuroraWorlds`. Markers (log substrings; `_WRONG` and `_FAILED` fail the CI step): `START`, `WORLD_OK regions=N` (fewer than 2 regions is `REGIONS_WRONG`), `QUEUED_OK`, `UNLOAD_OK`, `ACCOUNTED_OK` (`tasks ran retired cancelled leaked ranDuringUnload farFutureRanAtUnload executeNotRun ranAfterUnload`), `NOTE_DRAIN_RAN_BODIES` (informational), `QUIET_OK`, `RELEASED_OK`, and the final `OK`, all prefixed `SOURBY_UNLOAD_FIXTURE_`.
 
-How to read it. PASS needs every marker, `leaked=0`, `ranAfterUnload=0`, no task body that threw or ran in a region that did not own its target, and no `_WRONG`/`_FAILED`. The CI step also fails on the engine's `Failed to drain|retire an entity scheduler|cancel region scheduler tasks|cancel queued region tasks` errors, and when `executeNotRun` (queued `execute` tasks that never ran) exceeds the `... and N queued region task(s)` count in the engine's `Drained unloadfixture for unload:` line (that is a leak). What the numbers mean: the 12 region-scheduler tasks (8 delayed, 4 fixed-rate) must show as cancelled; `executeNotRun` is the cancel-only queue path (non-zero when the hold works; zero means the region won the race and ran its queue, which still passes); `ran` can include tasks that ran after the unload was requested but before it completed. **Known finding (reported, not hidden):** `NOTE_DRAIN_RAN_BODIES` with `retiredCallbacks=0` means the unload's `EntityScheduler#retire` ran the entity task bodies, including ones due in an hour, on the world's shutdown thread instead of invoking their retired callbacks: `FoliaEntityScheduler.EntityScheduledTask#accept` chooses the retired callback only when `entity.isRemoved()`, and the drain retires schedulers without removing entities. `WorldUnloadDrain`'s documentation says the retired callbacks run. Whether a plugin's one-hour task firing at unload is acceptable is an owner decision; the fixture asserts only what the engine guarantees today (one of run or retired, never both, never after the unload completed, nothing leaked). Not covered: a player in the world, a cross-region teleport in flight, a region stuck in a long tick, the Redis backend, region-file (non-AWF) worlds, chunk-load tasks for chunks outside any region.
+How to read it. PASS needs every marker, `leaked=0`, `ranAfterUnload=0`, no task body that threw or ran in a region that did not own its target, and no `_WRONG`/`_FAILED`. The CI step also fails on the engine's `Failed to drain|retire an entity scheduler|cancel region scheduler tasks|cancel queued region tasks` errors, and when `executeNotRun` (queued `execute` tasks that never ran) exceeds the `... and N queued region task(s)` count in the engine's `Drained unloadfixture for unload:` line (that is a leak). What the numbers mean: the 12 region-scheduler tasks (8 delayed, 4 fixed-rate) must show as cancelled; `executeNotRun` is the cancel-only queue path (non-zero when the hold works; zero means the region won the race and ran its queue, which still passes); `ran` can include tasks that ran after the unload was requested but before it completed. **Former finding, fixed by Paper feature patch 0021 (in `v26.2-r48` and later, so in the r49 tag):** an earlier run logged `NOTE_DRAIN_RAN_BODIES` with `retiredCallbacks=0`, i.e. the unload's `EntityScheduler#retire` ran entity task bodies (including ones due in an hour) on the world's shutdown thread, because `FoliaEntityScheduler` chose the retired callback only for a removed entity. Since 0021 a retired scheduler always means the retired callback, as `WorldUnloadDrain` documents. Expected now: no `NOTE_DRAIN_RAN_BODIES` line, `farFutureRanAtUnload=0` and `retired` greater than 0 in `ACCOUNTED_OK`. The fixture and the CI step still treat that note as informational and do not fail on it, so read it yourself: a `NOTE_DRAIN_RAN_BODIES` line on the release jar is a defect to report (FAIL), not an accepted behaviour. The fixture asserts one of run or retired, never both, never after the unload completed, nothing leaked. Not covered: a player in the world, a cross-region teleport in flight, a region stuck in a long tick, the Redis backend, region-file (non-AWF) worlds, chunk-load tasks for chunks outside any region.
 
 Manual rerun on the agent test server: `python3 scripts/agent_testserver.py start --name own-1 --config-file plugins/SourbyCraft-Test-Plugin.jar=test-plugin/build/libs/test-plugin-1.0.0.jar --jvm-property sourby.testplugin.probes=true`, then `wait-for --name own-1 "SOURBY_UNLOAD_FIXTURE_(OK|FAILED|[A-Z_]*_WRONG)"` (the fixture also starts by itself about 40 ticks after startup); `cmd --name own-1 "unloadprobe" --raw` runs it again in `unloadfixture2`.
 
@@ -217,7 +304,7 @@ Manual rerun on the agent test server: `python3 scripts/agent_testserver.py star
 
 **Goal:** Demonstrate durable world/player state and honest crash recovery on region files and AWF.
 
-**Preconditions:** Shared requirements; P10 plus operator-provided persistence fixtures; minimum 2 human players for live-world checks. Local script clients are supplemental. Back up disposable region-file and AWF worlds; record Aurora TOML backend settings.
+**Preconditions:** Shared requirements; P10 plus operator-provided persistence fixtures; minimum 2 human players for live-world checks. Local script clients are supplemental. Back up disposable region-file and AWF worlds; record the `aurora.awf.*` backend settings from `sourbycraft_config/aurora.yml` (and the unseeded `aurora.awf.redis.*` keys or `SOURBYCRAFT_AWF_REDIS_URI`, redacted).
 
 **Steps:**
 
@@ -241,7 +328,7 @@ Manual rerun on the agent test server: `python3 scripts/agent_testserver.py star
 
 **Goal:** Complete a continuous multi-hour soak with real player and plugin activity.
 
-**Preconditions:** Shared requirements; stable named host reserved for more than 2 h plus recovery; P10; minimum 10 human players throughout the measurement window. Record interruptions rather than joining partial windows.
+**Preconditions:** Shared requirements; stable named host reserved for more than 2 h plus recovery; P10; minimum 10 human players throughout the measurement window. Record interruptions rather than joining partial windows. **Thread checks:** the soak runs with the effective mode recorded; under the default `relaxed` its ownership-violation count is zero by construction, so report the relaxed-hit counts (`/perf plugins`) as unqualified evidence and take ownership evidence from an `enforced` run (shared preconditions, PM-010).
 
 **Steps:**
 
@@ -310,10 +397,10 @@ Manual rerun on the agent test server: `python3 scripts/agent_testserver.py star
 
 **Steps:**
 
-1. Set `[plugins.protocollib] auto-provision = true` in the utility TOML (default true, RESTART_REQUIRED); record `[plugins.viaversion] auto-provision` separately. Boot and verify ProtocolLib enables before dependents; capture any 26.2 warning.
+1. Set `plugins.protocollib.auto-provision: true` in `sourbycraft_config/sourbycraft_global_config.yml` (default true, RESTART_REQUIRED); record `plugins.viaversion.auto-provision` separately. Boot and verify ProtocolLib enables before dependents; capture any 26.2 warning. Record the effective thread-checks mode: under `relaxed` a bridged plugin's wrong-thread accesses add nothing to "Fatal violations" and never quarantine it; "Relaxed ownership hits" in `/plugins <name>` is the figure to report (unqualified).
 2. Run `/plugins`, `/plugins Essentials`, `/plugins Vault`, `/perf plugins`. Have real players use the installed EssentialsX teleport/home flow and a Vault-backed economy consumer, plus native island create/visit/leave and ProtocolLib-dependent gameplay. Record plugin-specific command syntax before use.
 3. Repeat during G04’s representative legacy-plugin soak. Read per-plugin bridged timings in that run; inspect cancellations, event delivery, quarantine and errors. Include dependent-plugin observations, not only enabled state.
-4. LightingLuminol global-scheduler port (bridged plugins calling Folia's `GlobalRegionScheduler`; [port doc](../../development/LIGHTINGLUMINOL-BRIDGE-PORT.md)). With `aurora.bridge.mode = "safe"`, for each bridged plugin that uses the global scheduler: confirm its timers still fire (and stop when the plugin cancels them), that `/plugins <name>` shows no growing `Pending tasks` while idle, and that a disable/re-enable of the plugin (plugin manager, if the operator uses one) leaves no task from before the disable running and logs no `Unsupported in region threading` / `while cancelling Bukkit scheduler tasks`. If a world holding bridged work is unloaded (AWF/multiverse), the log shows `Released N bridged legacy task(s) anchored in <world> for unload` and the plugin's pending count drops. Optional synthetic cross-check on the same jar: install `legacy-test-plugin`, wait for every `LEGACY_*_OK` marker, run `legacybridge reenable` then `legacybridge unload` on the console and expect `LEGACY_REENABLE_OK`, `LEGACY_UNLOAD_RELEASED_OK` and `LEGACY_UNLOAD_LATE_REFUSED_OK` with no `_WRONG`. If the operator sets `max-pending-tasks-per-plugin` / `max-running-async-tasks-per-plugin`: refusals show in `/plugins <name>` (Rejected, Last failure names the limit) and as at most one WARN per plugin and limit per 60 s, never as a fatal violation; `legacybridge pending-limit <n>` / `async-limit <n>` (pass the configured value; the async probe needs `bridge-io-threads` >= n + 3) print `LEGACY_LIMIT_*_OK`. After a `/sourbycraft reload` the report lists LIVE changes and `aurora.bridge.mode` under RESTART_REQUIRED. With `mode = "off"` a legacy plugin is not loaded and the log has one `Not loading <plugin> ...` WARN (no stack trace) and `/plugins` lists it FAILED. Agent evidence of 2026-10-22/22b (port doc, per-case table) is local and functional only; this step is the real-server acceptance.
+4. LightingLuminol global-scheduler port (bridged plugins calling Folia's `GlobalRegionScheduler`; [port doc](../../development/LIGHTINGLUMINOL-BRIDGE-PORT.md)). With `aurora.bridge.mode: "safe"`, for each bridged plugin that uses the global scheduler: confirm its timers still fire (and stop when the plugin cancels them), that `/plugins <name>` shows no growing `Pending tasks` while idle, and that a disable/re-enable of the plugin (plugin manager, if the operator uses one) leaves no task from before the disable running and logs no `Unsupported in region threading` / `while cancelling Bukkit scheduler tasks`. If a world holding bridged work is unloaded (AWF/multiverse), the log shows `Released N bridged legacy task(s) anchored in <world> for unload` and the plugin's pending count drops. Optional synthetic cross-check on the same jar: install `legacy-test-plugin`, wait for every `LEGACY_*_OK` marker, run `legacybridge reenable` then `legacybridge unload` on the console and expect `LEGACY_REENABLE_OK`, `LEGACY_UNLOAD_RELEASED_OK` and `LEGACY_UNLOAD_LATE_REFUSED_OK` with no `_WRONG`. If the operator sets `max-pending-tasks-per-plugin` / `max-running-async-tasks-per-plugin`: refusals show in `/plugins <name>` (Rejected, Last failure names the limit) and as at most one WARN per plugin and limit per 60 s, never as a fatal violation; `legacybridge pending-limit <n>` / `async-limit <n>` (pass the configured value; the async probe needs `bridge-io-threads` >= n + 3) print `LEGACY_LIMIT_*_OK`. After a `/sourbycraft reload` the report lists LIVE changes and `aurora.bridge.mode` under RESTART_REQUIRED. With `mode: "off"` a legacy plugin is not loaded and the log has one `Not loading <plugin> ...` WARN (no stack trace) and `/plugins` lists it FAILED. Agent evidence of 2026-10-22/22b (port doc, per-case table) is local and functional only; this step is the real-server acceptance.
 
 **Capture:** Common capture plus Boot order, plugin inventory/hashes, per-plugin detail/timing, transaction and island results, client screenshots, spark report and G04 link; for step 4 the `/plugins <name>` output before/after the re-enable or unload and the matching log lines. Store in `docs/releases/evidence/49/g07-plugins/` using the shared filename pattern.
 
@@ -328,13 +415,13 @@ Manual rerun on the agent test server: `python3 scripts/agent_testserver.py star
 
 **Goal:** Show bounded AWF shutdown and a clean stop under client load.
 
-**Preconditions:** Shared requirements; P10; minimum 2 players actively modifying dirty AWF chunks; disposable network Redis. D6 overall deadline must be implemented and its actual value documented before a PASS is possible. **CONDITIONAL on MC feature patch 0071 (AWF shutdown failure fails the stop) and the D6 code being in the jar:** check that the boot's `sourbycraft_config/aurora.toml` has `[aurora.awf] shutdown-deadline-ms` (seeded, default `30000`, RESTART_REQUIRED) and that a stop logs `Aurora World Fabric: shutdown began; every AWF commit and release must finish within <N> ms`. Record N.
+**Preconditions:** Shared requirements; P10; minimum 2 players actively modifying dirty AWF chunks; disposable network Redis. The D6 overall deadline is implemented and in the r49 tag (MC feature patch 0071, AWF shutdown failure fails the stop with exit 70; `AwfShutdownBudget`): check that `sourbycraft_config/aurora.yml` has `aurora.awf.shutdown-deadline-ms` (seeded, default `30000`, RESTART_REQUIRED) and that a stop with an AWF storage open logs `Aurora World Fabric: shutdown began; every AWF commit and release must finish within <N> ms (aurora.awf.shutdown-deadline-ms)`. Record N. What stays open is the owner's evidence below.
 
 **Steps:**
 
-1. First stop normally under real client load; time from console `stop` (verify command exists) to process exit and record save/player/plugin completion.
-2. On a separate disposable run make chunks dirty, freeze only the test Redis process using the operator’s reviewed SIGSTOP method (unverified until target/process command recorded), then issue console `stop` (verify command exists).
-3. Measure total AWF shutdown against the implemented D6 overall deadline. If only per-store timeouts exist, mark BLOCKED on D6 rather than accepting the historical 91–115 s stop. Expected with the deadline: the time from the `shutdown began` line to process exit is at most N plus a few seconds (vanilla steps after AWF); the log has one `ERROR ... could not confirm the shutdown commit of <storage>: UNCERTAIN|REFUSED|FAILED - <n> unconfirmed dirty position(s) [...]` per affected storage and one `AWF-SHUTDOWN-INCOMPLETE: ...` alert listing them; the process exit status is **70**, not 0 (record how the panel/script reports it). A line that says these chunks were saved, or exit 0 with a frozen Redis, is a FAIL. With a healthy backend the stop logs `AWF-SHUTDOWN-OK: Aurora World Fabric confirmed <n> storage(s) at shutdown in <ms> ms` and exits 0; if a healthy-backend stop ever logs the incomplete alert, the deadline is too short for that world's chunk save (it counts from the start of shutdown): record the elapsed time, raise the key, and report it.
+1. First stop normally under real client load; time from console `stop` (a registered vanilla command) to process exit and record save/player/plugin completion.
+2. On a separate disposable run make chunks dirty, freeze only the test Redis process using the operator’s reviewed SIGSTOP method (unverified until target/process command recorded), then issue console `stop`.
+3. Measure total AWF shutdown against the D6 overall deadline. Expected with the deadline: the time from the `shutdown began` line to process exit is at most N plus a few seconds (vanilla steps after AWF); the log has one `ERROR ... could not confirm the shutdown commit of <storage>: UNCERTAIN|REFUSED|FAILED - <n> unconfirmed dirty position(s) [...]` per affected storage and one `AWF-SHUTDOWN-INCOMPLETE: ...` alert listing them; the process exit status is **70**, not 0 (record how the panel/script reports it). A line that says these chunks were saved, or exit 0 with a frozen Redis, is a FAIL. With a healthy backend the stop logs `AWF-SHUTDOWN-OK: Aurora World Fabric confirmed <n> storage(s) at shutdown in <ms> ms` and exits 0; if a healthy-backend stop ever logs the incomplete alert, the deadline is too short for that world's chunk save (it counts from the start of shutdown): record the elapsed time, raise the key, and report it.
 4. Resume the test backend using the paired reviewed SIGCONT method; wait until the leases expire (`lease-seconds`) or the same server directory restarts; boot again and inspect durable state against the alert: positions of a REFUSED storage must hold their last confirmed state; positions of an UNCERTAIN storage may hold either the old or the new state (the commit may have been applied after SIGCONT, as seen in the agent run below) — record which, never call it a loss or a success without checking.
 
 **Capture:** Common capture plus Stop-to-exit timeline/exit status, frozen-backend stacks, dirty/pending counts, deadline config/code reference and post-boot integrity observations. Store in `docs/releases/evidence/49/g08-shutdown/` using the shared filename pattern.
@@ -350,13 +437,13 @@ Manual rerun on the agent test server: `python3 scripts/agent_testserver.py star
 
 **Goal:** Test network backend loss, recovery and bounded reporting.
 
-**Preconditions:** Shared requirements; P10; minimum 2 players; Redis on a separate real-network host; capture sanitized backend settings and lease/timeout values. D4 requires closure evidence or written owner acceptance. **D4 closure evidence is CONDITIONAL on MC feature patch 0072 (save-all reports AWF durability)** being in the jar.
+**Preconditions:** Shared requirements; P10; minimum 2 players; Redis on a separate real-network host; capture sanitized backend settings and lease/timeout values. D4 requires closure evidence or written owner acceptance. The D4 reporting is implemented and in the r49 tag (MC feature patch 0072, save-all reports AWF durability; `AwfFlushReporting`); what stays open is the owner's evidence below.
 
 **Steps:**
 
 1. Follow the [AWF backend-failure scenarios](../../architecture/aurora-world-fabric.md#backend-failure-redis-gone--lease-lost-on-a-running-server) on disposable worlds: kill/unavailable Redis, expiry/recovery and lease loss; record each injected condition and expected durable checkpoint.
 2. Repeat the SIGSTOP/SIGCONT freeze scenario on the release jar while players modify chunks and request stored/new terrain; observe dirty chunks, retries and region stacks.
-3. Record save acknowledgements against actual durable commits to assess D4. Exercise the Moonrise read-failure path and count log lines per time window; do not call a flood bounded from a short excerpt. D4 check with 0072: with the backend healthy, `save-all flush` must print `Aurora World Fabric: waiting for <n> storage(s) to commit what this save wrote (pending; ...)` and then `Saved the game` followed by `Aurora World Fabric: <n> storage(s) durable, <m> chunk(s) committed`; with the backend frozen or down it must print the pending line and then `Save NOT durable: ... could not commit <k> of <n> storage(s), <c> chunk(s) only in memory: <storage> (<dirty> dirty: <error>)` and **no** `Saved the game` line for that command (it can take commit-attempts x timeout-ms, behind a running periodic commit). Place a marker block before each `save-all flush`, restart after a "Saved the game" acknowledgement and confirm the marker; a "Saved the game" for a save whose marker is missing after a restart is a FAIL. Plain `save-all` (no flush) still prints `Saved the game` at once plus a line with the AWF chunks still in memory: it never claimed durability.
+3. Record save acknowledgements against actual durable commits to assess D4. Exercise the Moonrise read-failure path and count log lines per time window; do not call a flood bounded from a short excerpt. D4 check (0072): with the backend healthy, `save-all flush` must print `Aurora World Fabric: waiting for <n> storage(s) to commit what this save wrote (pending; ...)` and then `Saved the game` followed by `Aurora World Fabric: <n> storage(s) durable, <m> chunk(s) committed`; with the backend frozen or down it must print the pending line and then `Save NOT durable: ... could not commit <k> of <n> storage(s), <c> chunk(s) only in memory: <storage> (<dirty> dirty: <error>)` and **no** `Saved the game` line for that command (it can take commit-attempts x timeout-ms, behind a running periodic commit). Place a marker block before each `save-all flush`, restart after a "Saved the game" acknowledgement and confirm the marker; a "Saved the game" for a save whose marker is missing after a restart is a FAIL. Plain `save-all` (no flush) still prints `Saved the game` at once plus a line with the AWF chunks still in memory: it never claimed durability.
 4. Restore the backend, inspect recovery and persistence, and attach either the D4 fix evidence or explicit owner acceptance.
 
 **Capture:** Common capture plus Per-scenario network/failure timeline, `/perf awf`, stacks, durable-state comparisons, Moonrise log rate, D4 disposition and client observations. Store in `docs/releases/evidence/49/g09-backend/` using the shared filename pattern.
@@ -393,15 +480,15 @@ Manual rerun on the agent test server: `python3 scripts/agent_testserver.py star
 
 ### G11. Security
 
-**Goal:** Activate signing and prove real apply/failure/rollback plus proxy guards.
+**Goal:** Verify signing enforcement and prove real apply/failure/rollback plus proxy guards.
 
-**Preconditions:** Shared requirements; P10 and actual proxy/dependent plugin inventory; minimum 2 players for proxy flow. Owner must supply signing activation and staged-rollout decision; never put keys or panel access in evidence.
+**Preconditions:** Shared requirements; P10 and actual proxy/dependent plugin inventory; minimum 2 players for proxy flow. The release public key ships in the jar since Build 48 (`META-INF/sourbycraft-release.pub`, commit `764ba62`, contained in `v26.2-r48` and later) and CI refuses a key without its signing secret; `rolloutPercent=100` at the r49 tag. Never put keys or panel access in evidence.
 
 **Steps:**
 
-1. Inspect CI signing results and the published release assets. Confirm verification is enforced by the jar and the signed release manifest is active; the no-key warning is a blocker, not acceptance.
+1. Inspect CI signing results and the published release assets. Confirm verification is enforced by the jar (boot log `auto-updater: release signatures ENFORCED (Ed25519 key from /META-INF/sourbycraft-release.pub)`) and the signed release manifest is active; a `release signatures NOT enforced` line is a blocker, not acceptance.
 2. On a disposable POSIX server capture `/update status`, use `/update apply` only with a reviewed same-Minecraft signed release candidate, and preserve `.prev` plus rollback state before the controlled failed boot.
-3. Cause the applied jar’s boot to end before ready using an operator-reviewed fault. Reproducible local rehearsal (agent test server, fake loopback release server, throwaway key, **not** a substitute for the panel run): `python3 scripts/updater_rollback_fixture.py run --scenario all --name g11` ([updater-rollback-fixture-2026-10-22.md](../../development/updater-rollback-fixture-2026-10-22.md)); it applies a broken jar (exits 3 before ready), shows `APPLIED` → `BOOTING` → `ROLLED_BACK`, the original jar booting to `Done (` with the updater held, `/update resume`, plus the healthy apply (`OK`, jar and `.prev` kept) and the dead-launcher limit. On the real server follow the automatic rollback sequence in F; capture APPLIED/BOOTING/ROLLED_BACK or failure states and the extra restart needed to run the restored bytes (two failed boots before the old jar runs); with the current 3.1.2 pin, a jar that fails before SourbyCraft code runs needs the manual `.prev` copy (see the version gate below).
+3. Cause the applied jar’s boot to end before ready using an operator-reviewed fault. Reproducible local rehearsal (agent test server, fake loopback release server, throwaway key, **not** a substitute for the panel run): `python3 scripts/updater_rollback_fixture.py run --scenario all --name g11` ([updater-rollback-fixture-2026-10-22.md](../../development/updater-rollback-fixture-2026-10-22.md)); it applies a broken jar (exits 3 before ready), shows `APPLIED` → `BOOTING` → `ROLLED_BACK`, the original jar booting to `Done (` with the updater held, `/update resume`, plus the healthy apply (`OK`, jar and `.prev` kept) and the dead-launcher limit. On the real server follow the automatic rollback sequence in F; capture APPLIED/BOOTING/ROLLED_BACK or failure states and the extra restart needed to run the restored bytes (two failed boots before the old jar runs); with the 3.1.3 pin of the r49 tag, a jar that fails before SourbyCraft code runs needs the manual `.prev` copy (see the version gate below).
 4. Boot behind the real proxy and exercise SEC-1 packet guards and SEC-11 connection limits per [SECURITY-GUARDS.md](../../development/SECURITY-GUARDS.md). Record configured LOG/KICK policy, ordinary player joins and controlled limit violations. LOG observes; it does not block.
 
 **Capture:** Common capture plus Signing/manifest verification, sanitized `/update status`, state transitions, `.prev` and active jar hashes, failed/restore/next boot logs, proxy topology class and limit counters. Store in `docs/releases/evidence/49/g11-security/` using the shared filename pattern.
@@ -412,8 +499,8 @@ hex; verify preservation through `BOOTING`, `OK`, `ROLLED_BACK` (and failed rest
 A present hash mismatch must log ERROR with the file and both hashes and refuse restore with
 jar files untouched. Missing hashes keep the server's legacy behavior. Apply hashing uses the
 updater's async scheduler callback; restore validation uses the boot guard before worlds tick.
-Launcher restore is **RESTART_REQUIRED and version-gated**: this tree actually pins
-`clipVersion=3.1.2`. The fixture reads that property at runtime, explicitly skips the launcher
+Launcher restore is **RESTART_REQUIRED and version-gated**: the r49 tag (and the Build 50 candidate) pins
+`clipVersion=3.1.3`. The fixture reads that property at runtime, explicitly skips the launcher
 expectation for <=3.1.3, and still checks legacy/manual recovery. With a candidate pinned
 >=3.1.4, require launcher restore before server classes, `ROLLED_BACK` with the exact launcher
 note and retained hash, **exit 71**, then the original jar reaching ready with the same updater
@@ -435,7 +522,7 @@ not verify these new expectations. G11 remains open for PM Java checks and real 
 
 **Goal:** Validate bounded bootstrap downloads and verified offline reuse.
 
-**Preconditions:** Shared requirements; remote Linux host, Temurin JDK 25 and recorded hardware/network; P10 including provisioned plugins; minimum 1 real player after each successful boot. New SourbyClip deadline/size-cap release and pin are prerequisites: SourbyClip 3.1.3 (`e5de0f4b`, jar SHA-256 `56d317b8…435e`) implements them and is pinned in the working change; the private commit must be pushed and the release built by CI before this gate can start.
+**Preconditions:** Shared requirements; remote Linux host, Temurin JDK 25 and recorded hardware/network; P10 including provisioned plugins; minimum 1 real player after each successful boot. SourbyClip 3.1.3 (`e5de0f4b`, jar SHA-256 `56d317b8…435e`) implements the deadline/size cap and is pinned and released in `v26.2-r49` (`clipVersion=3.1.3`, `clipSha256` and the lock's `SourbyClip.revision` at the tag); the release was published by the CI release job after the build job checked out that private revision, so the push happened (inferred from the tag contents). Confirm on the release jar with `--sourbyclip-info` (step 1).
 
 **Steps:**
 
@@ -471,7 +558,7 @@ How to verify (needs `gh`; `JAR` is the downloaded release asset; the tag commit
 sha256sum "$JAR"                                         # equals the release notes and "$JAR.sha256"
 gh attestation verify "$JAR" --repo YanIanZ/SourbyCraft  # attestation exists, signed for this repo's workflow
 gh run list --workflow build.yml --commit "$(git rev-list -n1 v26.2-r49)" --json databaseId,conclusion,event
-gh run view <run id> --log | grep -A3 'Slim jar rebuild\|REPRODUCIBLE'   # rebuild job: both hashes, "byte-identical"
+gh run view <run id> --log | grep -A3 'Rebuild the slim server jar\|REPRODUCIBLE'   # job "Rebuild slim jar and compare": both hashes, "byte-identical"
 python3 scripts/sbom.py verify "$JAR" SourbyCraft-26.2-REL.cdx.json
 ```
 
@@ -544,7 +631,7 @@ record both. Optional local redo (private toolchain, Temurin 25.0.4+1):
 
 1. Have the human release owner review every preceding gate’s PASS or written exception on the exact release tree.
 2. Record the owner’s STABLE declaration in release notes only after that review; verify tag/artifact/hash links and the selected channel.
-3. Check the publication notes selection described in the gate doc: its filename must match `docs/releases/26.2-build-N-*.md`. The workflow concatenates every existing match, so this runbook would also be appended. Resolve that inclusion with the release owner before publishing and inspect the assembled release body.
+3. Check the publication notes selection described in the gate doc: the release job takes `docs/releases/N.md` if it exists, otherwise the first existing `docs/releases/26.2-build-N-*.md`, and stops at the first match (`.github/workflows/build.yml`, release body loop). For Build 49 that is `26.2-build-49-release.md`; this runbook lives under `runbooks/` and never matches. Inspect the assembled release body.
 
 **Capture:** Common capture plus Owner declaration, gate disposition links, release-note body selection, tag commit, asset hash and publication record. Store in `docs/releases/evidence/49/g16-publication/` using the shared filename pattern.
 
@@ -556,7 +643,7 @@ record both. Optional local redo (private toolchain, Temurin 25.0.4+1):
 ## Additional runtime checks
 
 These checks supplement the gates; they do not replace their verbatim evidence requirements.
-Source status below was checked on 2026-10-21. Every check inherits shared release-jar,
+Source status below was checked on 2026-10-21 and re-checked against the `v26.2-r49` tree on 2026-10-25. Every check inherits shared release-jar,
 SHA-256, host/JDK/hardware, config, capture and rollback requirements.
 
 
@@ -566,12 +653,12 @@ SHA-256, host/JDK/hardware, config, capture and rollback requirements.
 
 **Goal:** Confirm real pearl events preserve cancellation and redirected destinations with protection plugins.
 
-**Preconditions:** Shared requirements; P10 plus a named anticheat or claims plugin and a reviewed event-observation fixture; minimum 2 human players. MC 0064 exists; real-client evidence remains open in [inherited-guards.md](../../architecture/inherited-guards.md).
+**Preconditions:** Shared requirements; P10 plus a named anticheat or claims plugin; minimum 2 human players. MC 0064 exists; real-client evidence remains open in [inherited-guards.md](../../architecture/inherited-guards.md). Event-observation fixture: the test plugin's pearl listener (`PearlTeleportProbe`, `-Dsourby.testplugin.probes=true`, test server only). It acts on players carrying a scoreboard tag (`/tag <player> add pearl-cancel`, `pearl-redirect` moves the destination to 3 blocks east of where the pearl was thrown, `pearl-world` to x 0.5, y 100, z 0.5 in another loaded world) and logs one `PEARLPROBE cause=ENDER_PEARL mode=<observe|cancel|redirect|world> owned=… cancelled=… to=… thread=…` line per pearl teleport event. The claims/anticheat plugin's own semantics still need that plugin.
 
 **Steps:**
 
 1. Join with protection enabled. Record starting position, health, inventory and the event trace. Throw one allowed pearl, then one into a protected area where `PlayerTeleportEvent` is cancelled.
-2. With the reviewed listener using `PlayerTeleportEvent.setTo()`, throw another pearl with a nearby destination, then a destination across regions/worlds. Record callback ownership and actual landing.
+2. With a listener using `PlayerTeleportEvent.setTo()` (the probe's `pearl-redirect` / `pearl-world` tags, or the protection plugin), throw another pearl with a nearby destination, then a destination across regions/worlds. Record callback ownership (`owned=`) and actual landing.
 3. Check cancelled pearls are consumed without teleport damage or endermite creation. Confirm redirects complete once and no duplicate transfer or anticheat false correction occurs.
 
 **Capture:** Common capture plus Event cancel/setTo trace including ENDER_PEARL cause, before/after position/health/items, protection decisions, screenshots and logs. Store in `docs/releases/evidence/49/r01-pearl/` using the shared filename pattern.
@@ -587,14 +674,14 @@ SHA-256, host/JDK/hardware, config, capture and rollback requirements.
 
 **Goal:** Exercise owned command-block rules with players in two actual regions.
 
-**Preconditions:** Shared requirements; P10; minimum 2 humans, creative/operator access, separate regions confirmed by `/perf region <world> <x> <z>`; `aurora.world.command-blocks = true` in Aurora TOML (LIVE, default false). Use [command-blocks.md](../../architecture/command-blocks.md) as the contract.
+**Preconditions:** Shared requirements; P10; minimum 2 humans, creative/operator access, separate regions confirmed by `/perf region <world> <x> <z>`; `aurora.world.command-blocks: true` in `sourbycraft_config/aurora.yml` (LIVE on `/sourbycraft reload`, default false; the gamerule `command_blocks_work` must also be true). Use [command-blocks.md](../../architecture/command-blocks.md) as the contract.
 
 **Steps:**
 
 1. Place impulse, repeating, chain/conditional blocks and a command-block minecart in region A; place a tagged entity and block target in B. Verify GUI editing and same-region execution first.
-2. From A test local and foreign selectors, foreign name/UUID lookup, and local/foreign block mutations. Exact vanilla syntax for `setblock`, `fill`, `fillbiome`, `clone`, `data` and `scoreboard` is (verify command exists) before entering it; record actual commands and outputs.
+2. From A test local and foreign selectors, foreign name/UUID lookup, and local/foreign block mutations. `setblock`, `fill`, `fillbiome`, `clone`, `data` and `scoreboard` are registered vanilla commands (Capture section); confirm argument syntax with tab completion and record actual commands and outputs.
 3. Test a chain crossing the ownership boundary, a conditional predecessor in B, unloaded local target chunks, and a global-state command with deferred output. Check comparator/success behaviour and one-per-command diagnostic logging.
-4. Repeat the documented unaudited synchronous read paths (`execute if/unless block[s]`, `execute store ... block`, `loot ... mine`; verify command exists). Keep these open unless their mechanism is audited, even if one attempt emits no error.
+4. Repeat the documented unaudited synchronous read paths (`execute if/unless block[s]`, `execute store ... block`, `loot ... mine`; `execute` and `loot` are registered). Keep these open unless their mechanism is audited, even if one attempt emits no error.
 5. Turn the LIVE switch off and confirm inherited disable behaviour; turn it back on and re-arm repeating blocks via redstone/GUI save/chunk reload. Test GUI edits from the foreign region and minecart behaviour.
 
 **Capture:** Common capture plus Block layout/coordinates and region evidence, entered commands, GUI screenshots, success/conditional results, deferred-output logs and ownership errors. Store in `docs/releases/evidence/49/r02-command-blocks/` using the shared filename pattern.
@@ -606,22 +693,22 @@ SHA-256, host/JDK/hardware, config, capture and rollback requirements.
 
 <a id="r03-functions"></a>
 
-### Scheduled functions and datapack — CONDITIONAL on MC 0066
+### Scheduled functions and datapack (MC 0065/0066)
 
 **Goal:** Test loaded datapack functions and persisted scheduling end to end.
 
-**Preconditions:** Shared requirements; **CONDITIONAL: only once MC patch 0066 lands and is included in the release jar.** No `0066-*` exists in `sourbycraft-server/minecraft-patches/features/` on this tree. P10, minimum 2 humans in different regions, a reviewed datapack with function/tag definitions and observable outcomes. [scheduled-functions.md](../../architecture/scheduled-functions.md) says MC 0065 registers scheduling but function loading and `/function` remain disabled.
+**Preconditions:** Shared requirements; P10, minimum 2 humans in different regions, a reviewed datapack with function/tag definitions and observable outcomes. MC 0065 (scheduled functions on the global tick) and MC 0066 (owned datapack functions on the global tick) are in the r49 tag: the function library and function tags load again, `/schedule`, `/function` and `/return` are registered, `#minecraft:load` runs once per published library and `#minecraft:tick` only with `aurora.world.tick-functions: true` (LIVE, default false); `/reload` stays unregistered. Contract: [datapack-functions.md](../../architecture/datapack-functions.md) (unit tests and functional test-server runs only, not qualified). Real clients are still required.
 
 **Steps:**
 
-1. After the prerequisite lands, record its patch/commit and recheck function loading, command registration and datapack format. Do not infer support from `/schedule` registration alone.
-2. Boot with the datapack and invoke `/function <namespace:id>` (verify command exists). Exercise `/schedule function <namespace:id> 20t append`, repeat with `replace`, a function tag and `/schedule clear <namespace:id>` (verify command exists for these vanilla registrations).
-3. Schedule events, save/restart before due time and observe persisted execution; exercise freeze/unfreeze through an available reviewed control (unverified). Test later events after one function failure and explicit cross-region block/entity operations.
+1. Record the patch identities (0065, 0066 at the tag) and check function loading and datapack format in the boot log. Do not infer support from command registration alone.
+2. Boot with the datapack and invoke `/function <namespace:id>`. Exercise `/schedule function <namespace:id> 20t append`, repeat with `replace`, a function tag and `/schedule clear <namespace:id>`.
+3. Schedule events, save/restart before due time and observe persisted execution; exercise freeze/unfreeze through `Bukkit.getServerTickManager()` (vanilla `/tick` is unregistered; the test plugin's `tickprobe` drives freeze/step/sprint/rate on a test server). Test later events after one function failure and explicit cross-region block/entity operations.
 4. Record asynchronous completion ordering and source dimension/position; do not interpret a returned acceptance value as completed region work.
 
 **Capture:** Common capture plus Datapack files/hash, boot loading logs, command/event timeline, save/restart and freeze results, both clients’ screenshots. Store in `docs/releases/evidence/49/r03-functions/` using the shared filename pattern.
 
-**Pass:** Only after 0066: functions load; direct invocation, append/replace/clear, tags, persisted deadlines and resumed overdue execution follow the reviewed contract; failure isolation and owner routing hold. Until then BLOCKED.
+**Pass:** Functions load; direct invocation, append/replace/clear, tags, persisted deadlines and resumed overdue execution follow the [datapack-functions.md](../../architecture/datapack-functions.md) contract; failure isolation and owner routing hold.
 
 **Fail:** Apply [procedure F](#failure-procedure-f-every-gate-and-runtime-check), include this check’s folder, `/ver`, jar SHA and config in the issue; stop, restore valid `<jar>.prev` over the active jar and restart under F. Missing conditional prerequisites stay BLOCKED.
 
@@ -670,42 +757,42 @@ SHA-256, host/JDK/hardware, config, capture and rollback requirements.
 
 <a id="r06-trader"></a>
 
-### Wandering trader spawn — CONDITIONAL on MC 0068
+### Wandering trader spawn (MC 0068)
 
 **Goal:** Check natural wandering-trader spawning through real gameplay.
 
-**Preconditions:** Shared requirements; **CONDITIONAL on MC patch 0068 landing and appearing in the release jar.** No `0068-*` feature patch exists on this tree. P10; minimum 1 human in suitable naturally ticking terrain. Spawn settings, observation window and exact expected behaviour must come from the landed feature (currently unverified).
+**Preconditions:** Shared requirements; P10; minimum 1 human in suitable naturally ticking terrain. MC 0068 (one wandering-trader spawner per world on the global tick) is in the r49 tag: one persisted timer per eligible world, advanced by the global tick, hands each spawn attempt to the owner of the selected player and keeps vanilla's world eligibility and spawn checks. Contract: [wandering-traders.md](../../architecture/wandering-traders.md) (unit and patch-shape tests only; nothing trader-specific exercised on a server).
 
 **Steps:**
 
-1. After landing, read the patch and record all spawn rules/config values and the required observation window; do not change gameplay settings to fabricate success.
+1. Read the contract and record the vanilla spawn rules, game rules and the observation window you use; do not change gameplay settings to fabricate success.
 2. Play in eligible terrain through the recorded spawn window. Observe natural trader/llama appearance, interaction, movement and subsequent lifecycle; do not count a manually summoned trader as spawner evidence.
 3. Record ownership diagnostics and natural spawn outcomes across regions during G04.
 
-**Capture:** Common capture plus Landed patch/commit, effective spawn configuration, timestamps, natural-spawn/player interaction screenshots and logs. Store in `docs/releases/evidence/49/r06-trader/` using the shared filename pattern.
+**Capture:** Common capture plus patch identity at the tag, effective spawn configuration, timestamps, natural-spawn/player interaction screenshots and logs. Store in `docs/releases/evidence/49/r06-trader/` using the shared filename pattern.
 
-**Pass:** BLOCKED until 0068 supplies a verified contract and the release includes it; then natural spawning/lifecycle must match that contract without ownership violations.
+**Pass:** Natural spawning/lifecycle matches the [wandering-traders.md](../../architecture/wandering-traders.md) contract without ownership violations (recorded under the effective thread-checks mode).
 
 **Fail:** Apply [procedure F](#failure-procedure-f-every-gate-and-runtime-check), include this check’s folder, `/ver`, jar SHA and config in the issue; stop, restore valid `<jar>.prev` over the active jar and restart under F. Missing conditional prerequisites stay BLOCKED.
 
 
 <a id="r07-forceload"></a>
 
-### Forceload after crash — CONDITIONAL on MC 0067
+### Forceload after crash (MC 0067)
 
 **Goal:** Verify forceload persistence through a crash, rather than only a clean shutdown.
 
-**Preconditions:** Shared requirements; **CONDITIONAL on MC patch 0067 landing and inclusion in the release jar.** No `0067-*` feature patch exists on this tree. P10; minimum 1 human before/after crash; disposable world and a recorded durable checkpoint. The current ledger says forceload tickets remain shutdown-only.
+**Preconditions:** Shared requirements; P10; minimum 1 human before/after crash; disposable world and a recorded durable checkpoint. MC 0067 (periodically save detached persistent tickets) is in the r49 tag: forceload tickets (`chunk_tickets.dat`) are saved by the global-tick autosave (`autosave.autosave-frequency` in `config/aurora-server.yml`), by `save-all` and at shutdown, no longer shutdown-only; raids and the world PDC stay shutdown-only. Contract and evidence state: [persistence-save-paths.md](../../architecture/persistence-save-paths.md) (code only for 0067, no runtime evidence recorded there).
 
 **Steps:**
 
-1. After landing, record the patch’s persistence contract and checkpoint boundary. Use `forceload add <x> <z>` and `forceload query` (verify command exists) on a chosen chunk; retain exact replies.
+1. Record the checkpoint boundary you rely on (an autosave or `save-all`, with its timestamp). Use `forceload add <x> <z>` and `forceload query` (registered vanilla commands) on a chosen chunk; retain exact replies.
 2. Allow the documented durable checkpoint, then have the operator crash the disposable server without a clean stop using the reviewed process-targeted method (unverified until recorded).
-3. Restart the same world; query retained forceload tickets before re-adding anything, join and inspect chunk ticking. Repeat on region files and AWF if supported by the landed contract.
+3. Restart the same world; query retained forceload tickets before re-adding anything, join and inspect chunk ticking. Repeat on region files and AWF.
 
 **Capture:** Common capture plus Before/after ticket replies, coordinates/world, checkpoint and crash timeline, patch identity, boot logs and ticking observations. Store in `docs/releases/evidence/49/r07-forceload/` using the shared filename pattern.
 
-**Pass:** BLOCKED until 0067; after landing, tickets covered by its durable checkpoint survive crash/restart and restore correctly without duplicate/manual re-add masking.
+**Pass:** Tickets covered by a durable checkpoint survive crash/restart and restore correctly without duplicate/manual re-add masking.
 
 **Fail:** Apply [procedure F](#failure-procedure-f-every-gate-and-runtime-check), include this check’s folder, `/ver`, jar SHA and config in the issue; stop, restore valid `<jar>.prev` over the active jar and restart under F. Missing conditional prerequisites stay BLOCKED.
 
@@ -716,11 +803,11 @@ SHA-256, host/JDK/hardware, config, capture and rollback requirements.
 
 **Goal:** Exercise plugin-facing synchronous owned teleports and async fallback with real players.
 
-**Preconditions:** Shared requirements; P10 plus a reviewed plugin fixture compiled against sourbyapi; minimum 2 humans in different regions. Public surface is `org.bukkit.entity.Entity.teleport(Location)` and `teleport(Location, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause, io.papermc.paper.entity.TeleportFlag...)`, as present in `sourbyapi/paper-patches/files/src/main/java/org/bukkit/entity/Entity.java.patch`. `dev.iyanz.sourbycraft.entity.teleport.OwnedTeleport` is server implementation, not a new public plugin API. `aurora.compat.sync-teleport` defaults enabled; setting it false is RESTART_REQUIRED.
+**Preconditions:** Shared requirements; P10 plus the plugin fixture `/tpprobe` (test plugin, `-Dsourby.testplugin.probes=true`, test server only): bare `tpprobe` drives an armor stand through the routes `near`, `far` (20 000 blocks), `world` (second world), `offthread`, `redirect` (an `EntityTeleportEvent` listener moves a near teleport far), `cancel`, `nested`, `mount` and `flags`; `tpprobe player <name>` does `player-near`, `player-far` and `player-offthread` for a real player. Each step logs one `TPPROBE <route> result=…` line (with `movedWhenReturned=` where the route checks it). Minimum 2 humans in different regions. Public surface is `org.bukkit.entity.Entity.teleport(Location)` and `teleport(Location, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause, io.papermc.paper.entity.TeleportFlag...)`, as present in `sourbyapi/paper-patches/files/src/main/java/org/bukkit/entity/Entity.java.patch`. `dev.iyanz.sourbycraft.entity.teleport.OwnedTeleport` is server implementation, not a new public plugin API. `aurora.compat.sync-teleport` defaults enabled; setting it false is RESTART_REQUIRED.
 
 **Steps:**
 
-1. Record fixture jar/hash, invocation (unverified until supplied), event listeners and scheduler context. From the entity owner call the public teleport overload with a nearby loaded/owned destination; record boolean return and final position.
+1. Record fixture jar/hash, the exact `tpprobe` invocation, event listeners and scheduler context. From the entity owner call the public teleport overload with a nearby loaded/owned destination; record boolean return and final position.
 2. Repeat with a far region, other world and off-thread caller. Record async fallback, false return, eventual transfer and once-per-plugin warning. Test velocity flags and event cancellation/redirect through the same API.
 3. Have a listener invalidate the original transfer or redirect outside the owned region; verify revalidation prevents stale/duplicate movement. Restart with `-Daurora.compat.sync-teleport=false` and confirm the documented refusal, then restore the run configuration.
 
@@ -746,26 +833,33 @@ non-default values in `config/canvas-server.yml`, `config/canvas-worlds.yml`, `s
 
 1. Record `sha256sum config/*.yml sourbycraft_config/*.toml sourbycraft-security.yml` and list every non-default value.
 2. Boot the Build 49 jar once to `Done (`; run `/sourbycraft config` and `/update status`; stop cleanly.
-3. Check the log for exactly one `Migrated config/canvas-server.yml -> config/aurora-server.yml`, one
-   `... canvas-worlds.yml -> ... aurora-worlds.yml`, one `Migrated the configuration files to the Build 49 layout`
-   (its `N key(s) renamed` must equal the number of old-layout keys the TOML held), and no
-   `Deprecated config key` / `is ignored` / `Both ... exist` WARN.
+3. Check the log for exactly one `Migrated config/canvas-server.yml -> config/aurora-server.yml (values and comments kept; …)`,
+   one `... canvas-worlds.yml -> ... aurora-worlds.yml`, one `converted sourbycraft_config/sourbycraft_global_config.toml to
+   sourbycraft_config/sourbycraft_global_config.yml; the old file is kept as sourbycraft_global_config.toml.migrated` (and the
+   same for `aurora.toml` when the copy has one), one `Migrated the configuration files to the Build 49 layout: …`
+   (its `N key(s) renamed` must equal the number of old-layout keys the TOML held; it names the `*.yml.migrated` copy
+   taken before the rename), and no `Deprecated config key` / `is ignored` / `Both ... exist` WARN.
 4. Verify files: `config/canvas-*.yml.migrated` byte-identical to step 1 (`sha256sum`), `aurora-*.yml` holding every
-   non-default engine value, `sourbycraft_global_config.toml.migrated` byte-identical to step 1, the new TOML holding every
-   value under its Build 49 name (`console.*`, `players.*`, `plugins.*`, `updater.*`), no `[ui]`/`[misc`/`[perf`/`[swap`
-   tables left, Aurora keys only in `aurora.toml`.
-5. Boot a second time: none of the three `Migrated` lines, no WARN from the configuration, same effective values in
+   non-default engine value, `sourbycraft_global_config.toml.migrated` byte-identical to step 1,
+   `sourbycraft_global_config.yml` holding every value under its Build 49 name (`console.*`, `players.*`, `plugins.*`,
+   `updater.*`), no `ui:`/`misc:`/`perf:`/`swap:` sections left, Aurora keys only in `aurora.yml`.
+5. Boot a second time: none of the `Migrated`/`converted` lines, no WARN from the configuration, same effective values in
    `/sourbycraft config`; stop cleanly. Then copy `config/canvas-server.yml.migrated` back to `config/canvas-server.yml`,
    boot once more and expect the `Both config/aurora-server.yml and config/canvas-server.yml exist ... ignored` WARN and
    the new file's values; remove the copy again.
 6. Downgrade rehearsal on the same copy: follow the downgrade sequence in `docs/AURORA-CONFIG.md` §7 with the Build 48 jar
    and confirm it boots with the pre-49 values.
 
-**Capture:** Common capture plus the step 1/4 checksums, the three `Migrated` lines, `/sourbycraft config` output of both
-boots and a diff of the old TOML against the migrated one. Store in `docs/releases/evidence/49/config-migration/`.
+**Capture:** Common capture plus the step 1/4 checksums, the `Migrated` and `converted` lines, `/sourbycraft config`
+output of both boots and a diff of the old TOML against the new YAML. Store in `docs/releases/evidence/49/config-migration/`.
 
 **Pass criteria:** every value kept (none changed, none lost), old files kept as `*.migrated`, migration lines exactly once,
 second boot silent and identical, stale-file WARN appears only in the deliberate step 5 case, downgrade rehearsal boots.
+
+**Build 50 candidate:** the same steps apply, with two differences in the code: a pre-49 key name the boot rewrite cannot
+remove (read-only directory) is no longer read and logs one WARN per load naming its current name, and a `*.toml` left beside its
+`*.yml` logs one `… is ignored: … exists and always wins` WARN at boot and on every reload. Expected results: Tester Owner
+TO-CFG-01, TO-CFG-02 and TO-CFG-09.
 
 **Fail handling:** [Procedure F](#failure-procedure-f-every-gate-and-runtime-check). A lost or changed value is a release
 blocker; attach both files and the log.
@@ -782,7 +876,7 @@ this runbook; from inside an evidence folder adjust relative links accordingly.
 
 | Date (UTC) | Host and hardware | Jar filename and SHA-256 | Config files and every non-default value | Players: count and who | Plugins: list, versions and hashes | Results per gate/check: pass/fail/blocked | Raw-file links |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| <fill in> | <fill in: host label, OS, Temurin 25, CPU/quota, RAM/heap, disk, network, competing load> | <fill in: tag, commit, jar, SHA-256 verified against tag> | <fill in: five required config files, server.properties, Aurora TOML, JVM flags; non-default values and lifecycle> | <fill in: count, consenting handles, attendance window/actions> | <fill in: complete actual list and load modes> | <fill in: G01–G16 and R01–R08, disposition and reason for each applicable item> | [<fill in: raw artifact>](../evidence/49/<gate-id>/<fill-in-filename>) |
+| <fill in> | <fill in: host label, OS, Temurin 25, CPU/quota, RAM/heap, disk, network, competing load> | <fill in: tag, commit, jar, SHA-256 verified against tag> | <fill in: five required config files, server.properties, `aurora.yml`, JVM flags, effective thread-checks mode; non-default values and lifecycle> | <fill in: count, consenting handles, attendance window/actions> | <fill in: complete actual list and load modes> | <fill in: G01–G16 and R01–R08, disposition and reason for each applicable item> | [<fill in: raw artifact>](../evidence/49/<gate-id>/<fill-in-filename>) |
 
 Record start/end times, workload and certification/noise state beside the table.
 Keep errors and failed runs. One screenshot or one JSON `passed` field cannot satisfy
@@ -806,7 +900,8 @@ is the verified tag asset. Record tool versions, stdout/stderr and exit status.
   and server logs; configure AWF through the server’s actual config separately.
 - `bench_panel.py`: `--panel`, `--server`, `--host`, `--port`, `--workload`,
   `--clients`, `--warmup`, `--duration`, `--sample-seconds`, `--seed`, `--world`,
-  `--output`, repeatable `--edit`, `--allow-online-players`. Supplemental example:
+  `--output`, repeatable `--edit`, `--max-players`, `--clients-on`, `--client-processes`,
+  `--external-clients-cmd`, `--external-clients-timeout`, `--allow-online-players`. Supplemental example:
   `python3 scripts/bench_panel.py --panel <panel-url> --server <server-id> --host <game-host> --workload plugins-10 --clients 10 --warmup 120 --duration 7200 --sample-seconds 60 --output <fresh-run-dir>`.
   This tool changes properties/whitelist and drives synthetic clients; it is not
   the real-player soak procedure. Do not bypass the online-player refusal to run
@@ -838,7 +933,7 @@ may no longer exist; a document link is not a replacement for the raw evidence.
 - [Chunk-generation stutter](../../development/CHUNK-GENERATION-STUTTER.md): records uncertified fresh-terrain delivery observations and metrics limitations; no release-wide throughput result.
 - [ASP 26.2 AWF port review](../../development/ASP-26.2-AWF-PORT-REVIEW.md): records format/persistence findings, dated local fixes/tests and unverified service wiring, not completed qualification.
 - [Build provenance](../../development/BUILD-PROVENANCE.md): records build-identity/SBOM regression checks and embedded metadata limits; explicitly distinguishes metadata from signed attestation.
-- [Auto-updater](../../development/AUTO-UPDATER.md): records unit-tested verification/rollback state machines and the lack of an apply/rollback boot test in that wave; signing activation was still absent.
+- [Auto-updater](../../development/AUTO-UPDATER.md): records unit-tested verification/rollback state machines and the lack of an apply/rollback boot test in that wave; signing activation was still absent then (the release key ships since Build 48, see G11).
 - AWF D6/D4, 2026-10-22 (agent `opus-awf-d6`, runs `opus-awf-d6-redis-1/-2`, jar built from the worker tree, loopback Redis 8.10.2 with AOF, default 30000 ms deadline, no players): with Redis SIGSTOPped, `stop` exited after 31.1 s with exit status 70 and the `AWF-SHUTDOWN-INCOMPLETE` alert (was 91–115 s); `save-all flush` printed pending then `Save NOT durable` (no success line) with Redis frozen and pending then `Saved the game` when healthy; after SIGCONT the next boot read all four markers, including the two in the UNCERTAIN commit. See [aurora-world-fabric.md](../../architecture/aurora-world-fabric.md) "Fixes 2026-10-22". Not network Redis, not under load.
 - [Agent test server](../../development/AGENT-TEST-SERVER.md): documents isolated functional harness guarantees/output and why those runs are not certified baselines or client evidence; not an authorization for agent testing from Build 49.
 
@@ -846,36 +941,45 @@ may no longer exist; a document link is not a replacement for the raw evidence.
 
 - All 16 authoritative Build 49 gates are still OPEN/PARTIAL/NOT RUN on their source
   document; this runbook changes no state. Real players, a stable host, exact plugin
-  inventories and human evidence are still required. Owner must resolve codename,
-  licence, signing key activation, rollout percentage, launcher deadline/cap and
-  the final STABLE declaration. Never include signing material in attachments.
-- All specifically named source **files** in the task were present. The directory
-  `docs/releases/evidence/` does **not** exist in this tree. Humans create
+  inventories and human evidence are still required. Owner decisions already made:
+  codename Aurora Nexus through Build 50 (2026-10-24), licence GPL-3.0-only plus
+  trademark policy (2026-10-22), release key shipped since Build 48, `rolloutPercent=100`,
+  SourbyClip 3.1.3 (deadline/cap) pinned. Still open: the STABLE declaration, the
+  private-toolchain corresponding-source question of G14, which thread-checks mode a
+  release qualifies (PM-012) and this runbook's target (PM-013). Never include signing
+  material in attachments.
+- The directory `docs/releases/evidence/` does **not** exist in this tree. Humans create
   `docs/releases/evidence/49/<gate-id>/` only when collecting real evidence.
-- MC feature patches `0066-*`, `0067-*`, `0068-*` are absent. Function loading/direct
-  `/function`, crash-persistent forceload and natural wandering-trader acceptance
-  remain conditional/planned. Recheck source and jar after they land. The trader
-  contract/window is not yet verified; do not invent a spawn default or acceleration.
-- Scheduled-functions MC 0065 alone registered `/schedule` but integration could not
-  load functions; no end-to-end datapack result. Append/replace/clear, tags,
-  save/restart, freeze/unfreeze and multi-region execution remain open. No verified
-  freeze control is supplied by that doc.
+- MC feature patches 0065–0068 are in the r49 tag. Function loading and `/function`
+  (0066), periodic forceload-ticket saves (0067) and the per-world trader timer (0068)
+  have at most unit, patch-shape or functional test-server evidence (0067: no runtime
+  evidence recorded in persistence-save-paths.md); their real-client,
+  crash and natural-spawn acceptance (R03, R06, R07) is open. Do not invent a trader
+  spawn default or acceleration.
 - Command blocks still have unaudited synchronous foreign-block read paths. A clean
   refusal in one observed case does not prove arbitrary command content safe.
   Bed-less respawn, End exit/once-only credits and pearl cancel/redirect need clients.
 - Public teleport overloads still carry inherited `@Unsupported` annotations and
   old return documentation in the sourbyapi file patch. The implementation is owned
   routing behind the existing Bukkit API, not a verified new SourbyCraft teleport
-  class for plugin authors. Real-plugin API fixture invocation remains unverified.
-- Controlled stall/wrong-owner, disk-stall, boot-fault and process-targeted backend
-  freeze/crash probes need reviewed human fixture/method definitions. This runbook
-  marks them unverified instead of inventing an administrative command. Spark stop,
-  vanilla stop and the listed vanilla datapack/block/forceload command registrations
-  must be checked at runtime; they are outside the verified owned command registry.
-- D4 reporting, D6 overall shutdown deadline, real-network Redis, Moonrise read-error
-  rate, boot-level corrupt cache, signed apply/rollback and launcher transfer limits
-  remain gate work. `/perf` reports instrumented queues only; attach independent
-  observations or leave uninstrumented queue stabilization BLOCKED.
+  class for plugin authors. `/tpprobe` drives the public overloads on a test server;
+  a real plugin's use of them with players remains unverified.
+- The test plugin supplies the controlled stall (`/stallprobe`), the pearl event fixture
+  and `/tpprobe`; `legacy-test-plugin` supplies synthetic bridged wrong-owner accesses
+  (`LEGACY_RELAXED_*`, meaningful only with thread-checks `enforced`). Still without a
+  reviewed definition: a native-plugin wrong-owner probe, the disk stall, the boot fault
+  and the process-targeted backend freeze/crash methods. This runbook marks them
+  unverified instead of inventing an administrative command. Spark syntax (including
+  `/spark profiler stop`) must be checked against the bundled version; vanilla command
+  registration is answered statically (Capture section).
+- D4 reporting (0072) and the D6 overall shutdown deadline (0071) are implemented; their
+  owner evidence, real-network Redis, the Moonrise read-error rate, the boot-level corrupt
+  cache, signed apply/rollback on a real boot and the launcher transfer limits remain gate
+  work. `/perf` reports instrumented queues only; attach independent observations or
+  leave uninstrumented queue stabilization BLOCKED.
+- Under the owner-default `relaxed` thread checks the ownership-violation counts of G02,
+  G04 and G07 cannot detect anything; their ownership evidence needs an `enforced` run
+  (shared preconditions, PM-010).
 - Source supplies no universal minimum player count or hardware threshold for every
   gate. This runbook’s explicit coverage minima are not benchmark certification rules.
   P10 is defined; the real ProtocolLib-dependent plugin list is operator-supplied.
@@ -883,7 +987,6 @@ may no longer exist; a document link is not a replacement for the raw evidence.
 - Panel persistence/crash scripts have no JSON output or `--awf`; local persistence
   also has no `--awf`. Do not fabricate those flags or reports. Panel crash refuses
   players, so additional human crash/recovery evidence is mandatory.
-- Publication selects `docs/releases/26.2-build-N-*.md`, per the gate doc. This new
-  runbook also matches the Build 49 pattern, and the workflow concatenates matches;
-  the human release owner must resolve its inclusion before publication.
-  No workflow/build file is changed here.
+- Publication takes the first existing `docs/releases/N.md` or
+  `docs/releases/26.2-build-N-*.md` and stops there (G16 step 3); this runbook is not
+  selected.

@@ -27,12 +27,21 @@ Aurora optimizes in this order: correctness, reliability, stability, predictable
 efficiency, scalability, observability, then peak throughput. A faster result that weakens region
 ownership, persistence, shutdown or plugin semantics is not accepted.
 
-**Status.** [Build 49 — Aurora Nexus](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.2-r49)
-is the latest release (full, signed, not STABLE; [release notes](docs/releases/26.2-build-49-release.md),
-open gates in [docs/releases/26.2-build-49.md](docs/releases/26.2-build-49.md)). It brings YAML
-configuration with the one-time TOML conversion, AbyssLink (disabled by default) and the 48.4 shutdown
-fixes. STABLE still waits on the gate list; the 26.3 line starts at Build 100, codename Aurora Forge
-([roadmap](docs/releases/ROADMAP-47-50.md)).
+**Status.** The newest normal releases are [Build 49 — Aurora Nexus](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.2-r49)
+(signed, not STABLE; [release notes](docs/releases/26.2-build-49-release.md), open gates in
+[docs/releases/26.2-build-49.md](docs/releases/26.2-build-49.md)) and its test-only hotfix
+[Build 49.1](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.2-r49.1)
+([notes](docs/releases/26.2-build-49.1-hotfix.md)). Build 49 brings YAML configuration with the one-time
+TOML conversion, AbyssLink (disabled by default) and the 48.4 shutdown fixes.
+[Build 50](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.2-r50) is a GitHub **prerelease**
+(`release=pre`; the auto-updater skips it unless `updater.allow-prerelease` is on). Its tag (`5f5a167`)
+predates PR #61 and PR #62, so the Build 50 AWF and MultiProfile fixes in
+[readiness](docs/releases/BUILD-50-READINESS.md) are in no published build yet. PR #62 is code written and
+statically reviewed, not built, not tested by the owner; neither PR has owner test results. How they ship
+(an r50.1 hotfix or Build 51) is an owner decision.
+**Do not use `aurora.awf.multiprofile.mode: distributed` on `v26.2-r50`:** that build runs it on the file
+repository, which cannot fence writes between servers. STABLE still waits on the gate list; the 26.3 line
+starts at Build 100, codename Aurora Forge ([roadmap](docs/releases/ROADMAP-47-50.md)).
 
 ## Features
 
@@ -40,11 +49,12 @@ fixes. STABLE still waits on the gate list; the 26.3 line starts at Build 100, c
 |---|---|
 | Region-threaded ticking (SourbyCraft-owned engine) | Implemented |
 | Metrics runtime behind `/tps`, `/mspt`, `/perf`, HUD bars and Spark | Implemented; cross-surface consistency is an open Build 48 gate |
-| Auto-updater (`apply_mode=notify` by default; releases signed from Build 48) | Implemented |
-| Aurora Compatibility Bridge for non-region-aware plugins | Implemented, off by default, not qualified; with `mode = safe` the region-ownership checks are **relaxed** by default (owner decision 2026-10-22, LightingLuminol parity) -- unsafe, set `aurora.bridge.thread-checks = "enforced"` to keep them |
+| Auto-updater (`updater.apply-mode: notify` by default; releases signed from Build 48) | Implemented |
+| Aurora Compatibility Bridge for non-region-aware plugins | Implemented, off by default, not qualified; with `mode: safe` the region-ownership checks are **relaxed** by default (owner decision 2026-10-22, LightingLuminol parity) -- unsafe, set `aurora.bridge.thread-checks: enforced` to keep them |
 | Aurora World Fabric (region storage, templates, instances) | Experimental, off by default |
+| AWF MultiProfile and Aurora Redis Fabric | Experimental, off by default; the shared Redis profile repository (`repository: redis`, required by `mode: distributed`) comes with PR #62 and is in no published build; it is unqualified, and live player state does not yet follow a player between servers |
 | Async pathfinding | Experimental, off by default |
-| Cherry server-side mixins (`-Dcherry.enable.mixin=true`) | Off by default |
+| Cherry server-side mixins (`-Dcherry.enable.mixin=true`) | Off by default; provided by the private SourbyClip launcher, not covered by this repository's tests |
 
 States use the vocabulary in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md): *implemented* means
 functionally verified, not performance-qualified.
@@ -77,7 +87,7 @@ Run both from the repository root. Compose stores server data in `data/`.
 | File | Purpose |
 |---|---|
 | `sourbycraft_config/sourbycraft_global_config.yml` | Console, players, messages, plugin provisioning, auto-updater (Build 49 layout; older layouts are migrated once at boot, copy kept as `*.migrated`) |
-| `sourbycraft_config/aurora.yml` | Aurora engine options (CPU budget, bridge, AWF, async pathfinding) |
+| `sourbycraft_config/aurora.yml` | Aurora engine options (CPU budget, bridge, AWF, MultiProfile, Redis Fabric, async pathfinding, AbyssLink) |
 | `config/aurora-server.yml`, `config/aurora-worlds.yml` | Region engine options (Build 49 names; `config/canvas-*.yml` are migrated once and renamed `*.migrated`) |
 | `config/paper-global.yml` → `threaded-regions` | Region thread count and grid size |
 | `sourbycraft-security.yml` | Crash-prevention and packet-guard limits (all default to `LOG`) |
@@ -133,4 +143,6 @@ SourbyCraft is licensed under the [GPL version 3 only](LICENSE.md); upstream com
 licences, listed there. The SourbyCraft and Aurora names and logos are covered by the
 [trademark policy](TRADEMARK.md): forks are welcome under the GPL, but must use their own name.
 
-Build 50 candidate: [readiness and partial-work closure](docs/releases/BUILD-50-READINESS.md) · [Tester Owner](docs/tester%20owner.md). Manual qualification pending; distributed MultiProfile startup is refused until atomic fenced storage exists.
+Build 50 candidate (PR #62): [readiness](docs/releases/BUILD-50-READINESS.md) ·
+[PM matrix](docs/releases/BUILD-50-PM-MATRIX.md) · [Tester Owner](docs/tester%20owner.md) · status in
+[docs/TODO.md](docs/TODO.md). Owner build and manual qualification are pending.

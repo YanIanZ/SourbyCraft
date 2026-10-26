@@ -83,6 +83,14 @@ worlds.unload("arena_match_42", true).thenCompose(result -> {
 });
 ```
 
+How `unload(name, true)` ends in the Build 50 candidate (PR #62; code written and statically reviewed;
+not built; not tested by the owner): for a world AWF manages, the world is first saved durably (not
+once the server is stopping; its shutdown saves the world). If that
+save fails, the future completes exceptionally (an `IOException` naming the world) and the world stays
+loaded for a retry. `UnloadResult.FAILED` can mean the world was unloaded but its final commit could not be
+confirmed: check `isLoaded` and the server log before treating the data as saved (`/awf unload` says so in
+its reply).
+
 Export/conversion also reserve their normalized output path; template creation/deletion has
 exclusive access while clone creation shares read access. Admission covers operations through
 this service on this server. Direct Bukkit/filesystem changes and other servers remain subject
@@ -99,9 +107,10 @@ thread, creation/loading/cloning futures can complete on a later global tick (si
 `join()`/`get()` on an unfinished one there throws `IllegalStateException`, because the tick
 that would finish it is the one blocked. Continue with `thenAccept`/`whenComplete` instead.
 
-Bridge `safe` mode is opt-in and RESTART_REQUIRED. At I/O saturation, a bridged async task is
-cancelled and diagnosed; an AWF operation rejected by the existing I/O executor fails its future.
-No extra plugin executors are needed for AWF lifecycle calls.
+Bridge `safe` mode is opt-in and RESTART_REQUIRED. At I/O saturation, a bridged one-shot async task
+is cancelled and diagnosed, and a repeating one skips that run and stays scheduled; an AWF operation
+rejected by the existing I/O executor fails its future. No extra plugin executors are needed for AWF
+lifecycle calls.
 
 ## Import and portability
 
@@ -109,6 +118,26 @@ Use `importSlime` for SourbyCraft's supported Slime v12/v13 format, `convertSlim
 without creating a world, and `exportWorld`/`importWorld` for portable `.awf` world files. Export
 requires an unloaded world. This is format conversion and a SourbyCraft API; it is not a
 drop-in implementation of every SWM/ASP plugin API or file format.
+
+World data in the Build 50 candidate (code written and statically reviewed; not built; not tested by
+the owner):
+
+- `WorldProperties.Spawn` is validated: x and z within ±29 999 984, y from -2032 to below 2032, all
+  finite, else `IllegalArgumentException`. A registry or template entry written earlier with such a
+  spawn loses only that spawn, with a WARN naming the world on each read (the registry is read twice per
+  boot, templates on every read); the next registry write removes it from
+  `sourbycraft_config/aurora-worlds.json`. An entry with invalid save bounds (min above max) makes the
+  registry unreadable: the `AuroraWorlds` service fails its boot stage with an `IOException` naming the file
+  and is not registered.
+- A Slime import or conversion drops an out-of-world spawn and lists `properties.spawnX/Y/Z/Yaw` in its
+  WARN of values it did not keep. An `.awf` file exported by an earlier build (up to `v26.2-r50`, which
+  did not range-check spawns) with such a spawn imports without that spawn and one WARN naming the new
+  world and the file's recorded source; a spawn that is not numbers, or save bounds with min above max,
+  still refuse the whole import.
+- `importWorld` restores the file's `plugin-data` into the world's persistent data container before the
+  future completes, after `WorldLoadEvent` has fired (a listener on that event does not see it yet);
+  malformed `plugin-data` fails the import. `importSlime` restores the Slime world's `BukkitValues` the
+  same way.
 
 Multi-plugin admission has functional regression coverage. Real-plugin gameplay, many loaded
 Minecraft worlds, power-loss recovery and throughput still need their separate qualification

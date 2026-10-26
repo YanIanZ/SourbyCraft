@@ -77,10 +77,15 @@ runtime evidence is described below; production qualification remains incomplete
   `LayeredSource`); the base is never written. Writes copy the caller's buffer. Saves run on a
   caller-supplied executor (the governor's `STORAGE` lane is meant for this), with bounded
   retries; a chunk rewritten during a save stays dirty. Metrics: resident/dirty chunks, save queue
-  depth, oldest pending save, serialization and backend p50/p95/p99, retries, failures, bytes read
-  and written, and materialised chunks. `AwfRegistry` counts loaded worlds. An optional resident
-  limit drops clean chunks LRU after each save; they are read back from the store, and dirty
-  chunks are never dropped.
+  depth, oldest pending save, oldest dirty age, serialization and backend p50/p95/p99, retries,
+  failures, bytes read and written, and materialised chunks. Loaded worlds are counted by
+  `/perf awf` (`AWF loaded worlds`: dimension folders with an open AWF storage); `AwfRegistry` is
+  not used by the runtime (only `AwfWorldTest` exercises it). An optional resident limit drops
+  clean chunks LRU after each save; they are read back from the store, and dirty chunks are never
+  dropped. Each chunk is one immutable entry (bytes, write version, first-dirty time) in one map,
+  with a dirty-key index changed only inside that key's `compute`, so eviction removes only the
+  exact clean entry it saw and a write racing it is never dropped (Build 50, PR #62; see
+  *Build 50 changes* below).
 - `WorldRole`: the six roles and their write rules.
 
 - Deletions are recorded as tombstones in the chunk index. A deleted chunk reads as absent and
@@ -101,13 +106,27 @@ backend (next section). MongoDB/MySQL backends are **planned, not implemented**.
   complete at once there). Blocking on an unfinished lifecycle future on the global tick throws
   `IllegalStateException`; never join one on a region/entity thread either. Names are `[a-z0-9_-]{1,48}`; storage folder names (`region`, `poi`, `entities`,
   `dimensions`, …) are refused because AWF matches worlds by the storage folder's own path
-  (see "What goes through AWF" below); template names follow the same rules, and every template
+  (see "What goes through AWF" below). Since Build 50 (PR #62) `overworld`, `the_nether`,
+  `the_end` and the server's level-name are refused as world names too, and a registry entry with
+  one is ignored with a WARN at load. Template names follow the folder rules only, and every template
   operation (create from, delete, read, save, and a template name read back from the registry)
   refuses a name that is not one, so no name resolves outside `awf-templates/` (AWF-4, 2026-10-14).
 - **Registry.** `sourbycraft_config/aurora-worlds.json` lists the managed worlds (environment,
-  seed, autoload). It is written through a temporary file and an atomic move. A world in it is an
-  AWF world without being listed in `aurora.awf.worlds`, so a world created at runtime stays in
-  AWF across restarts. A malformed file stops the stage instead of being read as empty.
+  seed, autoload, properties). It is written through a temporary file that is forced, an atomic
+  move (a plain move where the filesystem refuses an atomic one) and a forced directory. A world in
+  it is an AWF world without being listed in `aurora.awf.worlds`, so a world created at runtime
+  stays in AWF across restarts. A malformed file stops the stage instead of being read as empty;
+  since Build 50 an empty file or a literal `null` is refused the same way (the AuroraWorlds API
+  then does not start until the file is restored or removed). Build 50 (PR #62) also: readers see
+  a snapshot published only after a write reached the file, so a tick-thread read never waits for a
+  write's fsync and sees an entry only once it is durable; each entry records `knownStores` (the
+  storage folders whose store existed when the world was last loaded or saved), and a load is
+  refused while a recorded store is missing instead of opening an empty store in its place (entries
+  written before Build 50 are recorded at their first load or save, until then they load as
+  before); a stored spawn that `WorldProperties.Spawn` now refuses is dropped with a WARN naming
+  the world instead of failing the file (see *Build 50 changes*). `AuroraWorlds.setAutoload` is a
+  synchronous API, so its forced write still runs on the caller's thread (the global tick for a
+  console `/awf autoload`); an asynchronous variant is an API change left to the owner.
 - **Where data lives.** `world/dimensions/minecraft/<name>/{region,entities,poi}.awf`. No region
   file is written while the world is attached.
 - **Thread rules.** The engine creates and unloads worlds on the global tick, which runs on a
@@ -115,8 +134,14 @@ backend (next section). MongoDB/MySQL backends are **planned, not implemented**.
   open the world's three stores first on the I/O lane (`AwfEngine.prepare`); the storages that
   open on the global tick take those stores. `save` sends a save ticket to every region of the
   world, waits for all of them, then commits the stores off the region threads, so a completed
-  `save` is durable. `unload` uses the engine's asynchronous unload; `Bukkit.unloadWorld` is not
-  supported on this engine. `delete` requires the world to be unloaded.
+  `save` is durable. Since Build 50 (PR #62) the chunk I/O drain before that commit is bounded by
+  `aurora.awf.shutdown-deadline-ms` and each store is committed through
+  `AwfRegionStorage.flushConfirmed`, so a save fails, rather than reporting success, when its
+  commit is cut by the deadline, fenced, closed or discarding. `unload` uses the engine's
+  asynchronous unload; `Bukkit.unloadWorld` is not supported on this engine. `unload(name, true)`
+  of a registry world first runs that durable save and, when it fails, refuses the unload and
+  leaves the world loaded; a stopping server skips the save (the engine normally answers
+  `SERVER_STOPPING`). `delete` requires the world to be unloaded.
 - **Autoload.** Worlds with `autoload` are loaded on the global tick after `ServerLoadEvent`
   (STARTUP), i.e. after the default worlds exist. Setting changes are persisted immediately and
   take effect at the next start (RESTART_REQUIRED for loading; LIVE for the file).
@@ -132,24 +157,36 @@ backend (next section). MongoDB/MySQL backends are **planned, not implemented**.
   leaves a template instances could be made from. Nothing writes a template afterwards; it opens
   as role `TEMPLATE` (no commits, no garbage collection). A loaded world is refused because it keeps
   committing and a template must be one consistent moment. The world's stores may be on any
-  backend; the template itself is always written to disk under `awf-templates/`.
+  backend; the template itself is always written to disk under `awf-templates/`. Since Build 50
+  (PR #62) `template.json` and the hidden folder are forced before the move and `awf-templates/`
+  after it, and an empty or `null` `template.json` is an error instead of "no template".
 - **Instances.** `createFromTemplate(template, name)` registers a world with role `INSTANCE` whose
   stores take the template's stores as their read-only base: a chunk the instance never wrote is
   read from the template; a written chunk is the instance's own; a deleted chunk shadows the
   template and is generated again. All instances of a template share one opened template store
   (and its chunk index) in memory and one copy on disk. A template cannot be deleted while any
-  world is an instance of it.
-- **Slime import.** `importSlime(file, creator, generator, autoload)` converts a `.slime` file as
-  SourbyCraft's former Slime world manager wrote it — format **v12** (zstd, light as two booleans
-  per section, entities wrapped in a compound) and **v13** (zlib, a POI/tick flags byte) — into
-  the new world's stores, then loads it. Each chunk becomes the engine's own chunk NBT with status
+  world is an instance of it. Since Build 50 (PR #62) every load path, a plugin's
+  `Bukkit.createWorld` of a managed instance included, refuses an instance whose
+  `awf-templates/<t>/template.json` is missing (`AwfEngine.requireTemplate`), instead of opening it
+  as an empty or regenerated world whose next commits would replace its content.
+- **Slime import.** `importSlime(file, creator, generator, autoload)` converts a `.slime` file
+  into the new world's stores, then loads it. Two layouts are read: **v12** (zstd, light as two
+  booleans per section, entities a list under `entities` in a compound) and **v13** (a POI/tick
+  flags byte; the blobs are zlib as SourbyCraft's former Slime world manager wrote them or zstd as
+  AdvancedSlimePaper writes them, told apart by each blob's magic bytes; entities a bare list or,
+  as AdvancedSlimePaper writes them, a compound holding `entities`). Tests:
+  `SlimeImporterTest.version12FilesAreReadToo` and `advancedSlimePapersOwnVersion13IsRead` (a
+  fixture built in the test in AdvancedSlimePaper's v13 layout: zstd, compound entities), plus the
+  three real island files of the run below. A v13 chunk flag bit this build does not know has its
+  value skipped and, since Build 50 (PR #62), is named as `chunk-flags.0x<bit>` in the single
+  "did not keep" WARN of the import. Each chunk becomes the engine's own chunk NBT with status
   `full`; entities and POI go to their own stores; block entities, ticks (v13) and
   `ChunkBukkitValues` are kept. Light is **not** imported (the old writer recorded it against the
   wrong section heights), so chunks are lit on first load. The chunks keep their data version, so
   the data fixers upgrade older ones. Sections start at -4 for `normal` and 0 for `nether`/`end`.
-  The default generator for chunks the file does not hold is `void`. AdvancedSlimePaper files are
-  not supported unless they use one of these two layouts. zstd comes from the engine's runtime
-  libraries and is called reflectively. The source file is only read.
+  The default generator for chunks the file does not hold is `void`. Other Slime versions are
+  refused. zstd comes from the engine's runtime libraries and is called reflectively. The source
+  file is only read.
 - **Command.** `/awf import <file> <name> [normal|nether|end] [vanilla|generator=Plugin[:id]]
   [autoload]` — the file is read from `awf/imports/` under the server directory; an absolute
   path or a `..` segment is refused (`AuroraWorldFiles.confine`).
@@ -157,9 +194,22 @@ backend (next section). MongoDB/MySQL backends are **planned, not implemented**.
   large_biomes] [generator=Plugin[:id]] [seed] [autoload] | create <n> from <template> [autoload] |
   load <n> | save <n> | unload <n> [nosave] | delete <n> confirm | autoload <n> on|off |
   template list | template save <world> <template> | template delete <template> confirm |
-  compact <world|all>`, permission `sourbycraft.command.awf`. `compact` forces every open store of
-  the world into a full index on the storage lane and prints `full: yes/no` per store (see
-  *Delta generations*).
+  clone <world> <new> [autoload] | set <world> <spawn|difficulty|pvp|monsters|animals|biome|bounds|prune>
+  <value|none> | compact <world|all>` (plus `import`, above, `export`/`convert`, under *`.awf` world
+  files*, and `multiprofile` and `redis`, which have their own permission nodes), permission
+  `sourbycraft.command.awf`.
+  `compact` forces every open store of the world into a full index on the storage lane and prints
+  `full: yes/no` per store (see *Delta generations*). Since Build 50 (PR #62): delete, import,
+  export, convert, clone, set, template delete and `unload … nosave` also check
+  `sourbycraft.command.awf.admin`, which the command node implies unless that node is set on the
+  sender, so operators and existing holders keep every subcommand, and setting it to `false` (in a
+  permissions plugin, or as a child of a `permissions.yml` node) takes those eight away and keeps
+  the rest (`list`, `info`, `create`, `load`, `save`, `unload` with saving, `autoload`,
+  `template list`/`save`, `compact`; LIVE: checked on each execution). `/awf` starts no new work once shutdown
+  has begun or after a failed startup (`AuroraRuntime.stopping()`). `set <world> spawn x y z [yaw]`
+  refuses a spawn that is not finite with |x| and |z| ≤ 29,999,984, y in [-2032, 2032) and a finite
+  yaw (`WorldProperties.Spawn`). `unload` whose result is `FAILED` after the world is gone prints
+  "Unloaded <name>, but AWF could not confirm its last commit (see the server log)".
 
 Verification (2026-10-06, local, macOS, JDK 25, 2 GiB heap, one server, no players): create →
 setblock → `/awf save` → unload → stores present and 0 `.mca` → load → block present → clean
@@ -188,22 +238,28 @@ A defect this found: `AwfRegionStorage.read` returned "not ours" for any chunk t
 written, so instances never read their template and the engine fell through to (absent) region
 files. It now reads through the world's base first.
 
-### Redis backend (`aurora.awf.backend = "redis"`)
+### Redis backend (`aurora.awf.backend: redis`)
 
 Status: implemented and tested against a real Redis (unit/integration tests start their own
 `redis-server`; CI installs one and requires them to run) and in a local server end-to-end run.
 Not qualified under player load or over a real network. MongoDB/MySQL backends are **not
-implemented**.
+implemented**. The Build 50 changes to this backend (PR #62: commit confirmation, lease identity,
+URI refusal, reply bounds) are code written and statically reviewed, not built and not tested by
+the owner; the runs described here predate them.
 
 - **What it is.** Every AWF store of every world in Redis instead of `<storage>.awf/`
-  directories, so several servers can share world storage. Selected by `aurora.awf.backend =
-  "redis"`; applies to every AWF world on the server (managed worlds and `aurora.awf.worlds`).
+  directories, so several servers can share world storage. Selected by `aurora.awf.backend:
+  redis`; applies to every AWF world on the server (managed worlds and `aurora.awf.worlds`).
   Templates stay on disk under `awf-templates/` on each server; instances on Redis read through
   them. RESTART_REQUIRED, like every `aurora.awf` key.
 - **Client.** SourbyCraft's own RESP2 client (`awf/redis/RedisClient`), no new dependency: a
   bounded connection pool, `AUTH` (password or ACL user), `SELECT`, TLS with host-name
   verification (`rediss://`), a timeout on every connect, read and pool wait. A connection that
-  fails mid-reply is closed, never reused. Credentials are never logged.
+  fails mid-reply is closed, never reused. Credentials are never logged. Since Build 50 (PR #62)
+  a reply is bounded (a bulk string of at most 65 MiB, at most about 8.4M values and 256 MiB per
+  reply, nested values included) and any RESP framing error, a malformed number included, is an
+  `IOException`; URI parse errors never quote the URI, and log redaction masks everything up to the
+  last `@`.
 - **Layout.** Per store, four keys sharing one hash tag (one cluster slot):
   `<prefix>{<storage id>}:chunks` (hash `x,z` → chunk bytes), `:deleted` (set),
   `:gen` (counter), `:lock` (lease).
@@ -212,11 +268,18 @@ implemented**.
   of memory. A dropped connection leaves the commit applied or not; AWF commits the same chunks
   again, which is idempotent for the chunk bytes — but not for the lease guard: see defect D2 under
   *Backend failure* below.
-- **Durability.** With `wait-for-aof = true` (default) each commit waits for `WAITAOF 1 0`: it
-  returns once Redis has written it to its append-only file. Redis without AOF, or older than
-  7.2, is reported once in the log and commits are then acknowledged from Redis's memory —
-  as durable as that Redis's own persistence settings. Redis keeps no older generations, so
-  `retained-generations` does not apply.
+- **Durability.** With `wait-for-aof: true` (default) each commit waits for `WAITAOF 1 0`: it
+  returns once Redis has written it to its append-only file. Since Build 50 (PR #62) the commit
+  script and `WAITAOF` go out as one pipeline on the same pooled connection
+  (`RedisClient.evalThen`; before, `WAITAOF` was a separate call that could take another connection,
+  and `WAITAOF` waits only for the last write of the connection it runs on), and `WAITAOF` waits
+  at most half of the time a call may still take (2500 ms with the default `timeout-ms` of 5000,
+  less near the shutdown deadline). A commit Redis applied but did not confirm in that time fails,
+  its chunks stay dirty and are committed again (idempotent for the chunk bytes; the commit and
+  renew scripts accept this store's own last-writer token, so the lease is not lost over it).
+  Redis without AOF, or older than 7.2, is reported once in the log and commits are then
+  acknowledged from Redis's memory — as durable as that Redis's own persistence settings. Redis
+  keeps no older generations, so `retained-generations` does not apply.
 - **One writer per world (lease).** Opening a store for writing takes a lease
   (`lease-seconds`, default 60) renewed every third of that. Another server opening the same world
   is refused until the lease is released (unload, delete, clean stop) or expires. Every commit
@@ -225,9 +288,19 @@ implemented**.
   last commit's token (`:writer`, written by every commit) is this store's own (a commit Redis
   applied whose reply was lost). Otherwise the commit is refused and the chunks stay dirty. A
   store stays on lease renewal for as long as it is open, also after losing the lease, so renewal
-  or the next commit takes it back under the same rule (logged). The lease names the server by a hash of
-  `HOSTNAME` (or `/etc/hostname`) and the server directory, so the same server restarting after a
-  crash takes its own lease back at once; any other server waits for expiry. All of a server's
+  or the next commit takes it back under the same rule (logged). Lease tokens are
+  `owner/incarnation/store` (Build 50, PR #62; `awf/redis/fabric/NodeIdentity`): the owner is a
+  hash of the random id persisted in `awf/node-id`, the host name (`HOSTNAME` or `/etc/hostname`)
+  and the server directory; the incarnation is new for every boot. While a lease is live only the
+  incarnation holding it, or this server's previous incarnation, takes it over. The previous
+  incarnation counts only when it is proven stopped through the `awf/node.lock` handoff (each
+  process holds that lock for its whole life) and was recorded under the same lock-file fingerprint
+  (device, inode and, on Linux, the kernel boot id), so a server restarting after a crash on the
+  same host and boot takes its leases back at once. Everything else waits for expiry: a second
+  process in the same directory, a copied directory with the same host name and path (also one
+  copied while the server ran), a host reboot, or a platform without file keys. The upgrade to
+  Build 50 changes the owner value once, so a server that crashed on an older build waits for its
+  old leases to expire (a clean stop releases them first). All of a server's
   renewals go out as one pipeline per pass (one round trip however many stores are open; until
   2026-10-14 they were serial, so N stores × `timeout-ms` could outlast the lease), and a pass
   slower than half the renewal period is logged as a WARN (AWF-6). Since 2026-10-20 every script
@@ -239,16 +312,30 @@ implemented**.
   saved are not measured. A store the engine opens and
   then does not use — prepared for a world whose creation failed (`AwfEngine.unprepare`), a
   duplicate open of an already-open folder, an export's read-only store — is closed, releasing
-  its lease (AWF-5).
+  its lease (AWF-5). Since Build 50 (PR #62): `delete` and `retire` are each one script that is
+  refused while any lease exists (so an export's retire after a crash waits until the crashed
+  lease expires and is retried at the next load); a renewal that succeeds more than
+  `lease-seconds` after the previous extension (a request Redis ran late retook a lapsed lease and
+  its reply was lost) logs one WARN per pass; and `/perf awf` shows an `AWF Redis leases` row
+  (held, lost, or not extended for more than two renewal periods) while the backend is registered
+  and a storage is open.
 - **Opening is lazy.** A store reads only chunk coordinates (`HSCAN … NOVALUES`, `HKEYS` before
   Redis 7.4); chunk bytes are fetched one `HGET` at a time when the engine reads that chunk. Over
   a real network every chunk read pays one round trip; there is no prefetch yet.
 - **Requirements.** Redis 7.0+ (`#!lua`), an eviction policy that cannot evict these keys
   (`noeviction` or `volatile-*`; an `allkeys-*` policy is warned about at start), AOF for durable
   commits.
-- **Config** (`[aurora.awf.redis]`): `uri` (or env `SOURBYCRAFT_AWF_REDIS_URI`; the file wins),
-  `key-prefix` (`sourbycraft:awf:`), `pool-size` (8), `timeout-ms` (5000), `lease-seconds` (60),
-  `wait-for-aof` (true).
+- **Config** (`aurora.awf.redis.*` in `sourbycraft_config/aurora.yml`, RESTART_REQUIRED, not
+  seeded into a new file so that a seeded `uri` cannot shadow the environment variable): `uri` (or
+  env `SOURBYCRAFT_AWF_REDIS_URI` when the key is absent; the file wins), `key-prefix`
+  (`sourbycraft:awf:`), `pool-size` (8), `timeout-ms` (5000), `lease-seconds` (60), `wait-for-aof`
+  (true). Since Build 50 (PR #62) an unusable URI (the key present but not a string that parses,
+  or, with the key absent, an environment value that does not parse, or a config file that may
+  hold the key but cannot be read, unless a readable `aurora.yml` sets the URI) is never replaced
+  by `redis://127.0.0.1:6379/0`: the backend is not registered, one ERROR names the key (never the
+  value), and every world stored on Redis fails to load with "not registered (the Redis backend is
+  misconfigured: …)". The default server is used only when neither the key nor the variable is
+  set. The shutdown budget key is `aurora.awf.shutdown-deadline-ms` (see D6), not a Redis key.
 - **Not covered by the backend:** `aurora.awf.export` back to region files works through
   `retire` (keys renamed `…:exported-<millis>`), but region files are written locally.
 
@@ -265,12 +352,17 @@ generation-guarded take-back above is the fix, with tests for both the commit an
 
 #### Backend failure (Redis gone / lease lost on a running server)
 
-Build 47 release gate *backend failure*. **State: local scenarios PASS after fixes (2026-10-14
-rerun below); D1–D3, D5 and a write-hang found in the rerun (D7) fixed in the working tree,
-uncommitted, not in CI; D4 only mitigated (log line), D6 open (report only).** Local laptop
-evidence only, not a qualification. **Update 2026-10-22: D4 and D6 implemented (working tree,
-uncommitted; see "Fixes 2026-10-22" below), unit-tested and shown once on the agent test server
-with a SIGSTOPped loopback Redis; Redis over a network still not exercised.**
+Build 47 release gate *backend failure*. **State: local scenarios pass after fixes (2026-10-14
+rerun below); D1–D3, D5 and a write-hang found in the rerun (D7) fixed, D4 closed by MC 0072 and
+D6 by one shutdown deadline (MC 0071, "Fixes 2026-10-22" below). All of these are committed on
+26.2 and in the `v26.2-r50` tag (D4/D6: commit `7420098`; the recovery/commit log windows:
+`9a6d0c7`); their unit tests are in the server suite.** Evidence limits unchanged: local laptop
+and agent test server only, loopback Redis (plus a userspace-proxy approximation in
+[awf-backend-failure-2026-10-22.md](../development/awf-backend-failure-2026-10-22.md)), no
+players; Redis on a separate host over a real network has not been exercised. Not a
+qualification. Build 50 (PR #62) changed the commit/`WAITAOF` path, the lease identity and the
+shutdown reporting (*Build 50 changes* below), so these runs are NEEDS RETEST on the Build 50
+candidate.
 
 **Designed behavior (from code, before testing).**
 - *Redis gone.* Every call fails within `timeout-ms` (connect, read and pool wait each bounded;
@@ -291,7 +383,7 @@ with a SIGSTOPped loopback Redis; Redis over a network still not exercised.**
 **Setup.** Jar `rc-cbef3fb9.jar` (sha256 `975d3bda…`, head `cbef3fb9` tree), Apple M2, 16 GiB, macOS
 27.0.1, JDK 25.0.2, `-Xms2G -Xmx2G -XX:+UseG1GC`; `redis-server` 8.10.2 started for the run on
 127.0.0.1:6391 (`appendonly yes`, `appendfsync everysec`, `noeviction`); no players; view distance 4.
-`sourbycraft_config/aurora.yml`: `[aurora.awf] worlds = ["world"]`, `backend = "redis"`,
+`sourbycraft_config/aurora.toml` (the pre-Build-49 TOML file this run used): `[aurora.awf] worlds = ["world"]`, `backend = "redis"`,
 `commit-interval-seconds = 5`, `resident-chunks = 1` (forces reads of committed chunks back from
 Redis), `commit-attempts = 3`; `[aurora.awf.redis] uri = "redis://127.0.0.1:6391/0"`,
 `lease-seconds = 15` (shortened so expiry happens in the run), `timeout-ms` default 5000. Global TOML
@@ -349,7 +441,7 @@ on the lock/gen keys. Block checks in game via `fill X Y Z X Y Z minecraft:iron_
 - D6 (risk) — a frozen Redis makes `stop` take up to stores × (`commit-attempts` + 1) × `timeout-ms`
   (105 s here for 9 stores); there is no overall shutdown deadline for AWF.
 
-**Fixes (2026-10-14, working tree, uncommitted; SourbyCraft-side only, no Minecraft/Paper patch).**
+**Fixes (2026-10-14; since committed to 26.2, in `v26.2-r50`; SourbyCraft-side only, no Minecraft/Paper patch).**
 - **D1** (`AwfRegionStorage.read`/`readStored`/`fence`/`recovered`, `AwfRegionStorage.java:151-215`):
   a read of stored bytes is retried (3 attempts, 100/400 ms backoff, no new attempt after 5 s, none
   on a region thread or after close). If it still fails the position is *fenced* before the
@@ -385,8 +477,15 @@ on the lock/gen keys. Block checks in game via `fill X Y Z X Y Z minecraft:iron_
   reconfiguration, that DENYs only records whose throwable (or a cause) is a `RepeatedReadFailure` and
   whose logger is not SourbyCraft's (the cause search goes at most 8 levels deep); the first failure of a window still logs in full, and the summary counts the repeats but does not list their positions. Harness
   `patch-w4-redisflood-1`, same scenario: Moonrise ERRORs 1458 → 4, all ERRORs 1461 → 7, lines
-  3099 → 190, bytes 1.23 MB → 24.9 KB. Since 2026-10-22 (working tree, opus-49-backend) the recovery INFO "read … again" and the WARN of a failed periodic commit use the same per-storage windowing (`ReadFailureLog.recoveryLog`, 10 s; `commitFailureLog`, 60 s, first with its stack, summary when the window ends or a commit succeeds): agent test server, 529 recovery lines in one second and 28 commit WARN records (603 lines) in a 60 s outage before; after the change one record with its stack and one summary per storage per 60 s window (S5: 129 lines in 75 s). Logging only; evidence [awf-backend-failure-2026-10-22.md](../development/awf-backend-failure-2026-10-22.md). The POI read path was not exercised live (unit/code-path only).) Not covered: a POI or entity store whose
+  3099 → 190, bytes 1.23 MB → 24.9 KB. Since 2026-10-22 (commit `9a6d0c7`, in `v26.2-r50`; found in the opus-49-backend run) the recovery INFO "read … again" and the WARN of a failed periodic commit use the same per-storage windowing (`ReadFailureLog.recoveryLog`, 10 s; `commitFailureLog`, 60 s, first with its stack, summary when the window ends or a commit succeeds): agent test server, 529 recovery lines in one second and 28 commit WARN records (603 lines) in a 60 s outage before; after the change one record with its stack and one summary per storage per 60 s window (S5: 129 lines in 75 s). Logging only; evidence [awf-backend-failure-2026-10-22.md](../development/awf-backend-failure-2026-10-22.md). The POI read path was not exercised live (unit/code-path only).) Not covered: a POI or entity store whose
   read succeeded while the chunk store's failed keeps committing (derived from its own stored data).
+  *Build 50 (PR #62, code written and statically reviewed; not built; not tested by the owner):* a
+  region storage's fence now also makes the POI storage of the same dimension refuse writes and
+  deletes of that position (counted as refused writes) until the region storage reads the chunk
+  back on the load path, which lifts both. Entities are deliberately not fenced: a refused entity
+  save would lose entities that moved into the regenerated chunk, so its structure entities can sit
+  beside the stored ones. Fences live in memory only; a POI storage opened after the fence was set
+  does not inherit it.
 - **D2** (`RedisStore.COMMIT_SCRIPT` :54, `RedisBackend.RENEW_SCRIPT` :59): every commit writes its
   lease token to `<prefix>{id}:writer`; a free lease is taken back when the generation is unchanged
   *or* the last writer is this store's token. `delete` removes `:writer`, `retire` drops it.
@@ -410,15 +509,28 @@ on the lock/gen keys. Block checks in game via `fill X Y Z X Y Z minecraft:iron_
 - **D6** not changed: a frozen Redis still makes `stop` take stores × attempts × `timeout-ms` (115 s
   in the rerun). No overall AWF shutdown deadline. (Superseded 2026-10-22, below.)
 
-**Fixes 2026-10-22 (D4, D6; MC feature patches 0071/0072).**
+**Fixes 2026-10-22 (D4, D6; MC feature patches 0071/0072; commit `7420098`, in `v26.2-r50`).**
 - **D6 — one AWF shutdown deadline** (`aurora.awf.shutdown-deadline-ms`, default 30000, 1..2^31-1,
-  RESTART_REQUIRED, read in `AwfSettings.readEarly`). `AwfEngine.beginShutdown()` is called first in
-  `SourbyCraftBootstrap.close()` (Sourby code, no patch), i.e. before the storage lane drains, before
-  the region saves (whose last region per world runs `MoonriseRegionFileIO.flush`, then the AWF
-  flush and close of that world) and before `AwfEngine.closeAll()` after the chunk I/O drain. It
+  RESTART_REQUIRED, read in `AwfSettings.readEarly`). Where it starts: `RegionShutdownThread` first
+  waits up to 60 s for the region scheduler to halt, then calls `MinecraftServer.stopServer`, which
+  disables plugins, waits for their async tasks and then, through MC feature patch 0081, calls
+  `SourbyCraftBootstrap.close()`; there `AwfEngine.beginShutdown()` runs right after the SourbyMod
+  shutdown (`ModLoader.shutdown()`). The budget therefore does **not** cover the scheduler halt,
+  plugin disable or mod shutdown. It does start before the storage lane drains (the
+  `ResourceGovernor` shutdown at the end of `close()`), before the region saves (whose last region
+  per world runs `MoonriseRegionFileIO.flush`, then the AWF flush and close of that world) and
+  before `AwfEngine.closeAll()` after the chunk I/O drain (MC 0019/0071). (Until PR #62 this
+  paragraph said `beginShutdown()` was the first call of `close()`; the code comment that
+  described it sat above the mod step and was moved above `beginShutdown()` in PR #62.) It
   creates one `AwfShutdownBudget` (monotonic `System.nanoTime` deadline) shared by everything after
   it, so the budget also covers the vanilla chunk save: a world whose save alone takes longer than
-  the deadline gets its final commit refused (raise the key). Mechanisms: the commit lock
+  the deadline gets its final commit refused (raise the key). What the deadline cuts is lock waits,
+  the start of each commit attempt and Redis calls (lease release included). **A FILE commit that
+  is already writing (its object, generation and pointer files and their fsyncs) is not
+  interrupted** and can hold the stop past the deadline on a stalled disk; no thread is interrupted
+  (`AwfShutdownBudget`, `AwfBackend.beginShutdown` javadoc). Running such commits on a daemon thread
+  that the stop abandons at the deadline is not implemented. Since Build 50 (PR #62) the same key
+  also bounds the chunk I/O drain of an `AuroraWorlds` save (see *Build 50 changes*). Mechanisms: the commit lock
   (`AwfWorld.commitLock`, now a `ReentrantLock`) and the storage's transition lock are taken with
   `tryLock(remaining)`; no commit attempt starts once the deadline has passed and an attempt cut
   by it is never retried; `RedisClient.deadline` cuts every call's pool wait, connect, write-progress
@@ -434,7 +546,13 @@ on the lock/gen keys. Block checks in game via `fill X Y Z X Y Z minecraft:iron_
   Outcomes: CONFIRMED, FAILED (backend error before the deadline), REFUSED (no attempt could start:
   certainly not on the backend), UNCERTAIN (sent or running, unanswered: "may or may not have been
   applied", never "failed"). A clean shutdown logs `AWF-SHUTDOWN-OK`. MC 0071 turns a non-zero
-  `closeAll()` into `abnormalExit` (exit status 70). Tests: `AwfShutdownDeadlineTest` (7: shared
+  `closeAll()` into `abnormalExit` (exit status 70). Build 50 (PR #62; code written and statically
+  reviewed, not built, not tested by the owner): stores prepared but never taken by a storage are
+  closed at shutdown before the backend shuts down (releasing their Redis leases); a close that
+  throws before it reported counts as FAILED (exit 70); a storage already reported (REFUSED) during
+  the region saves is neither closed nor reported again; a Redis commit asked for after the deadline
+  fails before anything is sent (REFUSED), while one cut inside its pipeline stays UNCERTAIN.
+  Tests: `AwfShutdownDeadlineTest` (7: shared
   budget, a lock held by a hung commit cannot extend it, exact counts on expiry, sent vs never-sent,
   expired budget attempts nothing, confirmed shutdown keeps every commit, setting validation, real
   redis-server SIGSTOPped: 3 stores end at the 1500 ms deadline, ~1.7 s, where the old path would
@@ -503,7 +621,14 @@ playable in memory while Redis is down (writes to it are dropped at the store, s
 such a chunk are lost by design); the load-path check is the `moonrise$readData` frame, so a
 Moonrise read that is not a chunk load (`ChunkMap.read`, e.g. a plugin reading chunk NBT) and
 succeeds while the regenerated chunk is still loaded would lift the fence early (not observed, not
-tested); a Redis-over-network run and CI have not exercised any of this.
+tested); a Redis-over-network run has not exercised any of this, and CI runs only the unit tests
+named above (against its own local `redis-server`), not these server scenarios.
+
+Status 2026-10-25 (PR #62): the close-time line quoted in the C3 rows ("could not commit …
+uncommitted chunks are lost", later "could not confirm the final commit … lost") now reads "could
+not confirm the final commit of … on close; the chunks written since its last confirmed commit may
+or may not have been applied" (`RegionFileStorageHooks.close`); the rows keep the text those runs
+logged.
 
 Side observation, not root-caused and not tied to Redis: `save-all` threw `IllegalStateException:
 Ticket already propagated` (`SaveAllCommand.java:108` → `TicketHolder.propagate`) 2 times in ~90
@@ -537,6 +662,17 @@ One file holds a world's `region`, `entities` and `poi` chunk streams plus metad
   still takes any `Path`: a plugin has the file system anyway.
 - `AwfFile` (version 1: one stream, SHA-256) stays as the immutable image the qualification tests
   use.
+- Optional metadata keys: `properties` (WorldProperties as JSON, since 2026-10-07) and, since
+  Build 50 (PR #62), `plugin-data`: the world's persistent data container as base64 of the
+  gzip-compressed NBT compound. Only `/awf convert` writes `plugin-data` (from the Slime world's
+  `BukkitValues`), and only when it fits one metadata value (65,535 base64 characters); a larger
+  one is not written and is named in the conversion's WARN. `/awf import` of an `.awf` file
+  (`AuroraWorlds.importWorld`) decodes it before creating anything (a malformed value fails the
+  import) and merges it into the new world's container once the world is created. The format
+  version stays 2 and older readers ignore the key. `/awf export` still does not write an existing
+  world's PDC. Also since Build 50, the `.awf` and `AwfFile` index bounds are checked without
+  overflow, so an entry with an offset near `Long.MAX_VALUE` is refused at open instead of
+  allocating up to 2 GiB on read.
 
 Measurements (2026-10-06; `AwfLoadBenchmarkTest`, run by hand with `AWF_BENCH_FILE`; macOS
 aarch64, 8 cores, JDK 25.0.2; median of 7 runs after a warm-up; one session, not certified, on a
@@ -584,6 +720,10 @@ Sourby side: `AwfEngine`, `AwfRegionStorage`, `AwfSettings`.
   any path element matched, so a managed world named like a directory above the server (`home`
   for `/home/mc/server`) attached every world to AWF and could make the main world read that
   world's template chunks (AWF-1; `AwfRegionStorageTest.anAncestorDirectoryNamedLikeAManagedWorldDoesNotAttach`).
+  Since Build 50 (PR #62) a world managed through the AuroraWorlds API matches by its dimension
+  name only (`AwfRegionStorage.managedNames`), so in the 26.2 layout it claims only its own
+  dimension folder, never every dimension of a level folder with the same name;
+  `aurora.awf.worlds` and `aurora.awf.export` still match the dimension or the level folder.
 - **Hooked paths.** Moonrise's `readData`/`startWrite`/`finishWrite` (the chunk system's I/O),
   and vanilla `read`, `write` and `scanChunk` (structure checks, upgrade tools), `flush` and
   `close`.
@@ -600,7 +740,10 @@ Sourby side: `AwfEngine`, `AwfRegionStorage`, `AwfSettings`.
   the load where commits matter, so "the writes since the last interval" could be many intervals
   (AWF-3). Each driver step has its own `try`/`catch`, and a stalled collector no longer stops commits
   (`AwfMaintenanceIndependenceTest`, `AwfMaintenanceDriverTest`). Periodic commits still stop if the
-  driver thread itself stalls. At shutdown, feature patch 0019 commits and
+  driver thread itself stalls; since Build 50 (PR #62) the metrics collector WARNs once when the
+  driver has finished no pass for 30 s and logs an INFO when passes resume
+  (`MetricsRuntime.watchAwfMaintenance`, checked once a second, stale collections included), but
+  nothing watches the driver if the metrics collector itself failed to start. At shutdown, feature patch 0019 commits and
   closes every open storage in `MinecraftServer.stopServer`, right after
   `MoonriseRegionFileIO.flush(server)`, the point where every chunk save has reached its storage.
   This is needed because Folia's shutdown never calls `RegionFileStorage.flush()`/`close()`; CI
@@ -622,7 +765,7 @@ Sourby side: `AwfEngine`, `AwfRegionStorage`, `AwfSettings`.
 - **Once attached, attached.** If a store exists for a folder, it is opened even when the world is
   no longer listed, with a warning. Writing to the region files underneath would be overridden by
   the older AWF data on a later run.
-- **Export.** `aurora.awf.export = ["world"]` (and the world removed from `worlds`) writes every
+- **Export.** `aurora.awf.export: [world]` (and the world removed from `worlds`) writes every
   chunk and deletion in the store into the region files at the next load, through the storage's
   ordinary write path, flushes, then retires the store (FILE: renamed to
   `<folder>.awf.exported-<millis>`, kept, not deleted). A failure part-way fails the world load and
@@ -631,35 +774,55 @@ Sourby side: `AwfEngine`, `AwfRegionStorage`, `AwfSettings`.
 - **Failure behavior.** A store that cannot be opened fails the world load rather than falling
   back to region files. A commit that fails after `aurora.awf.commit-attempts` leaves the chunks
   dirty and logs a warning; the next interval retries. A chunk over 64 MiB is refused as an I/O
-  error.
+  error. Since Build 50 (PR #62) cleanup that runs after a FILE commit point (pruning old
+  generations, deleting unreferenced objects) no longer fails the commit: it logs a WARN at most
+  once a minute per store and kind, and the next commit retries it, so a persistent cleanup failure
+  shows as that WARN while disk use grows (no metric counts it). See *Build 50 changes* for the
+  other store-integrity checks.
 - **One writer per store.** Opening a folder that is already open throws. Two writers would each
-  commit an index missing the other's chunks.
+  commit an index missing the other's chunks. Since Build 50 (PR #62) `open` and `prepareStores`
+  reserve the folder before the backend opens anything, so a concurrent second open fails fast
+  ("already being opened", or "being opened by another load" for a prepare) without touching the
+  store (the `aurora.awf.export` branch of `open` runs before that reservation).
 - **Commit cost.** Retained generations' object names are kept in memory. A commit only
   considers objects of the generation that fell out of retention, plus those a failed commit
   wrote, for deletion. The object directory is scanned once, when a writable store opens, for
-  objects a crash left behind. By default (`aurora.awf.delta-generations = false`) a commit is still
+  objects a crash left behind. By default (`aurora.awf.delta-generations: false`) a commit is still
   O(chunks in the storage): the whole chunk index is rewritten, hashed and forced. With the opt-in
   flag on, a commit writes a delta of the changed entries and compacts into a full index every 32
   hops or once replaying the chain would cost as much as the full index (AWF-7, see *Delta
   generations*). Either way the object forces are still O(objects) per commit. Unmeasured on large
   worlds. Every NBT write is serialized once more into a byte array.
 - **Backends.** `AwfStore` is the backend contract: atomic commit, remembered deletions, caller
-  owns arrays. `AwfBackend` selects where stores live: `aurora.awf.backend`, default `file`, the
-  only one shipped. Another backend is server-internal code registered with
-  `AwfBackend.register` before listed worlds load; SourbyCraft ships no database backend or driver.
-  A listed or exporting world whose backend is not registered fails to load; there is no
-  fallback. Storage ids are region folders relative to the server directory (`world/region`).
+  owns arrays. `AwfBackend` selects where stores live: `aurora.awf.backend`, default `file`.
+  SourbyCraft ships two backends: `file` (built in) and `redis` (`awf/redis/RedisBackend`, its own
+  RESP client and no database driver, registered by the engine when `aurora.awf.backend: redis`;
+  see *Redis backend* above). It ships no MongoDB or MySQL backend. Another backend is
+  server-internal code registered with `AwfBackend.register` before listed worlds load. A listed
+  or exporting world whose backend is not registered (including a Redis backend refused for
+  invalid settings) fails to load; there is no fallback. Storage ids are region folders relative
+  to the server directory (`world/region`). `READ_ONLY` opens must never create or delete
+  anything; since Build 50 (PR #62) the FILE backend keeps that for `READ_ONLY` and `TEMPLATE`
+  opens too (no recovery, temp cleanup or directory creation).
 - **Observability.** `/perf awf` shows resident, dirty and evicted chunks, pending commits and the
   oldest one's age, commit p50/p95/p99, reads versus region-file fall-throughs and deletes,
-  retries, failures and bytes written, per storage. While non-zero it also shows
+  retries, failures and bytes written, per storage. Since Build 50 (PR #62) it also shows
+  `AWF loaded worlds` (dimension folders with an open AWF storage), per storage `<storage> oldest
+  dirty age` (milliseconds, truncated, since the oldest unsaved chunk became dirty, i.e. its first
+  write since it was last clean; a chunk rewritten while a commit carried its previous bytes counts
+  from that commit's snapshot; `no dirty chunk` when none is; `AwfMetrics.Snapshot.oldestDirtyMillis`),
+  the read-failure row also when only refused writes are non-zero, and `AWF Redis leases` with the
+  Redis backend. All LIVE (read at command time); the oldest-dirty walk is in memory over the dirty
+  chunks only and has no unit test. While non-zero it also shows
   `Chunk-system read errors collapsed`, the number of repeat read failures whose chunk-system log lines
   `RepeatedReadFailureLogFilter` dropped since start (LIVE: read at command time, a count since JVM start).
 - **Evidence.** Unit tests in `awf/`: `AwfRegionStorageTest`, `AwfSettingsTest`, `AwfBackendTest`,
   and the tombstone and garbage-collection tests in `AwfWorldStoreTest` and `AwfWorldTest`.
   `AwfQualificationTest` (below). CI step "Boot twice with Aurora World Fabric storing the world"
-  boots a fresh world with `worlds = ["world"]`. It checks that a store and a committed generation
+  boots a fresh world with `aurora.awf.worlds: ["world"]` (written to `aurora.yml` since Build 50,
+  PR #62; `aurora.toml` before). It checks that a store and a committed generation
   exist and that no `.mca` file was written, then boots again from the store, then a third time
-  with `export = ["world"]` and checks that region files appear and the store is retired. That
+  with `export: ["world"]` and checks that region files appear and the store is retired. That
   is one small world with no players.
   - **CI run 442 (`1e9a5c1a`, 2026-09-27), green.** First boot: 529 chunks per dimension went
     into AWF, and `committed and closed 9 storage(s) at shutdown` was logged. The second boot
@@ -704,8 +867,10 @@ no performance effect is claimed.
   under the commit lock before it releases the store. After `close()`, the FILE store
   (`AwfWorldStore`) refuses commits. Tests: `AwfLifecycleFenceTest.aCommitQueuedBeforeADiscardCommitsNothingWhenItRunsAfterIt`,
   `aFencedWorldRefusesQueuedCommitsWithoutTouchingTheStore`, `aRunningCommitCompletesAndTheStoreClosesOnlyAfterIt`,
-  `aClosedFileStoreRefusesCommits`. Redis lease release after close is not re-tested here
-  (a clean stop left 0 lock keys in the 2026-10-14 backend-failure run, *Backend failure* above).
+  `aClosedFileStoreRefusesCommits`. Redis lease release after close is not re-tested by these
+  tests; it is covered by `AwfEngineStoreLifecycleTest.anUnpreparedStoreReleasesItsLease` (real
+  `redis-server`: prepare takes the lease, unprepare releases it) and by the 2026-10-14
+  backend-failure run (a clean stop left 0 lock keys, *Backend failure* above).
 - **Pruning keeps non-regenerable data (B77/A2).** `ChunkPruning` keeps a chunk in any of
   these cases:
   - a non-empty `ChunkBukkitValues`
@@ -732,15 +897,23 @@ no performance effect is claimed.
   and values that do not fit. **World PDC (2026-10-20, unit-tested only):** `importSlime` merges
   the file's `BukkitValues` compound into the new world's persistent data container
   (`SlimeImporter.restorePluginData`, existing keys kept) when `start` completes on the global
-  tick, i.e. after `WorldLoadEvent` (a listener on that event does not see it yet); it reaches
-  `level.dat` at the world's next save. `convertSlime` still drops it and says so, because an
-  `.awf` file has no key for a world PDC (exported AWF worlds do not carry theirs either). Tests:
+  tick, i.e. after `WorldLoadEvent` (a listener on that event does not see it yet). The container
+  is the world's `paper/persistent_data_container.dat` (`dimensions/<dim>/data/`), which only that
+  world's `saveLevelData` writes: at a clean stop and when the world is unloaded (the engine's
+  world unload runs it after the chunks), never by autosave, `save-all` or `/awf save` (world PDC
+  has no consistent concurrent snapshot; see the [save-path ledger](persistence-save-paths.md#2-per-kind-of-data)); this
+  paragraph said "`level.dat` at the world's next save" until 2026-10-25. Since Build 50 (PR #62,
+  code written and statically reviewed; not built; not tested by the owner) `convertSlime` writes
+  it under the `.awf` metadata key `plugin-data` and `.awf` import restores it the same way (see
+  *`.awf` world files*); `/awf export` of an existing world still does not carry the world's PDC. Tests:
   `SlimeImporterTest.theWorldsPluginDataIsRestoredIntoTheNewWorldsContainer`. Earlier tests: `SlimeImporterTest.worldPropertiesMapFromTypedValuesAndTheRestIsReportedDropped`,
   `theHeaderOnlyReaderSeesWhatAFullParseSees`, `slimeToAwfToImportKeepsTheProperties`. The service
-  wiring (`AuroraWorldsService.importSlimeInternal`) has no unit test because it needs a running
-  server.
-- **Staged creation (B80/A5, B85), 2026-10-13, local, uncommitted, not in CI; LIVE for every
-  AWF create/load/clone/import, no setting.** `createAfter` composes on store preparation
+  wiring (`AuroraWorldsService.importSlimeInternal`, and since PR #62 `importWorldInternal`) has no
+  unit test because it needs a running server; the `plugin-data` round trip has no test either.
+- **Staged creation (B80/A5, B85), 2026-10-13; committed as MC feature patch 0029 and Paper
+  feature patch 0014 (both in `v26.2-r50`); LIVE for every AWF create/load/clone/import, no
+  setting.** Evidence: the local runs at the end of this item; no CI server test covers it.
+  `createAfter` composes on store preparation
   instead of joining it, then hops to the global tick. There it calls
   `CraftServer#sourbycraft$createWorldStaged` (Paper feature 0014), which runs `createWorld` up to
   `WorldInitEvent` (`MinecraftServer#initWorldBeforeSpawn`, MC feature 0029), computes the chunk
@@ -778,7 +951,9 @@ with the in-process tests that pin each finding. Unit-tested only; no server boo
 attributed to it. No performance effect is claimed.
 
 **The paths.** Region threads call `AwfRegionStorage.write` (read side of the transition lock,
-`AwfWorld.write`: `owned.put` then `dirty.put(version)`, both `ConcurrentHashMap`). Commits
+`AwfWorld.write`: one `owned.compute` that installs the new dirty entry and adds its key to the
+dirty index, since Build 50 (PR #62); at the time of this review it was `owned.put` then
+`dirty.put(version)`, both `ConcurrentHashMap`). Commits
 reach the store from three places: `maintain` (periodic, queued on the storage lane),
 `flush` (synchronous `saveNow` off the region threads; on a region thread it only queues a
 save through `maintain`) and `close` (synchronous). All three run `AwfWorld.commit` under
@@ -792,7 +967,13 @@ save through `maintain`) and `close` (synchronous). All three run `AwfWorld.comm
    committed, the chunk stays dirty). Neither loses the write; the store never holds bytes older
    than a version it cleared. Pinned by `AwfConcurrentFlushTest` (8 region-named threads, 40
    rounds, a store that rejects any commit of older bytes over newer and any two commits inside
-   it at once) and `AwfCommitOrderTest` (the 2026-10-07 ordering fix).
+   it at once) and `AwfCommitOrderTest` (the 2026-10-07 ordering fix). *Build 50 (PR #62):* a
+   commit now takes whole entries (bytes and version together) from the dirty index and, after
+   the store accepted it, cleans only the exact entries it carried; a write that replaced an entry
+   meanwhile stays dirty. The same structure closes a race this review did not cover: resident-limit
+   eviction after a commit could drop a concurrent write that the next commit then cleared (PM-023);
+   eviction now removes only the exact clean entry it saw. Code written and statically reviewed;
+   not built; not tested by the owner; no new test pins the eviction case.
 2. *Many regions flushing at once.* Each region-thread `flush` resets the commit clock and calls
    `maintain`, which starts at most one save unless the "no save pending" check races the
    `pendingSaves.offer` of another region's flush. Then a second save queues behind the first
@@ -806,13 +987,16 @@ save through `maintain`) and `close` (synchronous). All three run `AwfWorld.comm
    zero-empty-commit assertion of `flushesFromEveryRegionAtOnceLoseNoWriteAndNeverRegressTheStore`.
 3. *Foreground flush durability.* A `flush` off the region threads returns only after
    `saveNow` committed a snapshot taken after every write that preceded the call (the write's
-   `dirty.put` happens-before the snapshot copy). Pinned by
+   single `owned.compute`, which installs the dirty entry and adds its key to the dirty index,
+   happens-before the snapshot walk; at the time of this review it was the write's `dirty.put`
+   before the snapshot copy). Pinned by
    `AwfConcurrentFlushTest.aForegroundFlushReturnsOnlyOnceEveryEarlierWriteIsInTheStore`,
    which flushes from the test thread while region threads write and flush.
 4. *Bounded queueing.* `MAX_PENDING_SAVES` (16) refuses further saves; `maintain` logs that
    refusal as a failed commit (`lastCommitFailed`). With the pending check in `maintain` the
    duplicate from finding 2 is at most one extra save per racing region, so a world cannot reach
-   the cap through region flushes alone. Not tested beyond the pending-count assertions above.
+   the cap through region flushes alone. Not tested beyond the pending-count assertions above
+   (still true after Build 50: PR #62 added no test, PM-293 is open).
 
 **Open.** The region-thread `flush` leaves the commit clock at 0 after its `maintain`, so the
 next periodic `maintain` commits as soon as anything is dirty instead of waiting a full
@@ -824,7 +1008,7 @@ A `close` racing a region-thread flush is covered by the lifecycle fence tests, 
 **Status.** Implemented and unit-tested; off by default; not booted with the flag on; no wall-time
 gain measured locally.
 
-- **Switch.** `aurora.awf.delta-generations` (TOML boolean, default `false`, RESTART_REQUIRED, read
+- **Switch.** `aurora.awf.delta-generations` (YAML boolean, default `false`, RESTART_REQUIRED, read
   early like the other `aurora.awf.*` keys; anything that is not a boolean is reported as an invalid
   key and reads as `false`). Affects the `file` backend only.
 - **Flag off (default).** Every commit writes a full `index` blob under a format-1 manifest,
@@ -908,7 +1092,15 @@ unit tests plus one local boot (see the end of this list); no soak, no multi-ser
   or chunk-save failure without invoking the unload ticket's callback, so the unload future (and
   the world operation lease) never completed. MC feature patch 0030 runs the unload through
   `WorldUnloadCompletion`: `FAIL_UNKNOWN` on a throw (still rethrown, so the thread's handler stops
-  the server as before), `SUCCESS` otherwise (`WorldUnloadCompletionTest`). The world operation
+  the server as before), `SUCCESS` otherwise (`WorldUnloadCompletionTest`). *Since then:* PR #61
+  made the unload fail when an AWF storage of the world did not confirm its final commit
+  (`WorldUnloadDrain.runWithAwfConfirmation`); PR #62 (code written and statically reviewed; not
+  built; not tested by the owner) throws that case as `WorldUnloadDrain.AwfUnloadNotConfirmed`,
+  which `WorldUnloadCompletion` answers with `FAIL_UNKNOWN` (API `UnloadResult.FAILED`) and one
+  ERROR without rethrowing, so the server keeps running; the world is already unloaded at that
+  point, and `isLoaded` tells this case from an unload that did not happen. Every other failure
+  is still rethrown. A distinct "unloaded but not durable" result value is an API change left to
+  the owner. Neither PR is in a published build. The world operation
   gate now also logs, once, any operation holding its world over 5 minutes, checked once a second
   on the AWF maintenance thread (`WorldOperationGateTest.aLeaseHeldPastTheThresholdIsReportedOnceAndAReleasedOneNever`).
 - **AWF-9 Slime import memory.** Blobs up to 1 GiB, unlimited NBT accounting and a whole-file
@@ -928,6 +1120,117 @@ unit tests plus one local boot (see the end of this list); no soak, no multi-ser
   With no players no region held chunks, so the save tickets fanned out to zero regions ("No regions
   to save"): the boot shows nothing broke, not that the AWF-2 race is gone in a live server; that
   rests on `TicketHolderTest`.
+
+### Build 50 changes (PR #62, 2026-10-25)
+
+**Status: code written and statically reviewed; not built; not tested by the owner.** PR #62 added
+no tests (owner rule for that session); a few existing assertions were edited where they encoded
+behavior the PR changed on purpose. None of this is in a published build: the `v26.2-r50`
+prerelease tag predates PR #61 and PR #62, and how it ships (a later tag or Build 51) is owner
+decision PM-011. No AWF storage key (`aurora.awf.*` outside `aurora.awf.multiprofile.*` and
+`aurora.awf.redis.fabric.*`, which have their own documents; PR #62 added
+`aurora.awf.multiprofile.repository` and `aurora.awf.multiprofile.redis.*` there) was added, renamed
+or re-defaulted, and every one stays RESTART_REQUIRED; two changed meaning:
+`aurora.awf.shutdown-deadline-ms` now also bounds the chunk I/O drain of an `AuroraWorlds` save, and an unusable `aurora.awf.redis.uri` (or
+`SOURBYCRAFT_AWF_REDIS_URI`) is refused instead of falling back to the default server. The
+registry gains an optional `knownStores` array (older builds' Gson ignores it). Per-item status and owner scenarios:
+[BUILD-50-PM-MATRIX.md](../releases/BUILD-50-PM-MATRIX.md), [Tester Owner](../tester%20owner.md).
+The sections above link here where their statement changed.
+
+**Store integrity.**
+- *Eviction race (PM-023).* `AwfWorld` keeps each chunk as one immutable entry (bytes, write
+  version, first-dirty time) in one map; the dirty-key index changes only inside that key's
+  `compute`. A write installs its dirty entry in one step, eviction removes only the exact clean
+  entry it saw, and a commit cleans only the entries it carried. Before, a write racing the
+  post-commit resident-limit eviction could be dropped and then cleared by the next commit while a
+  flush reported DURABLE. In memory only; no on-disk change.
+- *Cleanup after the commit point (PM-070).* Pruning unretained generations (`GenerationStore`)
+  and deleting unreferenced objects (`AwfWorldStore`) run past the commit point and no longer fail
+  a commit that is already durable (which made callers retry and commit yet another generation).
+  A failure logs "AWF store … committed generation N, but …" with its stack at most once a minute
+  per store and kind, counting the failures in between; the next commit retries. A persistent
+  failure grows disk use; no metric counts it.
+- *Object names (PM-071).* Index and delta entries must name lower-case 64-hex objects
+  (`ObjectStore.NAME`); anything else, such as a path, makes the generation a
+  `CorruptGenerationException` ("malformed index line") at open, and `ObjectStore` refuses to
+  resolve any other name, so a copied or hand-edited store cannot name a file outside `objects/`.
+  No SourbyCraft writer produced other names.
+- *Vanished object temp (PM-207).* A pending object whose temporary file was removed outside the
+  server fails one commit attempt ("… disappeared …") and is rewritten by the next, instead of
+  failing every later commit until restart. A temp that vanished from an earlier failed batch can
+  fail the next, unrelated commit once.
+- *Read-only opens (PM-208).* `READ_ONLY` and `TEMPLATE` FILE opens (exports, template reads,
+  the template stores of instances) no longer run recovery, temp cleanup or directory creation, so
+  they cannot delete a live writer's pending files; the next writable open cleans leftovers.
+- *Bounds (PM-206).* `AwfWorldFile` and `AwfFile` index bounds are overflow-safe (see *`.awf`
+  world files*).
+
+**Unload and save durability (PM-001, PM-089, PM-211).**
+- An unload whose final AWF commit is not confirmed completes with `FAIL_UNKNOWN` and an ERROR and
+  no longer stops the server (see AWF-8 above). `/awf unload` then prints "Unloaded <name>, but AWF
+  could not confirm its last commit (see the server log)".
+- `AuroraWorlds.unload(name, true)` and `/awf unload` of a registry world first run a durable save;
+  when it fails the future fails ("was not unloaded … stays loaded") and the world stays loaded.
+  Unloads are one save slower. A stopping server skips that save. An unload can still report
+  `FAILED` for a world it did unload, when a write between that save and the engine's final close
+  is not confirmed.
+- `AuroraWorlds.save` / `/awf save` fail when a commit is cut by the deadline, fenced, closed or
+  discarding (`AwfRegionStorage.flushConfirmed`), or when the world's chunk I/O does not drain
+  within `aurora.awf.shutdown-deadline-ms` ("did not drain within N ms … not durable"). A drain
+  that timed out cannot be interrupted: it keeps one `VirtualExecutor` thread until the world's I/O
+  queue empties, a later save of that world waits behind it, and it can add up to 30 s to
+  `VirtualExecutor.shutdown` at stop. The region-ticket barrier before the drain is not bounded.
+
+**Registry, templates and engine lifecycle.**
+- Registry durability, published snapshot, `knownStores`, refused vanilla/level-name world names
+  and dimension-name matching: see *Registry* and *What goes through AWF* above (PM-024, PM-073,
+  PM-074). Templates: forced writes and refused missing templates (PM-072), see *Templates* and
+  *Instances* above.
+- Opens reserve their folder before the backend opens anything (PM-225), see *One writer per
+  store*.
+- A failed creation and `delete` discard and close the storages still open under the world's
+  folder before deleting its stores; if a close fails, or another thread (an abandoning unload) is
+  still closing one, nothing is deleted and the registry entry stays, and a later `delete` retries
+  (PM-209).
+- A region storage's read fence also fences the POI storage of its dimension (PM-210), see D1.
+- Shutdown reporting: prepared stores closed, a throwing close counts as FAILED, each storage
+  reported once (PM-226), see D6.
+- The metrics collector WARNs when the AWF maintenance thread has finished no pass for 30 s
+  (PM-223), see *Durability*.
+
+**Spawn tolerance (PM-290).** `WorldProperties.Spawn` refuses a spawn that is not finite with
+|x| and |z| ≤ 29,999,984, y in [-2032, 2032) and a finite yaw. A registry entry or `template.json`
+written before that holding such a spawn is not refused as a whole: the spawn is dropped with a
+WARN naming the world or template on every read (twice at boot for the registry: the engine and
+the world service each read it) and is no longer applied at load. The registry's next write leaves
+it out; `template.json` is never rewritten, so a template's WARN repeats on every read and worlds
+made from it get no spawn property. Earlier loads may already have written that spawn into the world's own level data, so set a new
+one (`/awf set <world> spawn …`). Other refused properties (save bounds with min above max) fail
+the file with an `IOException` naming it. A Slime import with such a spawn imports without it and
+lists it among the dropped keys. An `.awf` file exported before Build 50 with such a spawn imports
+without it, with one WARN naming the file and the `/awf set` hint (`AuroraWorldFiles.properties`;
+until 2026-10-25 it failed the whole import as "the file's properties are not valid"); a spawn
+that is not numbers, and other refused properties, still fail the import.
+
+**Redis backend.** `WAITAOF` pipelined behind the commit on the same connection, the node identity
+and lease takeover rule, one-script `delete`/`retire`, the late-renewal WARN and the `AWF Redis
+leases` row, RESP reply bounds, and the refusal of an unusable URI: see *Redis backend* above
+(PM-025, PM-026, PM-027, PM-212, PM-213, PM-262). Not done: a pipelined neighbour prefetch for chunk
+reads (PM-454; each read is still one round trip).
+
+**`.awf` and Slime.** `plugin-data` on `/awf convert` and `.awf` import (PM-252), see *`.awf` world
+files*; unknown v13 chunk flags named in the import WARN (PM-258), see *Slime import*.
+
+**Observability.** `AWF loaded worlds`, per-storage `oldest dirty age`, refused writes and `AWF
+Redis leases` in `/perf awf` (PM-260, PM-453), see *Observability*. Whether the oldest dirty age
+moves with the opt-in byte trigger (`aurora.awf.commit-dirty-bytes`) is not measured.
+
+**Not done in PR #62.** New tests for all of the above (eviction stress, cleanup failures,
+vanished temp, hostile object names, offset overflow, read-only leftovers, plugin-data round trip,
+unknown Slime flag, `MAX_PENDING_SAVES` refusal (PM-293), oldest dirty age, node identity,
+RESP caps); an `UnloadResult` value for "unloaded, not durable"; an asynchronous
+`AuroraWorlds.setAutoload`; FILE commits that the shutdown deadline can abandon; the Redis read
+prefetch; `/awf export` of a world's PDC.
 
 ## Qualification
 Load/unload loops, COW isolation, crash during each persistence stage, backend timeout/disconnect, shutdown with pending saves, corrupt cache/blob recovery, and 1/50/250/1000-world workloads.
@@ -957,8 +1260,10 @@ store holding data points at a committed generation, and no region file is writt
 The world's game time rewinds to the last boot, which is not AWF's doing (see the level.dat
 finding in docs/TODO.md); it fails the same way on region files.
 
-Still open: backend timeout/disconnect (no network backend exists) and any measurement under
-sustained real chunk load.
+Still open: backend timeout/disconnect is covered only by the local Redis backend-failure runs
+(*Backend failure* above and [awf-backend-failure-2026-10-22.md](../development/awf-backend-failure-2026-10-22.md):
+loopback Redis and a userspace-proxy approximation, no players); Redis on a separate host over a
+real network has not been run. Any measurement under sustained real chunk load is open too.
 
 ### Multi-plugin lifecycle admission and creation requests (2026-10-06)
 
