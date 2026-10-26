@@ -81,8 +81,9 @@ the global tick, as it delayed Paper's main thread. Not configurable. `PlayerLog
 ## 3. What this means in practice
 
 - **Login starts now have a separate SourbyCraft rate policy.** SEC-11 observes sockets at
-  TCP initialization and valid-state initial Login Hello packets across channels. It does not
-  restore Paper's per-tick completion buffering or deprecated sync pre-login callback. LOG
+  TCP initialization and valid-state initial Login Hello packets across channels. SEC-11 itself
+  touches neither Paper's per-tick completion buffering (still removed, §2.1) nor the sync
+  pre-login callback; that callback was restored separately by Minecraft feature 0073 (§2.2). LOG
   counts/logs without refusing admission; KICK is an operator opt-in. There is also an inherited
   minimum-IP-interval handshake throttle (`bukkit.yml` `settings.connection-throttle`), which is
   separate from the concurrent-pending cap and these new fixed-window limits. The inherited
@@ -108,5 +109,7 @@ materialized `sourbycraft-server/src/minecraft/java/net/minecraft/network/Connec
 `.../server/network/ServerLoginPacketListenerImpl.java`;
 `paper-server/src/main/java/io/papermc/paper/configuration/GlobalConfiguration.java`;
 `sourbycraft-security.yml`; `sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/maxplayers/MaxPlayersBypass.java`.
-SEC-11 adds independent accept/login hooks through a new feature commit; it does not change
-the baseline `max-joins-per-tick` pending-login mechanism or revive sync pre-login events.
+SEC-11 adds independent accept/login hooks (Minecraft feature patches 0036 and 0041); it does not
+change the baseline `max-joins-per-tick` pending-login mechanism and does not touch pre-login events. The sync
+`PlayerPreLoginEvent` fires again because of Minecraft feature 0073
+(`0073-SourbyCraft-legacy-PlayerPreLoginEvent-on-the-global-tick.patch`), not because of SEC-11.

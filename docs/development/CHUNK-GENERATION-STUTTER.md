@@ -9,16 +9,17 @@ generation scheduling paths; it does not establish the stutter's cause.
 Codex has not run tests, built a JAR, booted a server or measured performance.
 Build/testing/profiling are assigned to Claude by the user.
 
-Status update 2026-10-07 ([AGENT-COORDINATION.md](../../AGENT-COORDINATION.md), the tree and `build/`
-outputs): patch 0027 is applied as materialized commit `0569a90` (on top of 0026 `952f1e1`; the patch file is
+Status update 2026-10-07 (the coordination log `AGENT-COORDINATION.md`, an untracked file not retained in the
+repository; the tree and `build/` outputs): patch 0027 is applied as materialized commit `0569a90` (on top of 0026 `952f1e1`; the patch file is
 still untracked in the root repository) and was compiled into the demo jars (2026-10-07 00:00 and 00:36 at the
 latest, because the EDF patch `ade3b24` (then 0028, now parked) was stacked on it; the 22:40 build on 2026-10-06 likely too, not inspected). The
 metrics were never enabled on the demo, so `/perf chunks` stage samples do not exist. Nothing here is
-measured by 0027. A TOML switch (`aurora.diagnostics.chunk-generation-metrics` in `sourbycraft_config/aurora.yml`)
-is **in progress** by another agent (log, owner instruction 2026-10-07 ~02:00, agent "codex-items"); the working
-tree already references the key in `SourbyCraftConfig`, `AuroraConfig` and `PerfChunksView` (the `/perf chunks` view, formerly inside `PerfCommand`), but no test or boot of it
-is recorded. The "Enable" section below still describes only the JVM property, which is the 0027 contract until
-that work lands and is tested. The handoff list below carries a per-item status.
+measured by 0027. A config switch (`aurora.diagnostics.chunk-generation-metrics`) was then in progress by another
+agent (owner instruction 2026-10-07 ~02:00, agent "codex-items").
+
+Status 2026-10-25: the patch is committed as Minecraft feature 0026 and the config switch has landed; since Build 49
+it is the YAML key `aurora.diagnostics.chunk-generation-metrics` in `sourbycraft_config/aurora.yml` (see *Enable*
+below; `ChunkGenerationMetricsEarlyConfigTest`). The handoff list below carries the per-item status of 2026-10-07.
 
 ## Written increment
 
@@ -32,9 +33,10 @@ Enable (either way; both are **RESTART_REQUIRED**, default false):
 
 1. In `sourbycraft_config/aurora.yml` (works on hosted panels that cannot pass JVM flags):
 
-   ```toml
-   [aurora.diagnostics]
-   chunk-generation-metrics = true
+   ```yaml
+   aurora:
+     diagnostics:
+       chunk-generation-metrics: true
    ```
 
 2. Or as a JVM property, before `-jar`:
@@ -44,9 +46,10 @@ Enable (either way; both are **RESTART_REQUIRED**, default false):
    ```
 
 Timing is on when either is true. `ChunkGenerationMetrics.ENABLED` is read once at class
-initialization, which the chunk system triggers before configuration loads, so the TOML key
-is read directly from `aurora.toml` over `sourbycraft_global_config.toml` (the same early read
-`AuroraBridge` uses); a missing, unparseable or non-boolean value means off. `/sourbycraft reload`
+initialization, which the chunk system triggers before configuration loads, so the key is read
+directly from `aurora.yml` over `sourbycraft_global_config.yml` (`ChunkGenerationMetrics.readEarly`, the same
+early read `AuroraBridge` uses; a `.toml` beside a missing `.yml` is read in its place); a missing, unparseable
+or non-boolean value means off. `/sourbycraft reload`
 reports a change as restart-required, never as applied. Tests:
 `ChunkGenerationMetricsEarlyConfigTest`. The current running server is not changed.
 No extra executor, worker count, generation algorithm, scheduler priority, ticket,
@@ -122,9 +125,10 @@ No throughput improvement or stutter resolution is claimed for this increment.
 
 ## Measured on Sourby Demo (Claude, 2026-10-06)
 
-Source: [AGENT-COORDINATION.md](../../AGENT-COORDINATION.md), *new-terrain chunk delivery on
-Sourby Demo*. **Uncertified**: 3 spots per side at different fresh coordinates, noise not
-measured. This is an observation that guides investigation, not a reference result.
+Source: the coordination log `AGENT-COORDINATION.md`, *new-terrain chunk delivery on Sourby Demo* (untracked,
+not retained in the repository; the figures below are the only copy). **Uncertified**: 3 spots per side at
+different fresh coordinates, noise not measured. This is an observation that guides investigation, not a
+reference result.
 
 - Workload: one real-protocol client (`scripts/baseline_client.py`), view distance 10
   (361 chunks, Chebyshev ≤ 9), teleported to fresh terrain per spot; 1 player; 8-core host;
@@ -150,9 +154,9 @@ does not resolve the user's report. No stutter resolution is claimed.
   unchanged.
 - The panel cannot pass `-D` JVM flags (its startup variables are version/jar/build only), so
   `-Dsourbycraft.chunk-generation-metrics.enabled=true` from patch 0026 cannot be enabled
-  there. Since 2026-10-07 the same switch is the TOML key
-  `aurora.diagnostics.chunk-generation-metrics` (see *Enable* above), which the panel can set;
-  no build carrying it has run on the demo yet, so handoff step 3 is still open for that server.
+  there. Since 2026-10-07 the same switch is the config key
+  `aurora.diagnostics.chunk-generation-metrics` (YAML in `aurora.yml` since Build 49; see *Enable* above), which
+  the panel can set; no run with it on the demo is recorded, so handoff step 3 is still open for that server.
 - **Open observation, not a conclusion:** Paper/Moonrise sent no `chunk_batch_finished` to the
   test client during these runs (batches = 0). The client's optional `ack_chunk_batches` is off
   by default so swarm workloads are unchanged. Why no batch boundary was observed has not been
@@ -169,6 +173,10 @@ Metadata persistence remains P0: `PaperLevelOverrides` contains active game time
 but is missing from the safe-world autosave whitelist. The old `level.dat`-only explanation
 was corrected; the crash harness keeps its existing XFAIL until Claude verifies a fix.
 No metadata save-path change was made in this increment.
+**Resolved since (status 2026-10-25):** Minecraft feature 0027 (`persist-world-metadata-on-autosave`) adds the
+global-owned world metadata types to the autosave and `save-all` set (`WorldMetadataAutosave.addGlobalOwnedTypes`).
+`scripts/verify_crash.py` has no known limitation left (`KNOWN_LIMITATIONS = {}`): the game-time check passed
+every recovery in both modes on 2026-10-13 and now fails the run instead of being an XFAIL.
 
 Claude also reported the existing Bukkit API annotation check failing on `RegionTask`.
 It now declares `@NullMarked`, matching the API's JSpecify convention and the current

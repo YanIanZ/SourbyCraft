@@ -34,6 +34,14 @@ Tested server JAR: `58b701526caf273d49b22b3894d630a79569e47e37e4932da742c09dc31a
 under `build/bootstrap-3.0.26-20260921/`. This is bootstrap qualification, not performance or soak
 qualification. The reconstructed patch below is historical; the private source is authoritative.
 
+**Status 2026-10-25:** the corrected T8 wording in *The claim this corrects* no longer describes
+the current launcher. Since 2026-09-27 the CI build job's step *Bootstrap failure recovery and
+offline boot* boots a fresh directory online to `Done` and then offline from the cache, and checks
+that a fresh offline boot fails cleanly naming its source; the pinned launcher is SourbyClip 3.1.3.
+The current T8 row is in [qualification-readiness.md](qualification-readiness.md) §1, and the
+launcher audit in [bootstrap-download-audit.md](bootstrap-download-audit.md). Remote-host and
+fault-injection qualification are still open there.
+
 ## Symptom
 
 Booting `build/libs/SourbyCraft-slim.jar` in an empty directory — no `libraries/`, no `cache/` —
@@ -129,7 +137,9 @@ these closes it:
 A reconstructed patch for those first two points is in
 [`sourbyclip-download-fix.patch`](sourbyclip-download-fix.patch). It is written against bytecode
 rather than sources, since SourbyClip is private, so it is applied by hand rather than with
-`git am`.
+`git am`. **Historical: superseded by SourbyClip 3.0.26 (revision `5b46c3b5`, see *Resolution*),
+which stages every attempt and treats a hash mismatch as a repository miss in the private source;
+do not apply it.**
 
 ## Historical workaround before 3.0.26
 

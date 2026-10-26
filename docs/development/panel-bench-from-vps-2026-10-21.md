@@ -106,6 +106,11 @@ so a native-memory kill near the cap is possible; that is a guess.
 
 ## Findings and fixes made on the way (scripts in worktree `sc-worktrees/vpsbench`, PM applies)
 
+**Status 2026-10-25:** applied. The `baseline_client.py` and `bench_panel.py` fixes below were committed in
+`a3ebda7` (2026-10-22, "fix(bench): headless clients survive slow load-generator hosts", with
+`test_baseline_client_position.py` and `test_bench_panel.py`). The players-50 hang itself is unresolved (PM-065); the stall
+recorder ([STALL-RECORDER.md](STALL-RECORDER.md)) was added afterwards to capture evidence of it.
+
 Each failed attempt cost one stop/start of the panel server (about 5 minutes each); about ten bench windows
 were opened on the panel in total, all with the whitelist-only bench mode and verified restore.
 

@@ -12,8 +12,9 @@ materialized Java files. No Codex build, test, boot or deployment was performed.
 
 ## Status update 2026-10-07 (what the log and the tree show now)
 
-Sources: [AGENT-COORDINATION.md](../../AGENT-COORDINATION.md) (entries "patch directory incident",
-"OWNER DECISION 2026-10-07", "compat-vs-performance follow-up") and the materialized tree. The
+Sources: the coordination log `AGENT-COORDINATION.md` (entries "patch directory incident",
+"OWNER DECISION 2026-10-07", "compat-vs-performance follow-up"; an untracked file, not retained in the
+repository) and the materialized tree. The
 2026-10-06 paragraph above is the state when the patch was written; this section supersedes its
 "no build, test or boot" wording.
 
@@ -35,7 +36,13 @@ Sources: [AGENT-COORDINATION.md](../../AGENT-COORDINATION.md) (entries "patch di
   failures); with 0028 parked the Python suite is 327/327 (log), and the log attributes both failures to 0028,
   so 0026 passes the independence policy as it stands.
 - **No unit test exists for the watchdog switch**, and no run of the existing test suites is attributed to this
-  patch alone.
+  patch alone. *(Superseded 2026-10-20: `FoliaWatchdogDisabledTest`, added in `6e6407a`, see the status below.)*
+
+**Status 2026-10-25.** `sourbycraft-server/src/test/java/io/papermc/paper/threadedregions/FoliaWatchdogDisabledTest.java`
+runs against the real patched `FoliaWatchdogThread` with the property unset: the default is off, disabled add/remove
+calls retain no ticks, a direct `run()` returns, and no live `Folia Watchdog Thread` exists. That is unit evidence for
+case 3 and for the thread part of case 1. It cannot exercise the flag-on path (the flag is read once at class load),
+so cases 2 and 4, and the save/stop part of case 1, still need a live server.
 
 Acceptance cases below, item by item (2026-10-07): **1** partly: a jar containing 0026 booted and ticked with the
 flag off, but no thread dump or other check that no `Folia Watchdog Thread` exists is recorded, nor are world
@@ -46,13 +53,14 @@ the demo jars; both `RunningTick` call sites are in the patch (inspected 2026-10
 
 Still unverified: that the flag-off JVM has no watchdog thread, that the flag-on path still prints the
 diagnostics, and that disabling the diagnostic leaves guard, shutdown and bridge-quarantine behaviour unchanged.
-`docs/TODO.md` and `SPEC.md` §158 are owned by another agent and are not edited here.
+`docs/TODO.md` and `SPEC.md` §158 are owned by another agent and are not edited here. (2026-10-25: `SPEC.md` is
+no longer in the repository; `docs/TODO.md` is the status source.)
 
 ## Behavior and lifecycle
 
 `sourbycraft.region-watchdog.enabled` is a JVM system property, default **false**.
 It is **RESTART_REQUIRED**, read when `FoliaWatchdogThread` initializes before the
-region scheduler starts. It is independent of Aurora TOML, Canvas engine YAML,
+region scheduler starts. It is independent of `aurora.yml`, the engine files (`config/aurora-*.yml`, formerly `canvas-*.yml`),
 and bridge SAFE/OFF mode. A config reload cannot change it for this JVM.
 
 With the default, the scheduler does not start the watchdog thread, allocate its
@@ -98,8 +106,8 @@ case-insensitive `true` enables it; unset or other values are false.
 5. Reapply feature patches and rebuild the server; retain unrelated materialized
    edits and confirm both RunningTick call sites are covered by patch 0025.
 
-These are proposed acceptance cases; only items 1 (partly) and 5 have recorded evidence as of 2026-10-07 (see
-above). No performance,
+These are proposed acceptance cases; only items 1 (partly) and 5 had recorded evidence as of 2026-10-07 (see
+above). Since 2026-10-20 `FoliaWatchdogDisabledTest` covers item 3 and the thread check of item 1 at unit level. No performance,
 deadlock-prevention, plugin-compatibility or release qualification is claimed.
 
 ## A stalled tick without the watchdog: `/perf tick` "Tick in progress" (2026-10-22)

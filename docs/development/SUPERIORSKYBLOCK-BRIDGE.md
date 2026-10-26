@@ -1,6 +1,16 @@
 # SuperiorSkyblock2 spawn callback ownership
 
-Status: source fix written, testing assigned to Claude; no Codex build, tests or boot.
+Status 2026-10-25: the adapter (`bridge/SuperiorSpawnTaskOwner`) and Paper feature patch 0010 are committed
+and in every published build since `v26.2-r47`. Evidence, newest first:
+[headless real-jar server runs, 2026-10-22](ssb2-real-jar-2026-10-22.md) (the unported 2026.3 jar with the
+SSB-AuroraWorlds module enables in bridge `safe` mode; the one owner handoff the adapter can produce happens
+with 0 rejected operations, 0 violations and no quarantine, also with `sync-route = "global"`; counter evidence,
+no player); env-gated unit tests against the real jar (2026-10-20, below). Island operations with players stay
+owner-only. Those runs used Build 48 (base `6176d517`), before the PR #62 bridge changes (Build 50 branch; code
+written and statically reviewed, not built, not tested by the owner), so a rerun on that tree is NEEDS RETEST.
+Nothing here qualifies the plugin.
+
+Original status (2026-10-06): source fix written, testing assigned to Claude; no Codex build, tests or boot.
 The user's Build 47 log demonstrates a region-ownership violation. It does not
 demonstrate the behavior of this new source patch or qualify the whole plugin.
 
@@ -27,8 +37,9 @@ needs a chunk loaded between SSB2's two checks, which the local client did not h
 
 ## Status update 2026-10-07
 
-Sources: [AGENT-COORDINATION.md](../../AGENT-COORDINATION.md) (entries "SSB2 SpawnIsland violation, 2026-10-06 ~22:00",
-"COWORK MODE on the bridge", "bridge-fix agent done"), `sourbycraft-server/build/test-results`, and
+Sources: the agent coordination file (entries "SSB2 SpawnIsland violation, 2026-10-06 ~22:00",
+"COWORK MODE on the bridge", "bridge-fix agent done"; that file is untracked and not in the repository, so
+those entries cannot be checked from here), `sourbycraft-server/build/test-results`, and
 `~/Sourby/ssb/SSB2/FOLIA.md`. The paragraph above is the 2026-10-06 state.
 
 - **SuperiorSkyblock2 2026.3 was ported to native Folia instead** (owner choice, log ~22:00): repository
@@ -50,9 +61,11 @@ Sources: [AGENT-COORDINATION.md](../../AGENT-COORDINATION.md) (entries "SSB2 Spa
   methods), 0 failures.
 - **Patch 0010 is committed** in `paper-server` as `a31e1184` (log, bridge-fix agent); 0011 (entity routing) is `441f8e56e` on
   top. The sentence in "Changes" that calls 0010 "an additional uncommitted working-tree change" describes 2026-10-06. The
-  patch file is still untracked in the root repository (`git status` 2026-10-07).
+  patch file is still untracked in the root repository (`git status` 2026-10-07). (Since committed: in every tag from
+  `v26.2-r47`.)
 - Acceptance cases, item by item (2026-10-07): **1** not run against the exact upstream 2026.3 jar (the demo now runs the
-  ported jar). **2** unit level only: `v36TargetBeatsBothCallerAndGlobalFallback` and `regionTaskSnapshotsFlooredChunkCoordinates`
+  ported jar). (Since then: unit level 2026-10-20 below, and headless server evidence 2026-10-22 in
+  [ssb2-real-jar-2026-10-22.md](ssb2-real-jar-2026-10-22.md) section 5; players owner-only.) **2** unit level only: `v36TargetBeatsBothCallerAndGlobalFallback` and `regionTaskSnapshotsFlooredChunkCoordinates`
   (negative coordinates, later mutation of the Location); no server run. **3** unit level only:
   `v36GlobalAndAsyncNeverResolveTargetMetadata`. **4** partly: null meta and a wrong-bytes stand-in at the right version are
   refused without violation (`BridgeReviewTest`); missing resource, inaccessible capture, null world, island subclass, and the
@@ -85,7 +98,10 @@ with `BridgeReviewTest` 11/11 in the same run.
 
 Still not run: the plugin's real constructor and `BukkitExecutor`, the bridge scheduling the task onto the owning
 region on a server, the actual biome read, another world, an initially unloaded chunk, an island subclass,
-inaccessible capture, missing class resource. Cases 5 and 6 unchanged.
+inaccessible capture, missing class resource. Cases 5 and 6 unchanged. (2026-10-22: the real constructor,
+`BukkitExecutor` and the bridge's handoff to the owning region ran on a headless server, inferred from counters;
+see [ssb2-real-jar-2026-10-22.md](ssb2-real-jar-2026-10-22.md) section 5. The biome value, another world and an
+initially unloaded chunk are still not shown.)
 
 ## Root cause and scope
 
@@ -137,7 +153,8 @@ Feature patch `0010-SourbyCraft-route-explicitly-owned-bridge-callbacks.patch` c
 the original callback into `AuroraBridge.targetRegion` before dispatch. It is the
 source of truth for the targeted materialized CraftScheduler edit. Paper HEAD at
 the time of writing contains 0007/0008/0009; this patch is an additional uncommitted
-working-tree change. Codex did not run Gradle or rebuild the existing patches.
+working-tree change. Codex did not run Gradle or rebuild the existing patches. (2026-10-06 state;
+committed since, see the status at the top.)
 
 `BridgeRuntime.Task.targetRegion()` takes precedence over the caller-region/global
 fallback setting (and, since 2026-10-22, over the inferred player anchor of the scheduling
@@ -194,4 +211,5 @@ cover dispatch with a fake executor; they do not execute the actual plugin adapt
    for the initially unloaded spawn. Keep retirement/refusal explicit if the world goes away.
 
 Build/test/boot results must be recorded against the final tested snapshot. Prior
-bridge or AWF passing suites do not validate this change. Runtime status: unit-level only, as of 2026-10-07 (see above).
+bridge or AWF passing suites do not validate this change. Runtime status: unit-level only, as of 2026-10-07 (see above);
+since 2026-10-22 case 1 has headless server evidence (players owner-only), cases 4-rest, 5 and 6 are not run.

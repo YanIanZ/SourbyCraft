@@ -22,7 +22,8 @@ every active region. A **stall** is a source that has completed no tick for `aft
 4. If the JVM shuts down (SIGTERM, `System.exit`, console `stop`) while a stall is open, a shutdown
    hook appends one final dump (`FINAL`) to the same file. `SIGKILL` and the kernel OOM killer run no
    hook: the periodic dumps already on disk are the evidence in that case, which is why the first one
-   is written immediately and the file is flushed after every dump.
+   is written immediately and the file is flushed after every dump. On a normal stop the recorder is
+   closed early in shutdown (see *Limits*), so after that point only this `FINAL` dump can still be written.
 5. At most `keep-files` (default 20) `stall-*.txt` files are kept; creating a new stall file deletes
    the oldest. Nothing else in the directory is touched.
 
@@ -47,8 +48,19 @@ reading aids, not findings: no cause is established until a real dump exists.
 
 ## Settings (all RESTART_REQUIRED)
 
-Keys under `[aurora.diagnostics.stall-recorder]` in `sourbycraft_config/aurora.yml`; see
-[AURORA-CONFIG.md](../AURORA-CONFIG.md) and [config-examples/aurora.yml](../config-examples/aurora.yml).
+Keys `aurora.diagnostics.stall-recorder.*` in `sourbycraft_config/aurora.yml` (YAML since Build 49); see
+[AURORA-CONFIG.md](../AURORA-CONFIG.md) and [config-examples/aurora.yml](../config-examples/aurora.yml):
+
+```yaml
+aurora:
+  diagnostics:
+    stall-recorder:
+      enabled: true
+      after-seconds: 10
+      repeat-seconds: 10
+      max-dumps-per-stall: 6
+      keep-files: 20
+```
 
 | Key | Default | Range |
 | --- | --- | --- |
@@ -59,11 +71,11 @@ Keys under `[aurora.diagnostics.stall-recorder]` in `sourbycraft_config/aurora.y
 | `keep-files` | `20` | 1-1000 |
 
 **RESTART_REQUIRED, all five:** `SourbyCraftBootstrap` reads them
-once in the `stall recorder` stage (right after `configuration`) and creates the thread and the shutdown
-hook then; `/sourbycraft reload` republishes `AuroraConfig` but does not reach the running recorder, and
+once in the `stall recorder` stage (after `configuration` and `sourby mods`) and creates the thread and the
+shutdown hook then; `/sourbycraft reload` republishes `AuroraConfig` but does not reach the running recorder, and
 lists the key as restart-pending. An invalid value keeps that key's default and is reported (a typo
-never turns the recorder off). The file is seeded into a **new** `aurora.toml` only; an existing file
-without the keys runs on the defaults, which means **a server updated to this build records stalls
+never turns the recorder off). The keys are seeded into a **new** `aurora.yml` only (`SourbyCraftConfig.seedAurora`);
+an existing file without the keys runs on the defaults, which means **a server updated to this build records stalls
 without any config change**.
 
 ## Cost and risk
@@ -87,7 +99,12 @@ without any config change**.
   before the first global tick completes is not recorded (otherwise the gap between plugin enable and the
   first tick of a slow boot would be a false alarm). The `Done (` line is the end of that window.
 - **While the server is stopping** (`Bukkit.isStopping()`) no new stall opens: ticks cease by design and
-  a long final world save is not a hang. A stall that was already open stays open and keeps recording.
+  a long final world save is not a hang. In addition, `SourbyCraftBootstrap.close()` (Minecraft feature 0081,
+  called after plugins are disabled and async tasks are drained, before the worlds are saved) stops the recorder:
+  its watcher thread ends, so no periodic dump is written during the final save. A stall that was already open
+  keeps its shutdown hook, which writes the single `FINAL` dump at JVM exit and then closes the probe thread
+  (since PR #62 the probe thread is closed at stop, or after that final dump; code written and statically
+  reviewed; not built; not tested by the owner). A stall that opens after that point is not recorded.
 - It detects "no tick completed", not "ticks are slow": a server at 5 TPS never trips it. `/perf` and
   the incident detector cover slowness.
 - A JVM-wide stop (a stop-the-world GC longer than the threshold, a frozen container) stalls the recorder
@@ -96,8 +113,9 @@ without any config change**.
 - Region labels carry the engine's telemetry ids (`region #7 (world id 1)`), not world names; the thread
   dump is the primary evidence.
 - Verified: unit tests (state machine with a fake clock, rotation, report content, config, markers) and one
-  forced stall on the agent test server (see the coordination log entry). Not verified: a real panel,
-  a real OOM kill, behaviour under a multi-minute real hang.
+  forced stall on the agent test server (2026-10-22; its coordination log entry was in the untracked
+  `AGENT-COORDINATION.md` and is not retained). Not verified: a real panel, a real OOM kill, behaviour under a
+  multi-minute real hang, and the PR #62 shutdown change to the probe thread (NEEDS RETEST for the forced-stall run).
 
 ## Forcing a stall (test servers only)
 

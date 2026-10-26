@@ -1,8 +1,9 @@
 # Upstream rebase log
 
-AURORA-TASKS H: "track rebase conflict count". One row per `canvasRef` bump. The number that
-matters for independence is how many SourbyCraft patch files needed a human, not how many
-upstream commits moved.
+Task H of the former Aurora task list (`AURORA-TASKS.md`, no longer in the repository): "track
+rebase conflict count". One row per upstream pin bump (`canvasRef` until 2026-10-05, `paperRef`
+since). The number that matters for independence is how many SourbyCraft patch files needed a
+human, not how many upstream commits moved ([independence.md §14](independence.md#14-independence-metrics)).
 
 | Date | Commit | `canvasRef` | Upstream delta | Patch files needing intervention | Detail |
 | --- | --- | --- | --- | --- | --- |
@@ -26,12 +27,15 @@ In the same commit that moves `paperRef`:
 1. Run `./gradlew applyAllPatches` before any fix and list every patch file that fails or needs a
    rebuild (`rebuild*Patches`), including files deleted or parked in `.skipped/`.
 2. Add a row: date, commit, old → new ref, upstream commit count (`git rev-list --count old..new`
-   in the Canvas checkout), the number of patch files from step 1, and one clause per file saying
+   in a Paper checkout), the number of patch files from step 1, and one clause per file saying
    what happened.
 3. A parked patch stays listed in the row until it is ported or deliberately dropped; say which.
 
-Build 47 added four Paper patch files (the bridge load gates and `CraftScheduler`) and extended the
-Spark patch. They have not yet been through a bump; the next row will show what they cost.
+No `paperRef` bump has happened since the 2026-10-05 migration (`paperRef=9240f586…` in
+`gradle.properties`, unchanged on 2026-10-25). None of the current patch set has been through one:
+87 Minecraft, 29 Paper and 3 sourbyapi feature patches, the engine baseline (472 Minecraft, 234 Paper
+and 16 Paper API file patches) and the parked EDF patch. The next row will show what they cost.
+(This replaces a Build 47 note that only counted the four Paper patch files of that time.)
 
 2026-10-07: materialized order realigned to file order (Minecraft 0024–0027 re-applied on 0023);
 rebuild verified (`patch_surface.py --check-rebuild`: no change; `applyAllPatches` from the files

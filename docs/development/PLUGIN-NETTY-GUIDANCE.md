@@ -5,7 +5,9 @@ Audience: plugin authors and server operators.
 Status: this is guidance from a **static source audit** (DEV-H, 2026-10-20, see
 [region-io-audit.md](../architecture/region-io-audit.md#netty-event-loop-audit-dev-h-2026-10-20)).
 It is not a measured benchmark. No server was run and no latency figure is claimed. The
-file:line references are the audit's references in the materialized source tree.
+file:line references are the audit's references in the materialized source tree. Updated
+2026-10-25: H4/H5 are fixed (item 5 and *Open items*); H1 (the player-data read after
+code-of-conduct acceptance) was fixed by Minecraft feature patch 0035 and is not a plugin concern.
 
 ## Why this matters
 
@@ -37,8 +39,10 @@ Things that are **not** on the loop, for contrast: async login and pre-login che
 - A database, HTTP, Redis or DNS call on the loop stalls every connection on that loop until it
   returns. Latency is set by the slowest remote service, not by the server.
 - Status pings are cheap for a client to send in bulk. A slow ping listener multiplies the cost.
-- The server does not move your listener off the loop for you. `bridge/` does not wrap event
-  dispatch, so legacy listeners run on the loop unwrapped.
+- The server does not move your listener off the loop for you. For legacy (bridged) plugins, Paper
+  feature patch 0026 wraps event dispatch only to record a scheduling context (the player the event is
+  about) for tasks the listeners schedule; it does not hop threads, so the listeners still run on the
+  loop.
 
 ## What to do instead
 
@@ -52,8 +56,12 @@ Things that are **not** on the loop, for contrast: async login and pre-login che
 4. **Give cookie continuations an explicit executor.** Use `thenAcceptAsync(fn, yourExecutor)` (or
    the `Async` variant of each stage) rather than `thenAccept`, so your code does not run on the
    loop when the cookie response arrives.
-5. **Do not parse hostnames in `PlayerHandshakeEvent`.** Return an IP literal. A hostname makes the
-   server resolve it through DNS on the loop (H4). The audit proposes a server fix, not yet made.
+5. **Do not return hostnames from `PlayerHandshakeEvent`.** Return an IP literal. Before Minecraft
+   feature patch 0037 a hostname made the server resolve it through DNS on the loop (H4). Since 0037 the
+   server never resolves it: a socket address hostname that is not an IP literal is **ignored**, with one
+   WARN for the whole run ("... not an IP literal; it is ignored ... (logged once)"), so your value has no
+   effect. A BungeeCord-forwarded address that is not an IP literal is disconnected the way an invalid
+   forward already was, also with `-DPaper.bypassHostCheck` (H5).
 6. **Keep the handshake listener fast.** It runs for every new connection, before login.
 
 ## Operator notes
@@ -71,5 +79,6 @@ Things that are **not** on the loop, for contrast: async login and pre-login che
 
 - No server change is made for H2, H3 or H6. Routing them off the loop changes Paper event
   semantics and needs its own review.
-- H4 and H5 (hostname resolution in the handshake) have a proposed server-side fix, not yet made.
+- H4 and H5 (hostname resolution in the handshake) are fixed by Minecraft feature patch 0037
+  (IP literals only; pinned by `HandshakeAddressesTest`; static evidence, no runtime trace).
 - Third-party plugin listeners were not read by the audit.

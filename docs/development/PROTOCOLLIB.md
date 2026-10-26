@@ -6,7 +6,12 @@ plugin. Ini memakai entrypoint toolchain yang sudah dipin; perubahan JAR/revisio
 atau SourbyPatcher tidak diperlukan untuk hook server ini. Entry `SourbyBootstrap` lama bukan
 main slim JAR saat ini. Hook yang sama kini memasang ViaVersion/ViaBackwards dari jalur aktif.
 
-Status 2026-10-07 01:35 (sumber: [AGENT-COORDINATION.md](../../AGENT-COORDINATION.md), tree ter-materialisasi): patch 0025 (kini 0024) sudah
+**Status 2026-10-25:** paragraf berikut adalah catatan historis. Patch `0024-SourbyCraft-provision-plugins-before-plugin-scan.patch`
+sudah ter-commit di `sourbycraft-server/minecraft-patches/features/` dan ada di setiap tag rilis sejak itu; load ProtocolLib 5.4.0
+pada boot nyata tercatat di bagian *SEC-7 fix* di bawah. Log sumber paragraf historis (`AGENT-COORDINATION.md`, file
+untracked) tidak disimpan di repository.
+
+Historis — status 2026-10-07 01:35 (sumber: `AGENT-COORDINATION.md`, tree ter-materialisasi): patch 0025 (kini 0024) sudah
 **diterapkan** ke tree Minecraft ter-materialisasi dengan `git am --3way` sebagai commit `392a8e5` ("SourbyCraft provision packet plugins
 before the plugin scan", mengubah `net/minecraft/server/Main.java`, 3 baris; HEAD tree itu pada 2026-10-07), di atas commit `049aabd`. Sebelumnya patch
 ini belum pernah diterapkan, sehingga **setiap jar yang dibangun sebelum 01:35 tidak memiliki hook provisioning** (log). Berkas
@@ -14,18 +19,27 @@ ini belum pernah diterapkan, sehingga **setiap jar yang dibangun sebelum 01:35 t
 dengan jar yang dibangun sesudah 01:35 maupun provisioning ProtocolLib yang benar-benar berjalan; klaim "jalur aktif" di atas
 berarti hook ada di source ter-materialisasi, bukan bukti unduhan atau load.
 
-Konfigurasi di `sourbycraft_config/sourbycraft_global_config.yml`:
+Konfigurasi di `sourbycraft_config/sourbycraft_global_config.yml` (YAML sejak Build 49):
 
-```toml
-[plugins.protocollib]
-auto-provision = true
-
-[plugins.viaversion]
-auto-provision = true
+```yaml
+plugins:
+  protocollib:
+    auto-provision: true
+  viaversion:
+    auto-provision: true
 ```
 
-(Build 49 layout. The pre-49 tables `[protocollib]` / `[viaversion]` are still read until Build 50 and rewritten
-once at boot; `BootstrapPluginSettings` prefers the `[plugins.*]` spelling when both are present.)
+(Build 49 layout. Since Build 50 (PR #62; code written and statically reviewed; not built; not tested by the
+owner) the pre-49 keys `protocollib.auto-provision` / `viaversion.auto-provision` are no longer honoured by the
+early reader. `BootstrapPluginSettings` runs before the full configuration loads, so on the first boot of a
+directory the one-time `ConfigMigration` rewrite has not run yet: a file that sets **only** the old key skips that
+group for this boot (one console line plus a WARN; nothing downloaded, installed or quarantined), and the rewrite
+then writes `plugins.<group>.auto-provision`, which the next boot honours (where the rewrite cannot run, for
+example a read-only directory, the group stays skipped with the WARN on every boot). When both spellings are set, the
+`plugins.*` one decides. An invalid or quoted value, a flow-style YAML value on a `plugins`/group/`auto-provision`
+line, or a file that cannot be read also skips the group for the boot (before PR #62 an invalid value counted as
+`false` and quarantined the pinned jars). YAML `True`/`TRUE`/`False`/`FALSE` are booleans; TOML only
+`true`/`false`. A `.toml` file is read only when no `.yml` exists beside it.)
 
 Kedua setting **RESTART_REQUIRED**, independen, default `true`. `--plugins` menentukan folder
 tujuan JAR serta config Via. ProtocolLib menghasilkan config miliknya saat plugin dimuat;
@@ -53,9 +67,13 @@ sampai pin diperbarui, bukan otomatis dianggap versi terbaru yang dipercaya. Art
 telah diunduh dan diverifikasi pada 2026-10-20 (SHA-256 dihitung sendiri dari bytes
 resmi GitHub).
 
-`auto-provision=false` memindahkan hanya JAR dengan nama dan hash pin milik installer ke
+`auto-provision: false` memindahkan hanya JAR dengan nama dan hash pin milik installer ke
 `.jar.disabled`; mengaktifkannya kembali memulihkan JAR terverifikasi tanpa unduhan. JAR operator
-tetap dapat dimuat. File karantina yang berbeda tidak ditimpa.
+tetap dapat dimuat. File karantina yang berbeda tidak ditimpa. Nilai yang dilewati (SKIP, lihat di atas) tidak
+pernah mengkarantina apa pun. Sejak PR #62 pemindaian JAR plugin tidak memverifikasi signature JAR, JAR yang tidak
+terbaca dihitung "bukan plugin ini", dan `RuntimeException` pada satu grup tidak lagi lolos ke `Main` sebelum plugin
+scan. Pada stage `plugin provisioning` (setelah konfigurasi dimuat), nilai `plugins.viaversion.auto-provision` yang
+bukan boolean juga tidak menulis config default Via (pembacaan ketat yang sama).
 
 Verifikasi:
 
@@ -67,9 +85,15 @@ Tes JDK-only memeriksa install/hash/ukuran, cache, HTTPS-only, offline, setting 
 pelestarian JAR/config, karantina, folder CLI, pin metadata dan hook sebelum scan. Hook Main
 dikompilasi terpisah terhadap artifact lokal 26.2. Ini belum membuktikan unduhan HTTPS artifact
 resmi, packaging slim JAR baru, load ProtocolLib, kompatibilitas plugin lain atau boot/region soak.
-Full Gradle build masih ditolak oleh pembatasan socket lingkungan ini (batasan sesi Codex saat itu; agen Claude menjalankan Gradle dari 2026-10-06, lihat log, tetapi tidak ada hasil Gradle yang dicatat khusus untuk hook 0025, kini 0024).
+Historis (2026-10-07): full Gradle build saat itu ditolak oleh pembatasan socket lingkungan sesi Codex; agen Claude
+menjalankan Gradle sejak 2026-10-06, tetapi tidak ada hasil Gradle yang dicatat khusus untuk hook 0025 (kini 0024).
+Unduhan, packaging dan load ProtocolLib kemudian dibuktikan pada boot 2026-10-20 (*SEC-7 fix* di bawah).
 
 ## SEC-7 review — 2026-10-20
+
+Historical: this review was superseded the same day by the *SEC-7 fix* below (the tagged 5.4.0 release was
+pinned and load-tested, and the proposed probe exists as a workflow, see *SEC-7 pin probe*). It is kept as the
+record of why the `dev-build` pin was dropped.
 
 Live GitHub release metadata was checked again. The newest non-development tagged
 release is [5.4.0](https://github.com/dmulloy2/ProtocolLib/releases/tag/5.4.0), asset
@@ -94,8 +118,8 @@ and therefore does not validate ProtocolLib compatibility.
 The integrator's scheduled CI probe should query the pinned release tag and asset
 metadata daily, assert asset name/ID/size/digest still match the reviewed JSON, and
 report newer tagged releases for compatibility review. It must never auto-update the
-pin or accept `dev-build` as an immutable release. Proposed workflow details and
-verified evidence are in the current Codex block of `AGENT-COORDINATION.md`.
+pin or accept `dev-build` as an immutable release. (The proposal and its evidence were kept in the untracked
+`AGENT-COORDINATION.md`, not retained in the repository; the probe now exists, see *SEC-7 pin probe*.)
 
 ## SEC-7 fix — 2026-10-20
 
@@ -153,3 +177,13 @@ Pin file delta vs the reviewed prior JSON:
 `ProtocolLibProvisioner.PIN` updated to match (same 7-arg record constructor). No
 public API change. The CI probe in the section below stays pinned to the tagged
 release tag/asset and refuses to follow dev-build.
+
+## SEC-7 pin probe
+
+`.github/workflows/protocollib-pin-probe.yml` runs daily at 06:17 UTC and on manual dispatch, read-only
+(`contents: read`). It reads `build-data/protocollib-pin.json`, fetches the pinned tag's release metadata from the
+GitHub API, downloads the pinned asset, and fails on size, SHA-256, asset id or (since PR #62) **release id** drift:
+a release deleted and re-created under the same tag gets a new id even when the bytes match. It then lists up to
+eight newer non-prerelease tagged releases for a compatibility review. It never updates the pin and never follows
+`dev-build`. A failing probe means "review the pin", not that installed servers changed: the runtime size/SHA-256
+check already refuses changed bytes on a cold install. The release-id comparison has not run on a runner yet.

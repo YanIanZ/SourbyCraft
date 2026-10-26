@@ -6,8 +6,11 @@ second JVM was dead code — the slim jar's launcher is SourbyClip, which never 
 been removed. Class Data Sharing is now purely an explicit JVM flag the operator adds.
 
 CDS lets the JVM load class metadata from a memory-mapped archive instead of parsing it every
-boot, cutting startup substantially. The archive is written to `cache/sourbycraft.jsa` on the
-server data directory and self-heals when the jar or JDK changes.
+boot. How much startup time that saves on SourbyCraft has not been measured: the Build 50 startup
+gate lists the cold-versus-warm benchmark as not run
+([26.2-build-50-aurora-nexus.md](releases/26.2-build-50-aurora-nexus.md)). With the flag below the
+archive is written to `cache/sourbycraft.jsa` in the server's working directory, and the JVM
+recreates it when the jar or JDK changes.
 
 ## The one flag that always works
 
@@ -64,8 +67,9 @@ controlled entirely by the flag above; there is no SourbyCraft property that cha
 
 ## Advanced: AOT cache (JDK 24+)
 
-For the fastest cold start, Java 25's **AOT cache** (Project Leyden) also links classes ahead of
-time. It is a two-step, operator-managed flow — SourbyCraft does not automate it:
+Java 25's **AOT cache** (Project Leyden) goes further and also links classes ahead of time; its
+effect on SourbyCraft's startup is not measured either. It is a two-step, operator-managed flow —
+SourbyCraft does not automate it:
 
 ```bash
 # 1. record a training run, then create the cache

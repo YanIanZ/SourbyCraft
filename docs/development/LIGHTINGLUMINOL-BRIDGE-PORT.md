@@ -1,5 +1,17 @@
 # LightingLuminol / Luminol bridge port
 
+Status 2026-10-25 (Build 50 branch, PR #62): both ports are in the tree. The first (global scheduler, Paper 0007,
+with follow-ups 0008/0009/0012) is in every tag since `v26.2-r47`; the three fixes of the 2026-10-22b update below
+(Paper 0024, `BridgeCapacityLogTest`, `AuroraBridge.worldUnloading` / `BridgeWorldUnloadTest`) were merged in
+`dae9d99` and are in every tag since `v26.2-r48`; the relaxed thread checks (second port) shipped from `v26.2-r49`.
+Only case 8 (real plugins, players, soak, AWF interaction) remains, and it is the owner's. PR #62 changed bridge
+behaviour that some local results below describe: a repeating async task over `max-running-async-tasks-per-plugin`
+now skips the overlapping run and keeps its timer (F3's `..._TIMER_OK cancelled=true` is historical; the probe was
+updated to expect skip-not-cancel), a repeating async task keeps at most one run queued, and relaxed-hit log lines
+are rate-limited by base reason ([aurora-plugin-bridge.md](../architecture/aurora-plugin-bridge.md)). Those changes
+are code written and statically reviewed; not built; not tested by the owner, so F3 and the relaxed-mode boots are
+NEEDS RETEST on that tree. The bridge settings live in `sourbycraft_config/aurora.yml` since Build 49.
+
 Status (2026-10-06): adaptation source and feature patches written for SourbyCraft
 26.2. Paper's materialized HEAD already contains port 0007 (`425610c83`); Codex has
 also applied follow-up patch 0008 to the materialized source. Codex has not run a
@@ -21,7 +33,9 @@ upstream needs ported and gated. Design, scope, honesty and what was deliberatel
 | [`minecraft-patches/features/0001-Base-Dirty-Patches.patch`](https://github.com/LuminolCustomArchive/LightingLuminol/blob/72d51c4d11b1ddfe70cde21f4736fdf660873cb3/lightingluminol-server/minecraft-patches/features/0001-Base-Dirty-Patches.patch) | Three SourbyCraft Minecraft feature patches: relaxed region-ownership checks (RegionizedServer, RegionizedWorldData, TickRegions, NearbyPlayers, EntityLookup, ServerChunkCache, ChunkMap, MinecraftServer), cross-region world data (`ServerLevel.sourbycraft$worldDataPool` + `WorldDataAccess` leases at the upstream call sites, plus `ScheduledTickAccess`), legacy teleport events (`Entity#teleportAsync`, portal waiter). `RegionizedServer#globalTick` `mainThreadHeartbeat` and the `Projectile` Luminol-config hunk not ported |
 | [`core/ReferenceCountedRegionizedWorldDataPool.java`](https://github.com/LuminolCustomArchive/LightingLuminol/blob/72d51c4d11b1ddfe70cde21f4736fdf660873cb3/lightingluminol-server/src/main/java/meow/bacteriawa/lightingluminol/core/ReferenceCountedRegionizedWorldDataPool.java) | Ported as `dev.iyanz.sourbycraft.compat.luminol.RegionizedWorldDataPool` (own ticket type, never returns `null`, `Lease` instead of `Tuple`) |
 
-Evidence for this increment is in the coordination entry `fable-lightingluminol-compat` and the PR; unit tests
+Evidence for this increment is in the coordination entry `fable-lightingluminol-compat` (an untracked file, not in
+the repository; the committed boot evidence is the [2026-10-23 verification](LIGHTINGLUMINOL-VERIFICATION-2026-10-23.md))
+and the PR; unit tests
 `ThreadChecksTest`, `AsyncTeleportEventsTest`, `TeleportRouteTest` (relaxed cases), `AuroraBridgeConfigTest`
 (thread-checks), `BridgeRuntimeTest` (relaxed accounting). Nothing here qualifies a plugin or the server.
 
@@ -54,7 +68,7 @@ No publication or plugin qualification is implied here.
 ## Status update 2026-10-22b (remaining local cases, agent `claude-luminol2`)
 
 Local functional evidence only, in worktree `sc-worktrees/claude-luminol2` (base `cc5d5ef1`, PR #18; not applied, nothing
-committed). Not qualified: no real players or plugins, no soak, no panel/VPS, no benchmark. Every boot was its own agent
+committed at the time; status 2026-10-25: fixes A, B and C below were merged in `dae9d99`, in every tag since `v26.2-r48`). Not qualified: no real players or plugins, no soak, no panel/VPS, no benchmark. Every boot was its own agent
 test-server run (`minecraft:flat`, 2048 MiB, localhost), raw logs and `run.json` under
 `/Volumes/Ext/DevCache/agent-tmp/sourbycraft/luminol-2026-10-22b/`; all stops exited 0. Final jar SHA-256 `cb8c068c...a4e0`.
 
@@ -71,7 +85,7 @@ test-server run (`minecraft:flat`, 2048 MiB, localhost), raw logs and `run.json`
 | 8 Real plugins, players, soak, AWF interaction | owner-run | Build 49 runbook G07 |
 | F1 Config limits: default 0, LIVE reload, early TOML precedence | PASS (local + unit) | `limits-1-server.log`, `reload-1-server.log`: `/sourbycraft reload` "Aurora LIVE: 2 change(s) applied" (limits) / "4 change(s)" (limits, sync-route, quarantine-after) and `/plugins` shows the new limits at once; defaults, bounds (`0..100000`), malformed values and file precedence of both keys unit-tested (`AuroraBridgeEarlyConfigTest` +2) |
 | F2 Pending limit | PASS (local) | limit 10: `LEGACY_LIMIT_PENDING_OK accepted=10 rejected=3 ... replacement=true overflowRejected=true`, `LEGACY_LIMIT_PENDING_RELEASED_OK ran=10 duplicates=0 ... probeAdmitted=true`; limit 0: `LEGACY_LIMIT_PENDING_UNLIMITED_OK accepted=300 ran=300` |
-| F3 Running-async limit | PASS (local) | limit 2 (6 BRIDGE_IO threads): `LEGACY_LIMIT_ASYNC_OK started=2 rejected=3 peak=2`, `..._RELEASED_OK finished=2 probeRuns=1`, overlapping timer `..._TIMER_OK cancelled=true`; limit 0: `..._UNLIMITED_OK started=6 peak=6`; fatal count unchanged (1 before and after, the deliberate world access), not quarantined; rejected count = refusals |
+| F3 Running-async limit | PASS (local), on that tree; NEEDS RETEST on the PR #62 tree | limit 2 (6 BRIDGE_IO threads): `LEGACY_LIMIT_ASYNC_OK started=2 rejected=3 peak=2`, `..._RELEASED_OK finished=2 probeRuns=1`, overlapping timer `..._TIMER_OK cancelled=true` (historical: since PR #62 the overlapping run is skipped and the timer kept, and `LimitProbes` checks that instead); limit 0: `..._UNLIMITED_OK started=6 peak=6`; fatal count unchanged (1 before and after, the deliberate world access), not quarantined; rejected count = refusals |
 | F4/F5 Worker API, `isCurrentlyRunning`, ID wrap | PASS (unit only) | `BridgeReviewTest`, `BridgeRuntimeTest` (2026-10-07); no live probe |
 | F6 `/plugins` counts/limits without starting the bridge for natives | PASS (local) | `case2-off-3`: native plugin "Bridge telemetry: not available"; `limits-1`: "Pending tasks / limit: 0 / 10" |
 | R1 Reload while tasks pending/running | PASS (local) | `reload-1-server.log`: 20 held one-shots (600 ticks) and 3 running async bodies across a reload that set limits 5/1, `sync-route = global`, `quarantine-after = 5`, `mode = off`: report "RESTART_REQUIRED (changes since boot): aurora.bridge.mode", plugin still Bridged; `LEGACY_HELD queued=20 cancelled=0` after the reload (lowering does not cancel), `LEGACY_BUSY_DONE completed=3 interrupted=0`, new work refused while 20 >= 5 (`LEGACY_LIMIT_PENDING_OK accepted=0 rejected=3`), later `LEGACY_HELD ran=20 duplicates=0 queued=0`; `LEGACY_ROUTE global=true` after the reload, `global=false` after restoring `caller-region` |
@@ -199,7 +213,7 @@ the 2026-10-22b update above; case 8 stays owner-run.)
 
 ## Status update 2026-10-07 (what is applied, tested and run)
 
-Sources: [AGENT-COORDINATION.md](../../AGENT-COORDINATION.md), `sourbycraft-server/build/test-results`,
+Sources: the agent coordination file (untracked, not in the repository), `sourbycraft-server/build/test-results`,
 `.github/workflows/build.yml` and `git` in the materialized `paper-server` tree. The paragraph above is the
 2026-10-06 state when the patches were written; it is superseded where it says no build or test was run.
 
@@ -332,11 +346,14 @@ those snapshots once, and `isCurrentlyRunning()` also consults callbacks still
 draining after cancellation. The ID allocator excludes indexed/draining bridge IDs
 at counter wrap. `/plugins <name>` shows pending/running counts and their limits.
 
-Configuration in `[aurora.bridge]`:
+Configuration in the `aurora.bridge` section of `sourbycraft_config/aurora.yml` (YAML since Build 49; this
+document first showed the TOML form):
 
-```toml
-max-pending-tasks-per-plugin = 0
-max-running-async-tasks-per-plugin = 0
+```yaml
+aurora:
+  bridge:
+    max-pending-tasks-per-plugin: 0
+    max-running-async-tasks-per-plugin: 0
 ```
 
 Both are LIVE integers in `0..100000`, parsed during early bootstrap with the same
@@ -345,7 +362,8 @@ configuration load/reload. Lowering limits affects new admission rather than
 interrupting or discarding admitted bodies. Running limits count actual async
 callbacks, not queued I/O work; shared queue capacity/fair CPU scheduling are not
 guaranteed by these per-plugin limits. A rejected repeater loses future invocations,
-which is why limits are opt-in. See the architecture document for precise semantics.
+which is why limits are opt-in. (Since PR #62 a repeating task over the running limit only skips that run and
+keeps its timer; a one-shot task is still cancelled.) See the architecture document for precise semantics.
 
 ## Licensing
 

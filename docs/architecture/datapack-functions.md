@@ -3,7 +3,8 @@
 > **Role:** contract for datapack functions, function tags, `/function`, `/return`, `/schedule` and the
 > `#minecraft:load` / `#minecraft:tick` lifecycle on the region-threaded engine. **Status:** implemented
 > (Build 48: Minecraft feature patches `0065-SourbyCraft-tick-scheduled-functions-on-the-global-tick.patch`
-> and `0066-SourbyCraft-owned-datapack-functions-on-the-global-tick.patch`); unit tests and functional
+> and `0066-SourbyCraft-owned-datapack-functions-on-the-global-tick.patch`; storage and block data sources
+> follow `0069-SourbyCraft-data-command-threading.patch`); unit tests and functional
 > test-server runs only, not qualified, no performance claim. Formerly `scheduled-functions.md`.
 >
 > Code: `dev.iyanz.sourbycraft.world.{DatapackFunctions,FunctionLifecycle,ScheduledFunctionTicker}`.
@@ -72,6 +73,13 @@ touches no world state.
 | A command block (with `aurora.world.command-blocks = true`) | the block's region | the block | still inside the 0055 command-block scope, which is thread-local and spans the whole execution context: region-local selectors, block targets outside the region refused |
 | Advancement reward / `run_function` enchantment | the entity's region | that player / entity | as for a player |
 
+Data sources since MC 0069 (data-command threading, `command/DataCommandThreading`), per invoker:
+
+| Invoked by | Command storage (`function … with storage`, `execute if data storage`, `execute store … storage`) | Block data (`function … with block`, `data … block`) |
+| --- | --- | --- |
+| Global tick: console, RCON, `#minecraft:load` / `#minecraft:tick`, `/schedule` timers | read and written inline | `data … block` is handed to the owning region and reports to the sender when it runs (returns 0 at once); `function … with block` fails with the command error `Target not in same region` (the global tick owns no block) |
+| A region: player, command block, advancement reward, enchantment effect | command error `Command storage is only available on the global tick (console, RCON, datapack functions or /data storage); this command ran inside a region`; plain `/data … storage` is handed to the global tick instead (returns 0, reports later) | works for a block the region owns; any other block gets the command error `Cannot access block data outside the owning region; run from a player or command block in that region` |
+
 What this means for datapack authors (the honest contract, not vanilla semantics):
 
 - A function is **not** an atomic transaction across regions. Queued region work (block changes, entity
@@ -81,10 +89,11 @@ What this means for datapack authors (the honest contract, not vanilla semantics
 - From the console path, entity selectors are not region-filtered and read foreign entities' state from
   the global thread, as console commands already do on this engine. Only the command-block scope filters.
 - Commands and plugin code that need immediate region ownership keep failing under their existing
-  guards. Known inherited failures: console `data get block` NPE in `BlockDataAccessor` (so
-  `function … with block …` from the console path is expected to fail the same way); fake score holders
-  such as `#t` rejected by every source ("must be an entity"), so counters need an entity holder or
-  storage. Synchronous foreign-region block reads have not had a new audit here.
+  guards. Block and storage data follow the table above: the inherited console `data get block` NPE in
+  `BlockDataAccessor` is gone since 0069, and `function … with block …` from the global tick now fails
+  with a clean command error rather than that NPE (code read; not rerun live). Fake score holders such as
+  `#t` are rejected by every source ("must be an entity"), so counters need an entity holder, or storage
+  from the global tick. Synchronous foreign-region block reads have not had a new audit here.
 - Cross-region ordering, `with entity`/`with block` macro sources, and long-running tick tags under load
   have not been demonstrated live.
 
@@ -161,7 +170,7 @@ Functional, shared machine, not certified. Jar `14ebc935e904…` built from work
   three lines again one second later; marker score `none is set` 8 s after boot (tick tag off); one
   console `function #minecraft:tick` → `Marker has 1`, still `1` 21 s after boot. Exactly 1 `fn-load-ran`, 0 `fn-never`; the only
   ERROR lines are the `fn:bad` parse failure. Clean stop.
-- `opus-functions-3 --world-from opus-functions-1 --aurora-toml` (`tick-functions = true`): marker `2` at
+- `opus-functions-3 --world-from opus-functions-1 --aurora-toml` (`tick-functions = true`; the Aurora file was TOML then, YAML `aurora.yml` since Build 49): marker `2` at
   game time 242, `329` at game time 564 (about one per tick). LIVE: set `false` + `/sourbycraft reload` →
   `488`, still `488` 5 s later; set `true` + reload → `558` 3 s later; still exactly one `fn-load-ran`
   (no re-run on toggle). Clean stop, slots free.

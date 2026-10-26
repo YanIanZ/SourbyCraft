@@ -3,8 +3,8 @@
 The playbook for moving SourbyCraft to a new Paper revision, whether that is a routine Paper
 update on the same Minecraft version or a new Minecraft version. Sources: `AGENTS.md`,
 root `build.gradle.kts`, `settings.gradle.kts`, `gradle.properties`, `.github/workflows/build.yml`,
-[`rebase-log.md`](../architecture/rebase-log.md) and the patch directory incident of 2026-10-06
-in `AGENT-COORDINATION.md`.
+[`rebase-log.md`](../architecture/rebase-log.md) and the patch directory incident of 2026-10-06 (its notes were
+kept in the untracked `AGENT-COORDINATION.md` and are not retained in the repository).
 
 Status: **PLANNED procedure, not yet exercised end to end.** No bump has been done with this
 playbook. The last two rows in `rebase-log.md` (2026-10-05) predate it. Gradle task names
@@ -23,8 +23,10 @@ patch.
 > hook-candidate table below use the new numbering. Dated check results keep the numbering of
 > their date.
 >
-> Historical, as of 2026-10-07: the counts table below. Current file counts (2026-10-14): 29
-> Minecraft and 14 Paper feature patches; re-run `patch_surface.py` for the rest.
+> Historical, as of 2026-10-07: the counts table below. File counts on 2026-10-14: 29 Minecraft and
+> 14 Paper feature patches. File counts on 2026-10-25 (directory listing on `build50/pm-completion`, not a
+> `patch_surface.py` run): **87 Minecraft, 29 Paper and 3 API feature patches**, no duplicate number in any of
+> the three directories. Re-run `patch_surface.py` for the classification, the touched files and the hot spots.
 
 | What | Count | Where |
 | --- | ---: | --- |
@@ -73,10 +75,17 @@ Do all of this before touching `paperRef`.
    because the materialized repository has no commit for it. Both must pass. The report's
    "What a rebuild*Patches run would do now" section lists deletions, additions and renumbering.
 
-   On 2026-10-07 this check fails. Eight patch files are untracked (Minecraft 0024–0028 and
-   Paper 0007, 0008, 0010). Minecraft 0024 and 0025 and Paper 0010 have no materialized commit,
-   so a rebuild would delete them and renumber 0026–0028 to 0024–0026. That is the
+   Historical (2026-10-07): this check failed. Eight patch files were untracked (Minecraft 0024–0028 and
+   Paper 0007, 0008, 0010). Minecraft 0024 and 0025 and Paper 0010 had no materialized commit,
+   so a rebuild would have deleted them and renumbered 0026–0028 to 0024–0026. That was the
    2026-10-06 incident waiting to repeat. Do not bump until the check is clean.
+
+   Status 2026-10-25 (PR #62): every patch file is tracked and no number is used twice (git status and a
+   directory listing; the script was not run for this note). PR #62 hand-edited the Minecraft feature patches
+   0006, 0039, 0084 and 0087 without the toolchain, so their `index` blob hashes no longer match the edited
+   content (the hunks themselves were recounted by hand and checked with `git apply --numstat`). Before a bump the owner
+   runs `applyAllPatches`, then `rebuildMinecraftFeaturePatches`, then this check, so the patch files match
+   their materialized commits again.
 
 2. **Track every patch file.** A rebuild regenerates the whole directory from the materialized
    commits: it deletes files with no commit and renumbers the rest. Git is the only way back,
@@ -100,9 +109,9 @@ Do all of this before touching `paperRef`.
    file in the root repository.
 
 5. **Run both test suites green on the old ref** (see step 6), so a red result after the bump
-   is caused by the bump. Known exception on 2026-10-07: `test_independence_policy.py` has two
-   failures caused by patches 0026 and 0028 (`AGENT-COORDINATION.md`, "FOR CODEX"). Resolve or
-   record them first.
+   is caused by the bump. Historical exception (2026-10-07): `test_independence_policy.py` had two
+   failures with the EDF patch 0028 applied; with 0028 parked (`minecraft-patches/parked/`) the Python
+   suite was 327/327, so that exception is gone. Resolve or record any red test first.
 
 ## 2. The bump
 
@@ -111,11 +120,13 @@ Do all of this before touching `paperRef`.
    revisions and count the upstream commits (`git rev-list --count old..new` in a Paper
    checkout) for the rebase-log row.
 2. **For a new Minecraft version**, also change `mcVersion`, `apiVersion` and `releaseVersion`
-   in `gradle.properties` (and `codename` if the release gets one). `26.2` is also hard-coded on
-   24 lines of `.github/workflows/build.yml` (branch filters, jar names), in branch names
-   (`release/26.2-canvas`), in the Docker/README jar paths and in several `scripts/*.py`.
-   `grep -rn '26\.2'` is the inventory. A Paper-only update on the same Minecraft version
-   changes none of these.
+   in `gradle.properties` (and `codename` if the release gets one). Owner decision 2026-10-24: Minecraft 26.3
+   starts at Build 100 with the codename "Aurora Forge" (`scripts/release_version.py` refuses a release outside
+   that range). `26.2` is also hard-coded on 51 lines of `.github/workflows/build.yml` (2026-10-25; branch
+   filters, jar names, release tags), in branch names (the release branch `26.2`, `hotfix/26.2-r<N>.<M>`; the
+   former `release/26.2-canvas` was retired on 2026-10-21), in the Docker/README jar paths and in several
+   `scripts/*.py`. `grep -rn '26\.2'` is the inventory; the branch plan for 26.3 is open (PM-460). A Paper-only
+   update on the same Minecraft version changes none of these.
 3. **Paperweight version.** `settings.gradle.kts` pins `io.papermc.paperweight.core` (currently
    `2.0.0-beta.24`) via the `paperweightVersion` property, and it must be the **same release** that
    the private SourbyPatcher `paper-toolchain` was built against — the published
@@ -256,7 +267,8 @@ old jar as `SourbyCraft-slim.<tag>.jar`. After the CI jar passes:
    suffix.
 3. Existing world loads and persists: `scripts/verify_persistence_panel.py`.
 4. Plugins: ViaVersion/ViaBackwards/ProtocolLib provisioning still runs before the plugin
-   scan (patch 0024). Bridged legacy plugins load (`/plugins`, Paper features 0003 and 0006–0012).
+   scan (patch 0024). Bridged legacy plugins load (`/plugins`, Paper features 0003, 0006–0012, 0024, 0026,
+   0028 and 0029).
 5. New-terrain generation runs without "Detected unsafe terrain read during worldgen"
    (patch 0023's case).
 6. Clean `stop`.
@@ -311,6 +323,7 @@ inside patches because of the package the upstream code imports) has to be check
 | Paper 0026 scheduling context (2026-10-22) | 4/1 | — | Hook from the start: `PaperEventManager#callEvent` (try/finally around the listener loop, `AuroraBridge.enterEventContext`/`exitContext`) and `BukkitCommandNode.BukkitBrigCommand#run` (`AuroraBridge.withCommandContext`). Logic in `bridge/SchedulingContext`, `bridge/EventAnchors` |
 | Paper 0003, 0007 bridge admission and routing | 39/3, 43/1 (Build 50: 23/3, 40/1) | scheduler/provider logic in CraftBukkit | **Done for `CraftScheduler` (Build 50, 2026-10-22):** every `CraftScheduler` site of 0003 and 0006–0011 is one call into `AuroraBridge`/`FoliaSchedulerCompatibility` (`CraftSchedulerHooksTest`); 0006, 0008, 0009 are hooks now. 0003 stays `logic` (20 code lines: the three loader gates, six one-line sites and the 11-line `bridgeTask` adapter that has to read package-private `CraftTask` state). 0007 stays `logic` because of its LightingLuminol port in `FoliaGlobalRegionScheduler` and `PaperPluginInstanceManager` (not changed); its `CraftScheduler` part is +2/−1 |
 | Paper 0002 branded bootstrap line | 37/6 | formatting inline | Branding rule: render the line in an owned class from `BuildInfo` |
+| **Not written yet:** Paper `FoliaAsyncScheduler#cancelTasks` (2026-10-25, PR #62) | expected 1/0 | — | **Hook needed.** PR #62 added `AuroraBridge.cancelAsync(plugin)` (→ `BridgeRuntime.cancelAsync`, the bridge's `IO_LANE` tasks), the counterpart of the `AuroraBridge.cancelGlobal(plugin)` line Paper 0007 puts at the start of `FoliaGlobalRegionScheduler#cancelTasks`. No patch calls it yet, so a plugin that calls Folia's `AsyncScheduler#cancelTasks` directly leaves its bridged async tasks indexed (shown as pending) until disable. The one-line call needs a new Paper feature patch made in the materialized `paper-server` (`io/papermc/paper/threadedregions/scheduler/FoliaAsyncScheduler.java`), then `rebuildPaperServerPatches` (PM-099) |
 | MC 0004, 0009–0012, 0015, 0017, 0018, 0022, 0027; Paper 0001, 0004, 0005; MC 0020 (Paper 0006, 0008, 0009 became hooks in Build 50) | small | they replace upstream statements in place (allocation removals, operand order, a gate, a removed registration) | **Not candidates.** A hook cannot replace an upstream statement. These stay as patches, or go upstream |
 
 The classifier's limits: it reads only `+`/`-` lines. It cannot tell a gameplay rule from a
@@ -322,8 +335,8 @@ printed per patch so a reviewer can disagree with it.
 
 ## Rebasing the engine baseline onto a new upstream
 
-This offline tooling is a planning aid for the Build 50 / Minecraft 26.3 port, not
-an end-to-end qualified upgrade. The manifest's 722 baseline patches are the
+This offline tooling is a planning aid for the Minecraft 26.3 port (Build 100, Aurora Forge), not
+an end-to-end qualified upgrade. Build 50 is the 26.2 optimisation build (`release=pre`). The manifest's 722 baseline patches are the
 inventory; feature patches remain a separate layer. Markers are evidence, not
 proof of authorship. Canvas may never ship 26.3, so canvas-origin files are ours
 to port when there is no suitable new upstream implementation.

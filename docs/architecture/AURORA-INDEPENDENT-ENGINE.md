@@ -1,6 +1,6 @@
 # Aurora Independent Engine Architecture
 
-> **Role:** independence design argument (execution domains, hybrid scheduling, snapshot work, replacement policy). **Status:** Proposal — not current architecture. Its §38 Phase 0/Phase 2 status notes and §31 Canvas relationship are stale; the current statements are in [execution-contract.md](execution-contract.md), [dependency-ledger.md](dependency-ledger.md) and the entry point's *Current state*.
+> **Role:** independence design argument (execution domains, hybrid scheduling, snapshot work, replacement policy). **Status:** Design proposal: it describes a target direction, and most of it is not built. Sections that once stated current facts (§6, §10, §24, §31, §36, §37, §38) carry a dated *Status 2026-10-25* note with the current state; the authoritative current statements are [execution-contract.md](execution-contract.md), [dependency-ledger.md](dependency-ledger.md) and the entry point's *Current state* ([AURORA.md](AURORA.md)).
 >
 > Entry point: [docs/architecture/AURORA.md](AURORA.md).
 
@@ -10,7 +10,7 @@
 **Branch:** `26.2`  
 **Architecture:** Aurora Engine  
 **Runtime:** Java 25  
-**Status:** Active architecture proposal  
+**Status:** Architecture proposal (target direction; current state annotated per section on 2026-10-25)\
 **Primary goals:** Speed, reliability, performance, stability, efficiency, independence
 
 ---
@@ -156,12 +156,17 @@ Minecraft code
     ↓
 Aurora execution contract
     ↓
-Current backend: Folia/Canvas region scheduler
+Current backend: the inherited (Folia-lineage, formerly Canvas) region scheduler
     ↓
 Future backend: Aurora scheduler
 ```
 
 This allows migration without forcing a full scheduler rewrite in one release.
+
+*Status 2026-10-25:* the current backend is the region scheduler inherited from Folia through Canvas,
+SourbyCraft-owned engine source since the 2026-10-05 migration (Paper is the only upstream). Aurora
+contracts exist for owner handoff and region queries (`execution/OwnerHandoff`, `execution/region`);
+no Aurora scheduler exists. Stage status in §10.
 
 ---
 
@@ -268,6 +273,17 @@ Introduce Aurora-owned execution for selected domains where benchmarking shows b
 ## Stage 5 — Optional scheduler replacement
 
 Only after correctness, compatibility, and workload evidence exist may core scheduling be replaced more broadly.
+
+*Status 2026-10-25* (same statement as [AURORA.md *Current state*](AURORA.md) and
+[execution-contract.md *Status boundary*](execution-contract.md#status-boundary)): Stage 1
+**implemented** (execution-contract.md, dependency-ledger.md, pinned inventories); Stage 2
+**partial** (`OwnerHandoff` carries async-path delivery and the wandering-trader handoff, the
+`execution/region` contracts carry several owned services, others use the published scheduler API
+directly); Stage 3 **implemented for SourbyCraft's own sources**: internal scheduler symbols appear in
+seven pinned files (four adapters, two read-only views; `scripts/test_independence_policy.py`) and
+feature patches reach the scheduler only at recorded sites; Stage 4 **partial** (the async-path and
+governed lanes exist, default off or idle, no benchmark shows a benefit); Stage 5 **planned, not
+started**.
 
 ---
 
@@ -581,6 +597,13 @@ Configuration must be parsed into typed immutable runtime snapshots.
 
 Hot paths must not repeatedly perform dotted-string config lookup.
 
+*Status 2026-10-25:* implemented in YAML, not TOML: `sourbycraft_config/aurora.yml` with
+`aurora.<service>` sections (`aurora.entity`, `aurora.diagnostics`, `aurora.cpu`, `aurora.bridge`,
+`aurora.scheduler`, `aurora.network`, `aurora.world`, `aurora.awf`, with `multiprofile` and
+`redis.fabric` under it; key table `config/AuroraKeys.java`), parsed into the typed record
+`config/AuroraConfig` (Build 49 layout; see [AURORA-CONFIG.md](../AURORA-CONFIG.md)). The namespaces
+`performance`, `ai`, `chunk`, `storage` and `memory` above do not exist.
+
 ---
 
 # 25. No Automatic Config Mutation
@@ -692,6 +715,12 @@ The long-term goal is to preserve useful compatibility without making Aurora arc
 ---
 
 # 31. Canvas Relationship
+
+*Status 2026-10-25:* superseded. Canvas is no longer an upstream: since the 2026-10-05 migration Paper
+is the only upstream (`paperRef` in `gradle.properties`), and the region threading and Canvas features
+are SourbyCraft-owned engine source (`dev.iyanz.aurora.engine`, the engine baseline patches). The
+original sentence below, "Canvas remains a valuable upstream source during migration", describes the
+pre-migration state. The rule that follows still applies, to the inherited **Canvas-derived code**.
 
 Canvas remains a valuable upstream source during migration.
 
@@ -811,6 +840,12 @@ The command should eventually expose execution domains:
 
 Only metrics with reliable instrumentation should be shown.
 
+*Status 2026-10-25:* `/perf` lists `tick`, `cpu`, `memory`, `gc`, `lanes`, `async`, `network`,
+`governor`, `scheduler`, `incidents`, `storage`, `awf`, `plugins`, `history`, `player`, `chunks`,
+`entities`, `region` and `health` (`command/PerfViews.java`; the bare command shows an overview).
+There is no `/perf ai` (the async-path view is `/perf async`). Each view's limits are in
+[docs/guides/commands.md](../guides/commands.md).
+
 ---
 
 # 37. Spark Integration
@@ -820,7 +855,8 @@ Spark remains an upstream profiler for now.
 Aurora should feed Spark:
 
 - SourbyCraft platform identity,
-- Build44-style public version identity,
+- the SourbyCraft public version identity (*status 2026-10-25:* "Build 44-style" when written; since
+  Build 47 the public identity is `Build N`, formatted by `BuildInfo.formatReleaseIdentity`),
 - Aurora-owned TPS/MSPT metrics,
 - region/runtime context where supported,
 - SourbyCraft configuration metadata.
@@ -854,12 +890,30 @@ Phase 0 is therefore complete, with two faults logged against later phases: Sour
 telemetry never leaves `WARMING` even after two hours, and the `players-N` workloads
 deliver roughly half the regions they declare.
 
+*Status 2026-10-25:* the `WARMING` fault is fixed (readiness now asks whether the collector has
+watched long enough, not whether one region generation spanned the window; a 20-minute run reported
+`AVAILABLE`; [BASELINE.md](../BASELINE.md), "Two things this run exposed"). "Phase 0 is complete"
+overstates the qualification state: [qualification-readiness.md](qualification-readiness.md) still has
+no certified comparable before/after reference pair, so the >3% regression gate cannot be evaluated.
+The contention measurement above names `EDFSchedulerThreadPool`, which is again the active default
+backend while the LeafPile-derived `AuroraEdfScheduler` stays parked (owner decision 2026-10-07).
+
 ## Phase 1 — Aurora configuration ownership
 
 - typed config,
 - Aurora namespaces,
 - legacy read fallback,
 - no automatic rewrite.
+
+*Status 2026-10-25:* typed config and Aurora namespaces are implemented (§24). The last two bullets
+were superseded by owner decision 2026-10-22 (Build 49): renamed or reformatted files are migrated
+**once at boot, keeping every value**, with the original kept as `*.migrated` and the migration
+logged: `config/canvas-*.yml` → `config/aurora-*.yml` (`EngineConfigFiles`), `sourbycraft_config/*.toml`
+→ `*.yml` (`ConfigFormatMigration`) and the pre-49 key names (`ConfigMigration`). On the Build 50
+candidate (PR #62; not in the published `v26.2-r50`) the pre-49 key names are no longer read as a
+fallback; a leftover old name is ignored with one WARN. Code written and statically reviewed; not
+built; not tested by the owner.
+Rules: [independence.md §5](independence.md#5-configuration-independence).
 
 ## Phase 2 — Execution contract extraction
 
@@ -876,6 +930,15 @@ same document specifies — owner identity across dimension transfer, rejection,
 stale-result validation — is where the work is, and a generic `execute(Runnable)` facade
 would satisfy none of it while looking like independence. The third bullet is therefore
 specified but not closed, and the second is not started.
+
+*Status 2026-10-25:* the counts above are the first measurement and are historical. The current
+inventory (`scripts/test_independence_policy.py`, recounted in
+[execution-contract.md *Measured inventory*](execution-contract.md#measured-inventory)) is 59
+non-comment lines in seven pinned files of SourbyCraft code: four adapters and two read-only views.
+The second bullet ("isolate direct scheduler access") is therefore **done for SourbyCraft's own
+sources** (Stage 3, §10), and the third is partial: the owner-handoff contract and the
+`execution/region` contracts exist and are used, the remaining owned services use the published
+scheduler API.
 
 ## Phase 3 — Deep entity and AI optimization
 

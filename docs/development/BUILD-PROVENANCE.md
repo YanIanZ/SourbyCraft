@@ -57,8 +57,12 @@ Settings are build-time only and require a new JAR/restart.
 Verification: `PYTHONPATH=scripts python3 -m unittest scripts/test_build_identity.py`.
 The fixture tests include untracked (hash changes, dirty does not)/modified/staged/deleted files, nested materialized edits,
 index byte preservation, resource changes, generated API/server drift, missing Git,
-untracked nested repositories, unknown local provenance, dirty labels, wrong commits and divergent hashes. Current build
-and packaged-JAR evidence is recorded in `AGENT-COORDINATION.md`.
+untracked nested repositories, unknown local provenance, dirty labels, wrong commits and divergent hashes. The
+build and packaged-JAR evidence of the 2026-10-20 change was kept in the untracked `AGENT-COORDINATION.md` and is
+not retained in the repository. CI evidence since then: the build job checks the built server jar with
+`verify_build_identity.py ... --commit "$GITHUB_SHA" --source-root .` (`build.yml`) before the release job can
+run, and tags `v26.2-r48` through `v26.2-r50` were published through that job (no run id is recorded in the
+repository; the logs were not inspected for this page).
 
 ## Provenance block (TODO Inovasi "provenance manifest", 2026-10-20)
 
@@ -95,8 +99,9 @@ it recomputes every source-derived value from that checkout and requires equalit
 `--source-root .` right after `slimServerJar`. Tests: `test_build_identity.BuildProvenanceTest` (10),
 `BuildProvenanceTest` (4), `VerCommandTest.theProvenanceBlockIsPrinted`.
 
-Not covered: this is embedded metadata, not a signed in-toto/SLSA attestation; the jar signature
-(SEC-2, once the key exists) is what makes it tamper-evident after publication.
+Not covered: this is embedded metadata, not a signed in-toto/SLSA attestation; the Ed25519 jar signature
+(SEC-2, enforced by servers since Build 48, [AUTO-UPDATER.md](AUTO-UPDATER.md#signed-releases-sec-2--enabled-since-build-48))
+and the release job's provenance attestation (below) are what make the published jar tamper-evident.
 
 ## SBOM (CycloneDX 1.6)
 
@@ -123,7 +128,13 @@ present). Not validated against the official CycloneDX JSON schema (no validator
 
 ## Reproducible slim jar, independent rebuild and attestation (Build 49)
 
-**What is wired (IMPLEMENTED in the workflow and build script; CI result NOT YET OBSERVED, see below):**
+**What is wired (IMPLEMENTED in the workflow and build script).** Written 2026-10-22, before any CI run of it.
+Status 2026-10-25: the `release` job `needs: [build, rebuild]` in the workflow of every release tag from
+`v26.2-r48` on, so the rebuild comparison and the attestation ran for every release published since: tags
+`v26.2-r48`, `v26.2-r49`, `v26.2-r49.1` and `v26.2-r50` exist, and
+the [Build 48 release notes](../releases/26.2-build-48-aurora-nexus.md) record the first release with a
+provenance attestation. The run logs were not inspected for this page and no run id is recorded in the
+repository; `gh attestation verify` on a published jar (below) is the check an owner can repeat.
 
 - `slimServerJar` (root `build.gradle.kts`) writes every entry with one fixed time stamp and in a fixed
   order (`META-INF/MANIFEST.MF` first, then by name). The time is `SOURCE_DATE_EPOCH` clamped to the ZIP
@@ -137,7 +148,8 @@ present). Not validated against the official CycloneDX JSON schema (no validator
   `verify_build_identity.py build/libs/SourbyCraft-slim.jar --api-only ... --licences --source-root .`
   (GPL text hash pinned, notice markers, byte equality with the checkout, no extra files). Local
   evidence 2026-10-22: two `slimServerJar -PsourbyBuild=49` runs (second with `--rerun-tasks`) at
-  `SOURCE_DATE_EPOCH=1761091200` gave the same SHA-256 `1a3bc879…b2c0`; not yet observed on CI.
+  `SOURCE_DATE_EPOCH=1761091200` gave the same SHA-256 `1a3bc879…b2c0`; not yet observed on CI when written
+  (the build job's `--licences` check is in the workflow of every release tag from `v26.2-r49` on).
 - The `build` job pins `SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)` for every later step (so `buildTimestamp`
   in `sourbycraft-build.properties` and the server manifest `Build-Time` also derive from the commit, not
   `now()`), and pins the exact Temurin build (`java-version: 25.0.4+1`) instead of the floating `25`. Bump the
@@ -176,7 +188,8 @@ present). Not validated against the official CycloneDX JSON schema (no validator
 Runs 2 and 3 (identical inputs, entry times already fixed) differed in `META-INF/patches.list`,
 `META-INF/versions.list` and the paperclip patch, all following from the one differing class; runs 4 and 5 are
 byte-identical, in two time zones. Not covered: a different checkout path, a different machine or JDK build
-(CI uses Temurin 25.0.4+1, this laptop 25.0.2), and the CI `rebuild` job itself, which has not run yet.
+(CI uses Temurin 25.0.4+1, this laptop 25.0.2), and the CI `rebuild` job itself, which had not run yet on
+2026-10-22 (it gated the r48 to r50 publishes since, see the status above).
 
 **Verify a release** (needs the `gh` CLI; `<jar>` is the downloaded `SourbyCraft-26.2-REL.jar`):
 

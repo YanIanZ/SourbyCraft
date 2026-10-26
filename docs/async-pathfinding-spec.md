@@ -1,12 +1,20 @@
 # SourbyCraft — Async Pathfinding (Phase 1a of the async-offload MT uplift)
 
-Status: **EXPERIMENTAL / OFF by default**. Functional wiring exists, but default-on requires representative behavior, saturation and performance evidence.
+Status: **EXPERIMENTAL / OFF by default** (`aurora.entity.async-pathfinding`, LIVE, default `false`). Functional wiring exists, but default-on requires representative behavior, saturation and performance evidence.
+
+Status 2026-10-25 (Build 50 branch, PR #62): the offload now runs only on the thread that owns the mob, a
+declined offload is counted, and finished solves are counted by outcome (sections 3 and *Saturation contract*).
+Code written and statically reviewed; not built; not tested by the owner. Not in any published build
+(`v26.2-r50` predates it).
 
 ## Goal
 Move the A* path solve off the region tick thread onto a bounded worker pool, so a
-region packed with pathing mobs sheds ~20% of its tick cost (measured: PathNavigation +
-PathFinder + WalkNodeEvaluator were ~20% of the hot 500-player region). Vanilla-accurate;
-this is a latency-shift, not a behaviour change.
+region packed with pathing mobs sheds part of its tick cost. Vanilla-accurate; this is a
+latency-shift, not a behaviour change. The motivating figure, "PathNavigation + PathFinder +
+WalkNodeEvaluator were ~20% of the hot 500-player region", is an **uncertified historical
+profile**: no workload, host, configuration or noise state is recorded for it, so it is not a
+claim about what this feature saves. No measurement of the feature's effect exists (gate 3 below
+has not started).
 
 ## The hard constraint
 `Level.getBlockState` races / NPEs off the region thread (the trap that killed antixray).
@@ -34,11 +42,14 @@ only **chunk references**; block reads dereference the live mutable section pale
    getChunkForCollisions` to read the copies. `getFluidState = getBlockState(pos).getFluidState()`
    (fluid is derived, no separate snapshot). Skipped sections read as AIR. Immutable after
    construction → safe to read from any thread.
-   - Private per-solve `PathTypeCache` (not the shared regionized one which the region thread
-     invalidates on block writes).
+   - No path-type cache off the region thread: the snapshot context sets `cache = null` (MC 0039)
+     and a `PathfindingContext` built on a thread that ticks no region uses none (MC 0082), so the
+     solve calls the static `getPathTypeFromState`. The shared regionized cache, which the region
+     thread invalidates on block writes, is never touched off-thread.
 
-2. **`AsyncPathProcessor`** — bounded platform-thread pool (size ~`max(1, cores/4)`; CPU-bound,
-   NOT virtual threads). Submits `() -> pathFinder.findPath(snapshot, ...)`. Each solve owns its
+2. **`AsyncPathProcessor`** — bounded platform-thread pool, the Resource Governor's
+   `Lane.PATHFINDING` (`max(1, availableProcessors/4)` threads, queue 1024, neither configurable;
+   CPU-bound, NOT virtual threads). Submits `() -> pathFinder.findPath(snapshot, ...)`. Each solve owns its
    own `PathFinder`/`NodeEvaluator` (mutable A* buffers are never shared across threads). The
    solver comes from `PathNavigation.sourbyIsolatedPathFinder`: `createPathFinder` assigns the
    evaluator it creates to the navigation's live `nodeEvaluator` field as a side effect, so the
@@ -56,7 +67,10 @@ only **chunk references**; block reads dereference the live mutable section pale
    `NodeEvaluator.prepare(region, snapshot)`: the evaluator's `mob` field is `null` for the whole
    solve and every former `this.mob.…` read in `WalkNodeEvaluator`, `FlyNodeEvaluator`,
    `SwimNodeEvaluator`, `AmphibiousNodeEvaluator` and `Frog.FrogNodeEvaluator` is
-   `this.subject().…`. The supplier submitted to the pool captures the solver, the two snapshots,
+   `this.subject().…`. `SwimNodeEvaluator.getPathType(context, x, y, z)` passes the nullable `subject`
+   field instead (MC 0039, *PR #62*): its `getPathTypeOfMob` never reads the mob, so the live evaluator
+   can still be queried outside a solve (`MoveControl.isWalkable`) without "prepare was not called".
+   The supplier submitted to the pool captures the solver, the two snapshots,
    the target set and three scalars; the `Mob` reference is captured only by the completion
    lambda, which runs on the owner. See "What the snapshot holds" below.
 
@@ -69,13 +83,18 @@ only **chunk references**; block reads dereference the live mutable section pale
    `theSynchronousSolveSeesWhatVanillaWouldAndKeepsTheMobsRandom`).
 
 3. **Periodic recompute only** — `PathNavigation.recomputePath` offloads only when the mob already
-   has a live, unfinished path. Snapshot + event validation happen on the owning region thread;
+   has a live, unfinished path, and only on the thread that owns the mob (*PR #62*,
+   `AsyncPathRecompute.offload`): a recompute from a foreign thread, which relaxed thread checks make
+   possible, runs the synchronous recompute as with the feature off. The owner handoff is built on
+   the owner before the submission, so the completing worker only schedules the delivery.
+   Snapshot + event validation happen on the owning region thread;
    the A* solve runs on the worker; completion is handed back through the entity owner scheduler.
    A path identity token prevents a stale result from overwriting a newer retarget/stop/recompute.
 
-4. **Config**: `aurora.entity.async-pathfinding` (default `false`), with legacy
-   `perf.ai.async-pathfinding` compatibility where still supported. When false, the vanilla
-   synchronous path remains the active behavior.
+4. **Config**: `aurora.entity.async-pathfinding` (default `false`, LIVE). Since Build 50 (*PR #62*) the
+   old name `perf.ai.async-pathfinding` is not read: the boot migration renames it where the config
+   directory is writable; otherwise it is ignored with one WARN naming the current key. When false,
+   the vanilla synchronous path remains the active behavior.
 
 ## What the snapshot holds (ENG-8 member trace, 2026-10-20)
 
@@ -185,7 +204,9 @@ Creakings.
   read by nothing on this branch, see `docs/architecture/async-path-snapshot-audit.md` finding 3.)
 
 ## Verification gate before default-on
-1. Compile + boot clean with flag OFF (zero behaviour delta). ← this session
+1. Compile + boot clean with flag OFF (zero behaviour delta). Every green CI push build compiles and boots
+   with the flag at its default (off); "zero behaviour delta" rests on the flag-off recompute being the
+   vanilla call and on `MobPathSnapshotTest`, not on a measurement.
 2. Flag ON on the test server: mobs path normally (villagers pathfind to workstations, zombies
    chase, pathing across water/fences), no async-access crash in logs over a soak.
 3. Spark A/B: region-thread pathfinding frames drop; worst-region MSPT under a mob-heavy crowd.
@@ -203,17 +224,21 @@ this fixture does not cover player activation, region transitions, unloaded bord
   `FlyingPathNavigation`; initial path creation stays synchronous. Villagers still took jobs
   (synchronous path). Not evidence for the async path.
 - `asyncpath-soak-2` (midnight, no golems, invulnerable villager targets, walls/fences/glass/stone
-  toggled on mob routes from the console (each route on/off roughly every 12 s, ~25 s per cycle) for ~10 min — command blocks do not run on this
-  engine: `CommandBlock.tick` starts with an inherited `if (true) return;`; the ledger
-  `docs/architecture/inherited-guards.md` is being written): `/perf async` **204 solves admitted, 0
+  toggled on mob routes from the console (each route on/off roughly every 12 s, ~25 s per cycle) for ~10 min — command blocks did not run on
+  that jar: `CommandBlock.tick` started with an inherited `if (true) return;`; since MC 0055 they run behind
+  `aurora.world.command-blocks`, default off, see `docs/architecture/command-blocks.md`; the ledger is
+  `docs/architecture/inherited-guards.md`): `/perf async` **204 solves admitted, 0
   outstanding, 0 refused**, solve mean 0.39 ms / slowest 7.26 ms, queue wait mean 0.24 ms; zero
   exception/guard lines in `server.log` (one boot `ERROR: No key layers in MapLike[{}]`, the vanilla
   message for a flat world with empty `generator-settings`); clean stop (exit 0). Zombies, striders, bees and Creakings
   changed position between probes.
 - NOT shown: villagers walking to workstations on the async path (they sleep at midnight; 16/16
-  jobless), which mob types produced the 204 solves (no per-type counter), chase/arrival outcomes,
+  jobless), which mob types produced the 204 solves (no per-type counter in that jar; `/perf async`
+  has per-type rows since 2026-10-21, `AsyncPathTypeStats`), chase/arrival outcomes,
   amphibious controls (axolotl/drowned/frog refuse the offload by design), saturation, and anything
-  multi-hour. Item 2 stays open; item 3 (spark A/B) not started.
+  multi-hour. Item 2 stays open; item 3 (spark A/B) not started. The 0 refused above predates the
+  *PR #62* counters: on that jar a capacity decline was counted nowhere, so "0 refused" did not show
+  that the pool never saturated. A rerun on the PR #62 tree, reading declined as well, is NEEDS RETEST.
 
 
 ## Saturation contract
@@ -223,15 +248,19 @@ Saturation must not create a latency cliff.
 Current contract:
 
 ```text
+caller does not own the mob     -> decline before anything (PR #62); the synchronous recompute
+  (relaxed thread checks)          runs on the caller as with the feature off; not counted
 worker capacity available       -> snapshot, solve asynchronously
 no capacity (hasCapacity false) -> decline the offload before the event and the snapshot;
                                    the vanilla synchronous recompute runs this slot
+                                   (counted as declined, per type too; PR #62)
 queue filled since the check    -> trySubmit returns null; the vanilla recompute runs this
   (trySubmit null)                 slot (the snapshot was wasted and EntityPathfindEvent
-                                   fires a second time; a narrow race)
+                                   fires a second time; a narrow race) (counted as refused)
 shutdown/stopping               -> no capacity, as above
 solver failure                  -> null result, the mob keeps its live path; logged at most
-                                   once a minute with a suppressed count
+                                   once a minute with a suppressed count (counted as no path
+                                   when the result is still valid)
 ```
 
 The pool itself never executes a refused solve on the submitting thread. Since 2026-10-14 (audit
@@ -242,5 +271,9 @@ costs (one synchronous A*) and nothing more; under saturation the region thread 
 vanilla work, not vanilla work plus a snapshot. This is a correctness/latency-cliff statement,
 not a throughput claim; no measurement backs a number here.
 
-`/perf async` exposes refused submissions. A rising refusal count means the async feature is at
-capacity and needs workload-specific investigation; it does not justify adding threads blindly.
+`/perf async` exposes declined offloads and refused submissions (both ran the synchronous
+recompute) and, for finished solves, how many were applied, discarded (entity replaced / path
+replaced / generation moved on / no path) or retired before delivery (mob removed or unloaded,
+or the owner handoff refused) (*PR #62*). A rising declined or refused count means the async
+feature is at capacity and needs workload-specific investigation; it does not justify adding
+threads blindly. The incident detector's async-path signal reads declined plus refused.

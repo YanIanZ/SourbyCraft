@@ -93,3 +93,8 @@ changed plugin behavior.
 | 0019 | local scalar translation, caller-owned results | retained; arithmetic tests added, certified performance gate open |
 
 See [Task D validation](aurora-task-d-validation.md) for scope, tests, and remaining gates.
+
+> **Status 2026-10-25 (PR #62):** no follow-up landed. PR #62 did not touch either retained patch
+> (MC 0017 +28 −2, MC 0018 — the old "0019" — +20 −5); `BlockCollisionBoundsTest` still exists; the
+> certified performance gate for both is still open (no certified reference pair,
+> [qualification-readiness.md](qualification-readiness.md)).

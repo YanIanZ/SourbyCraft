@@ -1,14 +1,18 @@
 aurora:
   # sourbycraft_config/aurora.yml — Aurora services, Build 49 layout, every key at its default.
-  # A fresh server writes this file (comments included) at first boot; an existing file is never
-  # reformatted. Aurora keys an older server still kept in sourbycraft_global_config.yml are moved here
-  # once (copy of each rewritten file kept as *.migrated). LIVE = /sourbycraft reload applies it;
-  # RESTART_REQUIRED = read once at startup. Keys marked "read early" are read straight from this file
-  # before the configuration loads. Not performance tuning: these are the implemented defaults.
+  # A fresh server writes this file (comments included) at first boot. An existing file is never
+  # reformatted or seeded: keys added by a later build (AbyssLink, MultiProfile, Redis Fabric) are not
+  # written into it and run on their defaults until you copy them from this example. Aurora keys an older
+  # server still kept in sourbycraft_global_config.yml are moved here once (copy of the previous file kept
+  # as aurora.yml.migrated). LIVE = /sourbycraft reload applies it; RESTART_REQUIRED = read once at
+  # startup. Keys marked "read early" are read straight from this file before the configuration loads.
+  # A key no table documents gets one WARN per load and is ignored; a key written twice makes the whole
+  # file unreadable. Not performance tuning: these are the implemented defaults.
   # Reference: docs/AURORA-CONFIG.md.
   #
   entity:
     # LIVE. Experimental and default-off; functional tests do not establish qualification.
+    # The pre-49 name perf.ai.async-pathfinding is not read since Build 50 (one WARN per load).
     async-pathfinding: false
   diagnostics:
     # LIVE. Attribute per-thread CPU to execution lanes once a second (/perf lanes).
@@ -46,8 +50,11 @@ aurora:
     # enforced = throws, as before. relaxed/bridged are UNSAFE (data races, chunk corruption, item dupes, deadlocks
     # possible) and the server is not qualified; the boot log, /ver and /sourbycraft config say so.
     thread-checks: "relaxed"
-    # LIVE. 0 = unlimited, otherwise 1..100000. Over-limit submissions are cancelled and diagnosed.
+    # LIVE. 0 = unlimited, otherwise 1..100000. Over-limit submissions are cancelled and diagnosed;
+    # existing tasks drain normally.
     max-pending-tasks-per-plugin: 0
+    # LIVE. 0 = unlimited, otherwise 1..100000. Over the limit a one-shot async callback is cancelled and a
+    # repeating task skips that run and stays scheduled (both diagnosed, rate-limited). Rejection, not a queue.
     max-running-async-tasks-per-plugin: 0
   scheduler:
     # RESTART_REQUIRED. Resource Governor lane budgets (docs/architecture/aurora-resource-governor.md);
@@ -75,6 +82,12 @@ aurora:
     worlds: []
     # Move these worlds back to region files on the next load; must not overlap worlds.
     export: []
+    # file = a directory beside each region folder. redis = the built-in Redis backend, configured by the
+    # aurora.awf.redis.* keys (uri, key-prefix, pool-size, timeout-ms, lease-seconds, wait-for-aof). Those
+    # keys are read but never seeded, so they are not in this example: a uri written here takes precedence
+    # over the SOURBYCRAFT_AWF_REDIS_URI environment variable, which is used only while the key is absent.
+    # Another name selects a backend registered by server-side code; if it is not registered, listed worlds
+    # fail to load (no fallback).
     backend: "file"
     persistence: "incremental"
     # Writes become durable at commit / save-all / shutdown. A crash can lose this interval.
@@ -91,14 +104,22 @@ aurora:
     # Start a commit as soon as a storage's unsaved chunks hold at least this many bytes, without waiting for
     # commit-interval-seconds. 0 = off (interval only). A trigger checked once a second, not a hard cap.
     commit-dirty-bytes: 0
-    # One budget (ms) for every AWF wait at shutdown, counted from the start of shutdown (so including the
-    # vanilla chunk save). When it passes, no further commit is attempted, Redis connections are cut, every
-    # unconfirmed storage is logged and the stop ends with AWF-SHUTDOWN-INCOMPLETE and exit status 70.
+    # One budget (ms) for the AWF waits at shutdown (lock waits, the start of each commit attempt, Redis
+    # calls, lease release), counted from the start of shutdown (so including the vanilla chunk save). When
+    # it passes, no further commit is attempted, Redis connections are cut, every unconfirmed storage is
+    # logged and the stop ends with AWF-SHUTDOWN-INCOMPLETE and exit status 70. A FILE commit already
+    # writing (files plus fsync) is not interrupted and can hold the stop past the deadline. Also how long an
+    # AuroraWorlds save (/awf save, the save before an unload) waits for its world's chunk I/O to drain.
     shutdown-deadline-ms: 30000
     multiprofile:
-      # AWF MultiProfile. Default false: no directory, thread, listener or service registration.
+      # RESTART_REQUIRED, read early (every multiprofile key). AWF MultiProfile. Default false: no
+      # directory, thread, listener or service registration. docs/awf/multiprofile/CONFIGURATION.md.
       enabled: false
-      # standalone | distributed. Distributed is EXPERIMENTAL and requires the Redis fabric.
+      # standalone | distributed. distributed is refused at startup unless repository: redis,
+      # coordination.provider: redis, fencing-enabled: true and a running Aurora Redis Fabric are set.
+      # distributed, and standalone with repository: redis (nothing limits that to one server), are
+      # EXPERIMENTAL and unqualified: a player's live state does not follow them between servers, players
+      # online at shutdown get no quit snapshot, and there is no proxy handoff.
       mode: "standalone"
       default-slots: 3
       max-slots: 8
@@ -121,10 +142,30 @@ aurora:
         provider: "local"
         fencing-enabled: true
         single-active-session: true
+      # File repository directory (accounts, profiles, snapshots, transition journals); created only when
+      # enabled. With repository: redis it is only read: while Redis is empty and this directory holds
+      # profiles, profile writes are refused until /awf multiprofile migrate-repository copies them.
       directory: "awf/profiles"
+      # RESTART_REQUIRED. file = the directory above, one server only (its lock refuses a second server).
+      # redis = the Aurora Redis Fabric (STORAGE pool, keys <prefix>fabric:mp:*): each write is one Lua
+      # script that checks the writer's session claim (when the write carries one) and the record revision
+      # (when the record has one) before it writes. Needs coordination.provider: redis, fencing-enabled:
+      # true, a running fabric and a Redis 7.0+ primary (no cluster).
+      repository: "file"
+      redis:
+        # RESTART_REQUIRED. repository: redis only. true = refuse to start when Redis reports appendonly
+        # off. Even with AOF, appendfsync everysec can lose about 1 s of acknowledged writes on a Redis
+        # crash, and a promoted replica can lose acknowledged writes; one primary is the supported topology.
+        require-aof: true
+        # RESTART_REQUIRED. repository: redis only. true = snapshot, account, profile and binding writes,
+        # and the journal write before a target state is applied, wait for WAITAOF (Redis 7.2+, up to half
+        # of aurora.awf.redis.timeout-ms); a write not confirmed in time is still applied, logged and counted
+        # in /awf multiprofile status. Unsupported by Redis: logged once, then acknowledged from memory.
+        wait-for-aof: true
     redis:
       fabric:
-        # Aurora Redis Fabric. Default false: no socket, no thread, no key.
+        # RESTART_REQUIRED, read early (every fabric key). Aurora Redis Fabric. Default false: no socket,
+        # no thread, no key. Reuses aurora.awf.redis.uri, key-prefix, timeout-ms and TLS/ACL credentials.
         enabled: false
         services:
           sessions: true

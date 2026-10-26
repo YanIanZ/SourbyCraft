@@ -1,6 +1,6 @@
 # Aurora execution contract extraction
 
-> **Role:** execution contract and measured region-backend coupling. **Status:** Active; the current statement of scheduler isolation (supersedes the Phase 2 notes in [AURORA-INDEPENDENT-ENGINE.md](AURORA-INDEPENDENT-ENGINE.md) §38). Adapter-file count corrected on 2026-10-07.
+> **Role:** execution contract and measured region-backend coupling. **Status:** Active; the current statement of scheduler isolation (supersedes the Phase 2 notes in [AURORA-INDEPENDENT-ENGINE.md](AURORA-INDEPENDENT-ENGINE.md) §38). Inventory, adapter files and stage status corrected on 2026-10-25 against `scripts/test_independence_policy.py`, `perf/AsyncPathValidity` and [AURORA.md *Current state*](AURORA.md) (PR #62 docs pass); "Evidence and current gaps" below is the 2026-10 review, kept as history with dated corrections.
 >
 > Entry point: [docs/architecture/AURORA.md](AURORA.md).
 
@@ -15,16 +15,18 @@ metrics, plugin compatibility, and completed tests remain in place.
 
 | Domain / consumer | Current execution dependency | Required behavior | Migration boundary |
 | --- | --- | --- | --- |
-| Async path completion | `perf/AsyncPathCompletion.java` depends on `OwnerHandoff`; `execution/RegionOwnerHandoff` is the only backend adapter | Defer mutation to the current entity owner; handle rejection and retirement; release pending state | **Done** — owner identity delivered and checked; epoch and target validation outstanding |
+| Async path completion | `perf/AsyncPathCompletion.java` depends on `OwnerHandoff`; `execution/RegionOwnerHandoff` is the only backend adapter | Defer mutation to the current entity owner; handle rejection and retirement; release pending state | **Done** — before applying, `perf/AsyncPathRecompute.deliver` checks the delivered owner (`AsyncPathValidity.sameSubject`), path identity (`stillRequested`) and the navigation generation of MC feature patch 0047 (`sameGeneration`); each discard is counted in `/perf async` |
 | Path computation | `perf/AsyncPathProcessor.java` on the Resource Governor's `PATHFINDING` lane (`execution/GovernedLane`, since 2026-10-20) | Snapshot-only CPU work; defined saturation, cancellation, shutdown | Threads/queue governed and shown in `/perf governor`; admission, telemetry and lifecycle stay in `AsyncPathProcessor`. Separate CPU admission contract; do not conflate with owner dispatch |
 | Player replies | `command/SourbyReply.java`, player scheduler | Deliver on current player owner; handle disconnect | Public compatibility API remains until a shared handoff contract proves useful |
 | HUD | `hud/HudBars.java`, global periodic task plus player schedulers (boss-bar show/hide, actionbar sends) | One shared snapshot cadence; player-owned show/hide/preferences and actionbar mode; cancellation on close | Separate aggregation cadence from player mutation |
-| Metrics collection | `perf/PerformanceCollector.java`, direct `RegionizedServer` and `TickRegionScheduler` reads | Read counters/tick-rate cheaply; immutable publication; lifecycle-owned collector | Metrics-source adapter, not task dispatcher |
+| Metrics collection | `perf/PerformanceCollector.java` through the `execution/region/RegionBackend` adapter (`FoliaRegionBackend`); it names no scheduler internal | Read counters/tick-rate cheaply; immutable publication; lifecycle-owned collector | Metrics-source adapter, not task dispatcher |
 | Updater | `update/SourbyUpdater.java`, `UpdateApplier.java`, `UpdateNotifier.java`, public async/player schedulers | Blocking network/admin work away from gameplay; owner-bound player notification; shutdown cancellation | External I/O and notification contracts stay distinct |
-| Engine configuration | `SourbyCraftConfig.java`, concrete Canvas global/world reloads | Explicit operator reload; preserve cached-setting caveats | Config bridge, not scheduling API |
+| Engine configuration | `SourbyCraftConfig.java` through `config/upstream/UpstreamConfigBridge` (`CanvasConfigBridge` calls the engine's global/world reloads) | Explicit operator reload; preserve cached-setting caveats | Config bridge, not scheduling API |
 
 Paths above are relative to `sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/`.
-The Minecraft integration source is `sourbycraft-server/minecraft-patches/features/0006-SourbyCraft-async-pathfinding-offload-periodic-path-.patch`.
+The Minecraft integration sources are feature patches 0006 (the flag-gated call into `perf/AsyncPathRecompute`
+and the navigation seams), 0039 (the immutable mob snapshot), 0047 (the navigation generation) and 0082
+(no shared path-type cache off a region thread) under `sourbycraft-server/minecraft-patches/features/`.
 Generated upstream code is read-only evidence, never the patch source of truth.
 
 ## The Aurora region system
@@ -40,8 +42,12 @@ enumeration without naming a single backend type, under `perf`, framed as teleme
   are kept deliberately: a region that merged away thirty seconds ago holds the only record of what
   those chunks were doing, and dropping it on retirement is how a fifteen-minute window ends up
   empty.
-* `RegionBackend` / `FoliaRegionBackend` — the two read-only questions the engine still answers:
-  the global tick handle's metrics, and the configured tick rate.
+* `RegionBackend` / `FoliaRegionBackend` — the read-only questions the engine still answers: the
+  global tick handle's metrics and the configured tick rate (`RegionTickRate`), plus, added later,
+  the region the calling thread ticks (`CurrentRegion`), per-world population summed from the
+  regions (`RegionPopulation`) and the engine pools' configured sizes (`EnginePools`).
+  `MoonriseRegionOwnership` answers ownership queries and chunk-load continuations
+  (`RegionOwnership`, `RegionChunkLoading`).
 
 Every region runs on `ExecutionLane.REGION_TICK`, with no way to place one elsewhere. That is the
 whole point: a region *is* the unit of gameplay ownership, so a region on another lane would be
@@ -49,9 +55,14 @@ gameplay mutated by a thread that does not own it. It is also why "world load on
 on another" is not something a region system can offer — a region thread runs the entire tick for
 what it owns, plugin handlers included.
 
-With this in place the backend is named in exactly three files, `RegionOwnerHandoff`,
-`FoliaRegionBackend` and `awf/world/AuroraWorldsService` (AWF world lifecycle on the global tick,
-added later; corrected 2026-10-07 from "two"), and `perf` no longer names it at all. The independence tests pin the file
+With this in place the backend's internal scheduler is named in exactly **seven** pinned files
+(`SchedulerCouplingTest.test_the_backend_is_named_only_inside_the_adapters`, recounted 2026-10-25;
+"two" when this slice was written, "three" on 2026-10-07). Four adapters: `execution/RegionOwnerHandoff`,
+`execution/region/FoliaRegionBackend`, `awf/world/AuroraWorldsService` (AWF world lifecycle on the global
+tick) and the relaxed-thread-checks world-data pool, `compat/luminol/RegionizedWorldDataPool` with its lease
+helper `WorldDataAccess` (owner decision 2026-10-22; dead code while thread checks are enforced). Two
+read-only diagnostics views: `perf/LiveSchedulerSource` (`/perf scheduler`) and `perf/RegionLocator`
+(`/perf region`). The rest of `perf` names no scheduler internal. The independence tests pin the file
 set, not just the symbols, so replacing the backend stays an edit to a known list rather than a
 search.
 
@@ -67,29 +78,42 @@ coupling. Depending on a published contract is the goal. What matters is the int
 Counted by `scripts/independence_policy.py` and pinned by `scripts/test_independence_policy.py`,
 so this list is designed against a fixed set and new coupling has to be added deliberately.
 
-Five sites in SourbyCraft-owned code, across eighty files, when this slice was written. Recount on
-2026-10-07 (`independence_policy.scheduler_sites`): 11 sites in three files — the two below plus
-`awf/world/AuroraWorldsService.java` (`RegionizedServer`).
+History: five sites in SourbyCraft-owned code, across eighty files, when this slice was written;
+11 sites in three files on 2026-10-07. Recount on 2026-10-25 (`independence_policy.scheduler_sites`,
+non-comment lines): **59 lines in the seven pinned files**, naming the symbols in
+`SchedulerCouplingTest.APPROVED`:
 
-| Where | Symbol | Why |
-| --- | --- | --- |
-| `execution/region/FoliaRegionBackend.java` | `RegionizedServer.getGlobalTickData()` | read the global tick handle's metrics |
-| `execution/region/FoliaRegionBackend.java` | `TickRegionScheduler::getTickRate` | the configured tick rate, for TPS |
-| `execution/RegionOwnerHandoff.java` | `EntityScheduler` | the single adapter behind `OwnerHandoff`; hands work to an entity's owning region |
+| Where | Lines | Symbols | Why |
+| --- | ---: | --- | --- |
+| `execution/region/FoliaRegionBackend.java` | 15 | `RegionizedServer`, `TickRegionScheduler` | global tick handle metrics, tick rate, the calling thread's region, region populations |
+| `execution/RegionOwnerHandoff.java` | 1 | `EntityScheduler` | the single adapter behind `OwnerHandoff`; hands work to an entity's owning region |
+| `awf/world/AuroraWorldsService.java` | 5 | `RegionizedServer` | world creation, unload and per-region saves queued on the global tick |
+| `compat/luminol/RegionizedWorldDataPool.java`, `WorldDataAccess.java` | 8 + 4 | `RegionizedWorldData` (and the region types) | the relaxed-thread-checks world-data pool and its lease |
+| `perf/LiveSchedulerSource.java` | 23 | `TickRegions`, `TickRegionScheduler`, `RegionizedTaskQueue`, `ThreadedRegionizer`, `RegionizedServer` | `/perf scheduler`, read-only |
+| `perf/RegionLocator.java` | 3 | `ThreadedRegionizer`, `TickRegions` | `/perf region <world> <x> <z>`, read-only |
 
-One site in the fourteen engine-integration patches:
+Feature patches reach the scheduler only at recorded sites
+(`test_integration_patches_reach_the_scheduler_only_where_recorded`): Paper 0005 and 0019
+(`RegionizedServer.getGlobalTickData`), Paper 0014 and MC 0062 (`RegionizedServer.getInstance`),
+MC 0082 (`TickRegionScheduler.getCurrentRegionizedWorldData() != null`: am I on a region thread,
+so may the path-type cache be used; split from 0006 on 2026-10-22), and the relaxed-thread-checks
+patches MC 0084, MC 0085 and Paper 0029 (`isGlobalTickThread`, `getCurrentRegion`,
+`RegionizedWorldData` and the region types, recorded in the test as hunks that run only while thread
+checks are relaxed; MC 0084's global tick counter answer for `getTickCount` applies in every mode).
 
-| Patch | Symbol | Why |
-| --- | --- | --- |
-| `0006` async pathfinding | `TickRegionScheduler.getCurrentRegionizedWorldData() != null` | am I on a region thread, so is offload legal |
+Further patches *edit* `TickRegionScheduler.java`, `TickRegions.java` or `RegionizedTaskQueue.java`
+rather than call into them — among them `0002` (thread-count default), `0013`/`0079` (tick metrics
+hooks), `0025` (watchdog opt-in), `0031`/`0032` (save tickets and cancelled tasks across merge and
+split), `0045`/`0049` (queue telemetry) and `0084` (relaxed checks). Those are engine modifications,
+not call-site coupling, and a contract does not remove them.
 
-Two further patches (`0002`, `0013`) *edit* `TickRegionScheduler.java` and `TickRegions.java`
-rather than call into them — a thread-count default and the tick metrics hook. Those are engine
-modifications, not call-site coupling, and a contract does not remove them.
-
-Canvas coupling was two sites, both config reload bridges in `SourbyCraftConfig.java`. On 2026-10-07
-it is five sites in two files: the two reloads, now in `config/upstream/CanvasConfigBridge.java`,
-and three world-lifecycle references in `awf/world/AuroraWorldsService.java`.
+Canvas/engine coupling was two sites, both config reload bridges in `SourbyCraftConfig.java`; five
+sites in two files on 2026-10-07. On 2026-10-25 it is **four symbols in three files**
+(`CanvasSourceCouplingTest.APPROVED`): the two reloads in `config/upstream/CanvasConfigBridge.java`,
+`SaveAllTicket` in `awf/world/AuroraWorldsService.java` and `SchedulerUtil` in
+`perf/LiveSchedulerSource.java`; plus three engine symbols added by MC feature patch 0086
+(`PATCH_APPROVED`: `GlobalConfiguration.getInstance`, `EntityRegionTransferState`,
+`EntityRegionTransferState.PluginTeleportAsyncState`).
 
 ### What the count does and does not settle
 
@@ -102,9 +126,12 @@ imports measures the surface, not the contract.
 ## Progress against this document
 
 The first slice is implemented. `OwnerHandoff` and `Admission` state the contract,
-`RegionOwnerHandoff` is the only place `EntityScheduler` is named, and patch 0006 now
-delivers through it and compares the delivered owner against the entity the solve was
-computed for, discarding the result when a dimension transfer has replaced it.
+`RegionOwnerHandoff` is the only place `EntityScheduler` is named, and the async path delivers
+through it (since 2026-10-22 from `perf/AsyncPathRecompute`, which patch 0006 calls) and compares
+the delivered owner against the entity the solve was computed for, discarding the result when a
+dimension transfer has replaced it. The wandering-trader coordinator (MC 0068) is the second user of
+`OwnerHandoff`; the other owned services use the published `threadedregions.scheduler` API directly
+or the `execution/region` contracts (Stage 2 is therefore partial, see *Status boundary*).
 
 Requirements 1 to 6 are met by the contract and its adapter. Requirement 7 is now met for
 async pathfinding: owner identity and result applicability are both validated, from the
@@ -130,11 +157,19 @@ of path. That makes the path object itself a sufficient validity token: the solv
 captures the path it was computed against and discards its result if the navigation is
 no longer following that object.
 
-This is why no epoch field was added. An epoch would need incrementing at every one of
+This is why no epoch field was added at first: an epoch would need incrementing at every one of
 those sites, widening the diff against upstream, to derive a token the state already
 provides. The trade is that two identical-but-distinct `Path` objects cannot be told
 apart — but `moveTo` only reassigns when `!newPath.sameAs(this.path)`, so a path that
 compares the same is one the mob is still following, and refreshing it is correct.
+
+*Correction (DEV-A F3, landed as MC feature patch 0047; re-checked 2026-10-25):* path identity is
+not sufficient. A `stop()` that finds the path already `null`, or a second stop or retarget, leaves
+no new path object for the check to see, and an old solve could be re-armed. Patch 0047 therefore
+adds a navigation generation that advances on `stop()`, `moveTo` and the other invalidations; the
+solve captures it, and delivery discards the result when it changed
+(`AsyncPathValidity.sameGeneration`, checked after the subject and path-identity checks in
+`AsyncPathRecompute.deliver`; `AsyncPathValidityTest`, `AsyncPathRecomputeTest`).
 
 ### Shutdown and cancellation (requirements 8 and 9)
 
@@ -159,12 +194,13 @@ The four cancellation operations are separate, with separately tested outcomes:
 | Stop admission | `shutdown()` — terminal until restarted | `admissionIsRefusedAfterShutdownRatherThanRunningInline` |
 | Cancel a computation | `future.cancel(true)` | `cancellingAComputationIsNotShuttingThePoolDown` |
 | Retire an owner | handoff retirement callback | `v12RetirementAfterAdmissionReleasesWithoutApplying` |
-| Invalidate a result | path-identity check in patch 0006 | the trace above, not a unit test |
+| Invalidate a result | subject, path-identity and navigation-generation checks in `AsyncPathRecompute.deliver` (generation from MC 0047) | `AsyncPathRecomputeTest` (`aReplacedEntityAStalePathOrAnInvalidationDiscardsTheResult`), `AsyncPathValidityTest` |
 
-The last row is the honest one. That check lives in patched Minecraft code and needs a
-bootstrapped server to exercise, so it rests on the traced invalidation set rather than
-on a test. `setEnabled(false)` stops callers *offering* work and is distinct from
-`shutdown()`, which refuses work already being offered.
+The last row was the weak one when this was written: the check lived in patched Minecraft code
+and rested on the traced invalidation set rather than on a test. Since 2026-10-22 the checks are
+Sourby source and `AsyncPathRecomputeTest` runs them on a real `PathNavigation`; no live-server run
+of the invalidation paths is recorded. `setEnabled(false)` stops callers *offering* work and is
+distinct from `shutdown()`, which refuses work already being offered.
 
 ## First contract: owner-result handoff
 
@@ -191,6 +227,17 @@ No generic `execute(Runnable)` facade is sufficient: it hides owner identity, re
 retirement, and stale-result validation. Do not introduce that facade as cosmetic independence.
 
 ## Evidence and current gaps
+
+> **Historical (the 2026-10 review, before the 2026-10-22 split of patch 0006).** Status on
+> 2026-10-25: the gaps the next two paragraphs name are closed in code. Completion compares the
+> delivered entity (`AsyncPathValidity.sameSubject`), the path the solve was requested for and the
+> MC 0047 navigation generation before applying; the solver no longer receives the live `Mob`:
+> MC 0039 captures an immutable `MobPathSnapshot` on the owner (`MobPathSnapshot.captureDetached`,
+> called from `AsyncPathRecompute.offload`), and the solve reads only that and the region snapshot.
+> The evaluators that write to the mob are still refused the offload (`solveWritesMob`). Since PR #62
+> an offload is declined outright on a thread that does not own the mob (`RegionOwnership`), and every
+> decline runs the synchronous recompute. Code written and statically reviewed; not built; not tested
+> by the owner. The feature stays default off (`aurora.entity.async-pathfinding`).
 
 The current upstream `EntityScheduler` explicitly supplies the current NMS entity to callbacks.
 Its class and schedule documentation explain that dimension transfer can replace the underlying
@@ -350,8 +397,18 @@ that needs neither. Doing it for symmetry is how a contract turns into ceremony.
 
 ## Status boundary
 
-Stage 1 contract extraction has begun for a concrete handoff. Stage 2 dispatch API and Stage 3
-backend isolation are not implemented by this document. Existing baseline/soak results describe
-the tested workloads and revisions; they do not qualify a future scheduler or prove absence of
-all leaks. Keep the independent-engine roadmap as the focus, with correctness preceding backend
-replacement. The upstream Spark viewer remains in use as required by section 37.
+Stage status (2026-10-25), the same statement as [AURORA.md *Current state*](AURORA.md) and
+[AURORA-INDEPENDENT-ENGINE.md §10](AURORA-INDEPENDENT-ENGINE.md#10-aurora-scheduler-program):
+
+| Stage | Status | Evidence |
+| --- | --- | --- |
+| 1. Contract extraction | IMPLEMENTED | this document, [dependency-ledger.md](dependency-ledger.md), the pinned inventories |
+| 2. Aurora-owned dispatch | PARTIAL | `OwnerHandoff` carries async-path delivery and the wandering-trader handoff; the `execution/region` contracts carry owned teleports, command blocks, data commands and the guards; other owned services use the published `threadedregions.scheduler` API directly (HUD, replies, updater, bridge), which is not counted as coupling |
+| 3. Backend isolation | IMPLEMENTED for SourbyCraft's own sources (pinned) | internal scheduler symbols only in the seven files above; feature patches only at the recorded sites; not a claim about the engine baseline, which *is* the backend |
+| 4. Specialized execution | PARTIAL | the async-path lane and the Resource Governor's lanes exist, default off or idle; no benchmark shows a benefit |
+| 5. Scheduler replacement | PLANNED, not started | the parked EDF backend would swap the pool inside the same region model and is not an independent scheduler |
+
+Existing baseline/soak results describe the tested workloads and revisions; they do not qualify a
+future scheduler or prove absence of all leaks. Keep the independent-engine roadmap as the focus,
+with correctness preceding backend replacement. The upstream Spark viewer remains in use as
+required by section 37.

@@ -1,9 +1,12 @@
 # [console] section of sourbycraft_config/sourbycraft_global_config.yml (Build 49 layout; was [ui] +
 # branding.gc-advisor.enabled before Build 49 — an old file is migrated automatically, copy kept as *.migrated).
+# Since Build 50 the old names (ui.console-style, ui.plugins-page-size, branding.gc-advisor.enabled) are not
+# read: one the migration could not rename is ignored, with one WARN per load.
 # Merge this section into an existing file; the full example is sourbycraft_global_config.yml beside this one.
 console:
   # RESTART_REQUIRED. Character set of SourbyCraft's startup lines: auto = rich on interactive
   # terminals, otherwise plain; plain = ASCII dashes/hyphens; rich = Unicode box drawing/em dash.
+  # Read once from the file before the configuration loads, so the launch lines follow it too.
   # Not colour: time/level/tag are coloured only when the terminal supports ANSI
   # (-Dterminal.ansi=false turns it off). JVM override: -Dsourbycraft.console=plain|rich|auto
   style: "auto"

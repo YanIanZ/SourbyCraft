@@ -9,8 +9,9 @@ See [maintainer setup](development/PRIVATE-TOOLCHAIN.md).
 
 - Launcher and ServerMain failures retain their causes and exit nonzero.
 - `--sourbyclip-info` reports identity without starting Minecraft.
-- `-Dsourbyclip.offline=true` refuses bootstrap downloads and IP lookup. Verified cached
-  or embedded libraries remain usable; this does not disable server/plugin networking.
+- `-Dsourbyclip.offline=true` refuses bootstrap downloads. Verified cached or embedded libraries
+  remain usable; this does not disable server/plugin networking. (There is no boot-time IP lookup
+  to refuse since 3.1.2.)
 - Each concurrent hash check owns its digest and uses bounded memory. Native classifiers
   are preserved when converting Gradle library coordinates to repository paths.
 - Library hash verification occurs inside the repository retry loop. HTML with HTTP 200
@@ -56,10 +57,13 @@ local test is not a performance benchmark, a long soak, or proof of every networ
 ## Official CI
 
 Trusted pushes/manual runs retrieve pinned private tools using read-only deploy keys and
-publish them only to Maven Local. Public pull requests do not receive private build access.
-Build, server tests, cold boot/JFR and Docker validation run on one runner. Intermediate JARs
-and private Gradle caches are not uploaded publicly. Only a successful release-branch run
-publishes a server JAR and checksum to Releases. The retired NMS harness is not a release gate.
+publish them only to Maven Local. Public pull requests do not receive private build access and get
+no Gradle build, test or boot; those run after merge. Build, server tests, the cold boot with JFR,
+the bootstrap failure/offline boot step and the Docker image build run in one job. Intermediate
+JARs and private Gradle caches are not uploaded publicly. A server JAR and checksum are published
+to Releases only by a push or manual run on `26.2` (or a `hotfix/26.2-r<N>.<M>` branch) while
+`release=true|pre` and that build's tag does not exist yet, after the build job succeeded. The
+retired NMS harness is not a release gate.
 
 The 3.0.22 launcher exit-code/transfer fixes remain included. The 3.0.23 integrity check
 exposed the HTTP-200 mirror failure documented in
