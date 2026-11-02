@@ -44,6 +44,10 @@ disagree, the code wins ([DEVELOPMENT.md](DEVELOPMENT.md), truthfulness policy).
    as a prerelease (owner decisions 2026-10-21, 2026-10-22 and 2026-10-24); the 26.3 line starts at Build 100,
    Aurora Forge (owner 2026-10-24). Plan: [ROADMAP-47-50.md](releases/ROADMAP-47-50.md).
 
+## Future design RFC (proposed, not implemented)
+
+**[Aurora Identity + Territory Fabric v3](proposals/aurora-identity-territory-v3/README.md)** — major planned upgrade covering Mojang account UUID + unique character identities, GameProfile presentation, transactional MultiProfile, AWF territory partitioning, cross-server handoff, plugin compatibility, security, migration, owner tests and epic roadmap. This is a **docs-only PROPOSAL**, not Build 50 implementation or a released feature. Existing Build 50 readiness and TODO remain the source of truth.
+
 ## Index
 
 ### Project direction
