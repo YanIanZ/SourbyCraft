@@ -10,13 +10,17 @@ SourbyCraft server's existing `ca.spottedleaf:leafpile:1.2.0` dependency remains
 
 ## What this upgrade changes
 
-- Corrects `SWMRLong2ObjectHashTable.equals`: two non-identical objects with equal contents compare equal, and unequal contents compare unequal.
+- Corrects `SWMRLong2ObjectHashTable.equals` **and `hashCode`**: different map instances with equal logical entries compare equal and have matching hashes; unequal entries compare unequal. Upstream v1.3.2 still hashes table-entry object identities, so this is an explicit SourbyCraft source-owned correctness delta requiring review.
 - Adds JUnit 6 regression cases for negative keys, same/different values and symmetry.
 - Compiles the code generator into a temporary directory with Java 25, leaving `templates/` free of generated `.class` files.
 - Generates sources using absolute script-root paths, not the invoking shell's working directory.
 - Only replaces generated Java source when contents differ, and attempts an atomic same-directory move to avoid incomplete output after interruption.
 - Registers the generator as `:Metal:generateMetalSources`, a dependency of `:Metal:compileJava`.
 - Adds **opt-in** `-PmetalProvider=vendored` to select `project(":Metal")`, or `-PmetalProvider=modular` to use the published **LeafPile 1.3.2 modular BOM**. Without this property, the existing production `leafpile:1.2.0` runtime dependency remains unchanged.
+
+## Long-term Aurora Metal performance program
+
+This PR is **the foundation**, not the full upgrade. See [Aurora Metal Program](../docs/metal/README.md), [Build 56–100 roadmap](../docs/metal/BUILD-56-100-ROADMAP.md), [Upstream and ABI policy](../docs/metal/UPSTREAM-AND-ABI.md), and [owner qualification](../docs/metal/PERFORMANCE-QUALIFICATION.md). Every future version update needs provenance, owner tests and benchmark evidence; this branch does not modify the released Build 50 identity.
 
 ## Commands for owner verification
 
