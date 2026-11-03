@@ -71,7 +71,7 @@
  configurations.named(log4jPlugins.compileClasspathConfigurationName) {
      extendsFrom(configurations.compileClasspath.get())
  }
-@@ -109,12 +_,19 @@
+@@ -109,12 +_,30 @@
  }
  
  dependencies {
@@ -82,8 +82,20 @@
 +    // the vendored library. Exactly one provider must be on the server classpath.
 +    when (val metalProvider = rootProject.providers.gradleProperty("metalProvider").getOrElse("upstream")) {
 +        "upstream" -> implementation("ca.spottedleaf:leafpile:1.2.0")
++        // LeafPile 1.2.4 split the original monolith into published modules.
++        // Candidate only: owner must verify the exact classes and shaded jar.
++        "modular" -> {
++            implementation(platform("ca.spottedleaf.leafpile:bom:1.2.4"))
++            implementation("ca.spottedleaf.leafpile:common")
++            implementation("ca.spottedleaf.leafpile:concurrentutil")
++            implementation("ca.spottedleaf.leafpile:converter")
++            implementation("ca.spottedleaf.leafpile:ioutil")
++            implementation("ca.spottedleaf.leafpile:profiler")
++            implementation("ca.spottedleaf.leafpile:sampler")
++            implementation("ca.spottedleaf.leafpile:yamlconfig")
++        }
 +        "vendored" -> implementation(project(":Metal"))
-+        else -> error("Invalid metalProvider '$metalProvider' (expected upstream or vendored)")
++        else -> error("Invalid metalProvider '$metalProvider' (expected upstream, modular or vendored)")
 +    }
 -    implementation("org.jline:jline-terminal-ffm:3.27.1") // use ffm on java 22+
 -    implementation("org.jline:jline-terminal-jni:3.27.1") // fall back to jni on java 21
