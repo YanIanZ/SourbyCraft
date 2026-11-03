@@ -162,6 +162,28 @@ aurora:
         # of aurora.awf.redis.timeout-ms); a write not confirmed in time is still applied, logged and counted
         # in /awf multiprofile status. Unsupported by Redis: logged once, then acknowledged from memory.
         wait-for-aof: true
+      types:
+        # RESTART_REQUIRED. Policy types a profile may be created with (classic, ironman, stranded,
+        # bingo). Not the free consumer namespace (ProfileRequest.type). Build 51 stores and returns the
+        # type only: no ironman, stranded or bingo rule is enforced yet.
+        allowed: ["classic", "ironman", "stranded", "bingo"]
+        # RESTART_REQUIRED. Type of a profile created without one; must be in allowed (else the first
+        # allowed type is used, with a WARN).
+        default: "classic"
+      names:
+        # RESTART_REQUIRED. cute = the server assigns a fruit or vegetable name when the profile is
+        # created: unique per account, immutable. The only policy.
+        policy: "cute"
+      migration:
+        # RESTART_REQUIRED. What happens to a profile store written before Build 51 (format 1).
+        # off = nothing. dry-run = report only, writes nothing. apply = back the store up to backup-dir,
+        # then convert it to format 2. One way: builds older than Build 51 refuse a format-2 store;
+        # rolling back = restoring the backup into an isolated store. Quote the value (YAML reads an
+        # unquoted off as false). apply without a valid backup-dir falls back to off with a WARN.
+        mode: "off"
+        # RESTART_REQUIRED. Backup target for mode: apply; relative to the server directory or absolute.
+        # No ..; must not be inside or contain the store directory. Empty = not configured.
+        backup-dir: ""
     redis:
       fabric:
         # RESTART_REQUIRED, read early (every fabric key). Aurora Redis Fabric. Default false: no socket,

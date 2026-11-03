@@ -26,7 +26,9 @@ import java.util.zip.ZipInputStream;
 
 /**
  * Keeps the previous launch jar across an update and restores it when the first boot on the new
- * jar never reaches the ready point (audit SEC-3). Pure file logic over one directory so it is
+ * jar never reaches the ready point (audit SEC-3). Since Build 51 the restore consults
+ * {@link StoreDowngradeGuard}: a {@code .prev} older than Build 51 is not copied back while the AWF
+ * MultiProfile store is format 2 ({@code RESTORE_FAILED} with the reason; owner decision OD-2). Pure file logic over one directory so it is
  * unit-tested with a temporary directory; the Bukkit glue (boot step + ready listener) lives in
  * {@link AutoUpdateSettings#runBootGuard()}.
  *
@@ -97,7 +99,7 @@ public final class UpdateRollbackGuard {
     private static final int MAX_SMALL_ENTRY_BYTES = 64 * 1024;
 
     /** The guard over the server's {@code auto_update} directory. */
-    public static final UpdateRollbackGuard SERVER = new UpdateRollbackGuard(Path.of("auto_update"));
+    public static final UpdateRollbackGuard SERVER = new UpdateRollbackGuard(Path.of("auto_update"), StoreDowngradeGuard.SERVER);
 
     /** Where an apply stands. Persisted by name; order is not significant. */
     public enum Phase {
@@ -133,10 +135,23 @@ public final class UpdateRollbackGuard {
 
     private final Path dir;
     private final Path stateFile;
+    /** OD-2: refuses restoring (or installing) a jar older than Build 51 over a format-2 MultiProfile store. */
+    private final StoreDowngradeGuard.Gate downgradeGate;
 
+    /** Pure file logic without the store gate (unit tests); the server uses {@link #SERVER}. */
     public UpdateRollbackGuard(Path autoUpdateDir) {
+        this(autoUpdateDir, StoreDowngradeGuard.NONE);
+    }
+
+    public UpdateRollbackGuard(Path autoUpdateDir, StoreDowngradeGuard.Gate downgradeGate) {
         this.dir = autoUpdateDir;
         this.stateFile = autoUpdateDir.resolve(STATE_FILE);
+        this.downgradeGate = java.util.Objects.requireNonNull(downgradeGate, "downgradeGate");
+    }
+
+    /** The downgrade gate the apply path consults before a jar takes the launch path. */
+    public StoreDowngradeGuard.Gate downgradeGate() {
+        return downgradeGate;
     }
 
     // ------------------------------------------------------------------ apply side
@@ -317,6 +332,15 @@ public final class UpdateRollbackGuard {
                 }
             }
             BuildVersion restoredBuild = buildNumberOf(part);
+            // OD-2: a jar older than Build 51 must not run over a format-2 MultiProfile store. Refusing here
+            // leaves the suspect new jar in place; the operator restores the pre-migration backup to downgrade.
+            Optional<String> downgrade = downgradeGate.refuse(restoredBuild);
+            if (downgrade.isPresent()) {
+                String reason = "refusing to restore " + prev.getFileName() + ": " + downgrade.get() + " Jar files left untouched.";
+                SourbyLogger.error("auto-updater: " + reason);
+                writeQuietly(with(s, Phase.RESTORE_FAILED, reason));
+                return BootDecision.RESTORE_FAILED;
+            }
             copyPermissions(launch, part);
             moveReplacing(part, launch);
             part = null;

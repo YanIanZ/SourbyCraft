@@ -20,6 +20,11 @@ import org.jspecify.annotations.NullMarked;
  * rejected while another switch for the same player is running, and it is recoverable: an incomplete
  * transition is recorded and can be finished with an operator command or at the player's next join.</p>
  *
+ * <p>Co-op profiles (several players sharing a profile) are <b>not available</b> in this API; they are
+ * planned for a later build. Build 51 adds the profile's immutable name and policy type
+ * ({@link ProfileDetails}, {@link ProfileType}), which are stored but not yet used to restrict any
+ * gameplay.</p>
+ *
  * <p>The service is optional: plugins must handle {@code isEnabled() == false} and a missing service
  * registration, which is what a server without MultiProfile looks like.</p>
  */
@@ -29,13 +34,37 @@ public interface AuroraProfiles {
     /** Whether the feature is enabled and ready. */
     boolean isEnabled();
 
-    /** Creates a profile for the account, or fails with {@link ProfileErrorCode#SLOT_LIMIT}. */
+    /**
+     * Creates a profile for the account. Fails with {@link ProfileErrorCode#SLOT_LIMIT} when the account
+     * has no free slot. Since Build 51 the request may also carry a {@linkplain ProfileType policy type}
+     * and a name; they fail with {@link ProfileErrorCode#TYPE_NOT_ALLOWED}, {@link ProfileErrorCode#NAME_INVALID}
+     * or {@link ProfileErrorCode#NAME_TAKEN}. The name and type of the created profile are available from
+     * {@link #getProfileDetails(UUID)}; the returned {@link ProfileInfo} is unchanged.
+     */
     CompletableFuture<ProfileInfo> createProfile(ProfileRequest request);
 
     /** Every profile of the account, in creation order. */
     CompletableFuture<List<ProfileInfo>> listProfiles(UUID accountId);
 
     CompletableFuture<Optional<ProfileInfo>> getProfile(UUID profileId);
+
+    /**
+     * The profile with its name and policy type (Build 51). Completes with an empty optional when the
+     * profile does not exist. Default failure preserves compatibility with alternative service
+     * implementations built before this API was added.
+     */
+    default CompletableFuture<Optional<ProfileDetails>> getProfileDetails(UUID profileId) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("profile details unavailable"));
+    }
+
+    /**
+     * Every profile of the account with its name and policy type, in creation order (Build 51). Default
+     * failure preserves compatibility with alternative service implementations built before this API was
+     * added.
+     */
+    default CompletableFuture<List<ProfileDetails>> listProfileDetails(UUID accountId) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("profile details unavailable"));
+    }
 
     /** Marks the profile deleted and removes its snapshots and bindings; never deletes AWF worlds. */
     CompletableFuture<Boolean> deleteProfile(UUID profileId);

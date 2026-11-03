@@ -1,6 +1,7 @@
 package dev.iyanz.sourbycraft.awf.multiprofile;
 
 import dev.iyanz.sourbycraft.api.profile.AuroraProfiles;
+import dev.iyanz.sourbycraft.api.profile.ProfileDetails;
 import dev.iyanz.sourbycraft.api.profile.ProfileErrorCode;
 import dev.iyanz.sourbycraft.api.profile.ProfileInfo;
 import dev.iyanz.sourbycraft.api.profile.ProfileOperationException;
@@ -62,6 +63,15 @@ import org.bukkit.plugin.ServicePriority;
  * as saved. The server closes SourbyCraft services before it saves and removes players, so players
  * still online then get no quit snapshot; their active profile's live state stays in vanilla
  * playerdata, which the next switch captures.</p>
+ *
+ * <p>Store format (Build 51): before the service and listeners are registered, the engine reads the
+ * store's format marker on the storage lane ({@link ProfileEngine#open}). A store this build refuses
+ * (unknown format, newer schema, unfinished migration) stops MultiProfile with an ERROR naming the format
+ * and owner decision OD-2 (restore the pre-migration backup; no in-place downgrade). A format-1 store is
+ * migrated per {@code migration.mode} (RESTART_REQUIRED): {@code dry-run} logs a report and writes
+ * nothing, {@code apply} backs up and migrates before any player is admitted and refuses to start on
+ * failure. On a format-2 store every join first acquires the player's session claim {@code Q}; a player
+ * whose claim another live session holds is disconnected.</p>
  */
 public final class ProfileRuntime {
 
@@ -69,6 +79,8 @@ public final class ProfileRuntime {
     private static final Path UNIFIED_FILE = Path.of("sourbycraft_config", "sourbycraft_global_config.yml");
     /** Lease of a local session claim; the heartbeat renews it well before it lapses. */
     private static final int LOCAL_LEASE_SECONDS = 60;
+    /** Longest the boot waits for the store format check, intent recovery and an applied migration. */
+    private static final long STARTUP_BUDGET_MINUTES = 30L;
 
     private static volatile ProfileRuntime running;
 
@@ -83,12 +95,13 @@ public final class ProfileRuntime {
     private final String nodeId;
     /** The fabric this node advertises itself in, or {@code null} when routing is off. */
     private final RedisFabric routing;
+    private final ProfileEngine.StoreMigration migration;
     private volatile boolean closed;
 
     private ProfileRuntime(final Plugin plugin, final ProfileSettings settings, final ProfileEngine engine,
                            final ProfileStateAdapters adapters, final BukkitPlayerStatePort statePort,
                            final ScheduledExecutorService idleSweeper, final ScheduledExecutorService heartbeat,
-                           final String nodeId, final RedisFabric routing) {
+                           final String nodeId, final RedisFabric routing, final ProfileEngine.StoreMigration migration) {
         this.plugin = plugin;
         this.settings = settings;
         this.engine = engine;
@@ -98,6 +111,7 @@ public final class ProfileRuntime {
         this.heartbeat = heartbeat;
         this.nodeId = nodeId;
         this.routing = routing;
+        this.migration = migration;
         this.api = new Api();
     }
 
@@ -190,11 +204,14 @@ public final class ProfileRuntime {
                                          final RedisFabric fabric, final ProfileRepository repository)
         throws IOException {
         final ProfileOwnership ownership;
+        final PlayerSessionOwnership playerSessions;
         final long leaseMillis;
         if (settings.coordination().provider() == ProfileSettings.Provider.REDIS) {
             if (fabric == null) throw new IllegalStateException("coordination.provider: redis requires the Aurora Redis Fabric");
             final RedisSettings redis = fabric.redisSettings();
-            ownership = new RedisProfileOwnership(fabric.sessions(), nodeId, redis.timeoutMillis());
+            final RedisProfileOwnership redisOwnership = new RedisProfileOwnership(fabric.sessions(), nodeId, redis.timeoutMillis());
+            ownership = redisOwnership;
+            playerSessions = PlayerSessionOwnership.redis(redisOwnership.coopClaims(), nodeId);
             leaseMillis = fabric.settings().sessions().ttlSeconds() * 1000L;
             if (!settings.distributed() && !settings.redisRepository()) {
                 SourbyLogger.warn("AWF MultiProfile: coordination.provider: redis with mode: standalone and the file"
@@ -204,6 +221,7 @@ public final class ProfileRuntime {
             }
         } else {
             ownership = new LocalProfileOwnership(nodeId, LOCAL_LEASE_SECONDS);
+            playerSessions = PlayerSessionOwnership.local(nodeId, LOCAL_LEASE_SECONDS);
             leaseMillis = LOCAL_LEASE_SECONDS * 1000L;
         }
         if (settings.switching().timeoutMillis() >= leaseMillis) {
@@ -221,13 +239,45 @@ public final class ProfileRuntime {
                 + " or quit snapshot stores that state), players online at shutdown get no quit snapshot, and no proxy"
                 + " hands players between servers. A player who moves between servers can therefore lose progress.");
         }
+        if (repository instanceof FileProfileRepository file) {
+            // Format-2 FILE commits validate the claims they carry at commit time; until a validator is attached,
+            // every claim-bearing write is refused (OWNERSHIP_CONFLICT), so it is attached before the engine opens.
+            file.attachClaims(FileProfileClaims.of(ownership, playerSessions));
+            file.attachDefaultSlots(settings.defaultSlots());
+        } else if (repository instanceof RedisProfileRepository redis) {
+            redis.attachDefaultSlots(settings.defaultSlots());
+        }
         final ProfileStateAdapters adapters = new ProfileStateAdapters();
         final BukkitPlayerStatePort statePort = new BukkitPlayerStatePort(plugin, adapters);
         final AwfProfileWorldPort worldPort = new AwfProfileWorldPort(
             dev.iyanz.sourbycraft.awf.world.AuroraWorldsRuntime::service);
         final EventFabric events = fabric != null && fabric.settings().services().events() ? fabric.events() : null;
-        final ProfileEngine engine = new ProfileEngine(settings, repository, ownership, statePort, worldPort, nodeId,
-            ResourceGovernor.GLOBAL.lane(ResourceGovernor.Lane.STORAGE), fabric == null ? null : fabric.metrics(), events);
+        final ProfileEngine engine = new ProfileEngine(settings, repository, ownership, playerSessions, statePort, worldPort,
+            nodeId, ResourceGovernor.GLOBAL.lane(ResourceGovernor.Lane.STORAGE), fabric == null ? null : fabric.metrics(),
+            events);
+        // The store format decides every path: read it (and migrate, and resolve pending intents) on the storage
+        // lane before anything is scheduled or registered, so no player is admitted before it is decided.
+        final ProfileEngine.StoreMigration migration = storeMigration(settings);
+        final ProfileEngine.StoreStatus store;
+        try {
+            store = engine.open(migration).get(STARTUP_BUDGET_MINUTES, TimeUnit.MINUTES);
+        } catch (final java.util.concurrent.ExecutionException failed) {
+            closeQuietly(ownership, playerSessions);
+            throw new IllegalStateException(ProfileEngine.messageOf(failed.getCause()), failed.getCause());
+        } catch (final java.util.concurrent.TimeoutException slow) {
+            closeQuietly(ownership, playerSessions);
+            throw new IllegalStateException("the profile store check did not finish within " + STARTUP_BUDGET_MINUTES
+                + " minutes; MultiProfile did not start");
+        } catch (final InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            closeQuietly(ownership, playerSessions);
+            throw new IllegalStateException("interrupted while checking the profile store");
+        }
+        SourbyLogger.info("AWF MultiProfile: profile store " + ProfileEngine.describe(store.marker()) + " (" + store.reason()
+            + "); migration " + store.migration() + (store.unresolvedIntents().isEmpty() ? ""
+                : "; " + store.unresolvedIntents().size() + " intent(s) left pending for recovery"));
+        engine.onSessionLost(playerId -> disconnect(plugin, playerId,
+            "Your profile session was taken over or expired. Rejoin to continue."));
         ScheduledExecutorService sweeper = null;
         if (settings.worlds().idleUnloadSeconds() > 0) {
             sweeper = Executors.newSingleThreadScheduledExecutor(task -> {
@@ -275,7 +325,7 @@ public final class ProfileRuntime {
             heartbeats.scheduleWithFixedDelay(advertise, fabricPeriod, fabricPeriod, TimeUnit.SECONDS);
         }
         final ProfileRuntime runtime = new ProfileRuntime(plugin, settings, engine, adapters, statePort, sweeper,
-            heartbeats, nodeId, routing ? fabric : null);
+            heartbeats, nodeId, routing ? fabric : null, migration);
         try {
             Bukkit.getServicesManager().register(AuroraProfiles.class, runtime.api(), plugin, ServicePriority.Normal);
             Bukkit.getPluginManager().registerEvents(runtime.new Sessions(), plugin);
@@ -309,6 +359,110 @@ public final class ProfileRuntime {
         return this.nodeId;
     }
 
+    /** What the startup store check decided, for {@code /awf multiprofile format}. */
+    public ProfileEngine.StoreStatus storeStatus() {
+        return this.engine.storeStatus();
+    }
+
+    /** Runs the format-2 migration report now, writing nothing ({@code /awf multiprofile migrate dry-run}). */
+    public CompletableFuture<String> migrationDryRun() {
+        return this.engine.migrationDryRun(this.migration);
+    }
+
+    private static void closeQuietly(final ProfileOwnership ownership, final PlayerSessionOwnership playerSessions) {
+        try {
+            ownership.close();
+        } catch (final RuntimeException ignored) {
+            // The start already failed; the cause is reported by the caller.
+        }
+        try {
+            playerSessions.close();
+        } catch (final RuntimeException ignored) {
+            // As above.
+        }
+    }
+
+    /** Disconnects an online player through their entity scheduler; does nothing for a player who left. */
+    private static void disconnect(final Plugin plugin, final UUID playerId, final String message) {
+        try {
+            final Player player = Bukkit.getPlayer(playerId);
+            if (player == null) return;
+            player.getScheduler().execute(plugin, () -> player.kick(net.kyori.adventure.text.Component.text(message)),
+                null, 1L);
+        } catch (final RuntimeException retired) {
+            SourbyLogger.warn("AWF MultiProfile: could not disconnect " + playerId + ": " + retired.getMessage());
+        }
+    }
+
+    /**
+     * The format-1 to format-2 migration the engine runs at startup ({@code migration.mode}) and for
+     * {@code /awf multiprofile migrate dry-run}. {@code apply} first resolves {@code migration.backup-dir} to a
+     * real path and refuses one that overlaps the store directory (the settings check is textual only).
+     */
+    private static ProfileEngine.StoreMigration storeMigration(final ProfileSettings settings) {
+        return (repository, apply) -> {
+            final Path backup = apply ? backupDirectory(settings) : null;
+            return formatTwoMigration(repository, backup, apply, writtenBy());
+        };
+    }
+
+    /**
+     * {@link ProfileRepositoryMigration#toFormat2}: {@code apply == false} runs it in {@code dry-run} mode (reads
+     * and reports only, whatever {@code migration.mode} says); {@code apply == true} runs {@code apply} with the
+     * resolved {@code backup} directory: the store's writer check, the verified backup, the IN_PROGRESS marker,
+     * conversion, verification, READY. A refused or failed apply throws (the engine then does not start); a
+     * refused dry-run is reported in the summary. The summary is logged either way.
+     */
+    private static ProfileEngine.MigrationResult formatTwoMigration(final ProfileRepository repository, final Path backup,
+                                                                    final boolean apply, final String writtenBy)
+        throws IOException {
+        final ProfileSettings.Migration mode = apply
+            ? new ProfileSettings.Migration(ProfileSettings.MigrationMode.APPLY, backup.toString())
+            : new ProfileSettings.Migration(ProfileSettings.MigrationMode.DRY_RUN, "");
+        final ProfileRepositoryMigration.Format2Result result = ProfileRepositoryMigration.toFormat2(repository, mode, writtenBy);
+        SourbyLogger.info("AWF MultiProfile: " + result.summary());
+        final boolean applied = result.outcome() == ProfileRepositoryMigration.Format2Result.Outcome.MIGRATED;
+        if (apply && !applied) {
+            throw new IOException(result.summary());
+        }
+        return new ProfileEngine.MigrationResult(applied, result.summary());
+    }
+
+    /**
+     * {@code migration.backup-dir} resolved against the server directory, with symbolic links of its existing
+     * part resolved, refused when it is inside the store directory or contains it.
+     */
+    static Path backupDirectory(final ProfileSettings settings) throws IOException {
+        final String configured = settings.migration().backupDir();
+        if (configured.isBlank()) throw new IOException("migration.mode apply requires migration.backup-dir");
+        final Path store = realOrNormal(Path.of(settings.directory()));
+        final Path backup = realOrNormal(Path.of(configured));
+        if (backup.startsWith(store) || store.startsWith(backup)) {
+            throw new IOException("migration.backup-dir " + backup + " overlaps the profile directory " + store
+                + "; choose a directory outside it");
+        }
+        return backup;
+    }
+
+    /** The real path of the longest existing prefix of {@code path}, with the rest appended and normalised. */
+    private static Path realOrNormal(final Path path) throws IOException {
+        Path absolute = path.toAbsolutePath().normalize();
+        Path existing = absolute;
+        while (existing != null && !java.nio.file.Files.exists(existing)) existing = existing.getParent();
+        if (existing == null) return absolute;
+        return existing.toRealPath().resolve(existing.relativize(absolute)).normalize();
+    }
+
+    private static String writtenBy() {
+        String identity;
+        try {
+            identity = "SourbyCraft " + dev.iyanz.sourbycraft.brand.BuildInfo.load().releaseIdentity();
+        } catch (final RuntimeException unavailable) {
+            identity = "SourbyCraft";
+        }
+        return identity.length() <= 64 ? identity : identity.substring(0, 64);
+    }
+
     /**
      * Copies the file repository of {@code aurora.awf.multiprofile.directory} into the running Redis
      * repository, once ({@link ProfileRepositoryMigration}); completes with what was copied and
@@ -317,6 +471,10 @@ public final class ProfileRuntime {
      * another process. The directory is kept as it is.
      */
     public CompletableFuture<String> migrateFileRepository() {
+        if (this.engine.format2()) {
+            return CompletableFuture.failedFuture(new ProfileOperationException(ProfileErrorCode.INVALID_REQUEST,
+                "the running store is format 2; the file-to-Redis copy only handles format-1 stores"));
+        }
         if (!(this.engine.repository() instanceof RedisProfileRepository redis)) {
             return CompletableFuture.failedFuture(new ProfileOperationException(ProfileErrorCode.INVALID_REQUEST,
                 "the running repository is " + this.engine.repository().describe() + "; set"
@@ -394,7 +552,35 @@ public final class ProfileRuntime {
             // A quit during a switch asked for the session claim to be released when the switch
             // ends; the player is back, so the claim the switch leaves behind is theirs again.
             ProfileRuntime.this.engine.keepSessionAfterSwitch(playerId);
-            ProfileRuntime.this.engine.recoverPending(playerId).exceptionally(failed -> {
+            // Format 2: the player's session claim Q comes first, before recovery, capture or restore. A format-1
+            // store admits at once.
+            ProfileRuntime.this.engine.admitSession(playerId).handle((admission, failed) -> {
+                if (failed != null) {
+                    SourbyLogger.warn("AWF MultiProfile: admitting the session of " + playerId + " failed: "
+                        + ProfileEngine.messageOf(failed) + "; the player is disconnected, nothing of theirs is written");
+                    disconnect(ProfileRuntime.this.plugin, playerId, "Your profile session could not be started ("
+                        + ProfileEngine.codeOf(failed) + "). Try again in a moment.");
+                    return false;
+                }
+                if (!admission.admitted() && ProfileEngine.OFFLINE.equals(admission.reason())) {
+                    // The player quit while the admission ran; the engine released the claim it had just taken.
+                    return false;
+                }
+                if (!admission.admitted()) {
+                    SourbyLogger.warn("AWF MultiProfile: " + playerId + " already has a live session on "
+                        + admission.holderNode() + "; the join is disconnected");
+                    disconnect(ProfileRuntime.this.plugin, playerId, "Your profile is active on " + admission.holderNode()
+                        + ". Try again in a moment.");
+                    return false;
+                }
+                return true;
+            }).thenCompose(admitted -> !admitted ? CompletableFuture.completedFuture(null)
+                : joinAdmitted(event, playerId, joinedWorld));
+        }
+
+        /** The rest of the join once the session is admitted: recovery, the solo claim, the active profile's worlds. */
+        private CompletableFuture<Void> joinAdmitted(final PlayerJoinEvent event, final UUID playerId, final String joinedWorld) {
+            return ProfileRuntime.this.engine.recoverPending(playerId).exceptionally(failed -> {
                 SourbyLogger.warn("AWF MultiProfile: recovery for " + playerId + " failed: "
                     + ProfileEngine.messageOf(failed));
                 return 0;
@@ -428,7 +614,7 @@ public final class ProfileRuntime {
                 SourbyLogger.warn("AWF MultiProfile: session claim for " + playerId + " failed: "
                     + ProfileEngine.messageOf(failed));
                 return null;
-            });
+            }).thenApply(ignored -> (Void) null);
         }
 
         @EventHandler(priority = EventPriority.MONITOR)
@@ -436,6 +622,9 @@ public final class ProfileRuntime {
             final Player player = event.getPlayer();
             final UUID playerId = player.getUniqueId();
             final ProfileEngine engine = ProfileRuntime.this.engine;
+            // Format 2: the ticket is taken before the capture, and exactly this session's claim is released.
+            final ProfileEngine.CaptureTicket ticket = engine.captureTicket(playerId);
+            final CoopWriteGuard.PlayerClaim session = engine.playerSessionClaim(playerId);
             if (engine.switchInProgress(playerId)) {
                 // A switch already captured the previous profile; a second capture here would write
                 // the target's state under the profile being left. A recovery or the teleport of a join
@@ -446,6 +635,7 @@ public final class ProfileRuntime {
             if (!engine.isOpen() || !engine.holdsSession(playerId)) {
                 // Closed: shutdown closes MultiProfile before the server removes players. No session
                 // claim: the join found no active profile to claim. Either way nothing is written.
+                if (engine.isOpen() && session != null) releasePlayerSession(engine, playerId, session);
                 return;
             }
             // Captured here, on the thread that owns the player, while the player still exists; an
@@ -458,7 +648,7 @@ public final class ProfileRuntime {
                     + "); no quit snapshot was written");
             }
             final CompletableFuture<Boolean> saved = state == null
-                ? CompletableFuture.completedFuture(false) : engine.saveCaptured(playerId, state);
+                ? CompletableFuture.completedFuture(false) : engine.saveCaptured(playerId, state, ticket);
             saved.handle((written, failed) -> {
                 if (failed != null && engine.isOpen()) {
                     SourbyLogger.warn("AWF MultiProfile: saving the active profile of " + playerId + " on quit failed: "
@@ -466,6 +656,8 @@ public final class ProfileRuntime {
                 }
                 return null;
             }).thenCompose(ignored -> engine.releaseSession(playerId))
+                .thenCompose(ignored -> session == null ? CompletableFuture.completedFuture(false)
+                    : engine.releasePlayerSession(playerId, session))
                 .exceptionally(failed -> {
                     SourbyLogger.warn("AWF MultiProfile: quit handling for " + playerId + " failed: "
                         + ProfileEngine.messageOf(failed));
@@ -481,6 +673,15 @@ public final class ProfileRuntime {
                 SourbyLogger.info("AWF MultiProfile: removed " + removed + " state adapter(s) of "
                     + event.getPlugin().getName());
             }
+        }
+
+        private void releasePlayerSession(final ProfileEngine engine, final UUID playerId,
+                                          final CoopWriteGuard.PlayerClaim session) {
+            engine.releasePlayerSession(playerId, session).exceptionally(failed -> {
+                SourbyLogger.warn("AWF MultiProfile: releasing the session claim of " + playerId + " failed: "
+                    + ProfileEngine.messageOf(failed) + "; it expires on its own");
+                return false;
+            });
         }
 
         private void rejectDuplicate(final Player player, final ClaimResult claim) {
@@ -592,6 +793,16 @@ public final class ProfileRuntime {
         @Override
         public CompletableFuture<Optional<ProfileInfo>> getProfile(final UUID profileId) {
             return this.engine.get(profileId);
+        }
+
+        @Override
+        public CompletableFuture<Optional<ProfileDetails>> getProfileDetails(final UUID profileId) {
+            return this.engine.getDetails(profileId);
+        }
+
+        @Override
+        public CompletableFuture<List<ProfileDetails>> listProfileDetails(final UUID accountId) {
+            return this.engine.listDetails(accountId);
         }
 
         @Override

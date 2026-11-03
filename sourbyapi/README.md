@@ -49,12 +49,25 @@ would against upstream Paper and may also use the SourbyCraft services below.
 | `dev.iyanz.sourbycraft.api.simd` | `SIMDChecker`, `SIMDDetection`, `VectorMapPalette` | *Breaking change in Build 48* below |
 | `dev.iyanz.sourbycraft.api.metrics` | `SourbyMetrics` and its immutable snapshots: the read-only metrics service | *Consuming it* below |
 | `dev.iyanz.sourbycraft.api.world` | `AuroraWorlds` (Aurora World Fabric worlds and templates at runtime), `WorldRequest`, `WorldProperties`, `UnloadResult`, `WorldOperationBusyException`; also `WorldUnloadResult` from the former Canvas API | [developing-awf.md](../docs/guides/developing-awf.md), [aurora-world-fabric.md](../docs/architecture/aurora-world-fabric.md) |
-| `dev.iyanz.sourbycraft.api.profile` | `AuroraProfiles` (AWF MultiProfile: durable player profiles), its requests, results, error codes and `ProfileStateAdapter` | [MultiProfile API](../docs/awf/multiprofile/API.md) |
+| `dev.iyanz.sourbycraft.api.profile` | `AuroraProfiles` (AWF MultiProfile: durable player profiles), its requests, results, error codes, `ProfileStateAdapter`, and since Build 51 `ProfileDetails` and `ProfileType` | [MultiProfile API](../docs/awf/multiprofile/API.md) |
 | `dev.iyanz.sourbycraft.api.scheduler` | `RegionTask`, `EntityTask`: markers that name the owning chunk or entity of a sync Bukkit scheduler callback for the Aurora Bridge | [aurora-plugin-bridge.md](../docs/architecture/aurora-plugin-bridge.md) |
 
 `AuroraWorlds` and `AuroraProfiles` are obtained from Bukkit's `ServicesManager`; both are
 optional (a server without the feature has no registration, and `AuroraProfiles.isEnabled()` can
 be false).
+
+### API changes in Build 51
+
+Code written; not built by an agent; not tested by the owner. Binary compatible: `ProfileInfo` is
+unchanged, `ProfileRequest` keeps its three-argument constructor and `of(accountId, type)` and gains
+the optional components `profileType` and `name`, and `ProfileErrorCode` only gains constants at the
+end (`NAME_TAKEN`, `NAME_INVALID`, `TYPE_NOT_ALLOWED`, `STORE_FORMAT_REFUSED`, `MIGRATION_REQUIRED`).
+New: the enum `ProfileType` (`CLASSIC`, `IRONMAN`, `STRANDED`, `BINGO`), the record `ProfileDetails`
+(`ProfileInfo` plus the immutable name and policy type) and the `default` methods
+`AuroraProfiles.getProfileDetails` / `listProfileDetails` (fail with `UnsupportedOperationException` on an
+older implementation). The policy type is stored and returned; no gameplay rule is enforced for it in
+this build. Co-op membership is not in the API (Build 52). See
+[MultiProfile API](../docs/awf/multiprofile/API.md#names-and-policy-types-build-51).
 
 ### API changes in PR #62 (Build 50 candidate)
 

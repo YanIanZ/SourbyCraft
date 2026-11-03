@@ -48,6 +48,13 @@ import java.util.UUID;
  * </ul>
  *
  * <p>Clock source: Redis {@code TIME}, so nodes with skewed clocks agree on expiry.</p>
+ *
+ * <p><b>Scope.</b> This fabric is the format-1 (solo MultiProfile) profile claim, keyed by profile
+ * id, and its same-process token replacement is part of that solo switch protocol. The co-op claims
+ * of store format 2 — the profile transaction claim {@code P} and the player session claim {@code Q}
+ * — are {@link CoopClaimFabric} ({@link #coopClaims()}): disjoint key namespaces, strict "same session
+ * renews, any other token is refused while live" semantics, and a fence counter per resource. A
+ * session claim here is never a {@code Q}: it is keyed by profile, not by player.</p>
  */
 public final class SessionFabric {
 
@@ -194,6 +201,19 @@ public final class SessionFabric {
     /** Never expires: the epoch must not restart when a session record's TTL lapses. */
     String epochKey(final UUID profileId) {
         return this.prefix + "session-epoch:" + profileId;
+    }
+
+    /** The key prefix of every session-epoch counter; a backup exports them with the records they fence. */
+    public String epochPrefix() {
+        return this.prefix + "session-epoch:";
+    }
+
+    /**
+     * The strict co-op claim fabric sharing this fabric's connection, namespace, metrics, lease
+     * length and incarnation. A new instance per call; it holds no state of its own.
+     */
+    public CoopClaimFabric coopClaims() {
+        return new CoopClaimFabric(this.client, this.prefix, this.metrics, this.ttlSeconds, this.incarnation);
     }
 
     /**

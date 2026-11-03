@@ -260,7 +260,32 @@ public final class AuroraKeys {
                 + "target state is applied, wait for WAITAOF (Redis 7.2+, up to half of aurora.awf.redis.timeout-ms); a "
                 + "write not confirmed in time is still applied, logged and counted in /awf multiprofile status. With "
                 + "appendfsync everysec each such write can take up to about 1 s longer. Unsupported by Redis: logged "
-                + "once, then acknowledged from memory."));
+                + "once, then acknowledged from memory."),
+        restart("aurora.awf.multiprofile.types.allowed", List.of("classic", "ironman", "stranded", "bingo"),
+            "Policy types (classic, ironman, stranded, bingo) a profile may be created with; a list or a comma-separated "
+                + "string. A request naming another type is refused (TYPE_NOT_ALLOWED). Not the free consumer namespace "
+                + "(ProfileRequest.type), which this list does not restrict. Build 51 stores and returns the type only: "
+                + "no ironman, stranded or bingo rule is enforced yet, so list only classic if you do not want profiles "
+                + "that look restricted but are not. An unknown or empty list is ignored with a WARN."),
+        restart("aurora.awf.multiprofile.types.default", "classic",
+            "The policy type of a profile created without one. Must be in types.allowed; if it is not, the first allowed "
+                + "type is used and a WARN names this key."),
+        restart("aurora.awf.multiprofile.names.policy", "cute",
+            "How a profile is named. cute = the server assigns a fruit or vegetable name from its pool when the profile "
+                + "is created: unique per account (ignoring case), immutable, with a numeric suffix when the pool is "
+                + "exhausted for the account. A create request may ask for a specific pool name; other text is "
+                + "refused (NAME_INVALID, or NAME_TAKEN when the account uses it). cute is the only policy."),
+        restart("aurora.awf.multiprofile.migration.mode", "off",
+            "What happens to a profile store written before Build 51 (record format 1). off = nothing; the store stays "
+                + "format 1. dry-run = read the store and report what a migration would do; writes nothing. apply = copy the "
+                + "store to migration.backup-dir first, then convert it to format 2. Conversion is one way: a format-2 "
+                + "store is refused by builds older than Build 51, and rolling back means restoring the backup into an "
+                + "isolated store (there is no in-place downgrade). apply without a valid backup-dir falls back to off "
+                + "with a WARN. Quote the value in YAML (an unquoted off is the boolean false; it is read as off)."),
+        restart("aurora.awf.multiprofile.migration.backup-dir", "",
+            "Where migration.mode: apply writes the pre-migration backup: a path relative to the server directory, or "
+                + "absolute (a separate disk is the point of a backup). Empty = not configured. No .. segment; it must not "
+                + "be inside or contain the store directory. Not used by off or dry-run."));
 
     // [aurora.awf.redis.fabric] — Aurora Redis Fabric (docs/awf/multiprofile/REDIS-FABRIC.md)
     public static final List<ConfigKey> AWF_REDIS_FABRIC_KEYS = List.of(

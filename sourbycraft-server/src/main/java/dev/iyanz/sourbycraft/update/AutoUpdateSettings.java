@@ -169,11 +169,24 @@ public final class AutoUpdateSettings {
                     "the restored previous build runs from the NEXT restart.",
                     "Automatic update checks and applies are HELD until an operator runs /update resume",
                     "(or deletes " + guard.stateFile() + "). applied.tag keeps " + tag + " from being re-offered.");
-                case RESTORE_FAILED -> loud(
-                    "UPDATE ROLLBACK FAILED: the boot after applying " + tag + " did not reach ready",
-                    "and the previous jar could not be restored: " + guard.holdReason(),
-                    "Restore it by hand (copy <jar>.prev over the launch jar), then /update resume.",
-                    "Automatic update checks and applies are HELD until then.");
+                case RESTORE_FAILED -> {
+                    final String reason = guard.holdReason();
+                    if (reason.contains(StoreDowngradeGuard.REASON_TAG)) {
+                        loud(
+                            "UPDATE ROLLBACK REFUSED: the boot after applying " + tag + " did not reach ready,",
+                            "but the previous jar is older than Build 51 and the AWF MultiProfile store is format 2: " + reason,
+                            "Do NOT copy <jar>.prev over the launch jar: the old build corrupts a format-2 store.",
+                            "To downgrade, stop the server, restore the pre-migration backup (docs/awf/multiprofile/OPERATIONS.md),",
+                            "then install the older jar by hand. Otherwise fix the new build's boot failure and /update resume.",
+                            "Automatic update checks and applies are HELD until then.");
+                    } else {
+                        loud(
+                            "UPDATE ROLLBACK FAILED: the boot after applying " + tag + " did not reach ready",
+                            "and the previous jar could not be restored: " + reason,
+                            "Restore it by hand (copy <jar>.prev over the launch jar), then /update resume.",
+                            "Automatic update checks and applies are HELD until then.");
+                    }
+                }
                 case HELD -> loud(
                     "AUTO-UPDATER HELD: " + guard.holdReason(),
                     "No update is checked or applied until an operator runs /update resume",

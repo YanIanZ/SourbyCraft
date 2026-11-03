@@ -73,10 +73,22 @@ server without the feature.
   the switch freeze listener, the heartbeat (claim renewal, node advertising), the idle-world sweep and
   the shutdown drain.
 
+## Build 51 additions
+
+Build 51 code written; not built by an agent; not tested by the owner. The profile store moves to
+record format 2 (file and Redis) with a one-way migration from format 1 and a backup first; builds older
+than Build 51 refuse a format-2 store ([OPERATIONS.md](OPERATIONS.md#format-2-migration-and-rollback-build-51)).
+Profiles carry a name (unique per account, immutable) and a policy type (`classic`, `ironman`,
+`stranded`, `bingo`), exposed by `ProfileDetails`; the types are stored but their rules are not
+enforced yet. Co-op membership is planned for Build 52, salvage and the shared bank for Build 54,
+type rules and the audit log for Build 55 ([plan](../../releases/BUILD-51-55-PLAN.md),
+[design](COOP-DESIGN.md)); none of it exists in Build 51.
+
 ## What it deliberately does not do
 
 - No PostgreSQL, no cross-store transaction. The switch is **recoverable, not atomic**.
 - No SkyBlock/OneBlock/RPG mechanics. `type` is a consumer namespace; the core never interprets it.
+  The Build 51 policy type (`ProfileType`) is separate and also has no enforced rules yet.
 - No advancement, statistics or recipe-book isolation: they are shared by every profile of a player.
   A plugin can store its own data through an adapter (see [PROFILE-ISOLATION.md](PROFILE-ISOLATION.md)).
 - No remote command execution over Redis. Events carry data; a consumer decides what to do.

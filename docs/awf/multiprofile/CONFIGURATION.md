@@ -40,7 +40,26 @@ are code written and statically reviewed; not built; not tested by the owner, an
 | `directory` | `awf/profiles` | file repository directory; relative path, no `..`, no absolute path. Exclusive to one server (`repository.lock`). With `repository: redis` it is only read, and profile writes are refused while Redis is empty and this directory holds profiles, until `migrate-repository` copies them |
 | `repository` | `file` | `file` = the directory, one server. `redis` = the Aurora Redis Fabric (STORAGE pool, keys `<prefix>fabric:mp:*`): each write is one Lua script that checks the writer's session claim (when the write carries one) and the record revision (when the record has one). Needs `coordination.provider: redis`, `fencing-enabled: true`, a running fabric and a Redis 7.0+ primary (no cluster, no replica endpoint). EXPERIMENTAL |
 | `redis.require-aof` | `true` | `repository: redis` only. `true` refuses to start when Redis reports `appendonly` off. Even with AOF, `appendfsync everysec` can lose about 1 s of acknowledged writes, and a failover to a replica can lose acknowledged writes; one primary is the supported topology. `false` starts with a WARN |
-| `redis.wait-for-aof` | `true` | `repository: redis` only. Snapshot, archive, account, profile and binding writes and the journal written before a target state is applied wait for `WAITAOF` (Redis 7.2+, up to half of `aurora.awf.redis.timeout-ms`) on the write's own connection. A write not confirmed in time is still applied, logged and counted in `/awf multiprofile status`; when Redis refuses `WAITAOF` it is turned off with one WARN |
+| `redis.wait-for-aof` | `true` | `repository: redis` only. Writes wait for `WAITAOF` (Redis 7.2+ with appendonly on, up to half of `aurora.awf.redis.timeout-ms`) on the write's own connection. **Format-1 store** (Build 50 behaviour): snapshot, archive, account, profile and binding writes and the journal written before a target state is applied are confirmed; one not confirmed in time is still applied, logged and counted in `/awf multiprofile status`; when Redis refuses `WAITAOF` the confirmation is turned off for this process with one WARN. **Format-2 store** (Build 51): every format-2 write is confirmed; one not confirmed in time, or refused by Redis, is applied but reported UNKNOWN to its caller (the engine re-reads and re-confirms before any effect; a login or save then fails) and the confirmation is never turned off by itself. At startup `WAITAOF` is probed once: when Redis cannot answer it (older than 7.2, or appendonly off), opening a format-2 store and starting a format-2 migration are refused with an ERROR naming this key, before any marker is written; set `false` to acknowledge writes from Redis's memory |
+
+### Build 51: store format 2, names and types
+
+Build 51 code written; not built by an agent; not tested by the owner. All five keys are
+**RESTART_REQUIRED** (read early with the rest; the repository is opened once at startup). Co-op
+membership and its keys are Build 52; nothing here enables it.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `types.allowed` | `[classic, ironman, stranded, bingo]` | policy types a create request may name (a list, or a comma-separated string). Another type is refused with `TYPE_NOT_ALLOWED`. It does not restrict the free consumer namespace (`ProfileRequest.type`). The type is stored and returned only; no ironman, stranded or bingo rule is enforced before Build 55, so list only `classic` if profiles that look restricted but are not are unwanted. An unknown name or an empty list: WARN, the default list is used |
+| `types.default` | `classic` | the type of a profile created without one; must be in `types.allowed`. If it is not, the first allowed type is used and a WARN names this key |
+| `names.policy` | `cute` | `cute` is the only policy: the server assigns a fruit or vegetable name from its pool at creation; unique per account (ignoring case), immutable, numeric suffix only when the pool is exhausted for the account. A request may ask for a specific pool name (`NAME_INVALID` for other text, `NAME_TAKEN` for a used one) |
+| `migration.mode` | `off` | what happens to a store written before Build 51 (record format 1) at startup. `off`: nothing, the store stays format 1. `dry-run`: reads the store and reports what a migration would do, writes nothing. `apply`: copies the store to `migration.backup-dir`, then converts it to format 2 (one way, see below). Quote the value: YAML reads an unquoted `off` as `false`, which is accepted as `off`. `apply` without a valid `backup-dir` falls back to `off` with a WARN. Ignored while `enabled: false` (nothing is touched) |
+| `migration.backup-dir` | empty | backup target for `apply`: a path relative to the server directory, or absolute. No `..` segment; it must not be inside or contain `directory` (checked textually when both are relative; the runtime that opens the path must resolve it and check again). Not used by `off` and `dry-run` |
+
+There is deliberately **no** `storage.format` key. The store format is a property of the data, not a
+setting: it is reported (format 1 = written before Build 51, format 2 = written by Build 51) and
+cannot be chosen. A server with `enabled: false` reports nothing and reads nothing. A
+`storage.format` line in the file is an undocumented key: one WARN per load, ignored.
 
 ## `aurora.awf.redis.fabric.*`
 
@@ -84,6 +103,12 @@ limited to one server. A refusal fails the MultiProfile boot stage with the reas
 running without MultiProfile and never falls back to local ownership.
 
 ## Migration and rollback
+
+Build 51 adds a one-way store migration (format 1 to format 2); see
+[OPERATIONS.md](OPERATIONS.md#format-2-migration-and-rollback-build-51) for the procedure and the
+rollback rule (restore the pre-migration backup into an isolated store; builds older than Build 51
+refuse a format-2 store, and there is no in-place downgrade). The paragraphs below describe the
+pre-Build-51 state of the stores and still hold for the Redis copy.
 
 There is nothing to migrate for existing AWF data: no world key, store format, template or registry
 entry changes. New keys are additive and default to off (file repository, standalone, local provider).
