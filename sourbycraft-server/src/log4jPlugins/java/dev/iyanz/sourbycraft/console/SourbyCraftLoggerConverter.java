@@ -87,9 +87,9 @@ public final class SourbyCraftLoggerConverter extends LogEventPatternConverter {
 
     /** Engine (region threading, engine configuration, spark pinning) classes that log by simple name or literal. */
     static final String[] ENGINE_CLASSES = {
-        "AuroraFileMigration", "ConfigurationProvider", "PearlsMigration",
+        "AuroraFileMigration", "ConfigurationProvider", "FieldOrderPropertyUtils", "PearlsMigration",
         "FoliaAsyncScheduler", "FoliaWatchdogThread", "RegionizedServer", "RegionizedWorldData", "RegionShutdownThread",
-        "TickRegions", "TickRegionScheduler", "WorldShutdownThread",
+        "TickRegions", "TickRegionScheduler", "WorldShutdownThread", "WorldUnloadCompletion",
         "Scheduler", "SparkRegionPinner", "SparkGlobalPinner",
     };
 
