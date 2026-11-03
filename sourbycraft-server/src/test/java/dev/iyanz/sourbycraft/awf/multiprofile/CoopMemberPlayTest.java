@@ -321,8 +321,11 @@ class CoopMemberPlayTest {
             assertEquals(coopHead, head(h, p.coop().id(), p.member(), p.epoch()));
             assertEquals(kiwiHead, head(h, p.kiwi().id(), p.member(), p.kiwiEpoch()), "the save went to the profile active later");
 
-            // A ticket of a session the player rejoined since.
+            // A ticket of a session the player rejoined since. (The return into the co-op captures the solo state as the
+            // rollback point of the solo stream, so the solo head to hold still from here on is the one after it.)
             switched(h, p.member(), p.coop().id());
+            final MemberStateHead kiwiAfterReturn = head(h, p.kiwi().id(), p.member(), p.kiwiEpoch());
+            assertEquals(kiwiHead.revision() + 1L, kiwiAfterReturn.revision(), "the return did not publish the solo rollback point");
             final ProfileEngine.CaptureTicket old = h.engine.captureTicket(p.member());
             online(h, p.member());
             final ProfileEngine.CaptureTicket current = h.engine.captureTicket(p.member());
@@ -335,7 +338,7 @@ class CoopMemberPlayTest {
 
             assertTrue(join(h.engine.saveCaptured(p.member(), PlayerStatePort.CaptureResult.of(level(5)), current)));
             assertEquals(5, stateOf(h, head(h, p.coop().id(), p.member(), p.epoch())).level());
-            assertEquals(kiwiHead, head(h, p.kiwi().id(), p.member(), p.kiwiEpoch()));
+            assertEquals(kiwiAfterReturn, head(h, p.kiwi().id(), p.member(), p.kiwiEpoch()), "the save moved the solo stream");
         }
     }
 

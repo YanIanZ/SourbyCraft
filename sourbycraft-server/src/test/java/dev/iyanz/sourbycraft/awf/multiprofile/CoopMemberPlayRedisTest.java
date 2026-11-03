@@ -14,8 +14,9 @@ import dev.iyanz.sourbycraft.awf.multiprofile.MemberPlayFixtures.PlayingPorts;
 import dev.iyanz.sourbycraft.awf.redis.RedisSettings;
 import dev.iyanz.sourbycraft.awf.redis.RedisTestServer;
 import dev.iyanz.sourbycraft.awf.redis.fabric.FabricSettings;
+import dev.iyanz.sourbycraft.awf.redis.fabric.FabricTestNodes;
 import dev.iyanz.sourbycraft.awf.redis.fabric.RedisFabric;
-import java.lang.reflect.Method;
+import dev.iyanz.sourbycraft.awf.redis.fabric.SessionFabric;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -31,9 +32,11 @@ import org.junit.jupiter.api.io.TempDir;
 /**
  * The Build 53 member-play cases on the shared Redis store, with two engines as two nodes (COOP-DESIGN §6, §10 slice
  * 5, OD-1): a member switches into a co-op over Redis, each member's stream is its own on either node, and only the
- * node that holds the co-op plays it ({@code WRONG_NODE} elsewhere, no routing). Each node has its own fabric with its
- * own process incarnation (one JVM plays two processes), repository, claim providers and engine. Each test starts its
- * own {@code redis-server} ({@link RedisTestServer}); without the binary it is skipped, and with
+ * node that holds the co-op plays it ({@code WRONG_NODE} elsewhere, no routing). {@link RedisFabric} is one per
+ * process by design, so the test runs one fabric and gives each node its own {@link SessionFabric} with its own
+ * incarnation on it ({@link FabricTestNodes#sessionsAs}): to {@code foreignHolder} and the claim scripts the two nodes
+ * are two processes, each with its own repository, claim providers, player port and engine. Each test starts its own
+ * {@code redis-server} ({@link RedisTestServer}); without the binary it is skipped, and with
  * {@code SOURBY_REQUIRE_REDIS=1} (CI) it fails instead.
  */
 class CoopMemberPlayRedisTest {
@@ -42,36 +45,34 @@ class CoopMemberPlayRedisTest {
     Path directory;
 
     private RedisTestServer server;
+    private RedisFabric fabric;
     private final List<Node> nodes = new ArrayList<>();
 
     @BeforeEach
     void setUp() throws Exception {
         this.server = RedisTestServer.start("--appendonly", "yes", "--appendfsync", "always");
+        final RedisSettings redis = new RedisSettings(this.server.uri(), "t:coop53:", 4, 1_000, 30, false);
+        final FabricSettings settings = FabricSettings.parse(Map.of(FabricSettings.ENABLED_KEY, true)).settings();
+        this.fabric = RedisFabric.start(settings, redis, "node-a");
     }
 
     @AfterEach
     void tearDown() throws Exception {
         for (final Node node : this.nodes) node.close();
         this.nodes.clear();
+        if (this.fabric != null) this.fabric.close();
         if (this.server != null) this.server.close();
     }
 
     /**
-     * A fabric with its own incarnation: {@code RedisFabric.start(settings, redis, nodeId)} takes the JVM's, which would
-     * make two nodes of one test the same process to {@code foreignHolder}.
+     * One node: its own session fabric and incarnation on the shared fabric (the JVM's incarnation would make every node
+     * the same process to {@code foreignHolder}), repository, Redis claim providers, a stateful player port and an
+     * engine, opened.
      */
-    private static RedisFabric fabric(final FabricSettings settings, final RedisSettings redis, final String nodeId) throws Exception {
-        final Method start = RedisFabric.class.getDeclaredMethod("start", FabricSettings.class, RedisSettings.class, String.class,
-            String.class, String.class);
-        start.setAccessible(true);
-        return (RedisFabric) start.invoke(null, settings, redis, nodeId, "test-" + nodeId + "-" + UUID.randomUUID(), null);
-    }
-
-    /** One node: fabric, repository, Redis claim providers, a stateful player port and an engine, opened. */
     private final class Node implements AutoCloseable {
 
         final String id;
-        final RedisFabric fabric;
+        final SessionFabric sessions;
         final RedisProfileRepository repository;
         final RedisProfileOwnership profiles;
         final PlayerSessionOwnership players;
@@ -81,14 +82,13 @@ class CoopMemberPlayRedisTest {
 
         Node(final String id, final boolean writeMarker) throws Exception {
             this.id = id;
-            final RedisSettings redis = new RedisSettings(CoopMemberPlayRedisTest.this.server.uri(), "t:coop53:", 4, 1_000, 30, false);
-            final FabricSettings settings = FabricSettings.parse(Map.of(FabricSettings.ENABLED_KEY, true)).settings();
-            this.fabric = fabric(settings, redis, id);
-            this.repository = RedisProfileRepository.open(this.fabric, new ProfileSettings.Repository(ProfileSettings.Backend.REDIS,
+            final RedisFabric shared = CoopMemberPlayRedisTest.this.fabric;
+            this.sessions = FabricTestNodes.sessionsAs(shared, "test-" + id + "-" + UUID.randomUUID());
+            this.repository = RedisProfileRepository.open(shared, new ProfileSettings.Repository(ProfileSettings.Backend.REDIS,
                 true, false), CoopMemberPlayRedisTest.this.directory.resolve("no-file-store-" + id));
             this.repository.attachDefaultSlots(CoopFixtures.SLOTS);
             if (writeMarker) this.repository.writeStoreFormat(StoreFormat.Marker.ready(CoopFixtures.BUILD));
-            this.profiles = new RedisProfileOwnership(this.fabric.sessions(), id, 1_000);
+            this.profiles = new RedisProfileOwnership(this.sessions, id, 1_000);
             this.players = PlayerSessionOwnership.redis(this.profiles.coopClaims(), id);
             this.engine = new ProfileEngine(playSettings(), this.repository, this.profiles, this.players, this.ports,
                 ProfileWorldPort.NONE, id, this.io, null, null);
@@ -140,7 +140,7 @@ class CoopMemberPlayRedisTest {
         public void close() {
             this.engine.close();
             this.io.shutdownNow();
-            this.fabric.close();
+            this.repository.close();
         }
     }
 

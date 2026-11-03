@@ -132,7 +132,8 @@ public interface PlayerSessionOwnership extends AutoCloseable {
 
         private Local(final String nodeId, final int leaseSeconds) {
             this.nodeId = Objects.requireNonNull(nodeId, "nodeId");
-            this.leases = new LocalProfileOwnership.StrictLeases(leaseSeconds);
+            // The leases carry this instance's incarnation, so a claim's incarnation() and this provider's agree.
+            this.leases = new LocalProfileOwnership.StrictLeases(leaseSeconds, this.incarnation);
         }
 
         @Override

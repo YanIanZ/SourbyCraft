@@ -2,7 +2,6 @@ package dev.iyanz.sourbycraft.awf.multiprofile;
 
 import dev.iyanz.sourbycraft.awf.multiprofile.CoopWriteGuard.ProfileClaim;
 import dev.iyanz.sourbycraft.awf.redis.fabric.ClaimResult;
-import dev.iyanz.sourbycraft.awf.redis.fabric.NodeIdentity;
 import dev.iyanz.sourbycraft.awf.redis.fabric.OwnerClaim;
 import java.util.HashMap;
 import java.util.Map;
@@ -43,7 +42,7 @@ public final class LocalProfileOwnership implements ProfileOwnership {
         this.nodeId = Objects.requireNonNull(nodeId, "nodeId");
         if (leaseSeconds < 1) throw new IllegalArgumentException("leaseSeconds " + leaseSeconds);
         this.leaseNanos = leaseSeconds * 1_000_000_000L;
-        this.transactions = new StrictLeases(leaseSeconds);
+        this.transactions = new StrictLeases(leaseSeconds, this.incarnation);
     }
 
     @Override
@@ -211,7 +210,10 @@ public final class LocalProfileOwnership implements ProfileOwnership {
      * session and fence, refused for any other token (also of this process), with a per-id fence
      * counter that never resets within the process and refuses to pass {@link CoopWriteGuard#MAX_COUNTER}.
      * Expiry uses {@link System#nanoTime}. Shared by the local {@code P} and {@code Q} providers, each
-     * with its own instance, so their ids never alias.
+     * with its own instance, so their ids never alias. Every lease carries the owning provider's
+     * {@link ProfileOwnership#incarnation() incarnation} (one per instance, so a restarted provider is a new
+     * one): the claims it mints and the provider's own {@code incarnation()} agree, which is what the engine's
+     * recovery compares a journal's recorded incarnation against.
      */
     static final class StrictLeases {
 
@@ -225,11 +227,13 @@ public final class LocalProfileOwnership implements ProfileOwnership {
         private final Map<UUID, Lease> leases = new HashMap<>();
         private final Map<UUID, Long> fences = new HashMap<>();
         private final long leaseNanos;
-        private final String incarnation = NodeIdentity.processIncarnation();
+        /** The owning provider's incarnation, written into every lease (see the class comment). */
+        private final String incarnation;
 
-        StrictLeases(final int leaseSeconds) {
+        StrictLeases(final int leaseSeconds, final String incarnation) {
             if (leaseSeconds < 1) throw new IllegalArgumentException("leaseSeconds " + leaseSeconds);
             this.leaseNanos = leaseSeconds * 1_000_000_000L;
+            this.incarnation = Objects.requireNonNull(incarnation, "incarnation");
         }
 
         synchronized Outcome claim(final UUID id, final String node, final UUID owner) {
