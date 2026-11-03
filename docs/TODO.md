@@ -15,6 +15,8 @@ sini **dan** di dokumen sumbernya bila ada di repo, sertakan bukti (run CI, comm
 Plan lama (era v6/v12/Folia, Mei–Juli 2026, dulu di `docs/superpowers/`, dihapus 2026-10-13) tidak dimasukkan; isinya
 sudah digantikan dokumen di atas.
 
+**Rencana jangka panjang, belum diimplementasikan:** [Aurora Engine Independence — Build 56–100](proposals/aurora-engine-independence/README.md) · [milestone roadmap](proposals/aurora-engine-independence/ROADMAP-56-100.md) · [owner acceptance](proposals/aurora-engine-independence/OWNER-ACCEPTANCE.md). Fokus hanya Aurora Engine; tidak mengaktifkan upgrade Metal atau Spottedleaf. Semua tugas baru masih PROPOSED, bukan dianggap selesai; Build 50 tetap prioritas sesuai gate di bawah.
+
 Rencana rilis Build 47–50 (item per build, gate per build): [`docs/releases/ROADMAP-47-50.md`](releases/ROADMAP-47-50.md).
 
 Status: `[ ]` belum · `[-]` sebagian / perlu validasi · `[!]` terblokir keputusan owner
