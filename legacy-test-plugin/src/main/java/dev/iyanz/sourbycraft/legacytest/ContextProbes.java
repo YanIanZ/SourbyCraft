@@ -1,6 +1,7 @@
 package dev.iyanz.sourbycraft.legacytest;
 
 import dev.iyanz.sourbycraft.api.scheduler.EntityTask;
+import java.util.concurrent.CompletableFuture;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -51,44 +52,57 @@ final class ContextProbes implements Listener {
     }
 
     private final LegacyBridgePlugin plugin;
+    /** The three terminal bodies: chain, global isolated, mob event. */
+    private final LegacyBridgePlugin.Completion done = new LegacyBridgePlugin.Completion(3);
 
     ContextProbes(final LegacyBridgePlugin plugin) {
         this.plugin = plugin;
     }
 
-    void run() {
+    /**
+     * Starts the probes. The returned future completes once all three terminal bodies have ended, on every path,
+     * or fails when a step stops before scheduling the next one.
+     */
+    CompletableFuture<Void> run() {
         final World world = this.plugin.getServer().getWorlds().get(0);
         final BukkitScheduler scheduler = this.plugin.getServer().getScheduler();
         this.plugin.getServer().getPluginManager().registerEvents(this, this.plugin);
         final int chunkX = 7;
         final int chunkZ = 7;
-        world.getChunkAtAsync(chunkX, chunkZ).thenAccept(chunk -> {
-            world.addPluginChunkTicket(chunkX, chunkZ, this.plugin);
-            final Location spot = new Location(world, 120.5, 100, 120.5);
-            final ArmorStand stand = world.spawn(spot, ArmorStand.class, created -> {
-                created.setGravity(false);
-                created.setPersistent(false);
-            });
-            // Scheduled from the global region, so nothing but the explicit EntityTask names an owner.
-            Bukkit.getGlobalRegionScheduler().run(this.plugin, global -> {
-                scheduler.runTask(this.plugin, EntityTask.of(stand, () -> {
-                    scheduler.runTaskAsynchronously(this.plugin, () -> scheduler.runTask(this.plugin, () ->
-                        this.plugin.check(Bukkit.isOwnedByCurrentRegion(stand) && !Bukkit.isGlobalTickThread(),
-                            "LEGACY_CONTEXT_CHAIN", "thread=" + Thread.currentThread().getName()
-                                + " owned=" + Bukkit.isOwnedByCurrentRegion(stand))));
-                    Bukkit.getGlobalRegionScheduler().run(this.plugin, explicit -> scheduler.runTask(this.plugin, () ->
-                        this.plugin.check(Bukkit.isGlobalTickThread(), "LEGACY_CONTEXT_GLOBAL_ISOLATED",
-                            "thread=" + Thread.currentThread().getName())));
+        world.getChunkAtAsync(chunkX, chunkZ).whenComplete((chunk, failure) -> {
+            if (failure != null) {
+                this.done.fail(failure);
+                return;
+            }
+            this.done.step(() -> {
+                world.addPluginChunkTicket(chunkX, chunkZ, this.plugin);
+                final Location spot = new Location(world, 120.5, 100, 120.5);
+                final ArmorStand stand = world.spawn(spot, ArmorStand.class, created -> {
+                    created.setGravity(false);
+                    created.setPersistent(false);
+                });
+                // Scheduled from the global region, so nothing but the explicit EntityTask names an owner.
+                Bukkit.getGlobalRegionScheduler().run(this.plugin, global -> this.done.step(() -> {
+                    scheduler.runTask(this.plugin, EntityTask.of(stand, () -> this.done.step(() -> {
+                        scheduler.runTaskAsynchronously(this.plugin, () -> this.done.step(() -> scheduler.runTask(this.plugin, () ->
+                            this.done.last(() -> this.plugin.check(Bukkit.isOwnedByCurrentRegion(stand) && !Bukkit.isGlobalTickThread(),
+                                "LEGACY_CONTEXT_CHAIN", "thread=" + Thread.currentThread().getName()
+                                    + " owned=" + Bukkit.isOwnedByCurrentRegion(stand))))));
+                        Bukkit.getGlobalRegionScheduler().run(this.plugin, explicit -> this.done.step(() -> scheduler.runTask(this.plugin, () ->
+                            this.done.last(() -> this.plugin.check(Bukkit.isGlobalTickThread(), "LEGACY_CONTEXT_GLOBAL_ISOLATED",
+                                "thread=" + Thread.currentThread().getName())))));
+                    })));
+                    this.plugin.getServer().getPluginManager().callEvent(new FixtureEntityEvent(stand));
                 }));
-                this.plugin.getServer().getPluginManager().callEvent(new FixtureEntityEvent(stand));
             });
         });
+        return this.done.future();
     }
 
     @EventHandler
     public void onFixtureEntity(final FixtureEntityEvent event) {
-        this.plugin.getServer().getScheduler().runTask(this.plugin, () -> this.plugin.check(Bukkit.isGlobalTickThread(),
-            "LEGACY_CONTEXT_MOB_EVENT", "thread=" + Thread.currentThread().getName() + " entity="
-                + event.getEntityType()));
+        this.done.step(() -> this.plugin.getServer().getScheduler().runTask(this.plugin, () -> this.done.last(() ->
+            this.plugin.check(Bukkit.isGlobalTickThread(), "LEGACY_CONTEXT_MOB_EVENT", "thread="
+                + Thread.currentThread().getName() + " entity=" + event.getEntityType()))));
     }
 }
