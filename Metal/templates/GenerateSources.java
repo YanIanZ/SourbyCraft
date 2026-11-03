@@ -108,7 +108,7 @@ public final class GenerateSources {
         // Never leave a truncated generated source when codegen is interrupted.
         final Path temporary = Files.createTempFile(dst.getParent(), ".metal-codegen-", ".tmp");
         try {
-            Files.write(temporary, generated, StandardCharsets.UTF_8, StandardOpenOption.TRUNCATE_EXISTING);
+            Files.write(temporary, generated, StandardCharsets.UTF_8, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
             try {
                 Files.move(temporary, dst, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
             } catch (final AtomicMoveNotSupportedException ex) {
