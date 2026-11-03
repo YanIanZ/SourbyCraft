@@ -1,5 +1,6 @@
 package dev.iyanz.sourbycraft.awf.multiprofile;
 
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.BooleanSupplier;
@@ -15,13 +16,44 @@ import java.util.function.BooleanSupplier;
  *
  * <p>The core never touches Bukkit, which is what makes the switch protocol testable with a fake
  * port.</p>
+ *
+ * <p><b>Adapter contract (Build 53).</b> {@link #captureDetailed} returns the state together with what the
+ * adapter registry decided for this capture ({@link ProfileStateAdapters.Capture}: best-effort keys to preserve,
+ * keys cleared); {@link #carryAdapters(ProfileState, ProfileState, ProfileStateAdapters.Capture)} merges the
+ * previous snapshot's entries with it; {@link #validateApply} refuses, before any apply, a state whose required
+ * adapter data has no registration ({@code ADAPTER_MISSING}). A capture or apply whose required adapter fails
+ * completes exceptionally with {@code ADAPTER_REQUIRED_FAILED}. The defaults keep the Build 52 behaviour for
+ * ports without an adapter registry.</p>
  */
 public interface PlayerStatePort {
+
+    /** One capture: the state and the adapter registry's decisions for it. */
+    record CaptureResult(ProfileState state, ProfileStateAdapters.Capture adapters) {
+
+        public CaptureResult {
+            Objects.requireNonNull(state, "state");
+            adapters = adapters == null ? new ProfileStateAdapters.Capture(state.adapters(), java.util.Set.of(), java.util.Set.of())
+                : adapters;
+        }
+
+        /** A result whose adapter decisions are exactly the state's entries (nothing preserved or cleared). */
+        public static CaptureResult of(final ProfileState state) {
+            return new CaptureResult(state, null);
+        }
+    }
 
     boolean online(UUID playerId);
 
     /** The player's current state for the requested categories, read on the entity thread. */
     CompletableFuture<ProfileState> capture(UUID playerId, ProfileIsolation isolation);
+
+    /**
+     * {@link #capture} with the adapter registry's decisions. This default wraps {@link #capture}: every adapter
+     * entry of the state counts as captured, nothing is preserved or cleared.
+     */
+    default CompletableFuture<CaptureResult> captureDetailed(final UUID playerId, final ProfileIsolation isolation) {
+        return capture(playerId, isolation).thenApply(CaptureResult::of);
+    }
 
     /** Applies the categories the isolation setting enables, on the entity thread. */
     CompletableFuture<Void> apply(UUID playerId, ProfileState state, ProfileIsolation isolation);
@@ -42,6 +74,22 @@ public interface PlayerStatePort {
         return apply(playerId, state, isolation);
     }
 
+    /**
+     * Refuses a state that cannot be applied completely on this node: stored data of a required adapter whose
+     * version has no registration ({@code ADAPTER_MISSING}). Called on the engine's I/O worker before the apply is
+     * handed to the entity thread; reads no player. This default, for ports without a registry, accepts every state.
+     */
+    default void validateApply(final ProfileState state) {}
+
+    /**
+     * When this server last wrote the player's vanilla playerdata file ({@code <world>/playerdata/<uuid>.dat}),
+     * in epoch milliseconds, or empty when there is none or it cannot be read (Build 53 authoritative login
+     * compares it with the committed head to decide an adoption). Reads only a file attribute; any thread.
+     */
+    default java.util.OptionalLong vanillaPlayerdataModifiedMillis(final UUID playerId) {
+        return java.util.OptionalLong.empty();
+    }
+
     /** Teleports the player; completes when the destination is loaded and the move was accepted. */
     CompletableFuture<Void> teleport(UUID playerId, ProfileState.Location location);
 
@@ -50,9 +98,20 @@ public interface PlayerStatePort {
      * {@code previous} (the profile's last stored state) that no adapter registered on this boot
      * accounts for, so a plugin that is missing on this boot does not lose its data at the next save.
      * Called on the engine's I/O worker; reads no player. This default has no adapter registry, so it
-     * keeps every previous entry whose id the capture does not hold.
+     * keeps every previous entry whose id the capture does not hold. Fails with {@code STATE_TOO_LARGE} when the
+     * entries do not fit the snapshot's adapter budget together.
      */
     default ProfileState carryAdapters(final ProfileState captured, final ProfileState previous) {
         return captured.withAdapters(new ProfileStateAdapters().carryForward(captured.adapters(), previous.adapters()));
+    }
+
+    /**
+     * {@link #carryAdapters(ProfileState, ProfileState)} honouring the capture's decisions: entries of
+     * {@code previous} the capture preserved are kept even though their adapter is registered, entries it cleared
+     * are dropped. This default ignores the decisions.
+     */
+    default ProfileState carryAdapters(final ProfileState captured, final ProfileState previous,
+                                       final ProfileStateAdapters.Capture capture) {
+        return carryAdapters(captured, previous);
     }
 }

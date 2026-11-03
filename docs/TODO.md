@@ -33,7 +33,9 @@ Rencana dan keputusan OD-1…4: [BUILD-51-55-PLAN.md](releases/BUILD-51-55-PLAN.
 - [-] Build 52 — slice 4: keanggotaan co-op (undang/terima/tolak/kedaluwarsa, keluar, peran, vote kick, batas anggota),
   intent FILE+Redis, level store minimumBuild 52, `/coop`. Kode ditulis, direview, dikompilasi; belum diuji owner:
   TO-B52-01…07 di [catatan rilis Build 52](releases/26.2-build-52-aurora-nexus.md).
-- [ ] Build 53 — slice 5 + RFC E03: switching v2, login dari snapshot, adapter REQUIRED, snapshot quit saat shutdown (PM-076).
+- [-] Build 53 — slice 5 + RFC E03: anggota main di co-op, login otoritatif (auto) + autosave lockstep + marker sesi/adopsi
+  vanilla, kontrak adapter REQUIRED/BEST_EFFORT, penghapusan anggota online, snapshot quit saat shutdown (PM-076, patch 0081).
+  Kode ditulis, direview, dikompilasi; belum diuji owner: TO-B53-01…08 di [catatan rilis Build 53](releases/26.2-build-53-aurora-nexus.md).
 - [ ] Build 54 — slice 6: bank bersama/pribadi, koleksi, transfer dengan receipt, salvage exactly-once (OD-3), purse via adapter (OD-4).
 - [ ] Build 55 — slice 7 + G5–G7: audit, switch guard, aturan tipe, paritas API, antrean I/O per akun (PM-091).
 

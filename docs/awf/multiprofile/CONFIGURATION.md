@@ -76,9 +76,26 @@ runs, so a change needs a restart (`/sourbycraft reload` does not apply it). Co-
 | `coop.kick-vote.inactive-days` | `35` | in a two-member co-op, days the other member must have been inactive before a kick vote may start against them (`TARGET_NOT_INACTIVE` until then); `1` to `3650`. Build 52 records a member's last activity at join time and on membership changes, not from gameplay. Outside the range: WARN, `35` |
 | `coop.allowed-types` | `[classic]` | policy types whose solo profile may be converted to co-op (a list, or a comma-separated string); checked at conversion only, so narrowing it later does not touch existing co-ops. A profile of another type: `TYPE_NOT_ALLOWED`. Build 51 enforces no ironman, stranded or bingo rule, so adding them gives those types co-op without any of their intended restrictions. An unknown name or an empty list: WARN, `[classic]` |
 
-Not configurable in Build 52: the per-account membership limit (it is the account's profile slot limit,
+Not configurable in Build 52 (unchanged in Build 53): the per-account membership limit (it is the account's profile slot limit,
 `default-slots`/`max-slots`), the size of a page (fixed, at most 32), the number of open invitations and
 votes (store bounds, `CAPACITY_EXCEEDED`), and the salvage window (salvage delivery is Build 54).
+
+### Build 53: authoritative login, shutdown capture, adapters
+
+Build 53 code written; not tested by the owner. All three keys are **RESTART_REQUIRED** (read early with the rest;
+`/sourbycraft reload` does not apply them). They apply to every profile, not only co-op. Accessors in
+`ProfileSettings`: `login().authoritative()` (the `Authoritative` enum) / `authoritativeLogin()` (resolved against `coop.enabled`), `shutdown().captureDeadlineMillis()`,
+`adapters().required()`.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `login.authoritative` | `auto` | `auto`, `true` or `false`. `auto` = authoritative exactly when `coop.enabled` is true, so a server without co-op joins exactly as Build 52 did (vanilla playerdata, saved by the server with the chunks). While authoritative login applies: a join restores the committed state of the player's active profile (for a co-op the member head) or, after an unclean previous session or the upgrade from Build 52, adopts a newer vanilla playerdata into it once ([PROFILE-LIFECYCLE.md](PROFILE-LIFECYCLE.md#authoritative-login-build-53)); every vanilla player save of the server (autosave) publishes a profile snapshot in lockstep; a join whose state cannot be restored or adopted is refused (`HEAD_UNREADABLE`, `RECOVERY_REQUIRED`, `ADAPTER_MISSING`, `ADAPTER_REQUIRED_FAILED`, `OWNERSHIP_CONFLICT`, `STATE_TOO_LARGE`, `WRONG_NODE`) instead of loading vanilla playerdata; a save that cannot succeed freezes and disconnects the player. `false` is the Build 52 behaviour with co-op on too: the join keeps vanilla playerdata, a quit that was not captured can let a player rejoin with items their profile snapshot does not hold, and co-op members cannot switch into a co-op (`COOP_SWITCH_UNAVAILABLE`). Not `auto`/`true`/`false` (a YAML boolean counts): WARN, `auto`. With `enabled: false` it does nothing; `false` with `coop.enabled: true` logs a WARN at every start, `auto` logs which way it resolved |
+| `shutdown.capture-deadline-ms` | `10000` | at shutdown MultiProfile captures and saves the online players before the server removes them. This is how long it waits, `1000` to `60000`. At the deadline unsaved players keep their last committed snapshot and pending intents for recovery and shutdown continues (see [OPERATIONS.md](OPERATIONS.md#shutdown-capture-build-53)). Raising it can delay process exit by up to that long. Outside the range: WARN, `10000` |
+| `adapters.required` | `[]` | profile state adapter ids (a list, or a comma-separated string; `[a-z0-9_.:-]{1,64}`, at most 32) treated as `REQUIRED` whatever the adapter's descriptor says ([PROFILE-ISOLATION.md](PROFILE-ISOLATION.md#adapter-contract-build-53)). It only raises strictness. A malformed entry is dropped with a WARN and the well-formed entries stay in force (a typo never relaxes the others). An id no plugin registers does nothing until a plugin registers it |
+
+Not changed by Build 53: the `coop.*` keys keep their Build 52 meaning, with `coop.enabled` now also allowing member
+play. `isolation.*` still decides which categories are captured; a disabled category stays in vanilla
+playerdata, and authoritative login does not restore it.
 
 ## `aurora.awf.redis.fabric.*`
 

@@ -64,8 +64,10 @@ import org.junit.jupiter.api.io.TempDir;
  * names and aliases, the shared label, accept replay, the cap, an invite that expires at commit, kick votes and
  * their electorate, owner protections, removal and rejoin epochs, the salvage bound, and the refusals Build 52
  * defines ({@code COOP_DISABLED}, {@code MIGRATION_REQUIRED}, {@code TYPE_NOT_ALLOWED}, {@code WRONG_NODE},
- * {@code MEMBER_ONLINE}, {@code COOP_SWITCH_UNAVAILABLE}, caps), paged listings, the events (after commit only) and the
- * store feature level with the OD-2 downgrade gate.
+ * {@code MEMBER_ONLINE}, {@code COOP_SWITCH_UNAVAILABLE}, caps) as Build 53 narrows them (members play a co-op;
+ * {@code COOP_SWITCH_UNAVAILABLE} only without {@code login.authoritative}; {@code MEMBER_ONLINE} only for a member who
+ * cannot be moved out safely; member play itself is covered by {@link CoopMemberPlayTest}), paged listings, the events
+ * (after commit only) and the store feature level with the OD-2 downgrade gate.
  *
  * <p>Deterministic: the engine's store clock is shifted by fixed offsets ({@link CoopEngine#clockOffset}), never
  * waited for; events are taken with bounded waits; no sleeps.</p>
@@ -395,16 +397,15 @@ class CoopMembershipEngineTest {
             final UUID owner = UUID.randomUUID();
             final UUID member = UUID.randomUUID();
             final AuroraProfile coop = h.coop(owner, "Apple");
-            h.create(member, "Kiwi");
+            final AuroraProfile kiwi = h.create(member, "Kiwi");
             final CoopInviteInfo firstInvite = join(h.engine.invite(owner, coop.id(), member));
             join(h.engine.acceptInvite(member, firstInvite.id()));
             final UUID oldEpoch = h.profile(coop.id()).member(member).epoch();
 
-            // Build 52: a member cannot play the co-op (the store refuses to make it active, COOP_SWITCH_UNAVAILABLE), so
-            // its stream holds the UNINITIALIZED head the accept created and nothing published.
+            // The member never played the co-op, so its stream holds the UNINITIALIZED head the accept created and
+            // nothing published.
             final MemberStateHead uninitialized = h.file.memberHead(coop.id(), member, oldEpoch).orElseThrow();
             assertEquals(MemberStateHead.State.UNINITIALIZED, uninitialized.state());
-            refusedWith(ProfileErrorCode.COOP_SWITCH_UNAVAILABLE, () -> h.activate(member, coop.id()));
             final PlayerAccount staleAccount = h.account(member);
             final AuroraProfile staleProfile = h.profile(coop.id());
 
@@ -445,10 +446,16 @@ class CoopMembershipEngineTest {
             assertEquals(MemberStateHead.State.CONSUMED, h.file.memberHead(coop.id(), member, oldEpoch).orElseThrow().state());
             assertNull(h.file.memberHead(coop.id(), member, rejoined.epoch()).orElseThrow().snapshotId(),
                 "the new epoch's head names the old epoch's snapshot");
-            // And the member still cannot switch into the co-op before Build 53.
+            // Build 53: the rejoined member plays the co-op under the new epoch only, never the consumed one.
+            h.activate(member, kiwi.id());
+            h.ports.online.add(member);
+            final ProfileEngine.Admission admission = join(h.engine.admitSession(member));
+            assertTrue(admission.admitted(), admission.reason());
             final ProfileSwitchResult switched = join(h.engine.switchProfile(member, coop.id()));
-            assertFalse(switched.success());
-            assertEquals(ProfileErrorCode.COOP_SWITCH_UNAVAILABLE, switched.errorCode(), switched.message());
+            assertTrue(switched.success(), switched.errorCode() + ": " + switched.message());
+            assertEquals(coop.id(), h.account(member).activeProfile());
+            assertEquals(rejoined.epoch(), h.account(member).activeEpoch());
+            assertEquals(MemberStateHead.State.CONSUMED, h.file.memberHead(coop.id(), member, oldEpoch).orElseThrow().state());
         }
     }
 
@@ -584,8 +591,14 @@ class CoopMembershipEngineTest {
         }
     }
 
-    // ------------------------------------------------------------------ MEMBER_ONLINE only for the active profile
+    // ------------------------------------------------------------------ MEMBER_ONLINE only when the member cannot be moved
 
+    /**
+     * Build 53: a member whose active profile is another one is removed as in Build 52; a member online here with the
+     * co-op active but no admitted session cannot be switched out safely and is refused {@code MEMBER_ONLINE} with
+     * nothing written (the other {@code MEMBER_ONLINE} cases and the switch-out and repoint flows are in
+     * {@link CoopMemberPlayTest}).
+     */
     @Test
     void memberOnlineOnlyWhenTheCoopIsActive() throws Exception {
         try (CoopEngine h = engine()) {
@@ -600,14 +613,14 @@ class CoopMembershipEngineTest {
             h.ports.online.add(b);
             h.ports.online.add(c);
 
-            // b cannot play the co-op in Build 52: the store refuses to make a non-owner's co-op membership the active
-            // profile (COOP_SWITCH_UNAVAILABLE, a direct account commit), so for a non-owner the MEMBER_ONLINE refusal of
-            // leave and kick is unreachable until Build 53; the rule itself is covered by CoopMembershipRulesTest.
+            // b online here with the co-op active (the store lets a member make it active since Build 53) but no
+            // admitted session: b cannot be captured and switched out first, so the leave is refused.
+            h.activate(b, coop.id());
             final var before = tree(store());
-            refusedWith(ProfileErrorCode.COOP_SWITCH_UNAVAILABLE, () -> h.activate(b, coop.id()));
-            assertEquals(before, tree(store()), "a refused activation wrote something");
+            refusedWith(ProfileErrorCode.MEMBER_ONLINE, () -> join(h.engine.leave(b, coop.id())));
+            assertEquals(before, tree(store()), "a MEMBER_ONLINE refusal wrote something");
             assertNotNull(h.profile(coop.id()).member(b));
-            assertNull(h.account(b).activeProfile());
+            assertEquals(coop.id(), h.account(b).activeProfile());
 
             // b online in its own profile: the leave runs.
             h.activate(b, ownB.id());
@@ -721,9 +734,13 @@ class CoopMembershipEngineTest {
 
     // ------------------------------------------------------------------ COOP_SWITCH_UNAVAILABLE and OD-1
 
+    /**
+     * Build 53: a member can switch into a co-op only with {@code login.authoritative}; with it false the member is
+     * refused {@code COOP_SWITCH_UNAVAILABLE}, and a non-member is {@code NOT_A_MEMBER} either way. Nothing is written.
+     */
     @Test
     void nonOwnerSwitchIntoCoopUnavailable() throws Exception {
-        try (CoopEngine h = engine()) {
+        try (CoopEngine h = engine(MemberPlayFixtures.playSettings(false, 15_000, Set.of()))) {
             final UUID owner = UUID.randomUUID();
             final UUID member = UUID.randomUUID();
             final UUID outsider = UUID.randomUUID();
@@ -734,7 +751,7 @@ class CoopMembershipEngineTest {
             assertFalse(byMember.success());
             assertEquals(ProfileErrorCode.COOP_SWITCH_UNAVAILABLE, byMember.errorCode(), byMember.message());
             final ProfileSwitchResult byOutsider = join(h.engine.switchProfile(outsider, coop.id()));
-            assertEquals(ProfileErrorCode.NOT_OWNED, byOutsider.errorCode(), byOutsider.message());
+            assertEquals(ProfileErrorCode.NOT_A_MEMBER, byOutsider.errorCode(), byOutsider.message());
             assertEquals(before, tree(store()), "a refused switch wrote something");
             assertNull(h.account(member).activeProfile());
         }
@@ -886,14 +903,14 @@ class CoopMembershipEngineTest {
             join(h.engine.cancelInvite(owner, ic2.id()));
             h.drainUntil(event -> invited(event, c, CoopInviteState.CANCELLED));
 
-            // Refusals fire nothing: a WRONG_NODE accept, a ROLE_FORBIDDEN invite, a refused activation of a member.
+            // Refusals fire nothing: a WRONG_NODE accept, a ROLE_FORBIDDEN invite, a non-member's switch into the co-op.
             final CoopInviteInfo id = join(h.engine.invite(owner, coop.id(), d));
             h.drainUntil(event -> invited(event, d, CoopInviteState.OPEN));
             final ClaimResult held = join(h.profiles.claim(coop.id(), "node-b", UUID.randomUUID()));
             refusedWith(ProfileErrorCode.WRONG_NODE, () -> join(h.engine.acceptInvite(d, id.id())));
             assertTrue(join(h.profiles.release(held.claim())));
             refusedWith(ProfileErrorCode.ROLE_FORBIDDEN, () -> join(h.engine.invite(b, coop.id(), UUID.randomUUID())));
-            refusedWith(ProfileErrorCode.COOP_SWITCH_UNAVAILABLE, () -> h.activate(b, coop.id()));
+            assertEquals(ProfileErrorCode.NOT_A_MEMBER, join(h.engine.switchProfile(UUID.randomUUID(), coop.id())).errorCode());
 
             // An UNKNOWN outcome fires nothing and is not treated as success: the prepare reply is lost before the store
             // saw the request; the accept is reported UNKNOWN_OUTCOME, and d stays without membership.

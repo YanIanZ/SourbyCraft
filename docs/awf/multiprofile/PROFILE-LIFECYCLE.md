@@ -76,17 +76,16 @@ refused with `WRONG_NODE` (OD-1: Build 52 never loads the same world on two node
 membership change (conversion, label, invitation, leave, kick vote) while another node holds the profile's
 claim. An accept of an invitation that already expired closes it and fails with `INVITE_EXPIRED`; repeating
 an accept that already committed returns the same membership without writing. A member who just joined
-**cannot switch into the profile** in Build 52: `switchProfile` into a co-op profile the player does not own
-is refused with `COOP_SWITCH_UNAVAILABLE` until Build 53 adds member snapshots and login restore.
+could not switch into the profile in Build 52 (`COOP_SWITCH_UNAVAILABLE`); Build 53 allows it, see
+[Member switching and play](#member-switching-and-play-build-53).
 
 **Leaving and removal.** A member leaves; or a kick vote removes a member. Both are one recoverable intent
 that consumes the membership epoch, releases the account's slot and records the member's personal state as a
 salvage entry that is unavailable to delivery. Build 52 delivers nothing (salvage delivery is Build 54); a
 removed member's rejoin is a new membership with a fresh epoch and an empty personal state, never the old
-epoch. **A membership that is the member's active profile is not removed** in Build 52 (`MEMBER_ONLINE`;
-enabled in Build 53); a member who is online but active in another profile, or offline, can leave and can
-be kicked. Since Build 52 never makes a co-op profile the active profile of anyone but its owner, and the
-owner cannot be removed, this refusal is reached only through an inconsistent account. A kick holds the
+epoch. A member whose **active** profile is the co-op was refused in Build 52 (`MEMBER_ONLINE`); Build 53
+captures and switches them out first, then removes them, see
+[Removing an online member](#removing-an-online-member-build-53). A kick holds the
 removed account's session claim as well as the actor's: a target whose session is on another node is
 refused (`OWNERSHIP_CONFLICT`) rather than having its claim taken. The owner cannot leave, be kicked or
 transfer ownership (`OWNER_ACTION_REFUSED`), and cannot delete a co-op profile that still has other
@@ -103,7 +102,10 @@ call; the vote becomes `EXECUTED` in that removal's commit, so a retry never cre
 If the removal fails the vote stays `PASSED` and approving it again retries the removal. A ballot or a new
 vote first closes an undecided vote that expired (`EXPIRED`) or whose electorate changed (`CANCELLED`).
 
-**Store level.** The first co-op intent of a store raises the store marker to minimum build 52 before it is
+**Store level.** The first switch journal of a *non-owner* member into a co-op raises the store marker to minimum
+build 53 before it is written (Build 52's rollback of such a journal would commit a co-op pointer for a non-owner
+and then refuse it, leaving the account stuck); a store without one keeps the Build 52 marker. Session markers (below)
+are stored under a record type Build 52 never reads and are not part of the level. The first co-op intent of a store raises the store marker to minimum build 52 before it is
 prepared ([OPERATIONS.md](OPERATIONS.md#enabling-co-op-build-52)); Build 51 then refuses the store.
 
 **Label.** The owner sets a shared display label (1 to 32 characters, not unique). It is separate from the
@@ -114,6 +116,157 @@ the affected player's next login, as the create and delete intents are above: un
 their reservations cleared, committed ones roll forward. A kick intent names two session claims (the actor's
 and the removed member's); recovery takes both. A result of `UNKNOWN_OUTCOME` means the store did
 not confirm the write; read the state back instead of repeating the call.
+
+## Member switching and play (Build 53)
+
+Build 53 code written; not tested by the owner. Everything here
+needs `coop.enabled: true`, a store in format 2 and authoritative login (`login.authoritative` `auto`, which co-op
+enables, or `true`).
+
+**Switching in.** A member of a co-op can `switchProfile` into it. The switch is refused with `NOT_A_MEMBER` for
+an account that is not a current member (a removed member included) and with `WRONG_NODE` on a node that does not
+hold the co-op's bound world: OD-1 holds for play as it does for membership, a member plays only on the node
+holding the world and nothing routes a player to another node. Each member has their own state stream in the
+co-op: a **member head** names the member's current committed snapshot for their membership epoch, and
+snapshots are kept per member, so two members never read or overwrite each other's inventory, ender chest,
+experience, health, location or adapter data. A member who joins starts with an empty personal state; nothing
+is copied from another member or from the member's other profiles.
+
+**Capture and save.** The server's own player save (the autosave and the per-player interval save, `PlayerSaveEvent`),
+the quit and the shutdown capture use a ticket minted before the entity is read; while authoritative login applies,
+every vanilla player save publishes the same capture to the member stream in lockstep, at most one pending per
+player, so the profile head and `players/data/<uuid>.dat` are written together. MultiProfile has no save timer of its
+own: without authoritative login only quit, switch, shutdown and the API `saveProfile` write snapshots (Build 52
+behaviour). The ticket binds the
+capture to the player's session generation, the account's active profile, the membership epoch and the profile
+revision it started from; the save is refused if any of them changed in between. A capture taken in profile A
+therefore cannot be written to profile B after an A to B to A round trip, and a capture of a membership that has
+since been removed cannot be written to a later membership. Entity state is read and applied only on the entity's
+owning thread; storage is never awaited on it.
+
+**Rollback.** A switch that fails after the target state was applied rolls the player back to exactly the
+snapshot the journal pinned (`fromSnapshotId`), not to whatever is newest. For a co-op this is the member's own
+snapshot. Pins are counted across every pending switch and membership intent, so pruning cannot remove a
+snapshot an unresolved intent needs.
+
+**Uncertain commits.** When the store does not confirm the commit of the active-profile write
+(`UNKNOWN_OUTCOME`), the switch does not guess: it rereads the authority (the account's active pointer and the
+member head) and then completes forward or rolls back from what the store holds. A result that still cannot be
+read leaves the journal in `RECOVERING`.
+
+**Required adapters.** A [REQUIRED adapter](PROFILE-ISOLATION.md#adapter-contract-build-53) is part of the switch:
+if its capture or apply fails the switch is refused (`ADAPTER_REQUIRED_FAILED`) or journaled for recovery, and one
+that holds data for the profile but is not registered on this node refuses it (`ADAPTER_MISSING`). A skip is never
+reported as success. BEST_EFFORT adapters behave as in Build 52 except that their previously stored bytes are
+preserved when a capture fails.
+
+## Authoritative login (Build 53)
+
+`login.authoritative` is `auto` (default: authoritative exactly when `coop.enabled` is true), `true` or `false`.
+While it applies, a join does not trust vanilla `players/data/<uuid>.dat` (the 26.2 player data directory,
+`LevelResource.PLAYER_DATA_DIR`; `playerdata/` before) for a player whose account names an active
+profile. The join holds the player's gameplay gate, takes the player's session claim, resolves any pending journal or
+membership intent of the account, reads the **committed head** of the active profile (for a co-op the member head),
+decides between restore and adoption from the **session marker** (below), checks that the required adapters are
+present, replaces the player's isolated state on the entity thread (or publishes the adopted state) and only then
+releases the gate. The gate is bound to the join: a player who quits and rejoins while it runs gets a new gate, and the
+old chain applies nothing to the new connection.
+
+**Session marker.** A small per-account record outside the store format (`sessions/<uuid>.awfp` in the file
+repository, `session:<uuid>` in Redis; Build 52 never reads it) says "session of generation *g* open on node *n*",
+plus the *vanilla provenance*: the profile and epoch this node's `players/data/<uuid>.dat` is known to hold, and when.
+The admission of an authoritative login carries the previous session's marker to the new generation unchanged, so a
+refused join (claim, head, journal) never turns the next reading into "another generation"; the login then writes it
+open with the provenance cleared when it restores the head (a marker that cannot be written refuses the join), or open
+with the provenance set once an adoption committed (a refused adoption leaves it as carried, so the next login retries
+the adoption). It gains its provenance at every lockstep save, loses it when a switch is about to apply another
+profile, and is closed by the committed quit or shutdown capture. A capture or save that is refused leaves it open. A
+marker that cannot be read is replaced at admission by an open one without provenance, with a WARN: that login
+restores the committed head (the safe choice; `/awf multiprofile session <player> reset-marker` forces the same).
+
+**Restore or adopt (D3).** The previous session counts as *unclean* when the marker is still open for the previous
+generation (crash, `kill -9`, a shutdown that missed its deadline, a refused save), names another generation
+(sessions ran under Build 52 or without authoritative login), or does not exist (the upgrade from Build 52). Then,
+and only then, the join compares this server's `players/data/<uuid>.dat` modification time with the head snapshot's
+`createdAtMillis` (an `UNINITIALIZED` head counts as never written). When the file is newer, no journal was
+recovered at this login, and the marker's provenance names the active profile and epoch on this node (an absent or
+other-generation marker is read with Build 52 semantics: vanilla holds the active profile's live state), the state
+the join loaded is captured on the player's thread and published as the head's next snapshot under the login's
+ticket: **adopted**, nothing is applied, and the empty initial state is never applied over existing vanilla data.
+Otherwise the committed head is restored and progress since it is lost (never duplicated). The two clocks are the
+filesystem's and the writer's wall clock on the same machine; a quit's vanilla save and its snapshot hold the same
+state, so an adoption triggered by their ordering changes nothing.
+
+- A head that cannot be read (damaged, unreadable store, missing snapshot a head names) **refuses the join** with
+  `HEAD_UNREADABLE` and a message to the player. Vanilla playerdata is never used as a fallback, because loading
+  it could resurrect items already moved elsewhere.
+- A pending journal that recovery could not resolve, a session claim that failed or was not granted, a recovery that
+  failed, a REQUIRED adapter that is absent or cannot migrate its data, an adoption that cannot be published
+  (`STATE_TOO_LARGE`, a reserved stream): each **refuses the join** with its code. The gate stays held until the
+  disconnect is final, so nothing of the vanilla state is captured; a plugin that cancels the kick leaves the player
+  frozen with their saves refused (the kick is retried five times, five ticks apart, then logged).
+- A profile that has never been captured (a co-op member's first join: head `UNINITIALIZED`) with no adoption is
+  initialised to an empty state under a guarded write; the player's current inventory is not captured into every
+  newly joined co-op.
+- A player who is not in any profile (no active profile) is unaffected: vanilla data stays.
+- **Fail closed during play (D4).** A lockstep or quit capture that fails with a code that repeats until someone acts
+  (`STATE_TOO_LARGE`, the aggregate adapter budget, a REQUIRED adapter failure) freezes the player (item events
+  cancelled, switches refused) and disconnects them; the quit capture is attempted once more, and when it fails the
+  marker stays open, so the next login re-examines the vanilla playerdata the server wrote at the quit. Other
+  failures (I/O, a stale ticket) are logged and retried by the next save.
+- With `login.authoritative: false`, or `auto` while co-op is off, the join keeps Build 52 behaviour: the player
+  keeps whatever vanilla playerdata loaded, unless a pending switch is recovered, no session marker is written and no
+  lockstep save runs. This keeps the crash window described under [Guarantees](#guarantees-and-non-guarantees) and
+  co-op members cannot switch into a co-op. Turning authoritative login on later is handled by the marker rule above
+  (absent or other-generation marker: Build 52 semantics, so a newer vanilla playerdata is adopted at the first join).
+- Running Build 52 again after Build 53 wrote markers leaves markers of an older generation; the next Build 53 login
+  adopts a newer vanilla playerdata under Build 52 semantics. A store that holds a non-owner member switch journal is
+  marked minimum build 53 and Build 52 refuses it.
+
+## Removing an online member (Build 53)
+
+`leave` and a passed kick vote work for a member whose active profile is the co-op:
+
+1. The server takes the player's session claim and gates the player.
+2. It captures the player through the same ticketed capture as a quit, and saves it as the member's last snapshot
+   in this membership epoch (the snapshot salvage will read in Build 54).
+3. It switches the player out: to the account's next profile, or to a fresh solo profile when the account has no
+   other one. The switch is the ordinary switch, with its journal, rollback and adapter rules.
+4. Only after the switch committed does the removal commit: the membership epoch is consumed, the slot is freed,
+   the salvage entry is recorded and `CoopMemberLeaveEvent` fires. Item ownership moves once: the captured items
+   are in the member's last co-op snapshot or in the player's new state, never both.
+
+A failure in step 2 or 3 removes nothing and reports the reason; the removal intent is retried, not repeated
+blindly. `MEMBER_ONLINE` remains for a member whose session is on another node (their gate cannot be taken
+here). The owner still cannot leave or be kicked.
+
+## Shutdown capture (Build 53)
+
+Before the server saves and removes players at shutdown, MultiProfile captures every online player of an active
+profile through the same ticketed capture as a quit, saves it, and only then closes (PM-076; feature patch 0081
+orders it). In Build 52 the service was closed first and these players got no quit snapshot.
+
+- It is bounded by `shutdown.capture-deadline-ms` (default 10000): one budget, started when the adapter capture
+  runs before the plugins are disabled (a quarter of it) and shared with the state captures and saves after; the
+  engine's close then waits for the saves still on the storage lane until that same deadline (never less than 10 s).
+  Players are gated first, so no new switch or capture starts for them; unfinished switches keep their journal.
+- Saves run one at a time on the storage lane (the engine's I/O lane serialises every claim and CAS check); shutdown
+  does not batch them. Each save closes the player's session marker; a save that did not finish leaves it open.
+- A plugin adapter's `capture()` runs synchronously on the shutdown thread and cannot be interrupted; one that takes
+  longer than 500 ms is named in the log. The contract asks adapters to return from their own data only.
+- A player whose capture and save finished is exactly as after a normal quit.
+- A player whose save did not finish by the deadline keeps the last committed snapshot, and any pending
+  journal or intent, which the next join resolves (authoritative login does not load vanilla data over them).
+  Progress since that snapshot is lost; this is logged per player. Nothing is reported as saved that was not.
+- Shutdown then continues; the deadline does not extend the existing storage drain budget in
+  [OPERATIONS.md](OPERATIONS.md#shutdown).
+
+## Remaining after Build 53
+
+Build 54: salvage delivery (OD-3), shared and personal bank, collections, bank transfers, purse (OD-4). Build 55:
+audit log, switch guard and cooldown, ironman/stranded/bingo rules at the action boundary, API parity fields and
+events, per-account I/O ordering, `/perf` metrics. Owner transfer is in no scheduled build. A removed member's
+state is recorded for salvage in Build 53 but nothing is delivered.
 
 ## Snapshot revisions
 
@@ -202,9 +355,13 @@ removes it ([OPERATIONS.md](OPERATIONS.md#troubleshooting)).
 - Inventory duplication through the switch requires the target state to be applied while the rollback
   point was not durable. `switching.require-durable-save: true` (default) refuses that case, including
   the first switch's archive; setting it to `false` explicitly allows a switch without a rollback point.
-- **Not guaranteed:** a crash after the commit and before the server saves vanilla playerdata
-  (autosave or quit) can leave playerdata with the previous profile's state while the account names the
-  target (PM-028 / MP-COMMIT-VANILLA, open owner decision).
+- **Narrowed in Build 53, not removed:** a crash after the commit and before the server saves vanilla
+  playerdata (autosave or quit) can leave playerdata with the previous profile's state while the account names
+  the target (PM-028 / MP-COMMIT-VANILLA). While authoritative login applies, the next join restores the committed
+  profile state instead of loading that playerdata (the session marker's provenance does not name the new profile,
+  so it is not adopted); otherwise the window is as in Build 52. State the active profile held at the crash but never
+  captured is lost either way; while authoritative login applies the loss window is the server's own player save
+  interval (every vanilla save publishes a snapshot), the same as vanilla's.
 - A crash between writing a new profile record and adding it to the account leaves an unreferenced
   profile record. It is never listed and is safe to delete; no player state is lost.
 - Cross-store atomicity (profile records + AWF world commits + Redis claims) is **not** claimed. A

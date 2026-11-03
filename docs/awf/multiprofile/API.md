@@ -79,18 +79,44 @@ profiles.registerProfileStateAdapter(this, new ProfileStateAdapter() {
 Adapters run inside the same entity task as the core capture/apply. Bytes are stored verbatim under
 `id:version`; bump `version()` when the format changes. `version()` is read once, at registration.
 
-- Limits: 2 MiB per adapter and 6 MiB for all adapters of one snapshot (an adapter past either is
-  skipped for that capture with a warning), at most 32 adapters, and an `id:version` key of at most 64
-  characters.
+- Limits: 2 MiB per adapter and 6 MiB for all adapters of one snapshot, at most 32 adapters, and an
+  `id:version` key of at most 64 characters.
 - Registration throws `IllegalArgumentException` for a malformed id, a version below 1, a key over 64
-  characters, an id another enabled plugin registered, or a 33rd id; `ProfileOperationException`
+  characters, an id another enabled plugin registered, a 33rd id, or (Build 53) a `descriptor()` that throws or
+  disagrees with `id()` / `version()`; `ProfileOperationException`
   (`INVALID_REQUEST`) when the registering plugin is not enabled. A plugin may replace its own adapter;
   disabling a plugin removes its adapters.
 - Data stored under another version is not applied (one warning) and stays in the profile, within the
   limits, until the adapter stores data at its current version. Data of adapters not registered on this
-  boot is carried into new snapshots. Data of an adapter registered at the stored version is not kept
-  when it returns `null`, throws or exceeds a limit.
-- A failing capture or apply is logged and skipped; it never fails the switch.
+  boot is carried into new snapshots.
+- What happens when a capture or apply fails, or the adapter is missing, depends on its criticality
+  (Build 53, below). An adapter that does not override `descriptor()` is BEST_EFFORT: a failing capture or
+  apply is logged and skipped and never fails the switch, as before, except that the bytes it already stored
+  at its current version are now preserved when its capture fails.
+
+### Adapter contract (Build 53)
+
+```java
+public interface ProfileStateAdapter {
+    default ProfileAdapterDescriptor descriptor() { /* BEST_EFFORT, PROFILE_SCOPED, id(), version(), 2 MiB */ }
+}
+public enum ProfileDataCriticality { REQUIRED, BEST_EFFORT }
+public enum ProfileDataScope { ACCOUNT_WIDE, PROFILE_SCOPED, UNSUPPORTED }
+public record ProfileAdapterDescriptor(String id, int version, ProfileDataScope scope,
+                                       ProfileDataCriticality criticality, long maxBytes) {}
+```
+
+An adapter that holds data the profile cannot be correct without overrides `descriptor()` and returns
+`REQUIRED`. The addition is binary compatible (a `default` method, new types only): an adapter compiled against
+Build 52 keeps running as BEST_EFFORT. `maxBytes` is 1 to 2 MiB; the id and version must equal `id()` and
+`version()`.
+
+REQUIRED means: the capture is durable before the target profile becomes active; the apply is verified before
+the switch is reported successful; a failure refuses the switch (`ADAPTER_REQUIRED_FAILED`) or is journaled for
+recovery; an adapter that is absent while the profile holds its data refuses it (`ADAPTER_MISSING`); a skip is
+never success. BEST_EFFORT means a failure is skipped with a warning and the opaque bytes the profile already
+holds for the adapter are preserved. Details and the full table: [PROFILE-ISOLATION.md](PROFILE-ISOLATION.md#adapter-contract-build-53).
+An operator can force adapter ids to REQUIRED with `adapters.required`.
 
 ## Example: create and switch
 
@@ -222,15 +248,16 @@ returns the same membership without writing.
 52 never changes them; the shared label (`CoopDetails.label()`, `setCoopLabel`) is a separate,
 non-unique, owner-set text. Changing the label changes no member's alias.
 
-**Refused in Build 52** (nothing is written; the failure carries the code):
+**Refused** (nothing is written; the failure carries the code; the Build 52 rows that Build 53 relaxed are
+marked):
 
 | Operation | Code |
 |---|---|
 | any co-op operation while `coop.enabled` is false | `COOP_DISABLED` |
 | any co-op operation on a format-1 store | `MIGRATION_REQUIRED` |
-| removing a membership that is the removed account's **active** profile: leave, or a kick (also refused at the start of a vote and at the approval that would complete it). A player who is online but active in another profile can leave and can be kicked (enabled for the active profile in Build 53) | `MEMBER_ONLINE` |
+| removing a membership that is the removed account's **active** profile: Build 52 refused it. **Build 53** captures and switches the member out first, then removes; `MEMBER_ONLINE` remains only when that cannot be done here (the member's session is on another node) | `MEMBER_ONLINE` |
 | owner transfer, the owner leaving, kicking the owner; deleting a co-op profile that still has other members | `OWNER_ACTION_REFUSED` |
-| `switchProfile` into a co-op profile the player does not own (Build 53: member snapshots and login restore). Since accepting never sets the active profile, a non-owner's login never restores a co-op profile either | `COOP_SWITCH_UNAVAILABLE` |
+| `switchProfile` into a co-op profile the player does not own: Build 52 only. **Build 53** allows it for a current member; a non-member gets `NOT_A_MEMBER` and a node that does not hold the co-op's bound world gets `WRONG_NODE` (OD-1) | `COOP_SWITCH_UNAVAILABLE` (Build 52) |
 | a membership change (convert, label, invite, accept, leave, kick vote start or ballot) while another node holds the profile's claim, which marks the node playing its bound world (OD-1). Decline, cancel and the listings are not refused | `WRONG_NODE` |
 | removing a member whose session is on another node (its account claim cannot be taken here) | `OWNERSHIP_CONFLICT` |
 | converting a profile whose policy type is not in `coop.allowed-types` | `TYPE_NOT_ALLOWED` |
@@ -253,9 +280,27 @@ recorded as a salvage entry that is unavailable to delivery. **Nothing is delive
 delivery is Build 54). Rejoining the same profile later is a new membership with a fresh epoch and an empty
 personal state; the old epoch cannot be restored.
 
-**Not in Build 52:** switching into a co-op profile you do not own, member snapshots and login restore for
-members, shared bank, collections, salvage delivery and ownership transfer. A member added by
-`acceptInvite` can be listed, but cannot play the profile yet.
+**Playing a co-op (Build 53).** A member `switchProfile`s into the co-op like any profile. The state is the member's
+own (their member head and their own snapshots); members never share inventory, ender chest, experience,
+health, location or adapter data. While authoritative login applies (`login.authoritative` `auto`, the default,
+means: when `coop.enabled` is true; or `true`) a join restores the committed state of the active profile, or adopts a
+newer vanilla playerdata into it once after an unclean session or the upgrade from Build 52, and is refused
+(`HEAD_UNREADABLE` and the other codes the server reports) when neither can be done, rather than loading vanilla
+playerdata; every vanilla player save of the server then publishes a profile snapshot, and `saveProfile` on a
+format-2 store saves every member who plays the profile on that node (`PLAYER_OFFLINE` when none does).
+`ProfileStateAdapter.migrate(fromVersion, data)` (default: unsupported) converts data stored under an older adapter
+version; a REQUIRED adapter that cannot migrate refuses the apply (`ADAPTER_REQUIRED_FAILED`). The snapshot records
+which stored adapter entries were REQUIRED, so a REQUIRED plugin that is absent later still refuses (`ADAPTER_MISSING`).
+`leave` by a member whose session is live on another node fails with `MEMBER_ONLINE`.
+New codes (appended, ordinals unchanged): `ADAPTER_REQUIRED_FAILED`, `ADAPTER_MISSING`, `HEAD_UNREADABLE`.
+`COOP_SWITCH_UNAVAILABLE` is returned only while authoritative login does not apply (`false`, or `auto` with co-op off). Leaving or being kicked while the co-op is your
+active profile is allowed: `CoopMemberLeaveEvent` still carries `LEFT` or `KICKED`, and fires after the
+member was switched out and removed. See [PROFILE-LIFECYCLE.md](PROFILE-LIFECYCLE.md#member-switching-and-play-build-53).
+
+**Not in Build 53** (see [BUILD-51-55-PLAN](../../releases/BUILD-51-55-PLAN.md)): shared bank, personal bank,
+collections, salvage delivery and the purse (Build 54); the audit log, switch guard and cooldown, ironman,
+stranded and bingo rules, API parity fields and `/perf` metrics (Build 55). Ownership transfer is in none of
+those builds. Co-op stays off by default.
 
 ### Events
 
@@ -311,7 +356,7 @@ bindings, never at boot; a missing world is created from the binding's template.
 - on join, a player outside the bound worlds while one of them was unloaded is returned to the
   profile's last location in them, or to its PRIMARY spawn when none is stored, bounded by
   `switching.timeout-ms` and only while no journal is pending. That destination may be older than the
-  last session when no quit snapshot was written (shutdown). A switch that starts before the join
+  last session when no quit snapshot was written (a crash, or a shutdown capture that missed its deadline). A switch that starts before the join
   teleport takes its reservation wins; one started after it is refused with `SWITCH_IN_PROGRESS` until
   the teleport ends.
 

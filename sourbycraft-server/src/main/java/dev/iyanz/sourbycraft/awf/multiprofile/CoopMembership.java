@@ -43,10 +43,12 @@ import java.util.UUID;
  * which requires the inviter to still be a member at the epoch that issued the invite).</p>
  *
  * <p>Checks the <em>caller</em> owns, because they need runtime knowledge: co-op enabled ({@code COOP_DISABLED}),
- * the node holding the profile's bound world (OD-1, {@code WRONG_NODE}), whether the member to remove is online
- * ({@code MEMBER_ONLINE}, Build 53 lifts it), and the claims ({@code P} on the profile, {@code Q} on the actor and
- * on a kicked member's account). This class refuses a removal of a membership that is the removed account's
- * <em>active</em> profile ({@code MEMBER_ONLINE}): that needs the gated capture of Build 53.</p>
+ * the node holding the profile's bound world (OD-1, {@code WRONG_NODE}), whether the member to remove plays the
+ * profile on another node ({@code MEMBER_ONLINE}), and the claims ({@code P} on the profile, {@code Q} on the actor
+ * and on a kicked member's account). A removal of a membership that is the removed account's <em>active</em>
+ * profile is refused here ({@code MEMBER_ONLINE}) unless the engine passes the member's {@link NextActive next
+ * profile} (Build 53): an online member was switched out before the plan is built, an offline member's account
+ * pointer is moved by the same intent.</p>
  *
  * <p>Refused in this port, with a reason: owner leave, owner kick and ownership transfer
  * ({@code OWNER_ACTION_REFUSED}; a sole owner deletes the profile through the existing delete intent), role changes
@@ -264,22 +266,50 @@ public final class CoopMembership {
      * The actor leaves {@code profile}: its row is dropped, its head (if any) becomes CONSUMED, an UNAVAILABLE salvage
      * record pins what the head named, and the account loses access and alias. Refused for the OWNER
      * ({@code OWNER_ACTION_REFUSED}; a sole owner deletes the profile) and while the profile is the account's active
-     * one ({@code MEMBER_ONLINE}: switch away first; the gated capture that allows it is Build 53). The open
-     * invitations the member issued ({@code issuedInvites}, the profile's open invites read through the index; other
-     * inviters' are ignored) are revoked and the profile's undecided kick votes ({@code openVotes}) cancelled in the
-     * same intent. Vector: actor {@code A} reserved, {@code M} reserved, the head reserved when it exists, the salvage
-     * record absent, the closed invites and votes compared.
+     * one ({@code MEMBER_ONLINE}: the engine switches an online member out first, Build 53, or hands an offline
+     * member's pointer to {@link #leave(CoopOperation, AuroraProfile, PlayerAccount, MemberStateHead, List, List, NextActive, long, long)}).
+     * The open invitations the member issued ({@code issuedInvites}, the profile's open invites read through the
+     * index; other inviters' are ignored) are revoked and the profile's undecided kick votes ({@code openVotes})
+     * cancelled in the same intent. Vector: actor {@code A} reserved, {@code M} reserved, the head reserved when it
+     * exists, the salvage record absent, the closed invites and votes compared.
      */
     public static CoopIntentPlan leave(final CoopOperation op, final AuroraProfile profile, final PlayerAccount memberAccount,
                                        final MemberStateHead head, final List<ProfileInvite> issuedInvites, final List<KickVote> openVotes,
                                        final long storeNow, final long deadlineMillis) throws IOException {
+        return leave(op, profile, memberAccount, head, issuedInvites, openVotes, null, storeNow, deadlineMillis);
+    }
+
+    /**
+     * {@link #leave(CoopOperation, AuroraProfile, PlayerAccount, MemberStateHead, List, List, long, long)} for a member
+     * whose active profile is the one being left and who is offline (Build 53): the same intent moves the account's
+     * active pointer to {@code next} (another profile the member has access to, or a fresh solo profile the engine
+     * created first), whose {@code M} and the member's head there are compared, so the next authoritative login
+     * restores that profile's committed head and never the co-op items the player left with. {@code next == null}
+     * keeps the Build 52 rule (the profile must not be active).
+     */
+    public static CoopIntentPlan leave(final CoopOperation op, final AuroraProfile profile, final PlayerAccount memberAccount,
+                                       final MemberStateHead head, final List<ProfileInvite> issuedInvites, final List<KickVote> openVotes,
+                                       final NextActive next, final long storeNow, final long deadlineMillis) throws IOException {
         kind(op, CoopOperation.Kind.MEMBER_REMOVE);
         requireCoop(profile);
         final ProfileMember row = requireMember(profile, op.actor());
         if (!row.role().allows(ProfileRole.Permission.LEAVE)) {
             throw refuse(ProfileErrorCode.OWNER_ACTION_REFUSED, "the OWNER cannot leave " + profile.id() + "; delete the profile instead");
         }
-        return removal(op, profile, row, memberAccount, head, null, issuedInvites, openVotes, storeNow, deadlineMillis);
+        return removal(op, profile, row, memberAccount, head, null, issuedInvites, openVotes, next, storeNow, deadlineMillis);
+    }
+
+    /**
+     * Where a removed member's account points afterwards when the removed membership was its active profile (Build
+     * 53): the profile (the member has a membership row in it, {@code epoch}), its metadata revision and the member's
+     * head there as read ({@code null} head = no stream yet), all compared by the removal's commit.
+     */
+    public record NextActive(AuroraProfile profile, UUID epoch, MemberStateHead head) {
+
+        public NextActive {
+            Objects.requireNonNull(profile, "profile");
+            Objects.requireNonNull(epoch, "epoch");
+        }
     }
 
     /**
@@ -296,6 +326,13 @@ public final class CoopMembership {
     public static CoopIntentPlan kick(final CoopOperation op, final AuroraProfile profile, final KickVote vote, final PlayerAccount targetAccount,
                                       final MemberStateHead targetHead, final List<ProfileInvite> issuedInvites, final Policy policy,
                                       final long storeNow, final long deadlineMillis) throws IOException {
+        return kick(op, profile, vote, targetAccount, targetHead, issuedInvites, policy, null, storeNow, deadlineMillis);
+    }
+
+    /** {@link #kick} with the offline target's next active profile ({@link NextActive}; see the leave overload). */
+    public static CoopIntentPlan kick(final CoopOperation op, final AuroraProfile profile, final KickVote vote, final PlayerAccount targetAccount,
+                                      final MemberStateHead targetHead, final List<ProfileInvite> issuedInvites, final Policy policy,
+                                      final NextActive next, final long storeNow, final long deadlineMillis) throws IOException {
         kind(op, CoopOperation.Kind.MEMBER_REMOVE);
         requireCoop(profile);
         requireVote(vote, profile);
@@ -313,18 +350,29 @@ public final class CoopMembership {
         final ProfileMember target = requireMember(profile, vote.target());
         if (target.role() == ProfileRole.OWNER) throw refuse(ProfileErrorCode.OWNER_ACTION_REFUSED, "the OWNER cannot be kicked");
         requireInactivityRule(vote.electorate().size(), target, policy, storeNow);
-        return removal(op, profile, target, targetAccount, targetHead, vote, issuedInvites, List.of(), storeNow,
+        return removal(op, profile, target, targetAccount, targetHead, vote, issuedInvites, List.of(), next, storeNow,
             earliest(deadlineMillis, vote.expiresAtMillis()));
     }
 
     private static CoopIntentPlan removal(final CoopOperation op, final AuroraProfile profile, final ProfileMember removed,
                                           final PlayerAccount removedAccount, final MemberStateHead head, final KickVote vote,
-                                          final List<ProfileInvite> issuedInvites, final List<KickVote> openVotes,
+                                          final List<ProfileInvite> issuedInvites, final List<KickVote> openVotes, final NextActive next,
                                           final long storeNow, final long deadlineMillis) throws IOException {
         requireAccount(removedAccount, removed.playerId());
-        if (profile.id().equals(removedAccount.activeProfile())) {
-            throw refuse(ProfileErrorCode.MEMBER_ONLINE, removed.playerId() + " has " + profile.id() + " active; removing an active"
-                + " membership needs the gated capture of Build 53. Switch to another profile first");
+        final boolean active = profile.id().equals(removedAccount.activeProfile());
+        if (active && next == null) {
+            throw refuse(ProfileErrorCode.MEMBER_ONLINE, removed.playerId() + " has " + profile.id() + " active; an online member is"
+                + " captured and switched out first, an offline one needs a next profile to point at. Nothing was written");
+        }
+        if (next != null) {
+            if (next.profile().id().equals(profile.id())) throw new IllegalArgumentException("the next profile is the one being left");
+            if (!removedAccount.owns(next.profile().id()) || !next.profile().hasMember(removed.playerId(), next.epoch())) {
+                throw refuse(ProfileErrorCode.STALE_STATE, removed.playerId() + " has no membership epoch " + next.epoch() + " in "
+                    + next.profile().id() + " to move to; nothing was written");
+            }
+            if (next.profile().status() != ProfileStatus.ACTIVE || !next.profile().usable()) {
+                throw refuse(ProfileErrorCode.PROFILE_LOCKED, "the next profile " + next.profile().id() + " is " + next.profile().status());
+            }
         }
         if (head != null && (!head.profileId().equals(profile.id()) || !head.memberId().equals(removed.playerId())
             || !head.epoch().equals(removed.epoch()))) {
@@ -336,7 +384,9 @@ public final class CoopMembership {
         final UUID member = removed.playerId();
         final UUID epoch = removed.epoch();
         final ProfileSalvage salvage = ProfileSalvage.unavailable(profile.id(), member, epoch, op.operationId(), head, storeNow);
-        final PlayerAccount accountAfter = removedAccount.withoutProfile(profile.id()).atRevision(removedAccount.revision() + 2L);
+        final PlayerAccount withoutMembership = removedAccount.withoutProfile(profile.id());
+        final PlayerAccount accountAfter = (active && next != null ? withoutMembership.withActive(next.profile().id(), next.epoch())
+            : withoutMembership).atRevision(removedAccount.revision() + 2L);
         final AuroraProfile profileAfter = profile.withoutMember(member, epoch).atRevision(profile.revision() + 2L);
         final List<Expected> before = new ArrayList<>(8);
         final List<Expected> after = new ArrayList<>(8);
@@ -359,6 +409,14 @@ public final class CoopMembership {
             before.add(Expected.record(vote.id(), vote.revision()));
             after.add(Expected.record(vote.id(), vote.revision()));
             images.add(voteImage(vote.executed(op.operationId())));
+        }
+        if (active && next != null) {
+            // The pointer moves only onto the profile and stream the engine read: both are compared, not advanced.
+            before.add(Expected.metadata(next.profile().id(), next.profile().revision()));
+            after.add(Expected.metadata(next.profile().id(), next.profile().revision()));
+            final long nextHead = next.head() == null ? CoopWriteGuard.ABSENT : next.head().revision();
+            before.add(Expected.head(next.profile().id(), member, next.epoch(), nextHead));
+            after.add(Expected.head(next.profile().id(), member, next.epoch(), nextHead));
         }
         revokeInvites(profile, removed.playerId(), issuedInvites, op.operationId(), before, after, images);
         cancelVotes(profile, openVotes, vote, before, after, images);

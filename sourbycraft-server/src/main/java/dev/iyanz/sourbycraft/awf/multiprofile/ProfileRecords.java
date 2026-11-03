@@ -84,6 +84,8 @@ final class ProfileRecords {
     static final byte TYPE_INTENT = 12;
     /** Index pages and receipt pages; the payload's subtype byte tells them apart. */
     static final byte TYPE_PAGE = 13;
+    /** Build 53 session marker ({@link SessionMarker}); stored outside the account record, never read by Build 52. */
+    static final byte TYPE_SESSION_MARKER = 14;
     static final byte PAGE_INDEX = 1;
     static final byte PAGE_RECEIPTS = 2;
 
@@ -129,6 +131,7 @@ final class ProfileRecords {
             case TYPE_MEMBER_HEAD -> "member-head";
             case TYPE_INTENT -> "intent";
             case TYPE_PAGE -> "page";
+            case TYPE_SESSION_MARKER -> "session-marker";
             default -> "type " + type;
         };
     }

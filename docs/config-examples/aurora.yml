@@ -118,8 +118,9 @@ aurora:
       # standalone | distributed. distributed is refused at startup unless repository: redis,
       # coordination.provider: redis, fencing-enabled: true and a running Aurora Redis Fabric are set.
       # distributed, and standalone with repository: redis (nothing limits that to one server), are
-      # EXPERIMENTAL and unqualified: a player's live state does not follow them between servers, players
-      # online at shutdown get no quit snapshot, and there is no proxy handoff.
+      # EXPERIMENTAL and unqualified: a player's live state does not follow them between servers, there is
+      # no proxy handoff, and the Build 53 quit capture at shutdown (shutdown.capture-deadline-ms) is bounded
+      # per node and not a distributed guarantee.
       mode: "standalone"
       default-slots: 3
       max-slots: 8
@@ -185,12 +186,14 @@ aurora:
         # No ..; must not be inside or contain the store directory. Empty = not configured.
         backup-dir: ""
       coop:
-        # RESTART_REQUIRED. Default false. Co-op membership (Build 52): convert a solo profile, invite, accept,
-        # decline, cancel, leave, kick vote, shared label. false = every co-op operation is refused
-        # (COOP_DISABLED) and nothing co-op is written. Needs multiprofile.enabled and a store in format 2.
-        # Build 52 does NOT: let a member switch into a co-op profile they do not own (Build 53), remove a
-        # member whose active profile is the co-op profile (Build 53), transfer ownership, or deliver salvage
-        # (Build 54). The first co-op record raises the store to minimum build 52 (Build 51 then refuses it).
+        # RESTART_REQUIRED. Default false. Co-op membership (Build 52) and play (Build 53): convert a solo
+        # profile, invite, accept, decline, cancel, leave, kick vote, shared label; since Build 53 a member can
+        # switch into the co-op and play it with their own state, and a member whose active profile is the co-op
+        # can be removed (captured and switched out first). false = every co-op operation is refused
+        # (COOP_DISABLED) and nothing co-op is written. Needs multiprofile.enabled, a store in format 2 and
+        # authoritative login (login.authoritative auto or true). A member can play only on the node that holds the co-op's bound world
+        # (WRONG_NODE elsewhere). Build 53 does NOT: transfer ownership or deliver salvage (Build 54).
+        # The first co-op record raises the store to minimum build 52 (Build 51 then refuses it).
         enabled: false
         # RESTART_REQUIRED. Members of one co-op, owner included. 2-8. Invalid = 5, with a WARN.
         max-members: 5
@@ -207,6 +210,30 @@ aurora:
           # vote may start against them. 1-3650. Build 52 records activity at join time and membership changes
           # only, not from gameplay.
           inactive-days: 35
+      shutdown:
+        # RESTART_REQUIRED (Build 53). At shutdown MultiProfile captures and saves the online players before the
+        # server removes them, then closes. This is how long it waits for those captures, 1000-60000 ms
+        # (invalid = 10000, with a WARN). When it passes, a player whose save has not finished keeps the last
+        # committed snapshot and any pending intent for recovery at their next join, and shutdown continues.
+        # A longer value delays process exit by up to that long.
+        capture-deadline-ms: 10000
+      login:
+        # RESTART_REQUIRED (Build 53). auto | true | false. auto = authoritative exactly when coop.enabled is
+        # true, so a server without co-op joins exactly as Build 52 did. true = on join the committed state of
+        # the active profile (the member head in a co-op) is restored instead of whatever vanilla playerdata
+        # loaded; every vanilla player save (autosave) and the quit publish a profile snapshot; a head that
+        # cannot be read or restored refuses the join (HEAD_UNREADABLE and other codes); after a crash or the
+        # upgrade from Build 52 a vanilla playerdata newer than the profile's snapshot is adopted into the active
+        # profile once (PROFILE-LIFECYCLE.md "Authoritative login"). false = Build 52 behaviour: the join keeps
+        # vanilla playerdata, and co-op members cannot switch into a co-op. Invalid = auto, with a WARN.
+        authoritative: auto
+      adapters:
+        # RESTART_REQUIRED (Build 53). Profile state adapter ids to treat as REQUIRED whatever their descriptor
+        # says, a list or comma-separated string, [a-z0-9_.:-]{1,64}, at most 32. REQUIRED: the capture is
+        # durable before the target profile becomes active, the apply is verified, a failure refuses the switch
+        # (ADAPTER_REQUIRED_FAILED) and an adapter that holds data for the profile but is not registered here
+        # refuses it (ADAPTER_MISSING). Can only raise strictness. A malformed entry is dropped with a WARN.
+        required: []
     redis:
       fabric:
         # RESTART_REQUIRED, read early (every fabric key). Aurora Redis Fabric. Default false: no socket,

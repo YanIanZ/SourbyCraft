@@ -287,11 +287,13 @@ public final class AuroraKeys {
                 + "absolute (a separate disk is the point of a backup). Empty = not configured. No .. segment; it must not "
                 + "be inside or contain the store directory. Not used by off or dry-run."),
         restart("aurora.awf.multiprofile.coop.enabled", false,
-            "Co-op membership (Build 52): convert a solo profile to co-op, invite, accept, decline, cancel, leave, kick "
-                + "vote, shared label. false = every co-op operation is refused with COOP_DISABLED and nothing co-op is "
+            "Co-op membership (Build 52) and play (Build 53): convert a solo profile to co-op, invite, accept, decline, "
+                + "cancel, leave, kick vote, shared label; since Build 53 a member can switch into the co-op and play it "
+                + "with their own state. false = every co-op operation is refused with COOP_DISABLED and nothing co-op is "
                 + "written. Needs aurora.awf.multiprofile.enabled and a store in format 2; a format-1 store refuses "
-                + "with MIGRATION_REQUIRED (see migration.mode). Build 52 does not let a member switch into a co-op "
-                + "profile they do not own (Build 53), does not remove a member who is online (Build 53), does not "
+                + "with MIGRATION_REQUIRED (see migration.mode). Member play also needs authoritative login (login.authoritative "
+                + "auto, which co-op enables, or true) and the node that holds the co-op's bound world (WRONG_NODE elsewhere; no "
+                + "cross-node routing). Does not "
                 + "transfer ownership and does not deliver salvage (Build 54). Conversion is one way."),
         restart("aurora.awf.multiprofile.coop.max-members", 5,
             "Members of one co-op, owner included. 2 to 8. Applies to new invitations and accepts; a co-op already "
@@ -311,7 +313,30 @@ public final class AuroraKeys {
                 + "comma-separated string. Checked at conversion only. A profile of another type is refused "
                 + "(TYPE_NOT_ALLOWED). Build 51 enforces no rule for ironman, stranded or bingo, so widening this list "
                 + "gives those types co-op without any of their intended restrictions. An unknown or empty list is "
-                + "ignored with a WARN."));
+                + "ignored with a WARN."),
+        restart("aurora.awf.multiprofile.shutdown.capture-deadline-ms", 10000,
+            "Build 53. At shutdown MultiProfile captures and saves the online players before the server removes them, "
+                + "then closes. This is how long shutdown waits for those captures and saves, 1000 to 60000 ms. "
+                + "When it passes, a player whose save has not finished keeps the last committed snapshot and any "
+                + "pending intent for recovery at their next join, and shutdown continues; it is logged per player. "
+                + "A longer value delays process exit by up to that long. An invalid value is ignored with a WARN (10000)."),
+        restart("aurora.awf.multiprofile.login.authoritative", "auto",
+            "Build 53. auto | true | false. auto (default) = authoritative exactly when coop.enabled is true, so a server "
+                + "without co-op joins exactly as Build 52 did. true = on join the committed state of the player's active "
+                + "profile (the member head in a co-op) is restored instead of whatever vanilla playerdata loaded, every "
+                + "vanilla player save (autosave) and the quit publish a profile snapshot, a head that cannot be read or "
+                + "restored refuses the join (HEAD_UNREADABLE and other codes), and after a crash or the upgrade from Build 52 "
+                + "a vanilla playerdata newer than the profile's snapshot is adopted into the active profile once "
+                + "(docs/awf/multiprofile/PROFILE-LIFECYCLE.md). false = the Build 52 behaviour: a join keeps the vanilla "
+                + "playerdata; co-op members cannot switch into a co-op while it does not apply. An invalid value is ignored "
+                + "with a WARN (auto)."),
+        restart("aurora.awf.multiprofile.adapters.required", List.of(),
+            "Build 53. Profile state adapter ids (a list or a comma-separated string, [a-z0-9_.:-]{1,64}, at most 32) "
+                + "that are treated as REQUIRED whatever the adapter's descriptor declares: their capture must be durable "
+                + "before a switch target becomes active, their apply is verified, a failure refuses the switch "
+                + "(ADAPTER_REQUIRED_FAILED), and an id that holds data for the profile but is not registered on this "
+                + "node refuses it (ADAPTER_MISSING). It can only raise strictness; an adapter that declares REQUIRED "
+                + "stays REQUIRED when not listed. A malformed entry is dropped with a WARN; the well-formed entries stay."));
 
     // [aurora.awf.redis.fabric] — Aurora Redis Fabric (docs/awf/multiprofile/REDIS-FABRIC.md)
     public static final List<ConfigKey> AWF_REDIS_FABRIC_KEYS = List.of(

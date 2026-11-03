@@ -84,11 +84,35 @@ import java.util.function.Consumer;
  * listings) run each {@link CoopMembership} plan as one intent, like the solo intents above: under {@code P}, the
  * actor's {@code Q} and, for a kick, the removed member's {@code Q}, with store-clock deadlines. Before the first
  * co-op record is prepared the store's feature level is raised ({@link ProfileRepository#requireStoreFeature}:
- * schema 2, minimum build 52). Refused in Build 52 with a reason: a membership change while another node holds the
- * profile ({@code WRONG_NODE}, OD-1), removing a membership that is the removed account's active profile
- * ({@code MEMBER_ONLINE}), a member switching into a co-op profile it does not own ({@code COOP_SWITCH_UNAVAILABLE}),
- * owner leave, kick and transfer ({@code OWNER_ACTION_REFUSED}). Removal writes an UNAVAILABLE salvage record;
- * nothing is delivered. Co-op events fire on the engine's own event thread after the durable commit.</p>
+ * schema 2, minimum build 52). Refused with a reason: a membership change or a switch while another node holds the
+ * profile ({@code WRONG_NODE}, OD-1), owner leave, kick and transfer ({@code OWNER_ACTION_REFUSED}). Removal writes
+ * an UNAVAILABLE salvage record; nothing is delivered. Co-op events fire on the engine's own event thread after the
+ * durable commit.</p>
+ *
+ * <p><b>Co-op play (Build 53, COOP-DESIGN slice 5 and RFC E03).</b> A member switches into the co-op profile like
+ * any other ({@link #switchProfile}; {@code NOT_A_MEMBER} for a non-member, {@code COOP_DISABLED} while co-op is off,
+ * {@code COOP_SWITCH_UNAVAILABLE} while authoritative login does not apply): the switch captures the previous state into
+ * the player's own member stream as the rollback point, applies the exact snapshot the target member head names
+ * (an UNINITIALIZED head applies the empty initial state), and commits the account pointer under
+ * {@link CoopWriteGuard#switchActive}; saves and quits publish into that stream under a {@link CaptureTicket} minted
+ * before the capture. One node claim per profile is shared by every member playing it here ({@link #nodeClaim}).
+ * While authoritative login applies every join is gated ({@link #gateLogin}) until the committed head of the active
+ * profile is restored ({@link #restoreOnLogin}); a head that cannot be read refuses the join ({@code HEAD_UNREADABLE}).
+ * Required adapters (RFC E03) refuse a capture or apply they cannot complete ({@code ADAPTER_REQUIRED_FAILED},
+ * {@code ADAPTER_MISSING}); best-effort ones keep their stored bytes when they fail. A member whose active profile
+ * is the co-op can leave or be kicked: online here they are switched out first, offline their pointer is moved by
+ * the removal intent ({@link Evacuation}); {@code MEMBER_ONLINE} remains for a member whose session is live on another
+ * node or who cannot be moved safely. The store level is raised to Build 53 ({@link StoreFormat#MEMBER_PLAY_MINIMUM_BUILD})
+ * by the first switch journal of a non-owner member (Build 52's rollback could not handle it); a store without one keeps
+ * Build 52's marker. Session markers ({@link SessionMarker}) live outside the store format.</p>
+ *
+ * <p><b>Authoritative login, D1-D4 (Build 53 review).</b> {@code login.authoritative} is {@code auto} (authoritative iff
+ * co-op is enabled), {@code true} or {@code false}. While it applies: every vanilla player save of the server (autosave)
+ * publishes a snapshot in lockstep ({@link #saveCaptured}); a per-account {@link SessionMarker} records the open
+ * session and the vanilla provenance, is closed by the committed quit or shutdown capture
+ * ({@link #saveCapturedAndClose}) and decides at the next login whether a newer vanilla playerdata is adopted once into
+ * the active profile ({@link #restoreOnLogin}); a save that cannot succeed freezes and disconnects the player
+ * ({@link #refuseSaves}); and every path that cannot restore the committed state refuses the join.</p>
  */
 public final class ProfileEngine {
 
@@ -138,6 +162,27 @@ public final class ProfileEngine {
     /** Pending intents {@link #open} could not attribute to a player (a corrupt index); refuses every format-2 mutation. */
     private final java.util.Set<UUID> unattributedIntents = ConcurrentHashMap.newKeySet();
     private volatile Consumer<UUID> sessionLostHandler = player -> {};
+    /** Where a message for an online player goes (the runtime sends it on the player's thread); no-op until set. */
+    private volatile java.util.function.BiConsumer<UUID, String> playerNotice = (player, text) -> {};
+    /**
+     * Players whose join is gated until the committed state of their active profile was restored (Build 53
+     * authoritative login): their captures, saves and switches are refused and the freeze listener cancels their
+     * item events, so nothing of the vanilla playerdata the join loaded is written anywhere or traded.
+     */
+    private final ConcurrentHashMap<UUID, LoginGate> loginGates = new ConcurrentHashMap<>();
+
+    /** A login gate; {@code sticky} once the join was refused: only the player's quit lifts it then. */
+    private record LoginGate(UUID token, boolean sticky) {}
+    /**
+     * Players whose state could not be saved during play (STATE_TOO_LARGE, the aggregate adapter budget, a REQUIRED
+     * adapter failure): frozen and disconnected (Build 53, D4); the quit capture is still attempted, and when it fails
+     * too the session marker stays open so the next login re-examines the vanilla playerdata.
+     */
+    private final java.util.Set<UUID> saveRefused = ConcurrentHashMap.newKeySet();
+    /** Where a player whose saves were refused is reported (the runtime disconnects them); no-op until set. */
+    private volatile java.util.function.BiConsumer<UUID, String> saveRefusedHandler = (player, reason) -> {};
+    /** Logged once: the repository stores no session markers, so every authoritative login applies the upgrade rule. */
+    private final AtomicBoolean markersUnsupportedLogged = new AtomicBoolean();
     /** What {@link #open} decided; {@code null} until it ran, which keeps the format-1 paths. */
     private volatile StoreStatus storeStatus;
 
@@ -914,12 +959,29 @@ public final class ProfileEngine {
                 throw error(ProfileErrorCode.PROFILE_NOT_FOUND, "no profile " + targetId);
             }
             if (!target.get().accountId().equals(playerId)) {
-                if (target.get().coop() && target.get().member(playerId) != null) {
-                    // Build 52: only the owner plays a co-op profile; member snapshots and login restore are Build 53.
-                    throw error(ProfileErrorCode.COOP_SWITCH_UNAVAILABLE, "profile " + targetId + " is a co-op profile owned by "
-                        + target.get().accountId() + "; members other than the owner cannot switch into it before Build 53");
+                if (!target.get().coop()) {
+                    throw error(ProfileErrorCode.NOT_OWNED, "profile " + targetId + " belongs to another account");
                 }
-                throw error(ProfileErrorCode.NOT_OWNED, "profile " + targetId + " belongs to another account");
+                if (target.get().member(playerId) == null) {
+                    throw error(ProfileErrorCode.NOT_A_MEMBER, playerId + " is not a member of co-op profile " + targetId);
+                }
+                // Build 53: a member plays the co-op profile from their own member stream. Their state is only safe
+                // when the join restores the committed member head (login.authoritative); without it a rejoin would
+                // load whatever vanilla playerdata this server last wrote.
+                if (!this.settings.coopEnabled()) {
+                    throw error(ProfileErrorCode.COOP_DISABLED, "profile " + targetId + " is a co-op profile and co-op is off ("
+                        + ProfileSettings.COOP_ENABLED_KEY + "); only its owner can switch into it");
+                }
+                if (!this.settings.authoritativeLogin()) {
+                    throw error(ProfileErrorCode.COOP_SWITCH_UNAVAILABLE, "a member can play co-op profile " + targetId + " only while"
+                        + " authoritative login applies (" + ProfileSettings.LOGIN_AUTHORITATIVE_KEY + ": auto with co-op enabled, or true;"
+                        + " RESTART_REQUIRED), which restores the member's committed state at join; it is "
+                        + this.settings.login().authoritative().id() + " on this server");
+                }
+            }
+            if (target.get().coop() && format2()) {
+                // OD-1: a co-op profile is played on the node that holds its bound world; no cross-node routing.
+                requireProfileNode(targetId);
             }
             if (target.get().status() != ProfileStatus.ACTIVE) {
                 throw error(ProfileErrorCode.PROFILE_LOCKED, "profile " + targetId + " is " + target.get().status());
@@ -932,6 +994,17 @@ public final class ProfileEngine {
                     + " nothing to switch");
             }
             requireNoPendingJournal(playerId);
+            requireNoLoginGate(playerId);
+            if (this.saveRefused.contains(playerId)) {
+                throw error(ProfileErrorCode.STATE_TOO_LARGE, "the state of " + playerId + " could not be saved in this session;"
+                    + " they are frozen until they rejoin and nothing is switched");
+            }
+            if (format2() && !target.get().accountId().equals(playerId)) {
+                // Build 53 (review P3-17): a non-owner's switch journal names a co-op the member does not own; Build 52's
+                // rollback would commit that pointer for a non-owner and checkCoopAccess would then refuse recovery, so a
+                // store that holds one is marked minimum build 53 first.
+                requireMemberPlayStoreLevel();
+            }
             return begin(new SwitchStart(account, target.get(), format2() ? switchAdmission(account, target.get()) : null),
                 targetId, began);
         }).thenCompose(result -> result)
@@ -987,6 +1060,7 @@ public final class ProfileEngine {
      */
     public CompletableFuture<Void> save(final UUID profileId) {
         if (!this.settings.enabled()) return failed(ProfileErrorCode.DISABLED, "AWF MultiProfile is disabled");
+        if (format2()) return saveMembers(profileId);
         return io(() -> {
             final AuroraProfile profile = this.repository.profile(profileId)
                 .orElseThrow(() -> error(ProfileErrorCode.PROFILE_NOT_FOUND, "no profile " + profileId));
@@ -994,42 +1068,22 @@ public final class ProfileEngine {
                 throw error(ProfileErrorCode.SWITCH_IN_PROGRESS, "a profile switch is running for "
                     + profile.accountId() + "; its capture is the authoritative save");
             }
+            requireNoLoginGate(profile.accountId());
             final PlayerAccount account = this.repository.loadAccount(profile.accountId(), this.settings.defaultSlots());
             if (!profile.id().equals(account.activeProfile()) || profile.status() != ProfileStatus.ACTIVE) {
                 throw error(ProfileErrorCode.PROFILE_LOCKED, "only the active profile can be saved");
             }
             requireNoPendingJournal(profile.accountId());
-            if (format2()) {
-                requireNoUnresolvedIntent(profile.accountId());
-                final PlayerSession session = this.sessions.get(profile.accountId());
-                if (session == null) {
-                    throw error(ProfileErrorCode.OWNERSHIP_CONFLICT, "the player has no admitted session on this node;"
-                        + " the snapshot was not written");
-                }
-                requireLive(profile.accountId(), session);
-                if (account.activeEpoch() == null || !profile.hasMember(profile.accountId(), account.activeEpoch())) {
-                    throw error(ProfileErrorCode.STALE_STATE, "the account's membership epoch is not a current membership"
-                        + " of " + profileId + "; the snapshot was not written");
-                }
-                return new SaveStart(profile, account.revision(), null, new CaptureTicket(profile.accountId(),
-                    session.claim(), account.sessionGeneration(), account.revision(), profileId, account.activeEpoch()));
-            }
             return new SaveStart(profile, account.revision(), writeAuthority(profile), null);
-        }).thenCompose(start -> this.players.capture(start.profile().accountId(), this.settings.isolation())
-            .thenCompose(state -> io(() -> {
+        }).thenCompose(start -> this.players.captureDetailed(start.profile().accountId(), this.settings.isolation())
+            .thenCompose(captured -> io(() -> {
                 final AuroraProfile profile = start.profile();
+                final ProfileState state = captured.state();
                 // The switch may have started while the player thread was capturing. Writing now
                 // would store the target's state under the profile being left, so it is refused.
                 if (this.switches.containsKey(profile.accountId())) {
                     throw error(ProfileErrorCode.SWITCH_IN_PROGRESS, "a profile switch started while the state"
                         + " was captured; the snapshot was not written");
-                }
-                if (start.ticket() != null) {
-                    final long began = System.nanoTime();
-                    publishCaptured(start.ticket(), state);
-                    if (this.metrics != null) this.metrics.snapshot(System.nanoTime() - began);
-                    publish(FabricEventType.PROFILE_SAVE_COMPLETED, Map.of("profile", profileId.toString()));
-                    return null;
                 }
                 final PlayerAccount current = this.repository.loadAccount(profile.accountId(),
                     this.settings.defaultSlots());
@@ -1043,10 +1097,80 @@ public final class ProfileEngine {
                     && !this.ownership.validate(start.claim()).join()) {
                     throw error(ProfileErrorCode.OWNERSHIP_CONFLICT, "ownership expired during capture");
                 }
-                writeSnapshot(profile, state, start.claim());
+                writeSnapshot(profile, state, start.claim(), captured.adapters());
                 publish(FabricEventType.PROFILE_SAVE_COMPLETED, Map.of("profile", profileId.toString()));
                 return null;
             })));
+    }
+
+    /**
+     * Format-2 {@link #save}: every member of the profile who plays it on this node with an admitted session (the owner
+     * included; review E1) is captured on their own thread and published into their own member stream under their own
+     * {@link CaptureTicket}. Members mid-switch, gated at login or frozen after a refused save are skipped and named; no
+     * member playing it here fails with {@link ProfileErrorCode#PLAYER_OFFLINE}. Every capture is attempted; the first
+     * failure is reported after all ran.
+     */
+    private CompletableFuture<Void> saveMembers(final UUID profileId) {
+        return io(() -> {
+            final AuroraProfile profile = this.repository.profile(profileId)
+                .orElseThrow(() -> error(ProfileErrorCode.PROFILE_NOT_FOUND, "no profile " + profileId));
+            if (profile.status() != ProfileStatus.ACTIVE) {
+                throw error(ProfileErrorCode.PROFILE_LOCKED, "profile " + profileId + " is " + profile.status() + "; only an ACTIVE"
+                    + " profile is saved");
+            }
+            final List<CaptureTicket> tickets = new ArrayList<>();
+            final List<String> skipped = new ArrayList<>();
+            for (final Map.Entry<UUID, PlayerSession> entry : this.sessions.entrySet()) {
+                final UUID member = entry.getKey();
+                final PlayerSession session = entry.getValue();
+                if (!profileId.equals(session.activeProfile()) || !this.players.online(member)) continue;
+                if (this.switches.containsKey(member) || this.loginGates.containsKey(member) || this.saveRefused.contains(member)) {
+                    skipped.add(member + " (switching, logging in, or frozen after a refused save)");
+                    continue;
+                }
+                requireNoUnresolvedIntent(member);
+                requireNoPendingJournal(member);
+                requireLive(member, session);
+                if (session.activeEpoch() == null || !profile.hasMember(member, session.activeEpoch())) {
+                    throw error(ProfileErrorCode.STALE_STATE, "the account of " + member + " names a membership epoch that is not a"
+                        + " current membership of " + profileId + "; the snapshot was not written");
+                }
+                tickets.add(new CaptureTicket(member, session.claim(), session.sessionGeneration(), session.accountRevision(), profileId,
+                    session.activeEpoch()));
+            }
+            if (tickets.isEmpty()) {
+                throw error(ProfileErrorCode.PLAYER_OFFLINE, "no member of profile " + profileId + " plays it on this node with an"
+                    + " admitted session" + (skipped.isEmpty() ? "" : "; skipped: " + skipped) + "; nothing was written");
+            }
+            if (!skipped.isEmpty()) {
+                SourbyLogger.info("AWF MultiProfile: saving profile " + profileId + " skips " + skipped);
+            }
+            return tickets;
+        }).thenCompose(tickets -> {
+            final List<CompletableFuture<Void>> saves = new ArrayList<>(tickets.size());
+            for (final CaptureTicket ticket : tickets) {
+                saves.add(this.players.captureDetailed(ticket.playerId(), this.settings.isolation())
+                    .thenCompose(captured -> this.<Void>io(() -> {
+                        if (this.switches.containsKey(ticket.playerId())) {
+                            throw error(ProfileErrorCode.SWITCH_IN_PROGRESS, "a profile switch of " + ticket.playerId() + " started while"
+                                + " the state was captured; the snapshot was not written");
+                        }
+                        requireNoLoginGate(ticket.playerId());
+                        final long began = System.nanoTime();
+                        publishCaptured(ticket, captured.state(), captured.adapters());
+                        if (this.metrics != null) this.metrics.snapshot(System.nanoTime() - began);
+                        markVanillaSynced(ticket, "the save of " + ticket.playerId());
+                        return null;
+                    })));
+            }
+            return CompletableFuture.allOf(saves.toArray(CompletableFuture[]::new)).handle((ignored, failed) -> {
+                publish(FabricEventType.PROFILE_SAVE_COMPLETED, Map.of("profile", profileId.toString()));
+                if (failed != null) {
+                    throw failed instanceof CompletionException completion ? completion : new CompletionException(failed);
+                }
+                return null;
+            });
+        });
     }
 
     private record SaveStart(AuroraProfile profile, long accountRevision, OwnerClaim claim, CaptureTicket ticket) {}
@@ -1078,7 +1202,8 @@ public final class ProfileEngine {
      * Publishes a format-2 capture into the member stream named by its ticket, after comparing the ticket with
      * the current session and account. Runs inside an I/O step.
      */
-    private ProfileSnapshot publishCaptured(final CaptureTicket ticket, final ProfileState state) throws IOException {
+    private ProfileSnapshot publishCaptured(final CaptureTicket ticket, final ProfileState state,
+                                            final ProfileStateAdapters.Capture adapters) throws IOException {
         final UUID accountId = ticket.playerId();
         final PlayerSession session = this.sessions.get(accountId);
         if (session == null || !session.claim().equals(ticket.claim())) {
@@ -1103,7 +1228,7 @@ public final class ProfileEngine {
             throw error(ProfileErrorCode.STALE_STATE, "membership " + ticket.epoch() + " of " + accountId + " in "
                 + profile.id() + " is not current; the snapshot was not written");
         }
-        return publishMemberState(profile, accountId, ticket.epoch(), state, ticket.claim(), ticket.accountRevision());
+        return publishMemberState(profile, accountId, ticket.epoch(), state, adapters, ticket.claim(), ticket.accountRevision());
     }
 
     /**
@@ -1113,7 +1238,8 @@ public final class ProfileEngine {
      * adapter entries of the head's snapshot no adapter of this boot accounts for. Runs inside an I/O step.
      */
     private ProfileSnapshot publishMemberState(final AuroraProfile profile, final UUID member, final UUID epoch,
-                                               final ProfileState state, final PlayerClaim q, final long expectedAccount)
+                                               final ProfileState state, final ProfileStateAdapters.Capture adapters,
+                                               final PlayerClaim q, final long expectedAccount)
         throws IOException {
         final Optional<MemberStateHead> head = this.repository.memberHead(profile.id(), member, epoch);
         if (head.isPresent() && head.get().state() == MemberStateHead.State.CONSUMED) {
@@ -1127,7 +1253,7 @@ public final class ProfileEngine {
         final MemberStateHead base = head.orElseGet(() -> MemberStateHead.uninitialized(profile.id(), member, epoch));
         final long expectedHead = head.isPresent() ? head.get().revision() : CoopWriteGuard.ABSENT;
         final CoopOperation op = operation(CoopOperation.Kind.SAVE_MEMBER, member, profile.id(), epoch, expectedHead);
-        final ProfileState carried = withCarriedAdapters(state, () -> head.isPresent() ? exactHeadSnapshot(head.get())
+        final ProfileState carried = withCarriedAdapters(state, adapters, () -> head.isPresent() ? exactHeadSnapshot(head.get())
             : Optional.empty(), profile.id());
         final byte[] encoded = encode(profile.id(), carried);
         final ProfileSnapshot snapshot = ProfileSnapshot.forMember(profile.id(), member, epoch,
@@ -1162,24 +1288,60 @@ public final class ProfileEngine {
      * the stream and is compared with the current session and account.
      */
     public CompletableFuture<Boolean> saveCaptured(final UUID accountId, final ProfileState state, final CaptureTicket ticket) {
-        Objects.requireNonNull(state, "state");
+        return saveCaptured(accountId, PlayerStatePort.CaptureResult.of(Objects.requireNonNull(state, "state")), ticket);
+    }
+
+    /**
+     * {@link #saveCaptured(UUID, ProfileState, CaptureTicket)} with the adapter registry's decisions for the capture
+     * ({@link PlayerStatePort#captureDetailed}): best-effort adapters that failed keep their stored bytes, adapters
+     * that returned nothing lose them.
+     */
+    public CompletableFuture<Boolean> saveCaptured(final UUID accountId, final PlayerStatePort.CaptureResult captured,
+                                                   final CaptureTicket ticket) {
+        return saveCaptured(accountId, captured, ticket, false);
+    }
+
+    /**
+     * {@link #saveCaptured(UUID, PlayerStatePort.CaptureResult, CaptureTicket)} for the final capture of a session (quit,
+     * shutdown): a committed publish also <em>closes</em> the account's {@link SessionMarker}; a refused one leaves it
+     * open, so the next authoritative login re-examines the vanilla playerdata (D3/D4). Without an active profile the
+     * marker is closed without a publish.
+     */
+    public CompletableFuture<Boolean> saveCapturedAndClose(final UUID accountId, final PlayerStatePort.CaptureResult captured,
+                                                           final CaptureTicket ticket) {
+        return saveCaptured(accountId, captured, ticket, true);
+    }
+
+    private CompletableFuture<Boolean> saveCaptured(final UUID accountId, final PlayerStatePort.CaptureResult captured,
+                                                    final CaptureTicket ticket, final boolean closing) {
+        Objects.requireNonNull(captured, "captured");
+        final ProfileState state = captured.state();
         if (!this.settings.enabled() || this.closed) return CompletableFuture.completedFuture(false);
         return io(() -> {
             if (this.switches.containsKey(accountId)) {
                 throw error(ProfileErrorCode.SWITCH_IN_PROGRESS, "a profile switch is running for " + accountId
                     + "; its capture is the authoritative save");
             }
+            requireNoLoginGate(accountId);
             if (format2()) {
                 if (ticket == null || !ticket.playerId().equals(accountId)) {
                     throw error(ProfileErrorCode.CLAIM_LOST, "no capture ticket of an admitted session of " + accountId
                         + "; the captured state cannot be attributed and was not written");
                 }
-                if (ticket.profileId() == null) return false;
+                if (ticket.profileId() == null) {
+                    if (closing) markSessionClosed(ticket, false);
+                    return false;
+                }
                 requireNoPendingJournal(accountId);
                 final long began = System.nanoTime();
-                final ProfileSnapshot written = publishCaptured(ticket, state);
+                final ProfileSnapshot written = publishCaptured(ticket, state, captured.adapters());
                 if (this.metrics != null) this.metrics.snapshot(System.nanoTime() - began);
                 publish(FabricEventType.PROFILE_SAVE_COMPLETED, Map.of("profile", written.profileId().toString()));
+                if (closing) {
+                    markSessionClosed(ticket, true);
+                } else {
+                    markVanillaSynced(ticket, "the save of " + accountId);
+                }
                 return true;
             }
             final PlayerAccount account = this.repository.loadAccount(accountId, this.settings.defaultSlots());
@@ -1190,7 +1352,7 @@ public final class ProfileEngine {
                 throw error(ProfileErrorCode.PROFILE_LOCKED, "profile " + profile.id() + " is " + profile.status());
             }
             requireNoPendingJournal(accountId);
-            writeSnapshot(profile, state, writeAuthority(profile));
+            writeSnapshot(profile, state, writeAuthority(profile), captured.adapters());
             publish(FabricEventType.PROFILE_SAVE_COMPLETED, Map.of("profile", profile.id().toString()));
             return true;
         });
@@ -1353,26 +1515,90 @@ public final class ProfileEngine {
             return CompletableFuture.failedFuture(error(ProfileErrorCode.SWITCH_IN_PROGRESS,
                 "a profile switch is running for " + playerId));
         }
-        return io(() -> this.ownership.claim(profileId, this.nodeId, UUID.randomUUID()).join())
-            .thenApply(claim -> {
-                if (claim.granted() && this.switches.containsKey(playerId)) {
-                    // A switch started while this join was claiming the old profile; the switch's
-                    // adopted claim is authoritative. Release this one, but do not turn a normal
-                    // join into a duplicate-session kick.
-                    this.release(claim.claim());
-                    return claim;
-                }
-                if (claim.granted()) this.sessionClaims.put(playerId, claim.claim());
+        // Claim and record in one I/O step: the lane may dispatch the next step before a completion callback runs, so a
+        // quit or save queued right after would not yet see the recorded claim (review P2).
+        return io(() -> {
+            final ClaimResult claim = nodeClaim(profileId, UUID.randomUUID());
+            if (claim.granted() && this.switches.containsKey(playerId)) {
+                // A switch started while this join was claiming the old profile; the switch's
+                // adopted claim is authoritative. Release this one (unless another session or the switch itself
+                // holds the same node claim), but do not turn a normal join into a duplicate-session kick.
+                releaseNodeClaimUnlessHeld(claim.claim(), playerId);
                 return claim;
-            });
+            }
+            if (claim.granted()) this.sessionClaims.put(playerId, claim.claim());
+            return claim;
+        });
     }
 
-    /** Releases the session claim of a player; {@code false} when none was recorded. */
+    /**
+     * Releases the session claim of a player; {@code false} when none was recorded. The sharing check and the release
+     * run in one I/O step (review P2-6): a join adopting the same node claim in between cannot have it released under it.
+     */
     public CompletableFuture<Boolean> releaseSession(final UUID playerId) {
         final OwnerClaim claim = this.sessionClaims.remove(playerId);
         if (claim == null) return CompletableFuture.completedFuture(false);
-        return release(claim);
+        return io(() -> {
+            releaseNodeClaimUnlessHeld(claim, playerId);
+            return true;
+        });
     }
+
+    /**
+     * Releases a node claim unless another player's session on this node, or a running switch or recovery, still holds
+     * the same incarnation of it (a co-op profile other members play here keeps its one node claim, OD-1). Runs inside
+     * an I/O step. Never releases a claim any session holds (review P2-6, P3-16).
+     */
+    private void releaseNodeClaimUnlessHeld(final OwnerClaim claim, final UUID exceptPlayer) {
+        if (claim == null || heldByAnother(claim, exceptPlayer)) return;
+        this.ownership.release(claim).join();
+    }
+
+    /** Whether a session other than {@code exceptPlayer}'s, or a running switch, holds the same incarnation of {@code claim}. */
+    private boolean heldByAnother(final OwnerClaim claim, final UUID exceptPlayer) {
+        if (sharedWithAnother(claim, exceptPlayer)) return true;
+        final List<OwnerClaim> running = new ArrayList<>();
+        for (final SwitchRun run : this.runs) {
+            if (!run.playerId().equals(exceptPlayer)) run.heldClaims(running);
+        }
+        for (final OwnerClaim held : running) {
+            if (held.sameIncarnation(claim)) return true;
+        }
+        return false;
+    }
+
+    // ------------------------------------------------------------------ one node claim per profile (OD-1)
+
+    /**
+     * Claims a profile for this node, reusing the live claim this process already holds on it (another member's
+     * session, a running switch or a recovery) instead of superseding it with a new token: a co-op profile that
+     * several members play on one node has exactly one node claim, shared by their session records, and the claim
+     * marks the node that plays the profile's bound world (owner decision OD-1). Without a live claim of this
+     * process, the profile is claimed with {@code ownerToken}. Runs inside an I/O step.
+     */
+    private ClaimResult nodeClaim(final UUID profileId, final UUID ownerToken) {
+        final OwnerClaim live = liveNodeClaim(profileId);
+        if (live != null) return ClaimResult.granted(live);
+        return this.ownership.claim(profileId, this.nodeId, ownerToken).join();
+    }
+
+    /** The validated live claim this process holds on {@code profileId}, or {@code null} (unowned, lapsed, or another process). */
+    private OwnerClaim liveNodeClaim(final UUID profileId) {
+        final OwnerClaim holder = this.ownership.holder(profileId).join();
+        if (holder == null || !holder.node().equals(this.nodeId)) return null;
+        // The same node id can name another process (a restarted server sharing the id): the provider compares processes.
+        if (this.ownership.foreignHolder(profileId).join() != null) return null;
+        return this.ownership.validate(holder).join() ? holder : null;
+    }
+
+    /** Whether a player other than {@code exceptPlayer} has this same claim (same profile, owner and fence) as their session claim. */
+    private boolean sharedWithAnother(final OwnerClaim claim, final UUID exceptPlayer) {
+        for (final Map.Entry<UUID, OwnerClaim> entry : this.sessionClaims.entrySet()) {
+            if (!entry.getKey().equals(exceptPlayer) && entry.getValue().sameIncarnation(claim)) return true;
+        }
+        return false;
+    }
+
 
     /** Whether this node recorded a session claim for the player (claimed on join or adopted by a switch). */
     public boolean holdsSession(final UUID playerId) {
@@ -1385,6 +1611,8 @@ public final class ProfileEngine {
      * When the switch ended in the meantime, the claim is released now instead.
      */
     public void releaseSessionAfterSwitch(final UUID playerId) {
+        // A quit lifts a login gate (a restore still running finds no player; a refused join is over) and a refused-save freeze.
+        sessionFlagsCleared(playerId);
         this.releaseOnSwitchEnd.add(playerId);
         // The switch may have ended between the caller's check and the add above; its end handler
         // then never saw the request. Whoever removes the entry first releases, exactly once.
@@ -1447,6 +1675,7 @@ public final class ProfileEngine {
             final PlayerSession previous = this.sessions.remove(playerId);
             if (previous != null) releaseQuietly(previous.claim());
             this.lostSessions.remove(playerId);
+            this.saveRefused.remove(playerId);
             final PlayerSessionOwnership.Grant grant = this.playerSessions.claim(playerId, UUID.randomUUID()).join();
             if (!grant.granted()) {
                 if ("exhausted".equals(grant.reason())) {
@@ -1488,6 +1717,7 @@ public final class ProfileEngine {
                 final CoopOperation op = operation(CoopOperation.Kind.LOGIN, playerId, "session", claim.fence(),
                     account.sessionGeneration());
                 commitAccount(account.nextSession(), accountGuard(op, claim, account.revision(), null));
+                carryMarkerForward(playerId, account.sessionGeneration() + 1L);
                 if (!this.players.online(playerId)) {
                     // The player quit while the admission ran; their quit found no session to release, so Q is
                     // released here instead of lingering until its lease lapses.
@@ -1542,6 +1772,7 @@ public final class ProfileEngine {
             }
             if (!this.sessions.remove(playerId, session)) return false;
             this.lostSessions.remove(playerId);
+            this.saveRefused.remove(playerId);
             return this.playerSessions.release(session.claim()).join();
         });
     }
@@ -1698,16 +1929,6 @@ public final class ProfileEngine {
         final PlayerAccount account = this.repository.loadAccount(playerId, this.settings.defaultSlots());
         final UUID profile = account.activeProfile();
         if (profile == null) return null;
-        if (format2()) {
-            final AuroraProfile active = this.repository.profile(profile).orElse(null);
-            if (active != null && active.coop() && !active.accountId().equals(playerId)) {
-                // Build 52 never sets a co-op profile active for a non-owner; an account that says so is not restored.
-                SourbyLogger.warn("AWF MultiProfile: the account of " + playerId + " names co-op profile " + profile + " of "
-                    + active.accountId() + " as active; member login restore is Build 53 (COOP_SWITCH_UNAVAILABLE), so its"
-                    + " worlds are not prepared and the player is not moved");
-                return null;
-            }
-        }
         final ProfileWorldBinding binding = this.repository.binding(profile).orElse(null);
         if (binding == null || binding.isEmpty()) return null;
         binding.worlds().keySet().forEach(this::touch);
@@ -1758,6 +1979,579 @@ public final class ProfileEngine {
             })
             .orTimeout(this.settings.switching().timeoutMillis(), TimeUnit.MILLISECONDS)
             .whenComplete((moved, failed) -> transitionEnded(playerId, reservation));
+    }
+
+    // ------------------------------------------------------------------ authoritative login (Build 53)
+
+    /**
+     * Gates a joining player until {@link #restoreOnLogin} ran (format 2 with {@code login.authoritative}): from this
+     * call their captures, saves and switches are refused and their item events are cancelled, so nothing of the
+     * vanilla playerdata the join loaded is written to a profile or traded. Call on the thread that owns the player,
+     * inside the join event, before the session is admitted. Returns the gate token, or {@code null} when no gate
+     * applies (feature off, format 1, or {@code login.authoritative} false); every exit of the join passes the token
+     * to {@link #releaseLoginGate}.
+     */
+    public UUID gateLogin(final UUID playerId) {
+        if (!this.settings.enabled() || this.closed || !format2() || !this.settings.authoritativeLogin()) return null;
+        final UUID token = UUID.randomUUID();
+        this.loginGates.put(playerId, new LoginGate(token, false));
+        return token;
+    }
+
+    /**
+     * Lifts the gate {@code token} installed by {@link #gateLogin}; another player's or a later join's gate, and a gate
+     * {@link #holdLoginGate held} after a refused join, are left alone.
+     */
+    public void releaseLoginGate(final UUID playerId, final UUID token) {
+        if (token != null) this.loginGates.remove(playerId, new LoginGate(token, false));
+    }
+
+    /**
+     * Keeps the gate until the player quits (the runtime disconnects a refused join): the vanilla playerdata, or a
+     * half-applied state, on the player must not be captured by the quit that follows. The quit clears every gate.
+     */
+    public void holdLoginGate(final UUID playerId, final UUID token) {
+        if (token != null) this.loginGates.replace(playerId, new LoginGate(token, false), new LoginGate(token, true));
+    }
+
+    /** Whether the gate installed for {@code token} is still the player's current one (a quit or a later join replaces it). */
+    public boolean gateHeld(final UUID playerId, final UUID token) {
+        final LoginGate gate = this.loginGates.get(playerId);
+        return token != null && gate != null && gate.token().equals(token);
+    }
+
+    // ------------------------------------------------------------------ refused saves (Build 53, D4)
+
+    /**
+     * Records that the player's state cannot be saved (a capture or publish failed with a code that repeats until an
+     * operator or plugin acts: {@link ProfileErrorCode#STATE_TOO_LARGE}, {@link ProfileErrorCode#ADAPTER_REQUIRED_FAILED}):
+     * the player is frozen (item events cancelled, switches refused) and the runtime disconnects them. Cleared when
+     * their session ends. Idempotent.
+     */
+    public void refuseSaves(final UUID playerId, final String reason) {
+        if (!this.saveRefused.add(playerId)) return;
+        SourbyLogger.error("AWF MultiProfile: the state of " + playerId + " cannot be saved (" + reason + "); the player is frozen"
+            + " and disconnected, their quit capture is attempted once more, and the next login re-examines their vanilla playerdata");
+        try {
+            this.saveRefusedHandler.accept(playerId, reason);
+        } catch (final RuntimeException failed) {
+            SourbyLogger.warn("AWF MultiProfile: disconnecting " + playerId + " after a refused save failed: " + failed.getMessage());
+        }
+    }
+
+    /** Whether a failed save with this code repeats until someone acts, so the player must not keep playing on it. */
+    public static boolean fatalSaveCode(final ProfileErrorCode code) {
+        return code == ProfileErrorCode.STATE_TOO_LARGE || code == ProfileErrorCode.ADAPTER_REQUIRED_FAILED;
+    }
+
+    /** Called with the player id and reason when {@link #refuseSaves} first fires; called on the calling thread. */
+    public void onSaveRefused(final java.util.function.BiConsumer<UUID, String> handler) {
+        this.saveRefusedHandler = Objects.requireNonNull(handler, "handler");
+    }
+
+    /** Whether {@link #refuseSaves} fired for the player's current session. */
+    public boolean savesRefused(final UUID playerId) {
+        return this.saveRefused.contains(playerId);
+    }
+
+    private void requireNoLoginGate(final UUID playerId) {
+        if (this.loginGates.containsKey(playerId)) {
+            throw error(ProfileErrorCode.SWITCH_IN_PROGRESS, "the join of " + playerId + " is still restoring the committed state of"
+                + " their active profile; nothing is captured, saved or switched until it finished");
+        }
+    }
+
+    /** What {@link #restoreOnLogin} did. */
+    public record LoginRestore(Outcome outcome, UUID profileId, ProfileErrorCode code, String detail) {
+
+        public enum Outcome {
+            /** No active profile, format 1, or {@code login.authoritative} off: the join keeps what it loaded. */
+            NONE,
+            /** The committed member head (or the member's empty initial state) was applied to the player. */
+            RESTORED,
+            /** The vanilla playerdata the join loaded was adopted once into the active profile's head (D3); nothing was applied. */
+            ADOPTED,
+            /** The join must be refused: the player is disconnected with {@code code} and {@code detail}. */
+            REFUSED
+        }
+
+        static LoginRestore none(final String detail) {
+            return new LoginRestore(Outcome.NONE, null, null, detail);
+        }
+    }
+
+    /** {@link #restoreOnLogin(UUID, UUID, java.util.function.BooleanSupplier, boolean)} without a gate binding or recovery flag. */
+    public CompletableFuture<LoginRestore> restoreOnLogin(final UUID playerId) {
+        return restoreOnLogin(playerId, null, () -> false, false);
+    }
+
+    /**
+     * Authoritative login (COOP-DESIGN §6, Build 53): restores the committed member head of the player's active
+     * profile onto the player, replacing the vanilla playerdata the join loaded, or adopts that vanilla playerdata
+     * once into the head (D3), and refuses the join when neither can be done. Runs after {@link #admitSession} and
+     * {@link #recoverPending}, under the gate of {@link #gateLogin}; the caller lifts the gate afterwards and
+     * disconnects a {@code REFUSED} player with the recorded reason. Decisions, in order:
+     * <ul>
+     *   <li>no active profile, format 1, {@code login.authoritative} not applying: {@code NONE}, nothing is applied;</li>
+     *   <li>a pending journal of the player that {@link #recoverPending} could not resolve, or an unresolved intent:
+     *       {@code REFUSED RECOVERY_REQUIRED} (never vanilla playerdata over an undecided state, review P1-4);</li>
+     *   <li>the active profile is a co-op whose bound world another node holds: {@code REFUSED WRONG_NODE} (OD-1);</li>
+     *   <li>the account names a membership epoch the profile no longer has, or a CONSUMED stream: {@code REFUSED
+     *       HEAD_UNREADABLE} (the account and the profile disagree; nothing is guessed);</li>
+     *   <li>the member head cannot be read, its exact snapshot is missing or differs, or the state does not decode:
+     *       {@code REFUSED HEAD_UNREADABLE}; vanilla playerdata is never accepted instead;</li>
+     *   <li><b>adoption (D3):</b> the account's {@link SessionMarker} is read. The previous session counts as
+     *       <em>unclean</em> when the marker is still open for the previous generation, names another generation
+     *       (sessions ran under Build 52 or without authoritative login), or is absent (the upgrade from Build 52).
+     *       Then, when this server's vanilla playerdata file of the player is newer than the head's snapshot
+     *       ({@code createdAtMillis}; an UNINITIALIZED head counts as never written), no journal was recovered at
+     *       this login, and the marker's vanilla provenance names the active profile and epoch on this node (an
+     *       absent or other-generation marker is taken to mean Build 52 semantics: vanilla holds the active profile's
+     *       live state), the state the join loaded is captured on the player's thread and published as the head's next
+     *       snapshot under the login's ticket: {@code ADOPTED}, nothing is applied, and {@link ProfileState#empty()} is
+     *       never applied over existing vanilla data. A publish that is refused (STATE_TOO_LARGE, a REQUIRED adapter,
+     *       a reserved stream, CAS) {@code REFUSES} the join with that code;</li>
+     *   <li>the state holds data of a required adapter that cannot be applied here: {@code REFUSED ADAPTER_MISSING} or
+     *       {@code ADAPTER_REQUIRED_FAILED} ({@link ProfileStateAdapters#validateApply});</li>
+     *   <li>an {@code UNINITIALIZED} head (first entry of a member into a profile, or a profile never saved since it
+     *       was applied) with no adoption: the member's <b>initial state</b> is {@link ProfileState#empty()} — empty
+     *       inventory, armor, off-hand and ender chest, level 0, full health and food, no effects, no respawn point, no
+     *       adapter data — which is applied and then published as the stream's first snapshot under the session's
+     *       ticket; a failure to publish it is logged, the state is applied all the same and the next save publishes;</li>
+     *   <li>a {@code READY} head: its exact snapshot is applied on the player's thread, bounded by
+     *       {@code switching.timeout-ms}; an apply that fails or times out {@code REFUSES} the join
+     *       ({@code ADAPTER_REQUIRED_FAILED} for a required adapter, else {@code TIMEOUT}/{@code INTERNAL_ERROR}): the
+     *       player is disconnected with the gate still refusing captures, so the half-applied state is never saved,
+     *       and the next join restores the same committed head again.</li>
+     * </ul>
+     * The marker was carried to this session's generation at admission; a restore writes it <em>open</em> with the
+     * provenance cleared before the gate lifts (a marker that cannot be written {@code REFUSES} the join), an adoption
+     * writes it open with the provenance set only once its publish committed, so a refused adoption is retried at the
+     * next login. The profile's
+     * bound worlds are made ready before the apply, so a respawn point in one of them is kept. Never fails: an
+     * unexpected error is a {@code REFUSED} result.
+     *
+     * @param gate the token {@link #gateLogin} returned; every step checks it is still the player's gate (a quit or a
+     *     later join of the same account replaces it) and {@code REFUSES} otherwise, so a stale chain never applies to
+     *     a new connection (review P2-5); {@code null} skips that check
+     * @param stale the runtime's own staleness check (the {@code Player} instance of the join is no longer the online
+     *     one); checked before every apply and publish
+     * @param recoveredJournal whether {@link #recoverPending} resolved a journal at this login: the recovery decided the
+     *     state, so the vanilla playerdata is never adopted
+     */
+    public CompletableFuture<LoginRestore> restoreOnLogin(final UUID playerId, final UUID gate,
+                                                          final java.util.function.BooleanSupplier stale, final boolean recoveredJournal) {
+        if (!this.settings.enabled() || this.closed || !format2() || !this.settings.authoritativeLogin()) {
+            return CompletableFuture.completedFuture(LoginRestore.none("authoritative login is off"));
+        }
+        final AtomicBoolean abandoned = new AtomicBoolean();
+        final java.util.function.BooleanSupplier abandon = () -> abandoned.get() || stale.getAsBoolean()
+            || (gate != null && !gateHeld(playerId, gate));
+        final long budget = this.settings.switching().timeoutMillis();
+        return io(() -> {
+                requireCurrentLogin(playerId, abandon);
+                return loginSource(playerId, recoveredJournal);
+            })
+            .thenCompose(source -> {
+                if (source.restore() == null) return CompletableFuture.completedFuture(source.restore);
+                if (source.adopt()) return adoptVanilla(playerId, source, abandon);
+                final CompletableFuture<Void> worlds = source.binding() == null || source.binding().isEmpty()
+                    ? CompletableFuture.completedFuture(null)
+                    : this.worlds.ensureReady(source.binding()).exceptionally(failed -> {
+                        SourbyLogger.warn("AWF MultiProfile: the worlds of " + source.profileId() + " could not be made ready"
+                            + " before restoring " + playerId + " (" + messageOf(failed) + "); a respawn point in one of them"
+                            + " is cleared by the apply");
+                        return null;
+                    });
+                return worlds.thenCompose(ignored -> this.players.apply(playerId, source.state(), this.settings.isolation(), abandon))
+                    .orTimeout(budget, TimeUnit.MILLISECONDS)
+                    .thenCompose(applied -> source.initialise() ? io(() -> {
+                        requireCurrentLogin(playerId, abandon);
+                        publishInitialState(playerId, source);
+                        return source.restore;
+                    }) : CompletableFuture.completedFuture(source.restore))
+                    .handle((restored, failed) -> {
+                        if (failed == null) return restored;
+                        abandoned.set(true);
+                        final Throwable cause = unwrapCompletion(failed);
+                        final ProfileErrorCode code = cause instanceof TimeoutException ? ProfileErrorCode.TIMEOUT : codeOf(failed);
+                        return new LoginRestore(LoginRestore.Outcome.REFUSED, source.profileId(), code,
+                            "restoring the committed state of profile " + source.profileId() + " onto the player did not complete ("
+                                + (cause instanceof TimeoutException ? "not within switching.timeout-ms" : messageOf(failed))
+                                + "); the join is refused and the same committed state is restored at the next join");
+                    });
+            })
+            .exceptionally(failed -> new LoginRestore(LoginRestore.Outcome.REFUSED, null, codeOf(failed), messageOf(failed)));
+    }
+
+    /** Refuses a login step whose join is no longer current (gate replaced, player instance gone, or abandoned). */
+    private static void requireCurrentLogin(final UUID playerId, final java.util.function.BooleanSupplier abandon) {
+        if (abandon.getAsBoolean()) {
+            throw error(ProfileErrorCode.STALE_STATE, "the join of " + playerId + " that started this restore is no longer the"
+                + " current one (the player quit or joined again); nothing is applied or written for it");
+        }
+    }
+
+    /**
+     * D3 adoption: captures the state the join loaded (on the player's thread) and publishes it as the next snapshot of
+     * the active profile's member stream under the login's ticket, then records the vanilla provenance. A refusal
+     * anywhere {@code REFUSES} the join; nothing is applied to the player either way.
+     */
+    private CompletableFuture<LoginRestore> adoptVanilla(final UUID playerId, final LoginSource source,
+                                                         final java.util.function.BooleanSupplier abandon) {
+        final long budget = this.settings.switching().timeoutMillis();
+        return this.players.captureDetailed(playerId, this.settings.isolation())
+            .orTimeout(budget, TimeUnit.MILLISECONDS)
+            .thenCompose(captured -> io(() -> {
+                requireCurrentLogin(playerId, abandon);
+                final PlayerSession session = this.sessions.get(playerId);
+                if (session == null || !session.claim().equals(source.ticket().claim())) {
+                    throw error(ProfileErrorCode.CLAIM_LOST, "the session that started this login is no longer admitted");
+                }
+                final CaptureTicket ticket = new CaptureTicket(playerId, session.claim(), session.sessionGeneration(),
+                    session.accountRevision(), source.profileId(), source.epoch());
+                final ProfileSnapshot written = publishCaptured(ticket, captured.state(), captured.adapters());
+                markVanillaSynced(ticket, "the login adoption of " + playerId);
+                return new LoginRestore(LoginRestore.Outcome.ADOPTED, source.profileId(), null, "adopted the vanilla playerdata ("
+                    + source.adoptWhy() + ") as snapshot " + written.snapshotId() + " (R " + written.revision() + ") of member stream "
+                    + source.profileId() + "/" + playerId + "/" + source.epoch() + "; nothing was applied to the player");
+            }))
+            .handle((adopted, failed) -> {
+                if (failed == null) return adopted;
+                final Throwable cause = unwrapCompletion(failed);
+                final ProfileErrorCode code = cause instanceof TimeoutException ? ProfileErrorCode.TIMEOUT : codeOf(failed);
+                return new LoginRestore(LoginRestore.Outcome.REFUSED, source.profileId(), code, "the vanilla playerdata of " + playerId
+                    + " is newer than the committed state of profile " + source.profileId() + " (" + source.adoptWhy() + ") but could not"
+                    + " be adopted into it (" + (cause instanceof TimeoutException ? "not within switching.timeout-ms" : messageOf(failed))
+                    + "); the join is refused so neither state is lost or applied twice. Fix the cause and rejoin");
+            });
+    }
+
+    /**
+     * What the login restores: the state, where it came from, whether the stream is initialised afterwards, and whether
+     * the vanilla playerdata is adopted instead ({@code adopt}, with {@code adoptWhy} for the log).
+     */
+    private record LoginSource(LoginRestore restore, UUID profileId, UUID epoch, ProfileState state, ProfileWorldBinding binding,
+                               boolean initialise, CaptureTicket ticket, boolean adopt, String adoptWhy) {
+
+        static LoginSource none(final String detail) {
+            return new LoginSource(LoginRestore.none(detail), null, null, null, null, false, null, false, null);
+        }
+
+        static LoginSource refused(final UUID profileId, final ProfileErrorCode code, final String detail) {
+            return new LoginSource(new LoginRestore(LoginRestore.Outcome.REFUSED, profileId, code, detail), profileId, null, null,
+                null, false, null, false, null);
+        }
+    }
+
+    /** Reads the account, profile, head and exact snapshot of the login and decides the adoption; runs inside an I/O step. */
+    private LoginSource loginSource(final UUID playerId, final boolean recoveredJournal) throws IOException {
+        final PlayerSession session = this.sessions.get(playerId);
+        if (session == null) return LoginSource.none("no admitted session");
+        final PlayerAccount account = this.repository.loadAccount(playerId, this.settings.defaultSlots());
+        final UUID profileId = account.activeProfile();
+        if (profileId == null) return LoginSource.none("no active profile");
+        if (pendingJournal(playerId)) {
+            // Review P1-4: recovery did not resolve it; the vanilla state must not be played (or saved) over an undecided one.
+            return LoginSource.refused(profileId, ProfileErrorCode.RECOVERY_REQUIRED, "a transition of " + playerId + " is still pending"
+                + " after recovery; the join is refused until it is resolved (/awf multiprofile recover) so vanilla playerdata is"
+                + " never played over an undecided state");
+        }
+        try {
+            requireNoUnresolvedIntent(playerId);
+        } catch (final ProfileOperationException pending) {
+            return LoginSource.refused(profileId, pending.code(), pending.getMessage());
+        }
+        final AuroraProfile profile = this.repository.profile(profileId).orElse(null);
+        if (profile == null || profile.status() == ProfileStatus.DELETED) {
+            return LoginSource.refused(profileId, ProfileErrorCode.HEAD_UNREADABLE, "the account names active profile " + profileId
+                + ", which is " + (profile == null ? "not stored" : "deleted") + "; nothing is restored and the join is refused");
+        }
+        if (profile.coop()) {
+            final OwnerClaim foreign = this.ownership.foreignHolder(profileId).join();
+            if (foreign != null) {
+                return LoginSource.refused(profileId, ProfileErrorCode.WRONG_NODE, "co-op profile " + profileId + " is played on node "
+                    + foreign.node() + " (owner decision OD-1: one node per co-op, no routing); join that server, or switch to another"
+                    + " profile from there");
+            }
+        }
+        final UUID epoch = account.activeEpoch();
+        if (epoch == null || !profile.hasMember(playerId, epoch)) {
+            return LoginSource.refused(profileId, ProfileErrorCode.HEAD_UNREADABLE, "the account names membership epoch " + epoch
+                + " of " + profileId + ", which the profile does not have; the committed state cannot be identified");
+        }
+        final ProfileWorldBinding binding = this.repository.binding(profileId).orElse(null);
+        final MemberStateHead head;
+        final ProfileState state;
+        boolean initialise = false;
+        long headWrittenAt = 0L;
+        try {
+            head = this.repository.memberHead(profileId, playerId, epoch)
+                .orElseGet(() -> MemberStateHead.uninitialized(profileId, playerId, epoch));
+            switch (head.state()) {
+                case CONSUMED -> {
+                    return LoginSource.refused(profileId, ProfileErrorCode.HEAD_UNREADABLE, "member stream " + head.describe()
+                        + " was consumed by " + head.consumingOperationId() + " but the account still names it active; nothing is"
+                        + " restored");
+                }
+                case UNINITIALIZED -> {
+                    state = ProfileState.empty();
+                    initialise = head.pendingIntent() == null;
+                }
+                case READY -> {
+                    final Optional<ProfileSnapshot> snapshot = exactHeadSnapshot(head);
+                    if (snapshot.isEmpty()) {
+                        return LoginSource.refused(profileId, ProfileErrorCode.HEAD_UNREADABLE, "member head " + head.describe()
+                            + " names no readable snapshot");
+                    }
+                    state = ProfileStateCodec.decode(snapshot.get().state());
+                    headWrittenAt = snapshot.get().createdAtMillis();
+                }
+                default -> throw new IllegalStateException("head state " + head.state());
+            }
+        } catch (final IOException | RuntimeException unreadable) {
+            final String why = unreadable instanceof ProfileOperationException operation ? operation.getMessage()
+                : unreadable.getMessage();
+            return LoginSource.refused(profileId, ProfileErrorCode.HEAD_UNREADABLE, "the committed state of " + playerId + " in "
+                + profileId + " (epoch " + epoch + ") could not be read: " + why + "; vanilla playerdata is not used instead and"
+                + " the join is refused");
+        }
+        final CaptureTicket ticket = new CaptureTicket(playerId, session.claim(), session.sessionGeneration(),
+            session.accountRevision(), profileId, epoch);
+        // D3: decide the adoption from the session marker (carried to this generation at admission) before anything is
+        // applied. An adoption leaves the marker as it is until its publish committed (a refused adoption is retried at
+        // the next login); a restore opens this session's marker with the provenance cleared first.
+        final String adoptWhy = adoptionReason(playerId, session, profileId, epoch, headWrittenAt, recoveredJournal);
+        if (adoptWhy != null) {
+            if (binding != null) binding.worlds().keySet().forEach(this::touch);
+            return new LoginSource(new LoginRestore(LoginRestore.Outcome.ADOPTED, profileId, null, adoptWhy), profileId, epoch, null,
+                binding, false, ticket, true, adoptWhy);
+        }
+        try {
+            if (!this.repository.writeSessionMarker(SessionMarker.opened(playerId, session.sessionGeneration(), this.nodeId))
+                && this.markersUnsupportedLogged.compareAndSet(false, true)) {
+                SourbyLogger.warn("AWF MultiProfile: the repository " + this.repository.describe() + " stores no session markers; every"
+                    + " authoritative login treats the previous session as unclean and applies the upgrade rule");
+            }
+        } catch (final IOException | RuntimeException failed) {
+            return LoginSource.refused(profileId, ProfileErrorCode.IO_FAILURE, "the session marker of " + playerId + " could not be"
+                + " written (" + messageOf(failed) + "); without it a crash in this session could not be told apart from a clean"
+                + " quit, so the join is refused");
+        }
+        try {
+            this.players.validateApply(state);
+        } catch (final ProfileOperationException missing) {
+            return LoginSource.refused(profileId, missing.code(), missing.getMessage());
+        }
+        if (binding != null) binding.worlds().keySet().forEach(this::touch);
+        return new LoginSource(new LoginRestore(LoginRestore.Outcome.RESTORED, profileId, null, head.state() == MemberStateHead.State.READY
+            ? "restored snapshot " + head.snapshotId() + " (R " + head.revision() + ")" : "applied the member's initial state"),
+            profileId, epoch, state, binding, initialise, ticket, false, null);
+    }
+
+    /**
+     * The D3 adoption rule; {@code null} when the committed head is restored, else the reason the vanilla playerdata is
+     * adopted. Runs inside an I/O step. Unclean previous session: marker open for generation {@code g-1}, of another
+     * generation, or absent. Vanilla newer: the file's modification time is after the head snapshot's
+     * {@code createdAtMillis} (0 for an UNINITIALIZED head). Provenance: the marker names this profile, epoch and node,
+     * or (absent / other generation) Build 52 semantics are assumed. Never after a recovered journal.
+     */
+    private String adoptionReason(final UUID playerId, final PlayerSession session, final UUID profileId, final UUID epoch,
+                                  final long headWrittenAt, final boolean recoveredJournal) throws IOException {
+        if (recoveredJournal) return null;
+        final long generation = session.sessionGeneration();
+        final Optional<SessionMarker> marker;
+        try {
+            marker = this.repository.sessionMarker(playerId);
+        } catch (final IOException corrupt) {
+            // Safe choice: the committed head is restored (progress in vanilla playerdata since the last committed capture
+            // may be lost, nothing is duplicated); the admission of the next login replaces the record. The operator can
+            // force the same outcome with /awf multiprofile session <player> reset-marker.
+            SourbyLogger.warn("AWF MultiProfile: the session marker of " + playerId + " is unreadable (" + corrupt.getMessage()
+                + "); the committed head is restored and the vanilla playerdata is not adopted");
+            return null;
+        }
+        final String unclean;
+        final boolean provenanceKnown;
+        if (marker.isEmpty()) {
+            unclean = "no session marker (first authoritative login of this account, e.g. the upgrade from Build 52)";
+            provenanceKnown = false;
+        } else if (marker.get().generation() != generation) {
+            // The admission carries a marker of the previous generation forward, so a gap means sessions without
+            // authoritative login (Build 52, or login.authoritative off) between the marker and now.
+            unclean = "the session marker is of generation " + marker.get().generation() + ", this session is " + generation
+                + " (sessions ran without authoritative login in between)";
+            provenanceKnown = false;
+        } else if (marker.get().open()) {
+            unclean = "the previous session (generation " + (generation - 1L) + ") was not closed by a committed capture (crash, kill,"
+                + " shutdown deadline, a refused save or a refused join)";
+            provenanceKnown = true;
+        } else {
+            return null;
+        }
+        if (provenanceKnown && !marker.get().provenanceIs(profileId, epoch, this.nodeId)) {
+            SourbyLogger.info("AWF MultiProfile: " + playerId + ": " + unclean + ", but the vanilla playerdata of this node last held "
+                + (marker.get().vanillaProfile() == null ? "an unknown profile" : marker.get().vanillaProfile() + "/" + marker.get().vanillaEpoch()
+                + " on " + marker.get().node()) + ", not the active " + profileId + "/" + epoch + "; the committed head is restored");
+            return null;
+        }
+        final java.util.OptionalLong vanilla = this.players.vanillaPlayerdataModifiedMillis(playerId);
+        if (vanilla.isEmpty()) {
+            SourbyLogger.info("AWF MultiProfile: " + playerId + ": " + unclean + ", but this node has no vanilla playerdata for them;"
+                + " the committed head is restored");
+            return null;
+        }
+        if (vanilla.getAsLong() <= headWrittenAt) {
+            SourbyLogger.info("AWF MultiProfile: " + playerId + ": " + unclean + "; the vanilla playerdata (" + vanilla.getAsLong()
+                + ") is not newer than the committed head (" + headWrittenAt + "), which is restored");
+            return null;
+        }
+        return unclean + "; the vanilla playerdata (" + vanilla.getAsLong() + ") is newer than the committed head ("
+            + (headWrittenAt == 0L ? "never written" : String.valueOf(headWrittenAt)) + ") and "
+            + (provenanceKnown ? "the marker records it holds this profile" : "Build 52 semantics say it holds the active profile");
+    }
+
+    /**
+     * Records, after a publish, that this node's vanilla playerdata of the player holds the state of the ticket's profile
+     * (a lockstep save, or the login adoption). Advisory: a failure is logged, never fails the save. Runs inside an I/O
+     * step; does nothing while authoritative login does not apply.
+     */
+    private void markVanillaSynced(final CaptureTicket ticket, final String what) {
+        if (!this.settings.authoritativeLogin()) return;
+        try {
+            final SessionMarker current = this.repository.sessionMarker(ticket.playerId())
+                .filter(marker -> marker.generation() == ticket.sessionGeneration())
+                .orElseGet(() -> SessionMarker.opened(ticket.playerId(), ticket.sessionGeneration(), this.nodeId));
+            this.repository.writeSessionMarker(current.synced(ticket.profileId(), ticket.epoch(), this.nodeId, System.currentTimeMillis()));
+        } catch (final IOException | RuntimeException failed) {
+            SourbyLogger.warn("AWF MultiProfile: the session marker of " + ticket.playerId() + " was not updated after " + what + " ("
+                + messageOf(failed) + "); the next login then restores the committed head rather than adopting vanilla playerdata");
+        }
+    }
+
+    /**
+     * Closes the session marker after the committed final capture of a quit or shutdown (D3). Advisory like
+     * {@link #markVanillaSynced}: a failure leaves the marker open, so the next login re-examines the vanilla playerdata
+     * (which then holds the same state the capture published).
+     */
+    private void markSessionClosed(final CaptureTicket ticket, final boolean published) {
+        if (!this.settings.authoritativeLogin()) return;
+        try {
+            SessionMarker current = this.repository.sessionMarker(ticket.playerId())
+                .filter(marker -> marker.generation() == ticket.sessionGeneration())
+                .orElseGet(() -> SessionMarker.opened(ticket.playerId(), ticket.sessionGeneration(), this.nodeId));
+            if (published) current = current.synced(ticket.profileId(), ticket.epoch(), this.nodeId, System.currentTimeMillis());
+            this.repository.writeSessionMarker(current.closed());
+        } catch (final IOException | RuntimeException failed) {
+            SourbyLogger.warn("AWF MultiProfile: the session marker of " + ticket.playerId() + " was not closed (" + messageOf(failed)
+                + "); the next login treats the session as unclean and re-examines the vanilla playerdata");
+        }
+    }
+
+    /**
+     * Admission of an authoritative login (SB-3): carries the player's marker of the previous generation to the new one,
+     * open flag and provenance kept, so a refusal between admission and the login decision (WRONG_NODE, HEAD_UNREADABLE,
+     * a claim that failed) never turns the next login's reading into "another generation" (Build 52 semantics). A marker
+     * of an older generation is left alone (sessions ran without authoritative login); an unreadable one is replaced by
+     * an open marker without provenance (WARN): it never adopts. A write that fails fails the admission. Runs inside an
+     * I/O step; does nothing while authoritative login does not apply.
+     */
+    private void carryMarkerForward(final UUID playerId, final long generation) throws IOException {
+        if (!this.settings.authoritativeLogin() || !this.repository.supportsSessionMarkers()) return;
+        Optional<SessionMarker> marker;
+        try {
+            marker = this.repository.sessionMarker(playerId);
+        } catch (final IOException corrupt) {
+            SourbyLogger.warn("AWF MultiProfile: the session marker of " + playerId + " is unreadable (" + corrupt.getMessage()
+                + "); it is replaced by an open marker without provenance, so this login restores the committed head");
+            marker = Optional.of(SessionMarker.opened(playerId, generation - 1L, this.nodeId));
+        }
+        if (marker.isEmpty() || marker.get().generation() != generation - 1L) return;
+        this.repository.writeSessionMarker(marker.get().atGeneration(generation));
+    }
+
+    /**
+     * A switch is about to apply another profile's state (review P2): the vanilla playerdata will no longer hold the
+     * profile the marker names once the server saves it, so the provenance is cleared first. A write that fails fails the
+     * switch before anything is applied. Runs inside an I/O step.
+     */
+    private void clearVanillaProvenance(final UUID playerId) throws IOException {
+        if (!this.settings.authoritativeLogin() || !this.repository.supportsSessionMarkers()) return;
+        final PlayerSession session = this.sessions.get(playerId);
+        if (session == null) return;
+        final Optional<SessionMarker> marker = this.repository.sessionMarker(playerId);
+        if (marker.isEmpty() || marker.get().generation() != session.sessionGeneration() || marker.get().vanillaProfile() == null) return;
+        this.repository.writeSessionMarker(marker.get().withoutProvenance());
+    }
+
+    /**
+     * Operator escape ({@code /awf multiprofile session <player> reset-marker}): writes a closed marker of the account's
+     * current session generation with no provenance, so the player's next authoritative login restores the committed
+     * head and does not adopt the vanilla playerdata (the safe choice: nothing is duplicated; progress held only in
+     * vanilla playerdata since the last committed capture is dropped). Completes with a description.
+     */
+    public CompletableFuture<String> resetSessionMarker(final UUID playerId) {
+        if (!this.settings.enabled()) return failed(ProfileErrorCode.DISABLED, "AWF MultiProfile is disabled");
+        return io(() -> {
+            if (!format2()) throw error(ProfileErrorCode.MIGRATION_REQUIRED, "session markers exist on a format-2 store only");
+            if (!this.repository.supportsSessionMarkers()) {
+                throw error(ProfileErrorCode.INVALID_REQUEST, "the repository " + this.repository.describe() + " stores no session markers");
+            }
+            final PlayerAccount account = this.repository.loadAccount(playerId, this.settings.defaultSlots());
+            final SessionMarker reset = SessionMarker.reset(playerId, account.sessionGeneration(), this.nodeId);
+            this.repository.writeSessionMarker(reset);
+            SourbyLogger.warn("AWF MultiProfile: the session marker of " + playerId + " was reset by an operator (" + reset.describe()
+                + "); the next login restores the committed head and adopts no vanilla playerdata");
+            return "session marker of " + playerId + " reset to " + reset.describe() + "; the next login restores the committed head"
+                + " of the active profile and the vanilla playerdata is not adopted" + (this.sessions.containsKey(playerId)
+                    ? " (the player is online here: their quit closes this marker as usual)" : "");
+        });
+    }
+
+    /**
+     * Operator escape ({@code /awf multiprofile session <player> clear-refusal}): lifts the freeze {@link #refuseSaves}
+     * installed for the player's current session, so their next save is attempted again. {@code false} when none was set
+     * (a new session clears it on its own).
+     */
+    public boolean clearSaveRefusal(final UUID playerId) {
+        final boolean cleared = this.saveRefused.remove(playerId);
+        if (cleared) SourbyLogger.warn("AWF MultiProfile: the refused-save freeze of " + playerId + " was lifted by an operator");
+        return cleared;
+    }
+
+    /**
+     * Publishes the empty initial state as the first snapshot of an UNINITIALIZED stream, under the login's ticket;
+     * the head becomes READY at R 1. A refusal (the account moved, the stream was initialised meanwhile, the store
+     * declined) is logged, never fatal: the state is on the player and the next save publishes. Runs inside an I/O step.
+     */
+    private void publishInitialState(final UUID playerId, final LoginSource source) {
+        try {
+            final PlayerSession session = this.sessions.get(playerId);
+            if (session == null || !session.claim().equals(source.ticket().claim())) return;
+            final CaptureTicket ticket = new CaptureTicket(playerId, session.claim(), session.sessionGeneration(), session.accountRevision(),
+                source.profileId(), source.epoch());
+            if (!source.profileId().equals(session.activeProfile())) return;
+            publishCaptured(ticket, source.state(), ProfileStateAdapters.Capture.EMPTY);
+        } catch (final IOException | RuntimeException refused) {
+            SourbyLogger.warn("AWF MultiProfile: the initial empty state of " + playerId + " in " + source.profileId() + " was applied"
+                + " but not published (" + messageOf(refused) + "); the next save publishes the stream's first snapshot");
+        }
+    }
+
+    /**
+     * Where a message for an online player goes: the runtime sends it on the player's thread. Called on an I/O
+     * worker; the hook must not block.
+     */
+    public void onPlayerNotice(final java.util.function.BiConsumer<UUID, String> hook) {
+        this.playerNotice = Objects.requireNonNull(hook, "hook");
+    }
+
+    private void notify(final UUID playerId, final String text) {
+        try {
+            this.playerNotice.accept(playerId, text);
+        } catch (final RuntimeException failed) {
+            SourbyLogger.warn("AWF MultiProfile: could not message " + playerId + ": " + failed.getMessage());
+        }
     }
 
     /** Whether the account has an incomplete journal; runs inside an I/O step. */
@@ -1859,12 +2653,24 @@ public final class ProfileEngine {
             return recorded != null;
         }
         if (this.players.online(playerId)) {
-            final ClaimResult claimed = this.ownership.claim(UUID.fromString(lapsed.id()), this.nodeId,
-                UUID.randomUUID()).join();
+            final UUID profileId = UUID.fromString(lapsed.id());
+            // Another member's session, a switch or a recovery of this process may hold the profile live already (a
+            // co-op several members play here): adopt that claim instead of superseding it, so the node converges on
+            // one claim per profile rather than two sessions re-claiming it from each other on every heartbeat.
+            final OwnerClaim live = liveNodeClaim(profileId);
+            if (live != null && !live.sameIncarnation(lapsed)) {
+                this.sessionClaims.replace(playerId, lapsed, live);
+                return true;
+            }
+            final ClaimResult claimed = this.ownership.claim(profileId, this.nodeId, UUID.randomUUID()).join();
             if (claimed.granted()) {
                 if (this.sessionClaims.replace(playerId, lapsed, claimed.claim())) {
                     SourbyLogger.warn("AWF MultiProfile: the session claim of " + playerId + " on " + lapsed.id()
                         + " lapsed and was claimed again (fence " + lapsed.fence() + " -> " + claimed.claim().fence() + ")");
+                    // Other members sharing the lapsed claim follow it to the new one.
+                    for (final Map.Entry<UUID, OwnerClaim> entry : this.sessionClaims.entrySet()) {
+                        if (entry.getValue().sameIncarnation(lapsed)) this.sessionClaims.replace(entry.getKey(), entry.getValue(), claimed.claim());
+                    }
                     return true;
                 }
                 // The player quit, or a switch installed its claim, in the meantime: this one is nobody's.
@@ -1887,7 +2693,13 @@ public final class ProfileEngine {
 
     /** Whether a switch, a recovery or the teleport of a join preparation ({@link #prepareActive}) runs for the player. */
     public boolean switchInProgress(final UUID playerId) {
-        return this.switches.containsKey(playerId);
+        return this.switches.containsKey(playerId) || this.loginGates.containsKey(playerId);
+    }
+
+    /** Clears the per-session flags a quit ends: the login gate and a refused-save freeze. */
+    private void sessionFlagsCleared(final UUID playerId) {
+        this.loginGates.remove(playerId);
+        this.saveRefused.remove(playerId);
     }
 
     /**
@@ -1895,15 +2707,20 @@ public final class ProfileEngine {
      * nor rolled back. Cheap enough for an event handler on the player's thread.
      */
     public boolean frozen(final UUID playerId) {
-        return this.frozen.contains(playerId) || this.lostSessions.contains(playerId);
+        return this.frozen.contains(playerId) || this.lostSessions.contains(playerId) || this.loginGates.containsKey(playerId)
+            || this.saveRefused.contains(playerId);
     }
 
     /** Releases every claim on the calling thread; shutdown only, after the I/O drain. */
     void releaseSessionsNow() {
         RuntimeException firstFailure = null;
-        for (final Map.Entry<UUID, OwnerClaim> entry : this.sessionClaims.entrySet()) {
+        final List<OwnerClaim> distinct = new ArrayList<>();
+        for (final OwnerClaim claim : this.sessionClaims.values()) {
+            if (distinct.stream().noneMatch(claim::sameIncarnation)) distinct.add(claim);
+        }
+        for (final OwnerClaim claim : distinct) {
             try {
-                this.ownership.release(entry.getValue()).join();
+                this.ownership.release(claim).join();
             } catch (final RuntimeException failed) {
                 // One provider serves every claim; after the first failure the rest would only pay
                 // another timeout each. They expire on their own.
@@ -2119,14 +2936,15 @@ public final class ProfileEngine {
             if (session != null && session.id().equals(profileId.toString()) && this.ownership.validate(session).join()) {
                 return session;
             }
-            final ClaimResult claimed = this.ownership.claim(profileId, this.nodeId, UUID.randomUUID()).join();
+            // The live node claim other members' sessions share is reused, never superseded by a new token (review P2-6).
+            final ClaimResult claimed = nodeClaim(profileId, UUID.randomUUID());
             if (!claimed.granted()) {
                 throw error(ProfileErrorCode.OWNERSHIP_CONFLICT, "profile " + profileId + " is held by "
                     + (claimed.claim() == null ? "another node" : claimed.claim().node())
                     + "; recovery did not write");
             }
             if (comparable && recordedFence > 0L && claimed.claim().fence() < recordedFence) {
-                this.ownership.release(claimed.claim()).join();
+                releaseNodeClaimUnlessHeld(claimed.claim(), journal.playerId());
                 throw error(ProfileErrorCode.OWNERSHIP_CONFLICT, "transition " + journal.transitionId()
                     + " was recorded under fence " + recordedFence + " on " + profileId + " but this claim is fence "
                     + claimed.claim().fence() + "; refusing to write with a stale fence");
@@ -2135,11 +2953,15 @@ public final class ProfileEngine {
         });
     }
 
-    /** Releases a claim {@link #claimForRecovery} took; the player's session claim it borrowed is kept. */
+    /**
+     * Releases a claim {@link #claimForRecovery} took; the player's session claim it borrowed, and a node claim any other
+     * session or run on this node holds, are kept (checked inside the I/O step, review P2-6).
+     */
     private CompletableFuture<Void> releaseRecoveryClaim(final OwnerClaim claim, final UUID playerId) {
         if (claim == null || claim.equals(this.sessionClaims.get(playerId))) return CompletableFuture.completedFuture(null);
         return this.<Void>io(() -> {
-            this.ownership.release(claim).join();
+            if (claim.equals(this.sessionClaims.get(playerId))) return null;
+            releaseNodeClaimUnlessHeld(claim, playerId);
             return null;
         }).handle((released, failed) -> {
             if (failed != null) {
@@ -2178,7 +3000,11 @@ public final class ProfileEngine {
                     + " of transition " + journal.transitionId() + " no longer exists; refusing to guess");
             }
             this.repository.saveTransition(journal.at(TransitionPhase.RECOVERING), journalGuard);
-            return ProfileStateCodec.decode(snapshot.get().state());
+            final ProfileState state = ProfileStateCodec.decode(snapshot.get().state());
+            // Required adapter data without a registration here: the rollback would be partial; the journal stays
+            // pending for a node that has the adapter (ADAPTER_MISSING).
+            this.players.validateApply(state);
+            return state;
         }).thenCompose(state -> this.players.apply(journal.playerId(), state, this.settings.isolation())
                 .orTimeout(budget, TimeUnit.MILLISECONDS)
                 .exceptionallyCompose(failed -> CompletableFuture.failedFuture(
@@ -2293,6 +3119,8 @@ public final class ProfileEngine {
         this.worldUse.clear();
         this.sessions.clear();
         this.lostSessions.clear();
+        this.loginGates.clear();
+        this.saveRefused.clear();
         this.ownership.close();
         try {
             this.playerSessions.close();
@@ -2317,6 +3145,10 @@ public final class ProfileEngine {
         private final long began;
         private final AtomicReference<OwnerClaim> claim = new AtomicReference<>();
         private final AtomicReference<OwnerClaim> previousClaim = new AtomicReference<>();
+        /** The target claim was this node's live claim already (another member plays the co-op here): never released by this run. */
+        private volatile boolean targetClaimShared;
+        /** The previous profile's claim was this node's live claim already: never released by this run. */
+        private volatile boolean previousClaimShared;
         private final AtomicBoolean commitPoint = new AtomicBoolean();
         /** Set immediately before the target state is handed to the player's entity thread. */
         private final AtomicBoolean targetApplyStarted = new AtomicBoolean();
@@ -2416,7 +3248,9 @@ public final class ProfileEngine {
         /** Claims the target; the journal records the fence on the next phase write. */
         private CompletableFuture<Void> claimTarget() {
             return io(() -> {
-                final ClaimResult claimed = ProfileEngine.this.ownership
+                final OwnerClaim live = liveNodeClaim(this.target.id());
+                this.targetClaimShared = live != null;
+                final ClaimResult claimed = live != null ? ClaimResult.granted(live) : ProfileEngine.this.ownership
                     .claim(this.target.id(), ProfileEngine.this.nodeId, this.ownerToken).join();
                 if (!claimed.granted()) {
                     throw error(ProfileErrorCode.OWNERSHIP_CONFLICT, "profile " + this.target.id()
@@ -2436,7 +3270,11 @@ public final class ProfileEngine {
                 return CompletableFuture.completedFuture(null);
             }
             return io(() -> {
-                final ClaimResult claimed = ProfileEngine.this.ownership
+                // The player's own session claim (or another member's) on the profile being left is reused when it is
+                // live; claiming anew with this run's token would supersede it under the other members' sessions.
+                final OwnerClaim live = liveNodeClaim(previous);
+                this.previousClaimShared = live != null && sharedWithAnother(live, playerId());
+                final ClaimResult claimed = live != null ? ClaimResult.granted(live) : ProfileEngine.this.ownership
                     .claim(previous, ProfileEngine.this.nodeId, this.ownerToken).join();
                 if (!claimed.granted()) {
                     throw error(ProfileErrorCode.OWNERSHIP_CONFLICT, "the previous profile " + previous
@@ -2457,9 +3295,10 @@ public final class ProfileEngine {
         private CompletableFuture<Void> capturePrevious() {
             checkDeadline();
             final UUID previous = this.account.activeProfile();
-            return bounded(ProfileEngine.this.players.capture(playerId(), ProfileEngine.this.settings.isolation()),
+            return bounded(ProfileEngine.this.players.captureDetailed(playerId(), ProfileEngine.this.settings.isolation()),
                     "capturing the player's state")
-                .thenCompose(state -> io(() -> {
+                .thenCompose(captured -> io(() -> {
+                    final ProfileState state = captured.state();
                     this.previousState = state;
                     final OwnerClaim held = this.previousClaim.get();
                     if (ProfileEngine.this.settings.coordination().fencingEnabled() && held != null
@@ -2479,11 +3318,11 @@ public final class ProfileEngine {
                                 throw error(ProfileErrorCode.STALE_STATE, "profile " + previous + " changed since the switch"
                                     + " was admitted; the rollback point was not written");
                             }
-                            snapshot = publishMemberState(source, playerId(), this.coop.fromEpoch(), state,
+                            snapshot = publishMemberState(source, playerId(), this.coop.fromEpoch(), state, captured.adapters(),
                                 this.coop.claim(), this.coop.accountRevision());
                             this.fromHead = snapshot.revision();
                         } else {
-                            snapshot = writeSnapshotFor(previous, state, held);
+                            snapshot = writeSnapshotFor(previous, state, captured.adapters(), held);
                         }
                         this.journal.set(this.journal.get().withFromSnapshot(snapshot.snapshotId()));
                     } catch (final IOException | ProfileOperationException failed) {
@@ -2522,7 +3361,16 @@ public final class ProfileEngine {
                 }
                 snapshot.ifPresent(found -> this.journal.set(this.journal.get().withToSnapshot(found.snapshotId())));
                 return snapshot.map(ProfileSnapshot::state).map(ProfileStateCodec::decode).orElseGet(ProfileState::empty);
-            }).thenCompose(state -> phase(TransitionPhase.APPLYING_TARGET).thenApply(written -> state))
+            }).thenApply(state -> {
+                // Required adapter data with no registration refuses the switch here (ADAPTER_MISSING), before the
+                // APPLYING_TARGET phase: nothing of the target reached the player, so the journal ends FAILED.
+                ProfileEngine.this.players.validateApply(state);
+                return state;
+            }).thenCompose(state -> this.coop == null ? CompletableFuture.completedFuture(state) : io(() -> {
+                // The vanilla playerdata stops holding the previous profile once the target is applied and saved (review P2).
+                clearVanillaProvenance(playerId());
+                return state;
+            })).thenCompose(state -> phase(TransitionPhase.APPLYING_TARGET).thenApply(written -> state))
                 .thenCompose(state -> {
                     this.targetApplyStarted.set(true);
                     return bounded(ProfileEngine.this.players.apply(playerId(), state,
@@ -2795,14 +3643,18 @@ public final class ProfileEngine {
             final OwnerClaim held = this.previousClaim.getAndSet(null);
             return ProfileEngine.this.io(() -> {
                 if (held != null) {
-                    ProfileEngine.this.ownership.release(held).join();
                     ProfileEngine.this.sessionClaims.remove(playerId(), held);
+                    // Other members of a co-op still play the profile just left on this node: the node keeps its claim.
+                    releaseNodeClaimUnlessHeld(held, playerId());
                     return null;
                 }
                 final OwnerClaim holder = ProfileEngine.this.ownership.holder(previous).join();
-                if (holder != null && holder.node().equals(ProfileEngine.this.nodeId)) {
-                    ProfileEngine.this.ownership.release(holder).join();
+                if (holder != null && holder.node().equals(ProfileEngine.this.nodeId)
+                    && ProfileEngine.this.ownership.foreignHolder(previous).join() == null) {
+                    // This process holds it without a recorded claim of this run: release it only when no other session
+                    // or run on this node shares it (review P3-16).
                     ProfileEngine.this.sessionClaims.remove(playerId(), holder);
+                    releaseNodeClaimUnlessHeld(holder, playerId());
                 }
                 return null;
             });
@@ -2812,8 +3664,10 @@ public final class ProfileEngine {
         private CompletableFuture<Void> releaseTargetClaim() {
             final OwnerClaim held = this.claim.getAndSet(null);
             if (held == null) return CompletableFuture.completedFuture(null);
+            // A node claim other members' sessions share is not this run's to release; checked in the I/O step (review P2-6).
+            if (this.targetClaimShared) return CompletableFuture.completedFuture(null);
             return ProfileEngine.this.<Void>io(() -> {
-                ProfileEngine.this.ownership.release(held).join();
+                releaseNodeClaimUnlessHeld(held, playerId());
                 return null;
             }).handle((released, failed) -> {
                 if (failed != null) {
@@ -2871,6 +3725,13 @@ public final class ProfileEngine {
             final ProfileState captured = this.previousState;
             if (captured == null || !ProfileEngine.this.players.online(playerId())) {
                 return leavePending(reason + "; the player is offline, so the rollback runs at the next join");
+            }
+            try {
+                ProfileEngine.this.players.validateApply(captured);
+            } catch (final ProfileOperationException unappliable) {
+                // Required adapter data of the captured state lost its registration meanwhile: the rollback would be
+                // partial, so it stays pending for a join on a node that has the adapter.
+                return leavePending(reason + "; the rollback cannot apply completely: " + unappliable.getMessage());
             }
             return ProfileEngine.this.players.apply(playerId(), captured, ProfileEngine.this.settings.isolation())
                 .orTimeout(ProfileEngine.this.settings.switching().timeoutMillis(), TimeUnit.MILLISECONDS)
@@ -3029,10 +3890,10 @@ public final class ProfileEngine {
 
     // ------------------------------------------------------------------ state and snapshots
 
-    private void writeSnapshot(final AuroraProfile profile, final ProfileState state, final OwnerClaim claim)
-        throws IOException {
+    private void writeSnapshot(final AuroraProfile profile, final ProfileState state, final OwnerClaim claim,
+                               final ProfileStateAdapters.Capture adapters) throws IOException {
         final long began = System.nanoTime();
-        writeSnapshotFor(profile.id(), state, claim);
+        writeSnapshotFor(profile.id(), state, adapters, claim);
         if (this.metrics != null) this.metrics.snapshot(System.nanoTime() - began);
     }
 
@@ -3042,11 +3903,12 @@ public final class ProfileEngine {
      * the profile on in between. The state keeps the adapter entries of the profile's latest snapshot
      * that the capture does not account for ({@link #withCarriedAdapters}).
      */
-    private ProfileSnapshot writeSnapshotFor(final UUID profileId, final ProfileState state, final OwnerClaim claim)
+    private ProfileSnapshot writeSnapshotFor(final UUID profileId, final ProfileState state,
+                                             final ProfileStateAdapters.Capture adapters, final OwnerClaim claim)
         throws IOException {
         final AuroraProfile profile = this.repository.profile(profileId)
             .orElseThrow(() -> error(ProfileErrorCode.PROFILE_NOT_FOUND, "no profile " + profileId));
-        final byte[] encoded = encode(profileId, withCarriedAdapters(profileId, state));
+        final byte[] encoded = encode(profileId, withCarriedAdapters(profileId, state, adapters));
         final ProfileSnapshot snapshot = new ProfileSnapshot(profileId, UUID.randomUUID(), ProfileState.SCHEMA,
             profile.revision() + 1, encoded, ProfileStateCodec.checksum(encoded), System.currentTimeMillis());
         this.repository.publishSnapshot(profile.nextRevision(), snapshot, SNAPSHOTS_KEPT,
@@ -3061,7 +3923,8 @@ public final class ProfileEngine {
      * snapshot cannot be read, the capture is stored as it is, with a warning: the entries only that
      * snapshot held are then not kept, and the save is not refused for it.
      */
-    private ProfileState withCarriedAdapters(final UUID profileId, final ProfileState state) {
+    private ProfileState withCarriedAdapters(final UUID profileId, final ProfileState state,
+                                             final ProfileStateAdapters.Capture adapters) {
         final ProfileState previous;
         try {
             final Optional<ProfileSnapshot> latest = this.repository.latestSnapshot(profileId);
@@ -3072,11 +3935,16 @@ public final class ProfileEngine {
                 + unreadable.getMessage() + "); adapter data only it held is not kept in the new snapshot");
             return state;
         }
-        return previous.adapters().isEmpty() ? state : this.players.carryAdapters(state, previous);
+        return previous.adapters().isEmpty() ? state : this.players.carryAdapters(state, previous, adapters);
     }
 
-    /** {@link #withCarriedAdapters(UUID, ProfileState)} for a format-2 stream, from the head's exact snapshot. */
-    private ProfileState withCarriedAdapters(final ProfileState state, final SnapshotRead source, final UUID owner) {
+    /**
+     * {@link #withCarriedAdapters(UUID, ProfileState, ProfileStateAdapters.Capture)} for a format-2 stream, from the
+     * head's exact snapshot. The merge fails with {@link ProfileErrorCode#STATE_TOO_LARGE} when the entries do not
+     * fit the adapter budget together: the snapshot is refused rather than written without some of them.
+     */
+    private ProfileState withCarriedAdapters(final ProfileState state, final ProfileStateAdapters.Capture adapters,
+                                             final SnapshotRead source, final UUID owner) {
         final ProfileState previous;
         try {
             final Optional<ProfileSnapshot> named = source.read();
@@ -3087,7 +3955,7 @@ public final class ProfileEngine {
                 + unreadable.getMessage() + "); adapter data only it held is not kept in the new snapshot");
             return state;
         }
-        return previous.adapters().isEmpty() ? state : this.players.carryAdapters(state, previous);
+        return previous.adapters().isEmpty() ? state : this.players.carryAdapters(state, previous, adapters);
     }
 
     private interface SnapshotRead {
@@ -3757,7 +4625,15 @@ public final class ProfileEngine {
             requireProfileNode(profileId);
             requireProfileReady(profile);
             final PlayerAccount account = loadReadyAccount(player);
-            requireNotActive(account, profileId, "leave");
+            return evacuationFor(account, profile);
+        }).thenCompose(evacuation -> evacuate(evacuation).thenCompose(moved -> this.<Void>coop(() -> {
+            final AuroraProfile profile = coopProfile(profileId, true);
+            final ProfileMember row = profile.member(player);
+            if (row == null) throw error(ProfileErrorCode.NOT_A_MEMBER, player + " is not a member of " + profileId + ". Nothing was written");
+            requireProfileNode(profileId);
+            requireProfileReady(profile);
+            final PlayerAccount account = loadReadyAccount(player);
+            final CoopMembership.NextActive next = evacuation.nextFor(account, profileId, this);
             final MemberStateHead head = this.repository.memberHead(profileId, player, row.epoch()).orElse(null);
             final long storeNow = this.repository.storeClockMillis();
             // The member's open invitations are revoked and the profile's undecided votes cancelled in the same intent;
@@ -3765,11 +4641,190 @@ public final class ProfileEngine {
             final List<ProfileInvite> issued = openInvites(ProfileIndexPage.Kind.INVITES_BY_PROFILE, profileId, player, storeNow);
             final AuroraProfile current = readyAgain(profileId, profile);
             runCoopPlan(CoopMembership.leave(operation(CoopOperation.Kind.MEMBER_REMOVE, player, profileId, row.epoch(),
-                current.revision()), current, account, head, issued, undecidedVotes(current), storeNow, storeNow + INTENT_DEADLINE_MILLIS));
+                current.revision()), current, account, head, issued, undecidedVotes(current), next, storeNow, storeNow + INTENT_DEADLINE_MILLIS));
             fireCoopEvent(new dev.iyanz.sourbycraft.api.profile.CoopMemberLeaveEvent(profileId, player,
                 dev.iyanz.sourbycraft.api.profile.CoopMemberLeaveEvent.Reason.LEFT, null));
+            if (evacuation.mode() != Evacuation.Mode.NONE) {
+                notify(player, "You left co-op profile " + current.shownLabel() + "; you now play profile "
+                    + evacuation.describeNext() + ". Your items in the co-op are recorded for salvage.");
+            }
             return null;
+        })).exceptionallyCompose(failed -> undoEvacuation(evacuation, failed)));
+    }
+
+    // ------------------------------------------------------------------ removing an active member (Build 53)
+
+    /**
+     * How a member whose <em>active</em> profile is the co-op being left is moved out before the removal commits, so
+     * no item exists twice (in the co-op's salvage source and on the player) or is lost:
+     * <ul>
+     *   <li>{@link Mode#NONE}: the co-op is not the member's active profile; the Build 52 removal runs as it is;</li>
+     *   <li>{@link Mode#SWITCH_OUT}: the member is online on this node with an admitted session: a regular switch
+     *       ({@link #switchProfile}) captures their co-op state into their member stream (the gated capture ticket)
+     *       and applies the next profile's committed state; only a committed switch lets the removal run, a refused
+     *       one fails the removal with {@code MEMBER_ONLINE} and the member stays;</li>
+     *   <li>{@link Mode#REPOINT}: the member is offline (no session anywhere; their quit captured their state): the
+     *       removal intent itself moves the account's active pointer to the next profile, so their next
+     *       authoritative login restores that profile's committed head and the co-op items never come back onto
+     *       them. Needs {@code login.authoritative}; refused {@code MEMBER_ONLINE} without it, and when the member's
+     *       session is live on another node (the affected {@code Q} is held there).</li>
+     * </ul>
+     * The next profile is the first other ACTIVE, usable profile the account has access to, in account order; without
+     * one a fresh solo profile is created for the member first ({@link #createForEvacuation}), taking the slot the
+     * co-op membership is about to free.
+     */
+    private record Evacuation(Mode mode, UUID member, UUID profileId, UUID nextProfile, UUID nextEpoch, String nextName,
+                              boolean createdFresh) {
+
+        enum Mode { NONE, SWITCH_OUT, REPOINT }
+
+        static final Evacuation NONE_NEEDED = new Evacuation(Mode.NONE, null, null, null, null, null, false);
+
+        String describeNext() {
+            return this.nextName == null ? String.valueOf(this.nextProfile) : this.nextName;
+        }
+
+        /** The removal plan's next pointer: only a REPOINT names one; a switched-out member's account already moved. */
+        CoopMembership.NextActive nextFor(final PlayerAccount account, final UUID leaving, final ProfileEngine engine) throws IOException {
+            if (this.mode == Mode.SWITCH_OUT && leaving.equals(account.activeProfile())) {
+                throw error(ProfileErrorCode.MEMBER_ONLINE, this.member + " switched back into " + leaving + " before the removal"
+                    + " committed; nothing was written. Retry");
+            }
+            if (this.mode != Mode.REPOINT) return null;
+            final AuroraProfile next = engine.repository.profile(this.nextProfile)
+                .orElseThrow(() -> error(ProfileErrorCode.PROFILE_NOT_FOUND, "the next profile " + this.nextProfile + " disappeared"));
+            final MemberStateHead head = engine.repository.memberHead(next.id(), this.member, this.nextEpoch).orElse(null);
+            return new CoopMembership.NextActive(next, this.nextEpoch, head);
+        }
+    }
+
+    /**
+     * Decides how {@code account}'s member is moved out of {@code profile} when it is their active profile, and
+     * creates the fresh solo profile when they have no other. Runs inside an I/O step; see {@link Evacuation}.
+     */
+    private Evacuation evacuationFor(final PlayerAccount account, final AuroraProfile profile) throws IOException {
+        final UUID member = account.playerId();
+        if (!profile.id().equals(account.activeProfile())) return Evacuation.NONE_NEEDED;
+        final boolean online = this.players.online(member);
+        final PlayerSession session = this.sessions.get(member);
+        final Evacuation.Mode mode;
+        if (online && session != null) {
+            if (!this.settings.switching().enabled()) {
+                throw error(ProfileErrorCode.MEMBER_ONLINE, member + " plays " + profile.id() + " on this node and switching is disabled ("
+                    + ProfileSettings.SWITCHING_ENABLED_KEY + "), so they cannot be switched out first. Nothing was written");
+            }
+            mode = Evacuation.Mode.SWITCH_OUT;
+        } else if (online) {
+            throw error(ProfileErrorCode.MEMBER_ONLINE, member + " is online on this node but their profile session is not admitted"
+                + " (joining, or admission failed); retry in a moment. Nothing was written");
+        } else {
+            if (this.lostSessions.contains(member)) {
+                throw error(ProfileErrorCode.MEMBER_ONLINE, member + "'s session claim was lost on this node and is not released yet;"
+                    + " retry once they quit. Nothing was written");
+            }
+            if (!this.settings.authoritativeLogin()) {
+                throw error(ProfileErrorCode.MEMBER_ONLINE, member + " is offline with " + profile.id() + " active; while authoritative"
+                    + " login does not apply (" + ProfileSettings.LOGIN_AUTHORITATIVE_KEY + " " + this.settings.login().authoritative().id()
+                    + ") their next join would load the co-op items from vanilla playerdata beside the salvage record, so the removal"
+                    + " is refused. Nothing was written");
+            }
+            mode = Evacuation.Mode.REPOINT;
+        }
+        // The next profile: another ACTIVE, usable one the member has a membership in (a solo profile first; a co-op only
+        // when no other node holds it, else the member could not play it here, review P3-15), else a fresh solo profile.
+        AuroraProfile coopFallback = null;
+        for (final UUID candidate : account.profileIds()) {
+            if (candidate.equals(profile.id())) continue;
+            final AuroraProfile other = this.repository.profile(candidate).orElse(null);
+            if (other == null || other.status() != ProfileStatus.ACTIVE || !other.usable()) continue;
+            final ProfileMember row = other.member(member);
+            if (row == null) continue;
+            if (other.coop()) {
+                if (coopFallback == null && this.ownership.foreignHolder(other.id()).join() == null) coopFallback = other;
+                continue;
+            }
+            return new Evacuation(mode, member, profile.id(), other.id(), row.epoch(), other.shownLabel(), false);
+        }
+        if (coopFallback != null) {
+            return new Evacuation(mode, member, profile.id(), coopFallback.id(), coopFallback.member(member).epoch(),
+                coopFallback.shownLabel(), false);
+        }
+        final AuroraProfile created;
+        try {
+            created = createForEvacuation(account, profile.id());
+        } catch (final ProfileOperationException busy) {
+            if (busy.code() != ProfileErrorCode.OWNERSHIP_CONFLICT) throw busy;
+            throw new ProfileOperationException(ProfileErrorCode.MEMBER_ONLINE, member + " has a live session on another node, so no"
+                + " fresh profile could be created for them: " + busy.getMessage(), busy);
+        }
+        final ProfileMember owner = created.member(member);
+        if (owner == null) throw error(ProfileErrorCode.INTERNAL_ERROR, "the fresh profile " + created.id() + " has no owner row");
+        return new Evacuation(mode, member, profile.id(), created.id(), owner.epoch(), created.shownLabel(), true);
+    }
+
+    /** Runs the {@link Evacuation}: a {@code SWITCH_OUT} switches the member; the other modes do nothing here. */
+    private CompletableFuture<Evacuation> evacuate(final Evacuation evacuation) {
+        if (evacuation.mode() != Evacuation.Mode.SWITCH_OUT) return CompletableFuture.completedFuture(evacuation);
+        return switchProfile(evacuation.member(), evacuation.nextProfile()).thenApply(result -> {
+            if (!result.success()) {
+                throw error(ProfileErrorCode.MEMBER_ONLINE, evacuation.member() + " plays " + evacuation.profileId() + " on this node and"
+                    + " could not be switched out to " + evacuation.describeNext() + " first (" + result.errorCode() + ": " + result.message()
+                    + "); the membership was not removed");
+            }
+            return evacuation;
         });
+    }
+
+    /**
+     * Undoes what a failed removal left behind (review E3): the fresh solo profile {@link #createForEvacuation} made for
+     * the member is deleted again when nothing was switched into it (the account still names the co-op active); when it
+     * cannot be deleted, or the member already switched into it, the failure names the profile that remains. The original
+     * failure is rethrown with its code.
+     */
+    private <T> CompletableFuture<T> undoEvacuation(final Evacuation evacuation, final Throwable failed) {
+        final ProfileOperationException cause = unwrap(failed);
+        if (evacuation == null || !evacuation.createdFresh() || evacuation.nextProfile() == null) {
+            return CompletableFuture.failedFuture(cause);
+        }
+        return io(() -> {
+            final PlayerAccount account = this.repository.loadAccount(evacuation.member(), this.settings.defaultSlots());
+            return !evacuation.nextProfile().equals(account.activeProfile());
+        }).thenCompose(deletable -> deletable ? delete(evacuation.nextProfile()).thenApply(deleted -> deleted ? "" : null)
+            : CompletableFuture.completedFuture((String) null))
+            .handle((removed, deleteFailed) -> {
+                final String note;
+                if (deleteFailed == null && "".equals(removed)) {
+                    note = " The fresh solo profile " + evacuation.describeNext() + " created for the member was deleted again; nothing"
+                        + " else was written";
+                } else {
+                    note = " The fresh solo profile " + evacuation.describeNext() + " (" + evacuation.nextProfile() + ") created for the"
+                        + " member remains in their account" + (deleteFailed == null ? "" : " (deleting it failed: " + messageOf(deleteFailed) + ")")
+                        + "; delete it or keep it, the membership was not removed";
+                }
+                throw new CompletionException(new ProfileOperationException(cause.code(), cause.getMessage() + "." + note, cause));
+            });
+    }
+
+    /**
+     * Creates the fresh solo profile a member is moved to when they have no other ({@link Evacuation}): the default
+     * type, a generated name, under the member's {@code Q}. The slot rule counts the co-op membership being removed
+     * as free (it is consumed by the same operation's next step); every other rule of {@link #createDetailed} holds.
+     * Runs inside an I/O step.
+     */
+    private AuroraProfile createForEvacuation(final PlayerAccount account, final UUID vacating) throws IOException {
+        final UUID member = account.playerId();
+        if (!format2()) throw error(ProfileErrorCode.MIGRATION_REQUIRED, "a fresh profile needs a format-2 store");
+        final dev.iyanz.sourbycraft.api.profile.ProfileType type = this.settings.types().defaultType();
+        // The co-op slot is not counted as free (review P3-15): the fresh profile exists before the removal commits, and a
+        // removal that fails must not leave the account over its limit.
+        final int occupied = account.profileIds().size();
+        if (occupied >= account.slotLimit() || occupied >= this.settings.maxSlots()) {
+            throw error(ProfileErrorCode.SLOT_LIMIT, member + " has no other profile to move to and no free slot for a fresh one ("
+                + occupied + " of " + account.slotLimit() + " used, the co-op being left included). Nothing was written");
+        }
+        final ProfileDetails created = createFormat2(new ProfileRequest(member, "solo", Map.of(), type, null), type, account);
+        return this.repository.profile(created.info().id())
+            .orElseThrow(() -> readBack("profile", created.info().id()));
     }
 
     /**
@@ -3789,18 +4844,13 @@ public final class ProfileEngine {
             final List<KickVote> undecided = undecidedVotes(first, actor, storeNow);
             // Each cleanup close reserved and released M: the profile is read again before the plan is built.
             final AuroraProfile profile = readyAgain(profileId, first);
-            final ProfileMember targetRow = profile.member(target);
-            if (targetRow != null && targetRow.role() != ProfileRole.OWNER && !target.equals(actor)) {
-                requireNotActive(this.repository.loadAccount(target, this.settings.defaultSlots()), profileId, "kick");
-            }
             final long openedAt = this.repository.storeClockMillis();
             final CoopIntentPlan plan = CoopMembership.createVote(operation(CoopOperation.Kind.VOTE_CREATE, actor, profileId, target,
                 profile.revision()), profile, account, target, undecided, coopPolicy(), openedAt, openedAt + INTENT_DEADLINE_MILLIS);
             runCoopPlan(plan);
-            KickVote vote = this.repository.vote(plan.result().recordId()).orElseThrow(() -> readBack("vote", plan.result().recordId()));
-            if (vote.status() == KickVote.Status.PASSED) vote = executeKick(actor, vote);
-            return voteInfo(vote, this.repository.storeClockMillis());
-        });
+            return this.repository.vote(plan.result().recordId()).orElseThrow(() -> readBack("vote", plan.result().recordId()));
+        }).thenCompose(vote -> vote.status() == KickVote.Status.PASSED ? executeKick(actor, vote) : CompletableFuture.completedFuture(vote))
+            .thenCompose(vote -> coop(() -> voteInfo(vote, this.repository.storeClockMillis())));
     }
 
     /**
@@ -3835,24 +4885,16 @@ public final class ProfileEngine {
                     throw error(ProfileErrorCode.INVALID_REQUEST, "vote " + voteId + " has passed; approve it to run the removal."
                         + " Nothing was written");
                 }
-                return voteInfo(executeKick(voter, vote), this.repository.storeClockMillis());
+                return vote;
             }
             if (approve && vote.approvals().containsKey(voter)) {
                 throw error(ProfileErrorCode.INVALID_REQUEST, voter + " already approved vote " + voteId + ". Nothing was written");
             }
-            if (approve) {
-                final java.util.Set<UUID> approvals = new java.util.HashSet<>(vote.approvals().keySet());
-                approvals.add(voter);
-                if (approvals.containsAll(vote.electorate().keySet())) {
-                    requireNotActive(this.repository.loadAccount(vote.target(), this.settings.defaultSlots()), profile.id(), "kick");
-                }
-            }
             runCoopPlan(CoopMembership.castVote(operation(CoopOperation.Kind.VOTE_CAST, voter, voteId, approve, vote.revision()),
                 profile, vote, account, approve, storeNow, storeNow + INTENT_DEADLINE_MILLIS));
-            KickVote after = this.repository.vote(voteId).orElseThrow(() -> readBack("vote", voteId));
-            if (after.status() == KickVote.Status.PASSED) after = executeKick(voter, after);
-            return voteInfo(after, this.repository.storeClockMillis());
-        });
+            return this.repository.vote(voteId).orElseThrow(() -> readBack("vote", voteId));
+        }).thenCompose(after -> after.status() == KickVote.Status.PASSED ? executeKick(voter, after) : CompletableFuture.completedFuture(after))
+            .thenCompose(after -> coop(() -> voteInfo(after, this.repository.storeClockMillis())));
     }
 
     /** The undecided (OPEN or PASSED, unexpired) kick vote of a co-op profile, if any; the operator's and the API's form. */
@@ -3968,8 +5010,8 @@ public final class ProfileEngine {
         final OwnerClaim foreign = this.ownership.foreignHolder(profileId).join();
         if (foreign != null) {
             throw error(ProfileErrorCode.WRONG_NODE, "profile " + profileId + " is held by node " + foreign.node() + " (its bound world"
-                + " is played there); owner decision OD-1: co-op membership changes run on that node, or while nobody plays the"
-                + " profile. Nothing was written");
+                + " is played there); owner decision OD-1: a co-op profile is played and changed on that node only, or while nobody"
+                + " plays it; there is no cross-node routing. Nothing was written");
         }
     }
 
@@ -3992,21 +5034,10 @@ public final class ProfileEngine {
         if (this.switches.containsKey(accountId)) {
             throw error(ProfileErrorCode.SWITCH_IN_PROGRESS, "a profile switch is running for " + accountId + ". Nothing was written");
         }
+        requireNoLoginGate(accountId);
         if (account.pendingIntent() != null) {
             throw error(ProfileErrorCode.RECOVERY_REQUIRED, "the account " + accountId + " is reserved by intent " + account.pendingIntent()
                 + ". Nothing was written");
-        }
-    }
-
-    /**
-     * Build 52's online rule: removing a membership that is the account's <em>active</em> profile needs the gated
-     * capture of Build 53 ({@code MEMBER_ONLINE}). A player online in another profile is not refused.
-     */
-    private static void requireNotActive(final PlayerAccount account, final UUID profileId, final String what) {
-        if (profileId.equals(account.activeProfile())) {
-            throw error(ProfileErrorCode.MEMBER_ONLINE, account.playerId() + " has co-op profile " + profileId + " active; a " + what
-                + " of the active membership needs the gated capture of Build 53. It is allowed once " + account.playerId()
-                + " switched to another profile (being online elsewhere does not block it). Nothing was written");
         }
     }
 
@@ -4022,15 +5053,28 @@ public final class ProfileEngine {
         final List<PlayerClaim> acquired = new ArrayList<>(2);
         ProfileClaim transaction = null;
         try {
-            final PlayerClaim q = actorClaim(plan.op().actor(), acquired);
+            final PlayerClaim q;
+            try {
+                q = actorClaim(plan.op().actor(), acquired);
+            } catch (final ProfileOperationException busy) {
+                // A leave is a MEMBER_REMOVE whose removed member is the actor: CoopMembership.leave sets no affected
+                // account (only a kick names one), so the actor's own claim is the member's claim.
+                if (busy.code() != ProfileErrorCode.OWNERSHIP_CONFLICT || plan.op().kind() != CoopOperation.Kind.MEMBER_REMOVE
+                    || plan.affectedAccount() != null) {
+                    throw busy;
+                }
+                // A leave by a member whose session is live on another node: the API contract is MEMBER_ONLINE.
+                throw new ProfileOperationException(ProfileErrorCode.MEMBER_ONLINE, "the leaving member " + plan.op().actor()
+                    + " has a live session on another node: " + busy.getMessage() + ". Leave from that node or while offline", busy);
+            }
             PlayerClaim affected = null;
             if (plan.affectedAccount() != null) {
                 try {
                     affected = actorClaim(plan.affectedAccount(), acquired);
                 } catch (final ProfileOperationException busy) {
                     if (busy.code() != ProfileErrorCode.OWNERSHIP_CONFLICT) throw busy;
-                    throw new ProfileOperationException(ProfileErrorCode.OWNERSHIP_CONFLICT, "the member to remove, "
-                        + plan.affectedAccount() + ", has a session on another node: " + busy.getMessage() + ". Run the removal on"
+                    throw new ProfileOperationException(ProfileErrorCode.MEMBER_ONLINE, "the member to remove, "
+                        + plan.affectedAccount() + ", has a live session on another node: " + busy.getMessage() + ". Run the removal on"
                         + " that node or while the member is offline", busy);
                 }
             }
@@ -4058,6 +5102,28 @@ public final class ProfileEngine {
      * Raises the store's feature level before the first co-op record is prepared (minimumBuild 52, schema 2), durably,
      * so no build that cannot read a co-op record opens the store afterwards; a failure refuses the operation.
      */
+    private volatile boolean memberPlayStoreLevel;
+
+    /**
+     * Raises the store to minimum build {@link StoreFormat#MEMBER_PLAY_MINIMUM_BUILD} before the first non-owner member switch
+     * journal is written (review P3-17), after {@link #requireCoopStoreLevel}; a failure refuses the switch.
+     */
+    private void requireMemberPlayStoreLevel() throws IOException {
+        if (this.memberPlayStoreLevel) return;
+        requireCoopStoreLevel();
+        final StoreFormat.Marker raised = this.repository.requireStoreFeature(StoreFormat.COOP_SCHEMA, StoreFormat.MEMBER_PLAY_MINIMUM_BUILD,
+            this.storeWriter);
+        if (!raised.covers(StoreFormat.COOP_SCHEMA, StoreFormat.MEMBER_PLAY_MINIMUM_BUILD)) {
+            throw error(ProfileErrorCode.STORE_FORMAT_REFUSED, "the store marker was not raised to Build " + StoreFormat.MEMBER_PLAY_MINIMUM_BUILD
+                + " (" + describe(raised) + "); no member switch journal is written");
+        }
+        this.memberPlayStoreLevel = true;
+        final StoreStatus status = this.storeStatus;
+        if (status != null) {
+            this.storeStatus = new StoreStatus(raised, status.gate(), status.reason(), status.migration(), status.unresolvedIntents());
+        }
+    }
+
     private void requireCoopStoreLevel() throws IOException {
         if (this.coopStoreLevel) return;
         final StoreFormat.Marker raised = this.repository.requireStoreFeature(StoreFormat.COOP_SCHEMA, StoreFormat.COOP_MINIMUM_BUILD,
@@ -4168,13 +5234,21 @@ public final class ProfileEngine {
      * {@code Q} and the target's {@code Q}. Fires {@code CoopMemberLeaveEvent} (KICKED) after the commit. A failure keeps
      * the PASSED vote and says how to retry.
      */
-    private KickVote executeKick(final UUID actor, final KickVote passed) throws IOException {
-        final AuroraProfile first = coopProfile(passed.profileId(), true);
-        final KickVote vote = this.repository.vote(passed.id()).orElse(passed);
-        try {
+    private CompletableFuture<KickVote> executeKick(final UUID actor, final KickVote passed) {
+        final UUID profileId = passed.profileId();
+        return coop(() -> {
+            final AuroraProfile first = coopProfile(profileId, true);
+            final KickVote vote = this.repository.vote(passed.id()).orElse(passed);
             final PlayerAccount targetAccount = this.repository.loadAccount(vote.target(), this.settings.defaultSlots());
             requireAccountReady(targetAccount);
-            requireNotActive(targetAccount, first.id(), "kick");
+            // A target playing the co-op here is captured and switched out first; an offline one is repointed (Build 53).
+            return evacuationFor(targetAccount, first);
+        }).thenCompose(evacuation -> evacuate(evacuation).thenCompose(moved -> this.<KickVote>coop(() -> {
+            final AuroraProfile first = coopProfile(profileId, true);
+            final KickVote vote = this.repository.vote(passed.id()).orElse(passed);
+            final PlayerAccount targetAccount = this.repository.loadAccount(vote.target(), this.settings.defaultSlots());
+            requireAccountReady(targetAccount);
+            final CoopMembership.NextActive next = evacuation.nextFor(targetAccount, first.id(), this);
             final long storeNow = this.repository.storeClockMillis();
             // The target's open invitations are revoked in the same intent; the cleanup on the way may have moved M.
             final List<ProfileInvite> issued = openInvites(ProfileIndexPage.Kind.INVITES_BY_PROFILE, first.id(), actor, storeNow);
@@ -4183,16 +5257,21 @@ public final class ProfileEngine {
             final MemberStateHead head = target == null ? null
                 : this.repository.memberHead(profile.id(), target.playerId(), target.epoch()).orElse(null);
             runCoopPlan(CoopMembership.kick(operation(CoopOperation.Kind.MEMBER_REMOVE, actor, vote.id(), vote.target(),
-                profile.revision()), profile, vote, targetAccount, head, issued, coopPolicy(), storeNow, storeNow + INTENT_DEADLINE_MILLIS));
-        } catch (final ProfileOperationException failed) {
-            final String outcome = failed.code() == ProfileErrorCode.UNKNOWN_OUTCOME ? "its outcome is unknown; list the members before"
+                profile.revision()), profile, vote, targetAccount, head, issued, coopPolicy(), next, storeNow, storeNow + INTENT_DEADLINE_MILLIS));
+            fireCoopEvent(new dev.iyanz.sourbycraft.api.profile.CoopMemberLeaveEvent(first.id(), vote.target(),
+                dev.iyanz.sourbycraft.api.profile.CoopMemberLeaveEvent.Reason.KICKED, vote.id()));
+            notify(vote.target(), "You were removed from co-op profile " + profile.shownLabel() + " by vote"
+                + (evacuation.mode() == Evacuation.Mode.NONE ? "." : "; you now play profile " + evacuation.describeNext() + ".")
+                + " Your items there are recorded for salvage.");
+            return this.repository.vote(vote.id()).orElse(vote);
+        })).exceptionallyCompose(failed -> undoEvacuation(evacuation, failed))).exceptionallyCompose(failed -> {
+            final ProfileOperationException cause = unwrap(failed);
+            final String outcome = cause.code() == ProfileErrorCode.UNKNOWN_OUTCOME ? "its outcome is unknown; list the members before"
                 + " retrying" : "it was not committed; approve the vote again to retry";
-            throw new ProfileOperationException(failed.code(), "kick vote " + vote.id() + " passed and is recorded, but the removal of "
-                + vote.target() + " did not complete (" + failed.getMessage() + "); " + outcome, failed);
-        }
-        fireCoopEvent(new dev.iyanz.sourbycraft.api.profile.CoopMemberLeaveEvent(first.id(), vote.target(),
-            dev.iyanz.sourbycraft.api.profile.CoopMemberLeaveEvent.Reason.KICKED, vote.id()));
-        return this.repository.vote(vote.id()).orElse(vote);
+            return CompletableFuture.failedFuture(new ProfileOperationException(cause.code(), "kick vote " + passed.id()
+                + " passed and is recorded, but the removal of " + passed.target() + " did not complete (" + cause.getMessage() + "); "
+                + outcome, cause));
+        });
     }
 
     /** Hands a co-op event to the event thread; dropped with a warning when the engine is closed or the queue is full. */
@@ -4424,7 +5503,9 @@ public final class ProfileEngine {
         return switch (code) {
             case STALE_STATE, OWNERSHIP_CONFLICT, WORLD_UNAVAILABLE, PLAYER_OFFLINE, INVALID_REQUEST, STATE_TOO_LARGE,
                  PROFILE_NOT_FOUND, NOT_OWNED, PROFILE_LOCKED, SWITCHING_DISABLED, DISABLED, TIMEOUT,
-                 COUNTER_EXHAUSTED, CLAIM_LOST, UNKNOWN_OUTCOME, STORE_FORMAT_REFUSED, MIGRATION_REQUIRED -> code;
+                 COUNTER_EXHAUSTED, CLAIM_LOST, UNKNOWN_OUTCOME, STORE_FORMAT_REFUSED, MIGRATION_REQUIRED,
+                 ADAPTER_REQUIRED_FAILED, ADAPTER_MISSING, NOT_A_MEMBER, WRONG_NODE, COOP_DISABLED, COOP_SWITCH_UNAVAILABLE,
+                 SWITCH_IN_PROGRESS, RECOVERY_REQUIRED -> code;
             default -> ProfileErrorCode.RECOVERY_REQUIRED;
         };
     }

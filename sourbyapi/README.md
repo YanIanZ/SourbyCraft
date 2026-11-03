@@ -49,12 +49,36 @@ would against upstream Paper and may also use the SourbyCraft services below.
 | `dev.iyanz.sourbycraft.api.simd` | `SIMDChecker`, `SIMDDetection`, `VectorMapPalette` | *Breaking change in Build 48* below |
 | `dev.iyanz.sourbycraft.api.metrics` | `SourbyMetrics` and its immutable snapshots: the read-only metrics service | *Consuming it* below |
 | `dev.iyanz.sourbycraft.api.world` | `AuroraWorlds` (Aurora World Fabric worlds and templates at runtime), `WorldRequest`, `WorldProperties`, `UnloadResult`, `WorldOperationBusyException`; also `WorldUnloadResult` from the former Canvas API | [developing-awf.md](../docs/guides/developing-awf.md), [aurora-world-fabric.md](../docs/architecture/aurora-world-fabric.md) |
-| `dev.iyanz.sourbycraft.api.profile` | `AuroraProfiles` (AWF MultiProfile: durable player profiles), its requests, results, error codes, `ProfileStateAdapter`, since Build 51 `ProfileDetails` and `ProfileType`, and since Build 52 the `Coop*` types, three async `Coop*Event`s and the co-op methods | [MultiProfile API](../docs/awf/multiprofile/API.md) |
+| `dev.iyanz.sourbycraft.api.profile` | `AuroraProfiles` (AWF MultiProfile: durable player profiles), its requests, results, error codes, `ProfileStateAdapter`, since Build 51 `ProfileDetails` and `ProfileType`, since Build 52 the `Coop*` types, three async `Coop*Event`s and the co-op methods, and since Build 53 the adapter contract (`ProfileAdapterDescriptor`, `ProfileDataCriticality`, `ProfileDataScope`) | [MultiProfile API](../docs/awf/multiprofile/API.md) |
 | `dev.iyanz.sourbycraft.api.scheduler` | `RegionTask`, `EntityTask`: markers that name the owning chunk or entity of a sync Bukkit scheduler callback for the Aurora Bridge | [aurora-plugin-bridge.md](../docs/architecture/aurora-plugin-bridge.md) |
 
 `AuroraWorlds` and `AuroraProfiles` are obtained from Bukkit's `ServicesManager`; both are
 optional (a server without the feature has no registration, and `AuroraProfiles.isEnabled()` can
 be false).
+
+### API changes in Build 53
+
+Code written; compiled by an agent; not tested by the owner. Binary and source compatible: no existing signature
+changed or was removed. `ProfileErrorCode` only gains constants at the end (`ADAPTER_REQUIRED_FAILED`,
+`ADAPTER_MISSING`, `HEAD_UNREADABLE`); persist the name, not the ordinal. New types in `api.profile`: the enums
+`ProfileDataCriticality` (`REQUIRED`, `BEST_EFFORT`) and `ProfileDataScope` (`ACCOUNT_WIDE`, `PROFILE_SCOPED`,
+`UNSUPPORTED`) and the record `ProfileAdapterDescriptor(id, version, scope, criticality, maxBytes)`.
+`ProfileStateAdapter` gains `default ProfileAdapterDescriptor descriptor()`, which returns `BEST_EFFORT` /
+`PROFILE_SCOPED` with the adapter's own id, version and the 2 MiB cap, so an adapter compiled against Build 52
+links and keeps its behaviour (one change: when a BEST_EFFORT capture fails, the bytes already stored for the
+adapter at that version are now preserved instead of dropped). `REQUIRED` means the capture is durable before the
+target profile is active, the apply is verified, a failure refuses the switch or is journaled for recovery, a
+missing adapter refuses it, and a skip is never success. No new method on `AuroraProfiles`. Behaviour of existing
+methods: `switchProfile` accepts a co-op the player is a member of; `leave` and `voteKick` accept a member whose
+active profile is the co-op (`MEMBER_ONLINE` only when they cannot be switched out here, or their session is live on
+another node); `COOP_SWITCH_UNAVAILABLE` is returned only while authoritative login does not apply; `saveProfile` on a
+format-2 store saves every member playing the profile on the node. `ProfileStateAdapter.migrate(int, byte[])` is a new
+`default` method (binary compatible; default: unsupported) for data stored under an older adapter version.
+`CoopMemberLeaveEvent.Reason` is unchanged. Configuration: `aurora.awf.multiprofile.login.authoritative`
+(`auto` | `true` | `false`, default `auto` = authoritative when co-op is enabled), `shutdown.capture-deadline-ms`,
+`adapters.required` (all RESTART_REQUIRED). Not in Build 53: salvage delivery, shared bank and the purse (Build 54); audit log, switch
+guard, type rules (Build 55); owner transfer (unscheduled). See
+[MultiProfile API](../docs/awf/multiprofile/API.md#adapter-contract-build-53).
 
 ### API changes in Build 52
 
@@ -67,10 +91,9 @@ changed; `ProfileDetails` is unchanged; `ProfileErrorCode` only gains constants 
 `UnsupportedOperationException` on an older implementation): `getCoopDetails`, `convertToCoop`,
 `invite`, `acceptInvite`, `declineInvite`, `cancelInvite`, `listInvitesFor`, `listInvites`, `leave`,
 `startKickVote`, `voteKick`, `getOpenKickVote`, `listMembers`, `setCoopLabel`. All are refused with
-`COOP_DISABLED` unless `aurora.awf.multiprofile.coop.enabled` is true (default false). Not in Build 52:
-a member switching into a co-op profile they do not own (Build 53), removing a member whose active profile
-is the co-op profile (Build 53; a member online in another profile can leave or be kicked), owner transfer,
-salvage delivery (Build 54). See
+`COOP_DISABLED` unless `aurora.awf.multiprofile.coop.enabled` is true (default false). Not in Build 52 (the
+first two arrived in Build 53, see above): a member switching into a co-op profile they do not own, removing a
+member whose active profile is the co-op profile, owner transfer, salvage delivery (Build 54). See
 [MultiProfile API](../docs/awf/multiprofile/API.md#co-op-membership-build-52).
 
 ### API changes in Build 51

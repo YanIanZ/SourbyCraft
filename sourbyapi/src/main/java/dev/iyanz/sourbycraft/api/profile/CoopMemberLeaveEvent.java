@@ -15,6 +15,12 @@ import org.jspecify.annotations.Nullable;
  * not cancellable, and lost if the node stops between the commit and the firing. At the time of the event the
  * membership epoch is consumed and the member's state is recorded for salvage; nothing has been delivered
  * (salvage delivery is Build 54).</p>
+ *
+ * <p>Build 53: a member who is online with the co-op as their active profile is captured and switched out to their
+ * next profile (or a fresh solo profile) first; the removal and this event follow. The {@link Reason} is still
+ * {@link Reason#LEFT} or {@link Reason#KICKED}, so a listener sees the same event as for an offline member and
+ * cannot tell the two apart. The capture and switch-out complete before the removal commits, so the event never
+ * precedes them.</p>
  */
 public class CoopMemberLeaveEvent extends Event {
 

@@ -9,6 +9,9 @@ import java.util.UUID;
  * this record is the additive view, returned by {@link AuroraProfiles#getCoopDetails(UUID)} and by
  * {@link AuroraProfiles#convertToCoop(UUID, UUID)}.
  *
+ * <p>Build 53: every listed member can {@linkplain AuroraProfiles#switchProfile switch into} the profile and has
+ * their own state in it. The record is unchanged and the member list says nothing about who is online.</p>
+ *
  * @param profileId the profile
  * @param label the shared display label the owner chose, or an empty string when none was set. It is
  *     not the profile's immutable name and not any member's persisted alias; changing it changes neither.

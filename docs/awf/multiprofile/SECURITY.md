@@ -77,7 +77,8 @@ Build 52 code written and compiled by an agent; not tested by the owner. Off by 
   profile's metadata record, so two membership changes of one profile cannot interleave between prepare and
   commit. What the store itself enforces, independent of the caller: member rows change only under a profile
   claim and inside an intent; an account gains or loses access to a co-op profile only inside an intent, and a
-  co-op profile becomes an account's active profile only for its owner in Build 52 (`COOP_SWITCH_UNAVAILABLE`);
+  co-op profile becomes an account's active profile only for its owner or a current member (Build 53; Build 52
+refused members with `COOP_SWITCH_UNAVAILABLE`), never for a removed member;
   a co-op record is refused on a store whose marker was not raised to schema 2 / Build 52. A plugin must still
   decide which player may ask for what: the API takes the acting account id as an argument and does not
   authenticate it. `/coop` acts only as the sender itself (permission `sourbycraft.coop.use`, default true),
@@ -85,6 +86,34 @@ Build 52 code written and compiled by an agent; not tested by the owner. Off by 
   `/sourbycraft:coop`, and the bare `/coop` only after the plugins enabled and only when none of them holds it (an
   INFO names the holder otherwise); `/awf multiprofile coop` acts on behalf of any
   named player and every change through it needs `sourbycraft.command.awf.admin`.
+- **Member state is bound to a membership epoch (Build 53).** A member's head and snapshots are keyed by profile,
+  member and membership epoch. A capture ticket carries the session generation, the active profile, the epoch and
+  the revision it started from, and a save is refused when any changed, so a capture cannot be written into another
+  profile, another member's stream or a later membership of the same account. A removed member's rejoin has a new
+  epoch and an empty state; the old epoch is never restored. The ticket is an integrity check against stale
+  writers, not an authentication of the player.
+- **Authoritative login does not fall back to vanilla data (Build 53).** While it applies (`login.authoritative`
+  `auto` with co-op enabled, or `true`) a join that cannot read the committed head is refused (`HEAD_UNREADABLE`),
+  as is one whose journal, claim or adapters cannot be settled; it never *loads* `players/data/<uuid>.dat` as a
+  substitute, because that file could hold items already moved to another profile or member. It may *adopt* that
+  file once, as the head's next snapshot, only when the per-account session marker shows the previous session was
+  unclean (or absent: the upgrade from Build 52), the file is newer than the head, and the marker's provenance names
+  the active profile on this node; the marker is written by the server only, never by a client. `false` keeps the
+  Build 52 behaviour and its duplication window (an uncaptured quit leaves items in playerdata that the snapshot does
+  not hold); it is a risk the operator accepts and the server logs a WARN for it with co-op on.
+- **Adapters are trusted plugin code with bounded blobs (Build 53).** An adapter's bytes are stored verbatim and
+  never deserialised by the server; limits (2 MiB per adapter, 6 MiB aggregate, 8 MiB snapshot, 32 adapters) are
+  unchanged. A REQUIRED adapter cannot be skipped by a failure or by its absence, so a plugin cannot make a switch
+  appear successful while its data was dropped; but an adapter's own `apply` is arbitrary plugin code and the
+  server cannot verify what it restored beyond its returning without error. A plugin cannot lower its criticality
+  below what the operator set in `adapters.required`. `descriptor().scope()` is a declaration the server does not
+  verify.
+- **Online removal captures before it removes (Build 53).** A leave or kick of a member who is playing the co-op
+  switches the member out through the gated capture and removes the membership afterwards, so the member's items
+  are in one place (their last co-op snapshot, which salvage will consume in Build 54, or their new state), not
+  both.
+- **Shutdown capture is bounded, not guaranteed (Build 53).** `shutdown.capture-deadline-ms` bounds the wait; a
+  player not saved by then keeps the last committed state, and the process can still be killed before it runs.
 - **Invitations and votes are bounded.** Open invitations per profile and per invitee, open votes and
   pending operations are store bounds; reaching one is `CAPACITY_EXCEEDED` before anything is written. An
   invitation expires `coop.invite-expiry-minutes` after issue and expiry is judged at commit against the
@@ -110,7 +139,8 @@ Build 52 code written and compiled by an agent; not tested by the owner. Off by 
   blocks the storage lane); a handler runs outside region, entity, global tick and Netty threads and must not
   touch world or player state directly.
 - **Downgrade.** The first co-op record raises the store to minimum build 52 before it is written, so Build 51
-  refuses the store instead of reading co-op records as corrupt, and the auto-updater refuses a jar below 52.
+  refuses the store instead of reading co-op records as corrupt, and the auto-updater refuses a jar below 52. The
+  first switch journal of a non-owner member raises it to 53 (Build 53), for the same reason against Build 52.
 - **Unchanged limits.** Co-op does not widen the distributed boundary: the Redis repository fences each
   commit as described above, and OD-1 refuses joining a co-op profile on a node that does not hold its
   bound world rather than claiming a multi-writer world.

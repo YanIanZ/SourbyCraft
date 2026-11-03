@@ -97,11 +97,14 @@ six RESTART_REQUIRED keys under `coop.*` ([CONFIGURATION.md](CONFIGURATION.md#bu
 default off. A removal durably consumes the membership epoch and records an unavailable-to-delivery
 salvage entry.
 
-Deliberately not in Build 52: a member switching into a co-op profile they do not own, member snapshots and
-login restore for members (Build 53); removing a membership that is the member's active profile (Build 53;
-a member online in another profile can leave or be kicked); owner transfer and
-kicking the owner (refused, no planned build); the shared bank, collections and salvage delivery (Build
-54); type rules and the audit log (Build 55). Joining a co-op profile on a node other than the one holding
+Build 53 adds member play: a member switches into the co-op with their own head and snapshots, authoritative
+login restores the committed head on join, an online member can be removed after a gated capture and switch-out,
+and shutdown captures online players before the server removes them
+([PROFILE-LIFECYCLE.md](PROFILE-LIFECYCLE.md#member-switching-and-play-build-53)); the adapter contract gains
+REQUIRED and BEST_EFFORT ([PROFILE-ISOLATION.md](PROFILE-ISOLATION.md#adapter-contract-build-53)).
+
+Deliberately not in Build 53: owner transfer and kicking the owner (refused, no planned build); the shared bank,
+collections and salvage delivery (Build 54); type rules, the switch guard and the audit log (Build 55). Joining a co-op profile on a node other than the one holding
 its bound world is refused (OD-1); the co-op metadata may be in a shared store, but the world is loaded on
 one node.
 
@@ -118,9 +121,13 @@ one node.
 
 ## Known gaps
 
-- A player's live state does not follow them between servers: a join keeps that server's vanilla
-  playerdata and only a switch applies a profile snapshot.
-- No quit snapshot at shutdown (feature patch 0081 closes MultiProfile before players are saved).
+- A player's live state does not follow them between servers. While authoritative login applies (Build 53;
+  `login.authoritative` `auto` with co-op enabled, or `true`) a join restores the committed state of the active
+  profile on that server and every vanilla player save publishes a snapshot; otherwise it keeps that server's vanilla
+  playerdata and only a switch, quit or shutdown writes a profile snapshot.
+- Shutdown captures online players before they are removed (Build 53), bounded by
+  `shutdown.capture-deadline-ms`; a player not saved by the deadline, or a killed process, keeps the last committed
+  snapshot.
 - No proxy or portal handoff; `RoutingFabric` has no transport.
 - A crash after the commit and before the server saves vanilla playerdata is not covered (PM-028,
   owner decision).

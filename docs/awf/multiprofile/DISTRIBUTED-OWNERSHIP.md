@@ -151,11 +151,13 @@ implements OS file locks.
 
 ## Known gaps
 
-- A player's live state does not follow them between servers. A join keeps that server's vanilla
-  playerdata; only a switch applies a profile snapshot, and the next save or quit snapshot stores the
-  local state. A player who moves between servers can therefore lose progress.
-- No quit snapshot at shutdown: feature patch 0081 closes MultiProfile before the server saves and
-  removes players (needs a materialized-patch change).
+- A player's live state does not follow them between servers. With `login.authoritative: true` (Build 53) a
+  join restores the committed state of the active profile from the store, so a player who moves between servers
+  gets the last snapshot that was saved, not the other server's live state; progress after that snapshot, or in a
+  capture that missed the shutdown deadline, is lost. With `false` a join keeps that server's vanilla playerdata
+  (Build 52 behaviour).
+- Shutdown capture (Build 53) is per node and bounded by `shutdown.capture-deadline-ms`; it is not a distributed
+  handoff. A member plays a co-op only on the node holding its bound world (OD-1, `WRONG_NODE` elsewhere).
 - No proxy or portal handoff. `RoutingFabric` has no transport and advertises an empty address.
 - No Redis Cluster and no replica topology.
 - Profile steps run one at a time per server (`ProfileIoQueue`), so one slow Redis call delays every
