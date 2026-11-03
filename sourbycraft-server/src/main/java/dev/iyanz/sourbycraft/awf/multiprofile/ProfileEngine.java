@@ -2153,7 +2153,12 @@ public final class ProfileEngine {
                 return loginSource(playerId, recoveredJournal);
             })
             .thenCompose(source -> {
-                if (source.restore() == null) return CompletableFuture.completedFuture(source.restore);
+                // A refusal or a NONE decided inside loginSource reaches the caller as is: nothing is applied or written
+                // for it (the documented refusal code, not an INTERNAL_ERROR from applying a null state).
+                if (source.restore().outcome() == LoginRestore.Outcome.NONE
+                    || source.restore().outcome() == LoginRestore.Outcome.REFUSED) {
+                    return CompletableFuture.completedFuture(source.restore);
+                }
                 if (source.adopt()) return adoptVanilla(playerId, source, abandon);
                 final CompletableFuture<Void> worlds = source.binding() == null || source.binding().isEmpty()
                     ? CompletableFuture.completedFuture(null)
