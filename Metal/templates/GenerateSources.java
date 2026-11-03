@@ -2,6 +2,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.StandardOpenOption;
 import java.util.*;
 import java.util.regex.Matcher;
@@ -93,15 +95,28 @@ public final class GenerateSources {
         defMacro("IS_REFERENCE_KEY", new ArrayList<>(), isRefKey ? "1" : "0", macros);
         defMacro("IS_REFERENCE_VALUE", new ArrayList<>(), isRefValue ? "1" : "0", macros);
 
-        Files.deleteIfExists(dst);
+        final List<String> generated = Preprocessor.parse(src, macros);
+        Files.createDirectories(dst.getParent());
 
-        if (dst.getParent() != null) {
-            Files.createDirectories(dst.getParent());
+        // Repeated builds should leave unchanged output untouched, preserving
+        // incremental compilation and avoiding useless filesystem notifications.
+        if (Files.isRegularFile(dst) && Files.readAllLines(dst, StandardCharsets.UTF_8).equals(generated)) {
+            System.out.println("Unchanged " + dst);
+            return;
         }
 
-        Files.write(
-                dst, Preprocessor.parse(src, macros), StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE
-        );
+        // Never leave a truncated generated source when codegen is interrupted.
+        final Path temporary = Files.createTempFile(dst.getParent(), ".metal-codegen-", ".tmp");
+        try {
+            Files.write(temporary, generated, StandardCharsets.UTF_8, StandardOpenOption.TRUNCATE_EXISTING);
+            try {
+                Files.move(temporary, dst, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (final AtomicMoveNotSupportedException ex) {
+                Files.move(temporary, dst, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(temporary);
+        }
 
         System.out.println("Generated " + dst + " from " + src);
     }
