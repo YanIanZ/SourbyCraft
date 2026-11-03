@@ -208,7 +208,8 @@ class CoopRedisTest {
 
         // STALE: an expected revision that moved.
         Map<String, String> before = keyspace();
-        refusedWith(ProfileErrorCode.STALE_STATE, () -> this.repository.commitAccount(account.withSlotLimit(4),
+        // A writer that read revision a-1 builds its after-image at a; Redis holds a, so the vector check refuses it.
+        refusedWith(ProfileErrorCode.STALE_STATE, () -> this.repository.commitAccount(account.atRevision(a - 1L).withSlotLimit(4),
             CoopWriteGuard.alias(op(CoopOperation.Kind.ACCOUNT_LIMIT, player), q, a - 1L)));
         assertEquals(before, keyspace(), "a STALE write changed Redis");
         // A member save that expects a head revision the stream does not have (it has no head yet).
