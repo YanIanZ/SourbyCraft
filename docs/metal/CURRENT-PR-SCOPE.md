@@ -14,6 +14,7 @@
 | `scripts/setup_metal.sh` | call generator from script path | compatible with CI working directory |
 | `sourbycraft-server/build.gradle.kts.patch` | `metalProvider=upstream/modular/vendored` | no default runtime change, explicit candidate selection |
 | `gradle.properties` | `metalModularVersion=1.3.2` pin | deterministically identifies modular candidate |
+| `.github/workflows/build.yml` | include `:Metal:test` in existing build CI test suite | runs vendored regression on push/release build; no Java tests on PR due private toolchain CI policy |
 | `Metal/README.md` and `docs/metal/*` | qualification and long-range plans | no release-feature claim |
 
 **Deliberately not changed:** `sourbyBuild`, `release`, `paperRef`, Folia scheduler implementation, AWF storage format, plugin API/UUID, network territory code, server default runtime provider.
