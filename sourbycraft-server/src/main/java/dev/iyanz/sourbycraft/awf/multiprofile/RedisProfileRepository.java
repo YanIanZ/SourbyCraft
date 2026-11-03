@@ -462,6 +462,19 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
      */
     public static RedisProfileRepository open(final RedisFabric fabric, final ProfileSettings.Repository settings,
                                               final Path fileDirectory) throws IOException {
+        return open(fabric, fabric.sessions(), settings, fileDirectory);
+    }
+
+    /**
+     * {@link #open(RedisFabric, ProfileSettings.Repository, Path)} with the session fabric whose claims this
+     * repository's writes present: every format-1 write rebuilds its claim's {@code node/incarnation/owner} from
+     * {@code sessions} ({@link #claimSession}), so it must be the fabric the process's ownership claims with. A process
+     * has one, {@code fabric.sessions()}; only a test that runs two nodes on one fabric
+     * ({@code FabricTestNodes#sessionsAs}) hands each node its own.
+     */
+    static RedisProfileRepository open(final RedisFabric fabric, final SessionFabric sessions,
+                                       final ProfileSettings.Repository settings, final Path fileDirectory) throws IOException {
+        java.util.Objects.requireNonNull(sessions, "sessions");
         final Durability durability = Durability.probe(fabric.client(RedisWorkload.CONTROL));
         durability.requireSupported(settings.requireAof());
         if (!durability.aof()) {
@@ -475,7 +488,7 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
                 + " asynchronous: a failover to a replica can lose acknowledged profile writes and move session epochs"
                 + " back. One primary is the supported topology for repository: redis");
         }
-        final RedisProfileRepository repository = new RedisProfileRepository(fabric.storageClient(), fabric.sessions(),
+        final RedisProfileRepository repository = new RedisProfileRepository(fabric.storageClient(), sessions,
             fabric.prefix() + "mp:", durability, settings.waitForAof());
         repository.probeWaitAof();
         repository.checkFormat();
