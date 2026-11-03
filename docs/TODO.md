@@ -30,13 +30,15 @@ Rencana dan keputusan OD-1…4: [BUILD-51-55-PLAN.md](releases/BUILD-51-55-PLAN.
 - [-] Build 51 — slice 2+3 + nama/tipe (G1): format 2 FILE+Redis, intent + recovery, migrasi 1→2 dengan backup,
   gate downgrade updater (OD-2), nama unik immutable, tipe profil disimpan. Dipublikasikan `v26.2-r51`
   (2026-11-03, CI hijau run 41653665686); belum diuji owner: TO-B51-01…07 di [catatan rilis Build 51](releases/26.2-build-51-aurora-nexus.md).
-- [-] Build 52 — slice 4: keanggotaan co-op (undang/terima/tolak/kedaluwarsa, keluar, peran, vote kick, batas anggota),
+- [-] Build 52 (`v26.2-r52`, dipublikasikan 2026-11-03) — slice 4: keanggotaan co-op (undang/terima/tolak/kedaluwarsa, keluar, peran, vote kick, batas anggota),
   intent FILE+Redis, level store minimumBuild 52, `/coop`. Kode ditulis, direview, dikompilasi; belum diuji owner:
   TO-B52-01…07 di [catatan rilis Build 52](releases/26.2-build-52-aurora-nexus.md).
 - [-] Build 53 — slice 5 + RFC E03: anggota main di co-op, login otoritatif (auto) + autosave lockstep + marker sesi/adopsi
   vanilla, kontrak adapter REQUIRED/BEST_EFFORT, penghapusan anggota online, snapshot quit saat shutdown (PM-076, patch 0081).
   Kode ditulis, direview, dikompilasi; belum diuji owner: TO-B53-01…08 di [catatan rilis Build 53](releases/26.2-build-53-aurora-nexus.md).
-- [ ] Build 54 — slice 6: bank bersama/pribadi, koleksi, transfer dengan receipt, salvage exactly-once (OD-3), purse via adapter (OD-4).
+- [-] Build 54 — slice 6 + registry tipe profil (dikelola addon) + API developer: bank bersama/pribadi, koleksi, transfer
+  dengan receipt + retry idempoten, salvage exactly-once (OD-3), purse via adapter (OD-4), `SourbyAPI`, AWF listWorlds/info/
+  createInstance. Kode ditulis, direview, dikompilasi; belum diuji owner: TO-B54-01…06 di [catatan rilis Build 54](releases/26.2-build-54-aurora-nexus.md).
 - [ ] Build 55 — slice 7 + G5–G7: audit, switch guard, aturan tipe, paritas API, antrean I/O per akun (PM-091).
 
 ---
