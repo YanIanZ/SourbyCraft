@@ -15,6 +15,11 @@ sini **dan** di dokumen sumbernya bila ada di repo, sertakan bukti (run CI, comm
 Plan lama (era v6/v12/Folia, Mei–Juli 2026, dulu di `docs/superpowers/`, dihapus 2026-10-13) tidak dimasukkan; isinya
 sudah digantikan dokumen di atas.
 
+Program peningkatan Metal untuk rencana Build 56–100 (belum terimplementasi dan tanpa hasil benchmark):
+[Metal Program](metal/README.md) · [roadmap dan gate](metal/BUILD-56-100-ROADMAP.md) ·
+[qualification owner](metal/PERFORMANCE-QUALIFICATION.md).
+Ini **proposal**, bukan daftar tugas selesai dan tidak menggantikan status Build 50 di bawah.
+
 Rencana rilis Build 47–50 (item per build, gate per build): [`docs/releases/ROADMAP-47-50.md`](releases/ROADMAP-47-50.md).
 
 Status: `[ ]` belum · `[-]` sebagian / perlu validasi · `[!]` terblokir keputusan owner
