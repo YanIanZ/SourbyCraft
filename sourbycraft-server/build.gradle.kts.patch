@@ -71,13 +71,20 @@
  configurations.named(log4jPlugins.compileClasspathConfigurationName) {
      extendsFrom(configurations.compileClasspath.get())
  }
-@@ -109,12 +_,13 @@
+@@ -109,12 +_,19 @@
  }
  
  dependencies {
 -    implementation(project(":paper-api"))
 +    implementation(project(":sourbyapi"))
-     implementation("ca.spottedleaf:leafpile:1.2.0")
+-    implementation("ca.spottedleaf:leafpile:1.2.0")
++    // SourbyCraft Metal: keep upstream as the default until the owner qualifies
++    // the vendored library. Exactly one provider must be on the server classpath.
++    when (val metalProvider = rootProject.providers.gradleProperty("metalProvider").getOrElse("upstream")) {
++        "upstream" -> implementation("ca.spottedleaf:leafpile:1.2.0")
++        "vendored" -> implementation(project(":Metal"))
++        else -> error("Invalid metalProvider '$metalProvider' (expected upstream or vendored)")
++    }
 -    implementation("org.jline:jline-terminal-ffm:3.27.1") // use ffm on java 22+
 -    implementation("org.jline:jline-terminal-jni:3.27.1") // fall back to jni on java 21
 +    implementation("org.jline:jline-terminal-ffm:3.29.0") // use ffm on java 22+
