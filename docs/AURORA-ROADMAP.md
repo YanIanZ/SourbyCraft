@@ -4,6 +4,8 @@
 >
 > Entry point: [docs/architecture/AURORA.md](architecture/AURORA.md).
 
+> **Companion (planned Build 56–100):** [Aurora Engine Independence program](proposals/aurora-engine-independence/README.md). Its build ranges are proposed scopes, not an implementation record or replacement for M0–M28 and current Build 50 readiness. It excludes a standalone Metal/Spottedleaf upgrade.
+
 ## SourbyCraft 26.2
 
 **Branch:** `26.2`  
