@@ -136,9 +136,18 @@ public final class FileProfileRepository implements ProfileRepository, ProfileMi
     static final int MAX_PENDING_GLOBAL = 1024;
     /** Snapshot files one member stream directory may hold before pruning gives up on it. */
     private static final int MAX_STREAM_FILES = 4096;
-    private static final int MAX_MARKER = 28 + 256;
+    private static final int MAX_MARKER = 28 + 256 + 4; // header, writer (64 chars of UTF-8), Build 52 minimumBuild trailer
     private static final String LOCK_FILE = "repository.lock";
     private static final String CORRUPT = ".corrupt";
+    /** The store clock's persisted high-water mark: {@code "AWFC"} and one big-endian epoch-millisecond long. */
+    private static final String CLOCK_FILE = "clock.awfc";
+    private static final int CLOCK_MAGIC = 0x41574643; // "AWFC"
+    /**
+     * How far ahead of the clock the persisted high-water mark runs ({@link #storeClockMillis}): the file is rewritten
+     * once the clock reaches half of it, so the clock a restart resumes from is never below any value this process
+     * returned, at the price of a jump of at most this much after a crash.
+     */
+    static final long CLOCK_LEASE_MILLIS = 30_000L;
 
     private final Path root;
     private final Path accounts;
@@ -179,6 +188,11 @@ public final class FileProfileRepository implements ProfileRepository, ProfileMi
     private FileProfileClaims claims;
     private int defaultSlots = PlayerAccount.DEFAULT_SLOTS;
     private boolean closed;
+    /** The last value {@link #storeClockMillis} returned: the store clock never runs backwards within a process. */
+    private long lastClockMillis;
+    /** The high-water mark the clock file holds (a value the clock has not reached yet, or the exact value at close). */
+    private long persistedClockMillis;
+    private boolean clockWarned;
 
     /** Opens the directory for an unnamed holder; see {@link #FileProfileRepository(Path, String)}. */
     public FileProfileRepository(final Path root) throws IOException {
@@ -249,6 +263,7 @@ public final class FileProfileRepository implements ProfileRepository, ProfileMi
                     }
                 }
             }
+            readClock();
             refreshMarker();
             if (this.markerProblem != null) {
                 SourbyLogger.error("AWF MultiProfile: " + this.markerProblem);
@@ -637,6 +652,15 @@ public final class FileProfileRepository implements ProfileRepository, ProfileMi
     public synchronized void close() {
         if (this.closed) return;
         this.closed = true;
+        if (this.lastClockMillis > 0L && this.lastClockMillis != this.persistedClockMillis) {
+            // The exact last value: a clean restart resumes from it without the lease's jump.
+            try {
+                persistClock(this.lastClockMillis);
+            } catch (final IOException | RuntimeException failed) {
+                SourbyLogger.warn("AWF MultiProfile: the store clock mark " + this.root.resolve(CLOCK_FILE) + " was not written at close ("
+                    + failed.getMessage() + "); the last mark, written ahead of the clock, stands");
+            }
+        }
         try {
             this.lock.release();
         } catch (final IOException | RuntimeException ignored) {
@@ -673,6 +697,10 @@ public final class FileProfileRepository implements ProfileRepository, ProfileMi
             throw invalid("this build writes only format-" + StoreFormat.CURRENT + " schema-" + StoreFormat.SCHEMA
                 + " markers; a downgrade marker is never written");
         }
+        if (!current.legacyFormat() && (current.schema() > next.schema() || current.minimumBuild() > next.minimumBuild())) {
+            throw refused("the store was raised to schema " + current.schema() + " / Build " + current.minimumBuild() + "; a marker below"
+                + " that (schema " + next.schema() + ", Build " + next.minimumBuild() + ") is never written. Nothing was written");
+        }
         if (next.migration() == StoreFormat.MigrationState.IN_PROGRESS) {
             if (!current.legacyFormat() && current.migration() != StoreFormat.MigrationState.IN_PROGRESS) {
                 throw invalid("the store is already format 2; a migration marker is not written over it");
@@ -692,6 +720,34 @@ public final class FileProfileRepository implements ProfileRepository, ProfileMi
         this.sawFormat2 = true;
         this.indexes.strict(true);
         this.format2Residue = null;
+    }
+
+    /**
+     * {@link ProfileRepository#requireStoreFeature}: under the commit lock, so no format-2 write interleaves; the
+     * marker file is replaced durably before this returns.
+     */
+    @Override
+    public synchronized StoreFormat.Marker requireStoreFeature(final int schema, final int minimumBuild, final String writtenBy)
+        throws IOException {
+        refreshMarker();
+        if (this.markerProblem != null) throw refused(this.markerProblem);
+        final StoreFormat.Marker current = this.marker;
+        if (current.legacyFormat() || current.migration() == StoreFormat.MigrationState.IN_PROGRESS) {
+            throw refused("the store is " + (current.legacyFormat() ? "format 1" : "being migrated") + "; its feature level is"
+                + " not raised and no co-op record is written");
+        }
+        if (schema > StoreFormat.MAX_SCHEMA || minimumBuild > StoreFormat.READS_UP_TO_BUILD) {
+            throw invalid("this build raises a store to at most schema " + StoreFormat.MAX_SCHEMA + " and Build "
+                + StoreFormat.READS_UP_TO_BUILD);
+        }
+        if (current.covers(schema, minimumBuild)) return current;
+        requireTransactional();
+        final StoreFormat.Marker next = current.raised(schema, minimumBuild, System.currentTimeMillis(), writtenBy);
+        durable(this.formatFile, StoreFormat.encode(next));
+        this.marker = next;
+        SourbyLogger.info("AWF MultiProfile: the profile store now requires Build " + next.requiredBuild() + " or newer (schema "
+            + next.schema() + "); builds below it refuse it");
+        return next;
     }
 
     // ================================================================== format 2: guarded record writes
@@ -722,6 +778,7 @@ public final class FileProfileRepository implements ProfileRepository, ProfileMi
         if (!migration) {
             requireNext(after.revision(), expected.revision(), what);
             requirePlayerClaim(guard, player);
+            checkCoopAccess(stored == null ? PlayerAccount.empty(player, this.defaultSlots) : stored, after, this::profileOrNull, what);
         }
         final Set<String> aliases = new HashSet<>();
         for (final String alias : after.aliases().values()) {
@@ -732,6 +789,61 @@ public final class FileProfileRepository implements ProfileRepository, ProfileMi
         }
         validateLive(guard);
         return publish(file, TYPE_ACCOUNT, after.revision(), payload, player, guard, migration, what);
+    }
+
+    /** Whether the marker read last covers co-op records (schema 2, Build 52). */
+    private boolean coopStoreLevel() {
+        return this.marker != null && this.marker.covers(StoreFormat.COOP_SCHEMA, StoreFormat.COOP_MINIMUM_BUILD);
+    }
+
+    private String describeLevel() {
+        return this.marker == null ? "unreadable" : "schema " + this.marker.schema() + ", minimum build " + this.marker.minimumBuild();
+    }
+
+    /** Reads a stored profile for {@link #checkCoopAccess}; {@code null} when none. */
+    interface ProfileLookup {
+        AuroraProfile profile(UUID profileId) throws IOException;
+    }
+
+    /**
+     * The account side of "membership changes are intents" (the counterpart of the member-row check of
+     * {@code commitProfile}), shared with the Redis repository: a direct account commit may not add or drop access to
+     * a co-op profile (an accept, leave or kick does that in one intent with the member row), and may make a co-op
+     * profile the active one only for a current member, which in Build 52 is its OWNER only
+     * ({@code COOP_SWITCH_UNAVAILABLE} for every other member: member switching arrives in Build 53), at that
+     * member's epoch. Solo profiles, account-local aliases, slot limits, sessions and cleanups are unaffected (Build 51
+     * behaviour), and so is a profile the store does not hold (a creation in the same operation).
+     */
+    static void checkCoopAccess(final PlayerAccount stored, final PlayerAccount after, final ProfileLookup profiles, final String what)
+        throws IOException {
+        final Set<UUID> touched = new LinkedHashSet<>(stored.profileIds());
+        touched.addAll(after.profileIds());
+        for (final UUID profileId : touched) {
+            if (stored.owns(profileId) == after.owns(profileId)) continue;
+            final AuroraProfile profile = profiles.profile(profileId);
+            if (profile != null && profile.coop()) {
+                throw invalid("a direct commit of " + what + (after.owns(profileId) ? " adds" : " drops") + " access to co-op profile "
+                    + profileId + "; co-op membership changes are intents (accept, leave, kick). Nothing was written");
+            }
+        }
+        final UUID active = after.activeProfile();
+        if (active == null || active.equals(stored.activeProfile())) return;
+        final AuroraProfile target = profiles.profile(active);
+        if (target == null || !target.coop()) return;
+        final ProfileMember row = target.member(after.playerId());
+        if (row == null) {
+            throw new ProfileOperationException(ProfileErrorCode.NOT_A_MEMBER, what + " would make co-op profile " + active + " active but "
+                + after.playerId() + " is not one of its members. Nothing was written");
+        }
+        if (row.role() != ProfileRole.OWNER) {
+            throw new ProfileOperationException(ProfileErrorCode.COOP_SWITCH_UNAVAILABLE, what + " would make co-op profile " + active
+                + " active for its " + row.role() + " " + after.playerId() + "; in Build 52 only the OWNER plays a co-op profile (member"
+                + " switching arrives in Build 53). Nothing was written");
+        }
+        if (after.activeEpoch() != null && !after.activeEpoch().equals(row.epoch())) {
+            throw invalid(what + " names active epoch " + after.activeEpoch() + " but the owner's membership epoch in " + active + " is "
+                + row.epoch() + ". Nothing was written");
+        }
     }
 
     @Override
@@ -768,11 +880,19 @@ public final class FileProfileRepository implements ProfileRepository, ProfileMi
                 throw invalid("a direct commit of " + what + " cannot change its owner, name, creation time or memberships;"
                     + " membership changes are intents");
             }
+            if (stored.kind() != after.kind()) {
+                throw invalid("a direct commit of " + what + " cannot change its kind (" + stored.kind() + " to " + after.kind()
+                    + "); the conversion to co-op is an intent and one way");
+            }
             checkReservation(stored.pendingIntent(), guard, what);
             if (!Objects.equals(after.pendingIntent(), stored.pendingIntent())) {
                 throw invalid("a direct commit of " + what + " cannot install or clear a reservation; intents do that");
             }
             requireNext(after.revision(), expected.revision(), what);
+        }
+        if (!migration && ProfileRecords.needsProfileSchema2(after) && !coopStoreLevel()) {
+            throw refused(what + " is a co-op or labelled profile (payload schema 2) but the store marker " + this.formatFile + " is "
+                + describeLevel() + "; raise the store's feature level first (requireStoreFeature). Nothing was written");
         }
         validateLive(guard);
         return publish(file, TYPE_PROFILE, after.revision(), payload, id, guard, migration, what);
@@ -1108,6 +1228,14 @@ public final class FileProfileRepository implements ProfileRepository, ProfileMi
         }
         requireIntentClaims(intent, guard);
         checkIntentRevision(guard, intent);
+        // The deadline is compared against the store clock under the commit lock, before the marker: an invite
+        // accept carries the invite's expiry here, so an expired invitation cannot be consumed by a late commit.
+        final long storeNow = storeClockMillis();
+        if (intent.pastDeadline(storeNow)) {
+            throw new ProfileOperationException(ProfileErrorCode.TIMEOUT, "intent " + operationId + " (" + intent.kind()
+                + ") passed its deadline " + intent.deadlineMillis() + " (store clock " + storeNow + "); it can only be aborted."
+                + " Nothing was committed");
+        }
         final List<Step> steps = plan(intent);
         for (final Step step : steps) {
             final Expected after = step.after();
@@ -1541,7 +1669,8 @@ public final class FileProfileRepository implements ProfileRepository, ProfileMi
             if (read.format() >= StoreFormat.CURRENT) this.sawFormat2 = true;
             this.indexes.strict(!read.legacyFormat());
             final boolean unknown = read.format() > StoreFormat.CURRENT
-                || (read.format() == StoreFormat.CURRENT && read.schema() > StoreFormat.SCHEMA);
+                || (read.format() == StoreFormat.CURRENT && (read.schema() > StoreFormat.MAX_SCHEMA
+                    || read.minimumBuild() > StoreFormat.READS_UP_TO_BUILD));
             this.markerProblem = unknown ? StoreFormat.gate(read).reason() : null;
         } catch (final IOException unreadable) {
             this.marker = null;
@@ -2077,12 +2206,75 @@ public final class FileProfileRepository implements ProfileRepository, ProfileMi
                     + expected);
             }
             if (staged.pendingIntent() != null) throw invalid("the after-image of " + target.describe() + " carries a reservation");
+            if (ProfileRecords.needsCoopStore(ref.recordType(), staged.record()) && !coopStoreLevel()) {
+                throw refused("the after-image of " + target.describe() + " is a co-op record but the store marker " + this.formatFile
+                    + " is " + describeLevel() + "; the store's feature level must be raised to schema " + StoreFormat.COOP_SCHEMA
+                    + " and Build " + StoreFormat.COOP_MINIMUM_BUILD + " (requireStoreFeature) before the first co-op record."
+                    + " Nothing was written");
+            }
             if (staged.record() instanceof AuroraProfile profile) {
                 if (profile.legacy()) throw invalid("the after-image of " + target.describe() + " has no member rows");
                 // A created profile's name must be free in its owner's account; compared at prepare and again at commit.
                 if (step.before().revision() == CoopWriteGuard.ABSENT) requireUniqueName(profile);
+                else checkProfileImage(profileOrNull(profile.id()), profile, intent);
+            } else {
+                checkRecordCapacity(staged.record());
             }
         }
+    }
+
+    /**
+     * Identity and kind checks of a profile after-image against the stored record (COOP-DESIGN §2: the repository
+     * checks identity and status, not only the vector): owner, name, namespace, policy type and creation time are
+     * immutable (owner transfer and renames are not operations of this port); the kind is one way; a membership
+     * change requires the operation's profile claim {@code P} on this profile.
+     */
+    static void checkProfileImage(final AuroraProfile stored, final AuroraProfile after, final ProfileIntent intent) {
+        if (stored == null) return;   // the vector reports the missing record as stale
+        if (!stored.sameIdentity(after)) {
+            throw invalid("the after-image of profile " + after.id() + " changes its owner, name, namespace, policy type or creation time;"
+                + " none of these can change (owner transfer is refused). Nothing was written");
+        }
+        if (stored.kind() == ProfileKind.COOP && after.kind() != ProfileKind.COOP) {
+            throw invalid("the after-image of profile " + after.id() + " turns a co-op profile back into a solo one; the conversion is"
+                + " one way. Nothing was written");
+        }
+        if (!sameMemberships(stored.members(), after.members())
+            && (intent.profileClaim() == null || !intent.profileClaim().id().equals(after.id()))) {
+            throw invalid("the after-image of profile " + after.id() + " changes its members but operation " + intent.operationId()
+                + " holds no profile claim on it. Nothing was written");
+        }
+    }
+
+    /**
+     * COOP-DESIGN §9 admission bounds of the membership records, checked at prepare and again at commit before the
+     * marker: at most {@value ProfileInvite#MAX_OPEN} open invites per profile and per invitee, one open vote per
+     * profile, {@value ProfileSalvage#MAX_OUTSTANDING_PER_PROFILE} outstanding salvage records per profile. A record
+     * already in the index (a replayed install) never counts twice.
+     */
+    private void checkRecordCapacity(final Object record) throws IOException {
+        if (record instanceof ProfileInvite invite && invite.open()) {
+            requireRoom(ProfileIndexPage.Kind.INVITES_BY_PROFILE, invite.profileId(), invite.id(), ProfileInvite.MAX_OPEN,
+                "open invites of profile " + invite.profileId());
+            requireRoom(ProfileIndexPage.Kind.INVITES_BY_INVITEE, invite.invitee(), invite.id(), ProfileInvite.MAX_OPEN,
+                "open invites to account " + invite.invitee());
+        } else if (record instanceof KickVote vote && vote.status().occupiesSlot()) {
+            requireRoom(ProfileIndexPage.Kind.VOTES_BY_PROFILE, vote.profileId(), vote.id(), KickVote.MAX_OPEN_PER_PROFILE,
+                "open kick votes of profile " + vote.profileId());
+        } else if (record instanceof ProfileSalvage salvaged && salvaged.outstanding()) {
+            requireRoom(ProfileIndexPage.Kind.SALVAGE_BY_PROFILE, salvaged.profileId(), salvaged.id(),
+                ProfileSalvage.MAX_OUTSTANDING_PER_PROFILE, "outstanding salvage of profile " + salvaged.profileId());
+        }
+    }
+
+    private void requireRoom(final ProfileIndexPage.Kind kind, final UUID resource, final UUID id, final int cap, final String what)
+        throws IOException {
+        final List<ProfileIndexPage.Entry> entries = this.indexes.entries(kind, resource, null, null);
+        if (entries.size() < cap) return;
+        for (final ProfileIndexPage.Entry entry : entries) {
+            if (entry.id().equals(id)) return;
+        }
+        throw busy("the bound of " + cap + " " + what + " is reached");
     }
 
     private static Step stepFor(final List<Step> steps, final Expected target) {
@@ -2208,19 +2400,38 @@ public final class FileProfileRepository implements ProfileRepository, ProfileMi
         return null;
     }
 
-    /** Derived index entries of installed membership records; idempotent. */
+    /**
+     * Derived index entries of installed membership records; idempotent, and the same as the Redis commit script
+     * keeps: the invite indexes hold <em>open</em> invites, the vote indexes undecided (OPEN or PASSED) votes, the
+     * salvage index every record that is not DELIVERED and the available index the AVAILABLE ones. A record that
+     * leaves a state leaves the index in the same install.
+     */
     private void indexAfterImage(final Object record) throws IOException {
         if (record instanceof ProfileInvite invite) {
             final ProfileIndexPage.Entry entry = new ProfileIndexPage.Entry(invite.createdAtMillis(), invite.id());
-            this.indexes.add(ProfileIndexPage.Kind.INVITES_BY_PROFILE, invite.profileId(), null, null, entry);
-            this.indexes.add(ProfileIndexPage.Kind.INVITES_BY_INVITEE, invite.invitee(), null, null, entry);
+            if (invite.open()) {
+                this.indexes.add(ProfileIndexPage.Kind.INVITES_BY_PROFILE, invite.profileId(), null, null, entry);
+                this.indexes.add(ProfileIndexPage.Kind.INVITES_BY_INVITEE, invite.invitee(), null, null, entry);
+            } else {
+                this.indexes.remove(ProfileIndexPage.Kind.INVITES_BY_PROFILE, invite.profileId(), null, null, invite.id());
+                this.indexes.remove(ProfileIndexPage.Kind.INVITES_BY_INVITEE, invite.invitee(), null, null, invite.id());
+            }
         } else if (record instanceof KickVote vote) {
             final ProfileIndexPage.Entry entry = new ProfileIndexPage.Entry(vote.createdAtMillis(), vote.id());
-            this.indexes.add(ProfileIndexPage.Kind.VOTES_BY_PROFILE, vote.profileId(), null, null, entry);
-            this.indexes.add(ProfileIndexPage.Kind.VOTES_BY_TARGET, vote.target(), null, null, entry);
+            if (vote.status().occupiesSlot()) {
+                this.indexes.add(ProfileIndexPage.Kind.VOTES_BY_PROFILE, vote.profileId(), null, null, entry);
+                this.indexes.add(ProfileIndexPage.Kind.VOTES_BY_TARGET, vote.target(), null, null, entry);
+            } else {
+                this.indexes.remove(ProfileIndexPage.Kind.VOTES_BY_PROFILE, vote.profileId(), null, null, vote.id());
+                this.indexes.remove(ProfileIndexPage.Kind.VOTES_BY_TARGET, vote.target(), null, null, vote.id());
+            }
         } else if (record instanceof ProfileSalvage salvaged) {
             final ProfileIndexPage.Entry entry = new ProfileIndexPage.Entry(salvaged.createdAtMillis(), salvaged.id());
-            this.indexes.add(ProfileIndexPage.Kind.SALVAGE_BY_PROFILE, salvaged.profileId(), null, null, entry);
+            if (salvaged.outstanding()) {
+                this.indexes.add(ProfileIndexPage.Kind.SALVAGE_BY_PROFILE, salvaged.profileId(), null, null, entry);
+            } else {
+                this.indexes.remove(ProfileIndexPage.Kind.SALVAGE_BY_PROFILE, salvaged.profileId(), null, null, salvaged.id());
+            }
             if (salvaged.state() == ProfileSalvage.State.AVAILABLE) {
                 this.indexes.add(ProfileIndexPage.Kind.SALVAGE_AVAILABLE_BY_PROFILE, salvaged.profileId(), null, null, entry);
             } else {
@@ -2675,6 +2886,79 @@ public final class FileProfileRepository implements ProfileRepository, ProfileMi
         } catch (final FileProfileIo.OutcomeUnknown unknown) {
             throw new IOException("staging " + file + " failed: " + unknown.getMessage(), unknown);
         }
+    }
+
+    /**
+     * The store clock intents' deadlines are compared against: the wall clock, never running backwards, also across
+     * restarts. The highest value returned is persisted as a high-water mark in {@value #CLOCK_FILE} ahead of the
+     * clock by {@link #CLOCK_LEASE_MILLIS} (rewritten when the clock reaches half the lease; the exact value at a clean
+     * close), and the clock resumes from that mark at open: a clock set back between two runs, or during one, does not
+     * revive an expired invitation or vote (COOP-DESIGN §9). After a crash the clock may therefore run up to the lease
+     * ahead of the wall clock until the wall clock catches up. A mark that cannot be written keeps the clock monotonic
+     * within the process and is reported once; it never fails the caller.
+     */
+    @Override
+    public synchronized long storeClockMillis() {
+        final long now = System.currentTimeMillis();
+        if (now > this.lastClockMillis) this.lastClockMillis = now;
+        if (!this.closed && this.lastClockMillis + CLOCK_LEASE_MILLIS / 2L >= this.persistedClockMillis) {
+            try {
+                persistClock(this.lastClockMillis + CLOCK_LEASE_MILLIS);
+            } catch (final IOException | RuntimeException failed) {
+                if (!this.clockWarned) {
+                    this.clockWarned = true;
+                    SourbyLogger.warn("AWF MultiProfile: the store clock mark " + this.root.resolve(CLOCK_FILE) + " cannot be written ("
+                        + failed.getMessage() + "); the clock stays monotonic within this process only until the mark is writable again");
+                }
+            }
+        }
+        return this.lastClockMillis;
+    }
+
+    /** A mark further ahead of the wall clock than the lease plus this is not trusted (a clock that jumped and came back). */
+    static final long CLOCK_TOLERANCE_MILLIS = TimeUnit.MINUTES.toMillis(10);
+
+    /**
+     * Reads the persisted clock mark at open; the clock never returns less than a valid mark. The open never fails on
+     * it: a missing, truncated or malformed file (WARN) starts from the wall clock and is rewritten by the first read;
+     * a mark beyond {@code now + lease + tolerance} (WARN) is capped to {@code now + lease}, so a mark written while
+     * the wall clock was far ahead cannot freeze every expiry for that long.
+     */
+    private void readClock() {
+        final Path file = this.root.resolve(CLOCK_FILE);
+        if (!Files.isRegularFile(file)) return;
+        final long now = System.currentTimeMillis();
+        long mark;
+        try {
+            final byte[] bytes = FileProfileIo.readBounded(file, 12);
+            if (bytes.length != 12 || ByteBuffer.wrap(bytes).getInt() != CLOCK_MAGIC) {
+                throw new IOException(bytes.length + " bytes" + (bytes.length >= 4 ? ", magic " + Integer.toHexString(ByteBuffer.wrap(bytes).getInt()) : ""));
+            }
+            mark = ByteBuffer.wrap(bytes, 4, 8).getLong();
+            if (mark < 0L) throw new IOException("negative time " + mark);
+        } catch (final IOException | RuntimeException malformed) {
+            SourbyLogger.warn("AWF MultiProfile: the store clock mark " + file + " is unreadable (" + malformed.getMessage() + "); the store"
+                + " clock resumes from the wall clock and the mark is rewritten. An invitation that expired while the wall clock was"
+                + " set back may be judged open until the wall clock passes its expiry");
+            this.persistedClockMillis = 0L;
+            return;
+        }
+        if (mark > now + CLOCK_LEASE_MILLIS + CLOCK_TOLERANCE_MILLIS) {
+            SourbyLogger.warn("AWF MultiProfile: the store clock mark " + file + " (" + mark + ") is " + (mark - now) + " ms ahead of the"
+                + " wall clock (" + now + "), beyond the lease and tolerance; it is capped to the wall clock plus the lease");
+            mark = now + CLOCK_LEASE_MILLIS;
+        }
+        this.persistedClockMillis = mark;
+        if (mark > this.lastClockMillis) this.lastClockMillis = mark;
+    }
+
+    private void persistClock(final long mark) throws IOException {
+        final ByteBuffer buffer = ByteBuffer.allocate(12);
+        buffer.putInt(CLOCK_MAGIC);
+        buffer.putLong(mark);
+        durable(this.root.resolve(CLOCK_FILE), buffer.array());
+        this.persistedClockMillis = mark;
+        this.clockWarned = false;
     }
 
     private static ProfileOperationException refused(final String message) {

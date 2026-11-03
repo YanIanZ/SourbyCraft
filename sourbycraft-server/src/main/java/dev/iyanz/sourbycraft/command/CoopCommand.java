@@ -1,0 +1,573 @@
+package dev.iyanz.sourbycraft.command;
+
+import dev.iyanz.sourbycraft.SourbyCraftColors;
+import dev.iyanz.sourbycraft.api.profile.CoopDetails;
+import dev.iyanz.sourbycraft.api.profile.CoopInviteInfo;
+import dev.iyanz.sourbycraft.api.profile.CoopKickVoteInfo;
+import dev.iyanz.sourbycraft.api.profile.CoopMemberInfo;
+import dev.iyanz.sourbycraft.api.profile.CoopPage;
+import dev.iyanz.sourbycraft.api.profile.ProfileDetails;
+import dev.iyanz.sourbycraft.api.profile.ProfileErrorCode;
+import dev.iyanz.sourbycraft.api.profile.ProfileOperationException;
+import dev.iyanz.sourbycraft.awf.multiprofile.ProfileEngine;
+import dev.iyanz.sourbycraft.awf.multiprofile.ProfileRuntime;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Locale;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
+import org.bukkit.Bukkit;
+import org.bukkit.OfflinePlayer;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Player;
+
+import static net.kyori.adventure.text.Component.text;
+
+/**
+ * AWF MultiProfile co-op commands (Build 52): the player-facing {@code /coop} and the operator's
+ * {@code /awf multiprofile coop ...} ({@link #admin}).
+ *
+ * <pre>
+ * /coop [info [profile]]               the co-op view of a profile (default: your active profile)
+ * /coop convert [profile]              convert your solo profile to co-op (one way)
+ * /coop invite &lt;player&gt; [profile]     invite a player (owner or manager)
+ * /coop invites                        your open invitations
+ * /coop accept [invite]                accept (the only open invitation when none is named)
+ * /coop decline &lt;invite&gt;               decline
+ * /coop cancel &lt;invite-uuid&gt;           cancel an invitation of your co-op (the full id the invite reply printed)
+ * /coop leave &lt;profile&gt;                leave a co-op you do not own (not while it is your active profile)
+ * /coop kick &lt;player&gt; [profile]       open a kick vote (owner or manager)
+ * /coop vote &lt;vote-uuid&gt; &lt;yes|no&gt;      cast your ballot (the full id /coop info and the kick reply print)
+ * /coop members [profile]              the members
+ * /coop label &lt;text...|--clear&gt;        the shared display label of your active co-op profile (owner)
+ * </pre>
+ *
+ * <p>A {@code profile} is a profile UUID or the name of one of your profiles; an {@code invite} is its UUID or
+ * the first characters of it ({@code accept}, {@code decline}); {@code cancel} and {@code vote} take the full UUID
+ * the replies print. Every action is asynchronous: the engine runs it on the profile I/O lane and the reply comes
+ * back on the sender's own scheduler ({@link SourbyReply#run}, the player's entity scheduler), so nothing blocks a
+ * region thread; replies name players through the online list and the server's in-memory name cache only, never
+ * through a player-data read. {@code info} and {@code members} show a co-op to its members only. Permission
+ * {@code sourbycraft.coop.use}, granted to everyone by default ({@link SourbyCraftCommands} registers it); the
+ * operator form needs {@code sourbycraft.command.awf.multiprofile} and, for every change,
+ * {@code sourbycraft.command.awf.admin}. The command is registered only while
+ * {@code aurora.awf.multiprofile.coop.enabled} is true (RESTART_REQUIRED); it never replaces a plugin's
+ * {@code /coop} (see {@link SourbyCraftCommands}).</p>
+ */
+public final class CoopCommand extends Command {
+
+    /** The player permission; default true (registered by {@link SourbyCraftCommands}). */
+    public static final String PERMISSION = "sourbycraft.coop.use";
+    static final String ADMIN_PERMISSION = "sourbycraft.command.awf.admin";
+
+    private static final List<String> SUBCOMMANDS = List.of("info", "convert", "invite", "invites", "accept", "decline", "cancel",
+        "leave", "kick", "vote", "members", "label");
+
+    private final BiConsumer<CommandSender, Runnable> reply;
+
+    public CoopCommand(final String name) {
+        this(name, SourbyReply::run);
+    }
+
+    CoopCommand(final String name, final BiConsumer<CommandSender, Runnable> reply) {
+        super(name);
+        this.description = "Co-op profiles: invite, accept, leave, vote-kick (AWF MultiProfile)";
+        this.usageMessage = "/coop <info|convert|invite|invites|accept|decline|cancel|leave|kick|vote|members|label>";
+        this.setPermission(PERMISSION);
+        this.reply = reply;
+    }
+
+    @Override
+    public boolean execute(final CommandSender s, final String alias, final String[] args) {
+        if (!testPermission(s)) return true;
+        if (!(s instanceof Player player)) {
+            s.sendMessage(text("/coop is for players; operators use /awf multiprofile coop", SourbyCraftColors.WARNING));
+            return true;
+        }
+        if (dev.iyanz.sourbycraft.core.AuroraRuntime.stopping()) {
+            s.sendMessage(text("The server is stopping; /coop starts no new work", SourbyCraftColors.DANGER));
+            return true;
+        }
+        final ProfileEngine engine = ProfileRuntime.engineOrNull();
+        if (engine == null) {
+            s.sendMessage(text("Profiles are not available on this server", SourbyCraftColors.DANGER));
+            return true;
+        }
+        final UUID me = player.getUniqueId();
+        final String sub = args.length == 0 ? "info" : args[0].toLowerCase(Locale.ROOT);
+        switch (sub) {
+            case "info" -> withProfile(s, engine, me, arg(args, 1), profile -> info(s, engine, me, profile));
+            case "convert" -> withProfile(s, engine, me, arg(args, 1), profile ->
+                done(s, engine.convertToCoop(me, profile), details -> s.sendMessage(text("Profile " + profile
+                    + " is now a co-op profile (up to " + details.maxMembers() + " members). Invite with /coop invite <player>",
+                    SourbyCraftColors.SUCCESS))));
+            case "invite" -> {
+                final UUID invitee = playerArg(s, arg(args, 1), "/coop invite <player> [profile]");
+                if (invitee == null) return true;
+                withProfile(s, engine, me, arg(args, 2), profile -> done(s, engine.invite(me, profile, invitee), invite ->
+                    s.sendMessage(text("Invited " + nameOf(invitee) + " (invite " + invite.id() + ", expires in "
+                        + minutesLeft(invite.expiresAtMillis()) + "). They accept with /coop accept; /coop cancel " + invite.id()
+                        + " withdraws it", SourbyCraftColors.SUCCESS))));
+            }
+            case "invites" -> done(s, engine.invitesFor(me, null), page -> {
+                s.sendMessage(UiPanel.header("Your co-op invitations"));
+                if (page.items().isEmpty()) s.sendMessage(UiPanel.row("none", "nobody invited you"));
+                for (final CoopInviteInfo invite : page.items()) {
+                    s.sendMessage(UiPanel.row(shortId(invite.id()), "from " + nameOf(invite.inviter()) + " to profile "
+                        + invite.profileId() + ", expires in " + minutesLeft(invite.expiresAtMillis())));
+                }
+                if (page.nextCursor() != null) s.sendMessage(UiPanel.hint("more invitations exist; decline some to see the rest"));
+                s.sendMessage(UiPanel.footer());
+            });
+            case "accept" -> withInvite(s, engine, me, arg(args, 1), invite -> done(s, engine.acceptInvite(me, invite), member ->
+                s.sendMessage(text("You joined the co-op as " + member.role() + ". Switching into it arrives in a later build;"
+                    + " until then only its owner plays it", SourbyCraftColors.SUCCESS))));
+            case "decline" -> withInvite(s, engine, me, arg(args, 1), invite -> done(s, engine.declineInvite(me, invite), ignored ->
+                s.sendMessage(text("Declined invite " + shortId(invite), SourbyCraftColors.SUCCESS))));
+            case "cancel" -> {
+                final UUID invite = uuid(s, arg(args, 1), "/coop cancel <invite-uuid>");
+                if (invite == null) return true;
+                done(s, engine.cancelInvite(me, invite), ignored -> s.sendMessage(text("Cancelled invite " + shortId(invite),
+                    SourbyCraftColors.SUCCESS)));
+            }
+            case "leave" -> {
+                if (arg(args, 1) == null) {
+                    s.sendMessage(text("Usage: /coop leave <profile> (name or UUID; it cannot be your active profile)",
+                        SourbyCraftColors.WARNING));
+                    return true;
+                }
+                withProfile(s, engine, me, arg(args, 1), profile -> done(s, engine.leave(me, profile), ignored ->
+                    s.sendMessage(text("You left co-op profile " + profile + ". Your items there are recorded for salvage;"
+                        + " delivery arrives in a later build", SourbyCraftColors.SUCCESS))));
+            }
+            case "kick" -> {
+                final UUID target = playerArg(s, arg(args, 1), "/coop kick <player> [profile]");
+                if (target == null) return true;
+                withProfile(s, engine, me, arg(args, 2), profile -> done(s, engine.startKickVote(me, profile, target),
+                    vote -> voteReply(s, vote)));
+            }
+            case "vote" -> {
+                final String choice = arg(args, 2);
+                if (choice == null || !(choice.equalsIgnoreCase("yes") || choice.equalsIgnoreCase("no"))) {
+                    s.sendMessage(text("Usage: /coop vote <vote-uuid> <yes|no>", SourbyCraftColors.WARNING));
+                    return true;
+                }
+                final UUID vote = uuid(s, arg(args, 1), "/coop vote <vote-uuid> <yes|no>");
+                if (vote == null) return true;
+                done(s, engine.voteKick(me, vote, choice.equalsIgnoreCase("yes")), info -> voteReply(s, info));
+            }
+            case "members" -> withProfile(s, engine, me, arg(args, 1), profile -> members(s, engine, me, profile));
+            case "label" -> {
+                if (args.length < 2) {
+                    s.sendMessage(text("Usage: /coop label <text...|--clear> (your active co-op profile; owner only)",
+                        SourbyCraftColors.WARNING));
+                    return true;
+                }
+                final String label = args[1].equals("--clear") ? null : String.join(" ", Arrays.copyOfRange(args, 1, args.length));
+                withProfile(s, engine, me, null, profile -> done(s, engine.setCoopLabel(me, profile, label), ignored ->
+                    s.sendMessage(text(label == null ? "Label cleared" : "Label set to \"" + label + "\"", SourbyCraftColors.SUCCESS))));
+            }
+            default -> usage(s);
+        }
+        return true;
+    }
+
+    // ------------------------------------------------------------------ operator form
+
+    /**
+     * {@code /awf multiprofile coop <sub> ...}: the same actions on behalf of a named player, for operators.
+     * {@code args[0]} is {@code multiprofile}, {@code args[1]} {@code coop}. Reads ({@code info}, {@code members},
+     * {@code invites}) need the multiprofile permission the caller already checked; every change also needs
+     * {@value #ADMIN_PERMISSION}.
+     */
+    static void admin(final CommandSender s, final ProfileEngine engine, final String[] args, final BiConsumer<CommandSender, Runnable> reply,
+                      final boolean admin) {
+        final String sub = args.length > 2 ? args[2].toLowerCase(Locale.ROOT) : "";
+        final boolean read = sub.equals("info") || sub.equals("members") || sub.equals("invites");
+        if (!read && !sub.isEmpty() && SUBCOMMANDS.contains(sub) && !admin) {
+            s.sendMessage(text("You do not have " + ADMIN_PERMISSION + "; co-op changes on behalf of a player need it",
+                SourbyCraftColors.DANGER));
+            return;
+        }
+        final Responder r = new Responder(s, reply);
+        switch (sub) {
+            case "info" -> {
+                final UUID profile = uuid(s, arg(args, 3), "/awf multiprofile coop info <profile-uuid>");
+                if (profile != null) r.info(engine, null, profile);
+            }
+            case "members" -> {
+                final UUID profile = uuid(s, arg(args, 3), "/awf multiprofile coop members <profile-uuid> [cursor]");
+                if (profile != null) r.members(engine, profile, arg(args, 4));
+            }
+            case "invites" -> {
+                if ("for".equalsIgnoreCase(arg(args, 3))) {
+                    final UUID player = playerArg(s, arg(args, 4), "/awf multiprofile coop invites for <player> [cursor]");
+                    if (player != null) r.done(engine.invitesFor(player, arg(args, 5)), page -> r.invites("Invitations of " + player, page));
+                    return;
+                }
+                final UUID profile = uuid(s, arg(args, 3), "/awf multiprofile coop invites <profile-uuid> [cursor] | invites for <player>");
+                if (profile != null) r.done(engine.invitesOf(null, profile, arg(args, 4)), page -> r.invites("Invitations of " + profile, page));
+            }
+            case "convert" -> {
+                final UUID owner = playerArg(s, arg(args, 3), "/awf multiprofile coop convert <owner> <profile-uuid>");
+                final UUID profile = owner == null ? null : uuid(s, arg(args, 4), "/awf multiprofile coop convert <owner> <profile-uuid>");
+                if (profile != null) r.done(engine.convertToCoop(owner, profile), details -> r.ok("Converted " + profile + " to co-op"));
+            }
+            case "invite" -> {
+                final String usage = "/awf multiprofile coop invite <actor> <profile-uuid> <invitee>";
+                final UUID actor = playerArg(s, arg(args, 3), usage);
+                final UUID profile = actor == null ? null : uuid(s, arg(args, 4), usage);
+                final UUID invitee = profile == null ? null : playerArg(s, arg(args, 5), usage);
+                if (invitee != null) r.done(engine.invite(actor, profile, invitee), invite -> r.ok("Invite " + invite.id() + " to "
+                    + invitee + " expires at " + java.time.Instant.ofEpochMilli(invite.expiresAtMillis())));
+            }
+            case "accept", "decline" -> {
+                final String usage = "/awf multiprofile coop " + sub + " <player> <invite-uuid>";
+                final UUID player = playerArg(s, arg(args, 3), usage);
+                final UUID invite = player == null ? null : uuid(s, arg(args, 4), usage);
+                if (invite == null) return;
+                if (sub.equals("accept")) {
+                    r.done(engine.acceptInvite(player, invite), member -> r.ok(player + " joined as " + member.role()));
+                } else {
+                    r.done(engine.declineInvite(player, invite), ignored -> r.ok("Declined invite " + invite));
+                }
+            }
+            case "cancel" -> {
+                final String usage = "/awf multiprofile coop cancel <actor> <invite-uuid>";
+                final UUID actor = playerArg(s, arg(args, 3), usage);
+                final UUID invite = actor == null ? null : uuid(s, arg(args, 4), usage);
+                if (invite != null) r.done(engine.cancelInvite(actor, invite), ignored -> r.ok("Cancelled invite " + invite));
+            }
+            case "leave" -> {
+                final String usage = "/awf multiprofile coop leave <player> <profile-uuid>";
+                final UUID player = playerArg(s, arg(args, 3), usage);
+                final UUID profile = player == null ? null : uuid(s, arg(args, 4), usage);
+                if (profile != null) r.done(engine.leave(player, profile), ignored -> r.ok(player + " left " + profile
+                    + "; an UNAVAILABLE salvage record was written"));
+            }
+            case "kick" -> {
+                final String usage = "/awf multiprofile coop kick <actor> <profile-uuid> <target>";
+                final UUID actor = playerArg(s, arg(args, 3), usage);
+                final UUID profile = actor == null ? null : uuid(s, arg(args, 4), usage);
+                final UUID target = profile == null ? null : playerArg(s, arg(args, 5), usage);
+                if (target != null) r.done(engine.startKickVote(actor, profile, target), vote -> r.vote(vote));
+            }
+            case "vote" -> {
+                final String usage = "/awf multiprofile coop vote <voter> <vote-uuid> <yes|no>";
+                final UUID voter = playerArg(s, arg(args, 3), usage);
+                final UUID vote = voter == null ? null : uuid(s, arg(args, 4), usage);
+                final String choice = arg(args, 5);
+                if (vote == null) return;
+                if (choice == null || !(choice.equalsIgnoreCase("yes") || choice.equalsIgnoreCase("no"))) {
+                    s.sendMessage(text("Usage: " + usage, SourbyCraftColors.WARNING));
+                    return;
+                }
+                r.done(engine.voteKick(voter, vote, choice.equalsIgnoreCase("yes")), info -> r.vote(info));
+            }
+            case "label" -> {
+                final String usage = "/awf multiprofile coop label <actor> <profile-uuid> <text...|--clear>";
+                final UUID actor = playerArg(s, arg(args, 3), usage);
+                final UUID profile = actor == null ? null : uuid(s, arg(args, 4), usage);
+                if (profile == null) return;
+                if (args.length < 6) {
+                    s.sendMessage(text("Usage: " + usage, SourbyCraftColors.WARNING));
+                    return;
+                }
+                final String label = args[5].equals("--clear") ? null : String.join(" ", Arrays.copyOfRange(args, 5, args.length));
+                r.done(engine.setCoopLabel(actor, profile, label), ignored -> r.ok(label == null ? "Label cleared" : "Label set"));
+            }
+            default -> s.sendMessage(text("Usage: /awf multiprofile coop <convert <owner> <profile>|invite <actor> <profile> <invitee>|"
+                + "accept <player> <invite>|decline <player> <invite>|cancel <actor> <invite>|leave <player> <profile>|"
+                + "kick <actor> <profile> <target>|vote <voter> <vote> <yes|no>|members <profile> [cursor]|"
+                + "invites <profile> [cursor]|invites for <player>|info <profile>|label <actor> <profile> <text|--clear>>",
+                SourbyCraftColors.WARNING));
+        }
+    }
+
+    /** Replies of the operator form: each on the sender's own scheduler. */
+    private record Responder(CommandSender s, BiConsumer<CommandSender, Runnable> reply) {
+
+        <T> void done(final CompletableFuture<T> future, final Consumer<T> success) {
+            future.whenComplete((value, failed) -> this.reply.accept(this.s, () -> {
+                if (failed != null) {
+                    fail(this.s, failed);
+                } else {
+                    success.accept(value);
+                }
+            }));
+        }
+
+        void ok(final String message) {
+            this.s.sendMessage(text(message, SourbyCraftColors.SUCCESS));
+        }
+
+        /** {@code viewer} is the player asking (members only), or {@code null} for the operator's unchecked view. */
+        void info(final ProfileEngine engine, final UUID viewer, final UUID profile) {
+            done(engine.coopDetails(viewer, profile), details -> {
+                if (details.isEmpty()) {
+                    this.s.sendMessage(text("Profile " + profile + " is not a co-op profile (or does not exist)", SourbyCraftColors.WARNING));
+                    return;
+                }
+                details(this.s, details.get());
+                done(engine.openKickVote(viewer, profile), vote -> vote.ifPresent(open -> this.s.sendMessage(UiPanel.row("open kick vote",
+                    open.id() + " against " + nameOf(open.target()) + " (" + open.votes() + "/" + open.electorateSize() + ", " + open.state()
+                    + "); /coop vote " + open.id() + " <yes|no>"))));
+            });
+        }
+
+        void members(final ProfileEngine engine, final UUID profile, final String cursor) {
+            done(engine.members(profile, cursor), page -> {
+                this.s.sendMessage(UiPanel.header("Members of " + profile));
+                for (final CoopMemberInfo member : page.items()) {
+                    this.s.sendMessage(UiPanel.row(member.playerId().toString(), member.role() + ", joined "
+                        + java.time.Instant.ofEpochMilli(member.joinedAtMillis())));
+                }
+                if (page.nextCursor() != null) this.s.sendMessage(UiPanel.hint("next page: " + page.nextCursor()));
+                this.s.sendMessage(UiPanel.footer());
+            });
+        }
+
+        void invites(final String title, final CoopPage<CoopInviteInfo> page) {
+            this.s.sendMessage(UiPanel.header(title));
+            if (page.items().isEmpty()) this.s.sendMessage(UiPanel.row("none", "no open invitations"));
+            for (final CoopInviteInfo invite : page.items()) {
+                this.s.sendMessage(UiPanel.row(invite.id().toString(), "profile " + invite.profileId() + ", " + invite.inviter() + " -> "
+                    + invite.invitee() + ", expires " + java.time.Instant.ofEpochMilli(invite.expiresAtMillis())));
+            }
+            if (page.nextCursor() != null) this.s.sendMessage(UiPanel.hint("next page: " + page.nextCursor()));
+            this.s.sendMessage(UiPanel.footer());
+        }
+
+        void vote(final CoopKickVoteInfo vote) {
+            voteReply(this.s, vote);
+        }
+    }
+
+    // ------------------------------------------------------------------ player helpers
+
+    private <T> void done(final CommandSender s, final CompletableFuture<T> future, final Consumer<T> success) {
+        new Responder(s, this.reply).done(future, success);
+    }
+
+    private void info(final CommandSender s, final ProfileEngine engine, final UUID viewer, final UUID profile) {
+        new Responder(s, this.reply).info(engine, viewer, profile);
+    }
+
+    private void members(final CommandSender s, final ProfileEngine engine, final UUID viewer, final UUID profile) {
+        done(s, engine.members(viewer, profile, null), page -> {
+            s.sendMessage(UiPanel.header("Co-op members"));
+            for (final CoopMemberInfo member : page.items()) s.sendMessage(UiPanel.row(nameOf(member.playerId()), member.role().name()));
+            if (page.nextCursor() != null) s.sendMessage(UiPanel.hint("more members than one page"));
+            s.sendMessage(UiPanel.footer());
+        });
+    }
+
+    /**
+     * Resolves {@code typed} (a profile UUID or the name of one of the player's profiles; {@code null} = the active
+     * profile) on the I/O lane, then runs {@code action} on the player's scheduler.
+     */
+    private void withProfile(final CommandSender s, final ProfileEngine engine, final UUID me, final String typed,
+                             final Consumer<UUID> action) {
+        if (typed != null) {
+            try {
+                action.accept(UUID.fromString(typed));
+                return;
+            } catch (final IllegalArgumentException notUuid) {
+                // a name; resolved below
+            }
+        }
+        final CompletableFuture<Optional<UUID>> resolved = typed == null
+            ? engine.active(me).thenApply(active -> active.map(info -> info.id()))
+            : engine.listDetails(me).thenApply(profiles -> profiles.stream()
+                .filter(details -> details.name().equalsIgnoreCase(typed)).map(ProfileDetails::id).findFirst());
+        done(s, resolved, found -> {
+            if (found.isEmpty()) {
+                s.sendMessage(text(typed == null ? "You have no active profile; name one (its name or UUID)"
+                    : "You have no profile named " + typed, SourbyCraftColors.DANGER));
+                return;
+            }
+            action.accept(found.get());
+        });
+    }
+
+    /** Resolves an invitation: its UUID, a prefix of it, or (none typed) the only open invitation. */
+    private void withInvite(final CommandSender s, final ProfileEngine engine, final UUID me, final String typed,
+                            final Consumer<UUID> action) {
+        if (typed != null) {
+            try {
+                action.accept(UUID.fromString(typed));
+                return;
+            } catch (final IllegalArgumentException notUuid) {
+                // a prefix; resolved below
+            }
+        }
+        done(s, engine.invitesFor(me, null), page -> {
+            final List<CoopInviteInfo> matches = page.items().stream()
+                .filter(invite -> typed == null || invite.id().toString().startsWith(typed.toLowerCase(Locale.ROOT))).toList();
+            if (matches.size() == 1) {
+                action.accept(matches.getFirst().id());
+                return;
+            }
+            s.sendMessage(text(matches.isEmpty() ? "No open invitation" + (typed == null ? "" : " starts with " + typed)
+                : matches.size() + " open invitations match; name one (see /coop invites)", SourbyCraftColors.WARNING));
+        });
+    }
+
+    private static void details(final CommandSender s, final CoopDetails details) {
+        s.sendMessage(UiPanel.header("Co-op " + (details.label().isEmpty() ? details.profileId().toString() : details.label())));
+        s.sendMessage(UiPanel.row("profile", details.profileId().toString()));
+        s.sendMessage(UiPanel.row("members", details.members().size() + " of " + details.maxMembers()));
+        for (final CoopMemberInfo member : details.members()) s.sendMessage(UiPanel.row("  " + nameOf(member.playerId()), member.role().name()));
+        s.sendMessage(UiPanel.footer());
+    }
+
+    private static void voteReply(final CommandSender s, final CoopKickVoteInfo vote) {
+        final String state = switch (vote.state()) {
+            case EXECUTED -> "passed; " + nameOf(vote.target()) + " was removed";
+            case PASSED -> "passed; the removal is pending (approve it again to retry)";
+            case OPEN -> vote.votes() + " of " + vote.electorateSize() + " approvals; expires in " + minutesLeft(vote.expiresAtMillis());
+            default -> vote.state().name().toLowerCase(Locale.ROOT);
+        };
+        s.sendMessage(text("Kick vote " + vote.id() + " against " + nameOf(vote.target()) + ": " + state
+            + (vote.state() == dev.iyanz.sourbycraft.api.profile.CoopKickVoteState.OPEN ? ". Members vote with /coop vote " + vote.id()
+            + " <yes|no>" : ""), SourbyCraftColors.SUCCESS));
+    }
+
+    private static void usage(final CommandSender s) {
+        s.sendMessage(UiPanel.header("Co-op"));
+        s.sendMessage(UiPanel.row("/coop info [profile]", "your co-op"));
+        s.sendMessage(UiPanel.row("/coop convert [profile]", "make a solo profile co-op (one way)"));
+        s.sendMessage(UiPanel.row("/coop invite <player> [profile]", "invite"));
+        s.sendMessage(UiPanel.row("/coop invites | accept [invite] | decline <invite>", "your invitations"));
+        s.sendMessage(UiPanel.row("/coop cancel <invite>", "cancel an invitation"));
+        s.sendMessage(UiPanel.row("/coop leave <profile>", "leave a co-op (not your active profile)"));
+        s.sendMessage(UiPanel.row("/coop kick <player> [profile] | vote <vote> <yes|no>", "kick votes"));
+        s.sendMessage(UiPanel.row("/coop members [profile] | label <text|--clear>", "members, shared label"));
+        s.sendMessage(UiPanel.footer());
+    }
+
+    // ------------------------------------------------------------------ shared helpers
+
+    /** A co-op failure with its error code and what the player or operator can do. */
+    static void fail(final CommandSender s, final Throwable failed) {
+        Throwable cause = failed;
+        while (cause instanceof CompletionException && cause.getCause() != null) cause = cause.getCause();
+        if (!(cause instanceof ProfileOperationException operation)) {
+            s.sendMessage(text("Failed: " + cause.getMessage(), SourbyCraftColors.DANGER));
+            return;
+        }
+        s.sendMessage(text("Failed (" + operation.code() + "): " + operation.getMessage() + hint(operation.code()), SourbyCraftColors.DANGER));
+    }
+
+    /** The operator- and player-facing hint of a co-op error code, or an empty string. */
+    static String hint(final ProfileErrorCode code) {
+        return switch (code) {
+            case COOP_DISABLED -> " (co-op is off: aurora.awf.multiprofile.coop.enabled, RESTART_REQUIRED)";
+            case MIGRATION_REQUIRED -> " (the store is format 1: /awf multiprofile migrate dry-run, then migration.mode: apply and restart)";
+            case NOT_COOP -> " (the owner converts the profile first: /coop convert)";
+            case ALREADY_COOP -> " (conversion is one way and already done)";
+            case NOT_A_MEMBER -> " (only members of the co-op can do this)";
+            case ALREADY_MEMBER -> " (that player is already a member)";
+            case COOP_FULL -> " (see aurora.awf.multiprofile.coop.max-members)";
+            case INVITE_EXPIRED -> " (ask for a new invitation)";
+            case INVITE_NOT_FOUND -> " (see /coop invites)";
+            case INVITE_EXISTS -> " (that player already has an open invitation to this co-op)";
+            case ROLE_FORBIDDEN -> " (your role does not allow it)";
+            case MEMBER_ONLINE -> " (the member has this co-op active; it works once they switched to another profile)";
+            case OWNER_ACTION_REFUSED -> " (the owner cannot leave, be kicked or transfer ownership)";
+            case WRONG_NODE -> " (OD-1: run it on the server that holds the profile, or when nobody plays it)";
+            case VOTE_NOT_FOUND -> " (no undecided vote with that id; it may have expired)";
+            case VOTE_OPEN -> " (one kick vote at a time per co-op)";
+            case ELECTORATE_CHANGED -> " (the members changed; start a new vote)";
+            case TARGET_NOT_INACTIVE -> " (in a two-member co-op see aurora.awf.multiprofile.coop.kick-vote.inactive-days)";
+            case COOP_SWITCH_UNAVAILABLE -> " (only the owner plays a co-op profile until a later build)";
+            case SLOT_LIMIT -> " (a co-op membership uses one profile slot)";
+            case TYPE_NOT_ALLOWED -> " (see aurora.awf.multiprofile.coop.allowed-types)";
+            case NAME_INVALID -> " (1-32 printable characters, no surrounding spaces)";
+            case UNKNOWN_OUTCOME -> " (the store did not confirm the write; check before retrying)";
+            case CAPACITY_EXCEEDED -> " (a co-op bound is reached: open invitations, votes or salvage records)";
+            case RECOVERY_REQUIRED -> " (a pending operation is resolved at the next login or start)";
+            case OWNERSHIP_CONFLICT -> " (the account or profile is busy on another server; retry later)";
+            default -> "";
+        };
+    }
+
+    private static String arg(final String[] args, final int index) {
+        return args.length > index ? args[index] : null;
+    }
+
+    private static UUID uuid(final CommandSender s, final String typed, final String usage) {
+        if (typed == null) {
+            s.sendMessage(text("Usage: " + usage, SourbyCraftColors.WARNING));
+            return null;
+        }
+        try {
+            return UUID.fromString(typed);
+        } catch (final IllegalArgumentException notUuid) {
+            s.sendMessage(text("Not a UUID: " + typed + ". Usage: " + usage, SourbyCraftColors.DANGER));
+            return null;
+        }
+    }
+
+    /** An online player's exact name, a player name in the server's profile cache, or a UUID. Never blocks on a lookup. */
+    private static UUID playerArg(final CommandSender s, final String typed, final String usage) {
+        if (typed == null) {
+            s.sendMessage(text("Usage: " + usage, SourbyCraftColors.WARNING));
+            return null;
+        }
+        final Player online = Bukkit.getPlayerExact(typed);
+        if (online != null) return online.getUniqueId();
+        try {
+            return UUID.fromString(typed);
+        } catch (final IllegalArgumentException notUuid) {
+            final OfflinePlayer cached = Bukkit.getOfflinePlayerIfCached(typed);
+            if (cached != null) return cached.getUniqueId();
+            s.sendMessage(text("Unknown player " + typed + "; use their UUID", SourbyCraftColors.DANGER));
+            return null;
+        }
+    }
+
+    /**
+     * A player's name for a reply without touching the disk: the online player, else the server's in-memory
+     * name cache ({@code usercache.json} as loaded), else the UUID. Replies run on the sender's entity scheduler, so a
+     * player-data read ({@code OfflinePlayer#getName} falls back to one) is not acceptable here.
+     */
+    private static String nameOf(final UUID player) {
+        final Player online = Bukkit.getPlayer(player);
+        if (online != null) return online.getName();
+        try {
+            final net.minecraft.server.MinecraftServer server = net.minecraft.server.MinecraftServer.getServer();
+            if (server != null) {
+                final var cached = server.services().nameToIdCache().get(player);
+                if (cached.isPresent() && !cached.get().name().isEmpty()) return cached.get().name();
+            }
+        } catch (final RuntimeException unavailable) {
+            // no cache (a test harness): the UUID below
+        }
+        return player.toString();
+    }
+
+    private static String shortId(final UUID id) {
+        return id.toString().substring(0, 8);
+    }
+
+    private static String minutesLeft(final long expiresAtMillis) {
+        final long minutes = Math.max(0L, (expiresAtMillis - System.currentTimeMillis()) / 60_000L);
+        return minutes + " min";
+    }
+
+    @Override
+    public List<String> tabComplete(final CommandSender sender, final String alias, final String[] args) {
+        if (args.length == 1) {
+            final String lower = args[0].toLowerCase(Locale.ROOT);
+            return SUBCOMMANDS.stream().filter(sub -> sub.startsWith(lower)).toList();
+        }
+        if (args.length == 3 && args[0].equalsIgnoreCase("vote")) return List.of("yes", "no");
+        return List.of();
+    }
+}

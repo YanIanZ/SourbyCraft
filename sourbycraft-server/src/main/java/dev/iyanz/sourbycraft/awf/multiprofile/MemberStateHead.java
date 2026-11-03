@@ -80,6 +80,12 @@ public record MemberStateHead(UUID profileId, UUID memberId, UUID epoch, long re
             Objects.requireNonNull(operationId, "operationId"), this.pendingIntent);
     }
 
+    /** The same head at an explicit revision (after-images: the revision COMMIT installs, after the reservation). */
+    public MemberStateHead atRevision(final long revision) {
+        return new MemberStateHead(this.profileId, this.memberId, this.epoch, revision, this.state, this.snapshotId,
+            this.snapshotChecksum, this.consumingOperationId, this.pendingIntent);
+    }
+
     /** Installs or clears ({@code null}) the reservation of an intent; a committed mutation, {@code R} advances. */
     public MemberStateHead withPendingIntent(final UUID operationId) {
         return new MemberStateHead(this.profileId, this.memberId, this.epoch,

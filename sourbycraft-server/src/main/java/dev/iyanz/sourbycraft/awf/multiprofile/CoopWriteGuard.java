@@ -220,10 +220,22 @@ public record CoopWriteGuard(CoopOperation operation, ProfileClaim profile, Play
     public static CoopWriteGuard intent(final CoopOperation op, final ProfileClaim profile, final PlayerClaim actor,
                                         final long expectedIntentRevision, final List<Expected> recordedVector,
                                         final Set<UUID> reservations) {
+        return intent(op, profile, actor, null, expectedIntentRevision, recordedVector, reservations);
+    }
+
+    /**
+     * {@link #intent(CoopOperation, ProfileClaim, PlayerClaim, long, List, Set)} for a membership operation that
+     * also holds the {@code Q} of the affected account (accept by the invitee: actor and affected are the same
+     * player and {@code affected} is {@code null}; kick of an offline member: the actor's session claim plus a
+     * short claim on the target account). Both claims are checked live at prepare, commit and abort.
+     */
+    public static CoopWriteGuard intent(final CoopOperation op, final ProfileClaim profile, final PlayerClaim actor,
+                                        final PlayerClaim affected, final long expectedIntentRevision,
+                                        final List<Expected> recordedVector, final Set<UUID> reservations) {
         final List<Expected> vector = new ArrayList<>(recordedVector.size() + 1);
         vector.add(Expected.record(op.operationId(), expectedIntentRevision));
         vector.addAll(recordedVector);
-        return new CoopWriteGuard(op, profile, actor, null, vector, null, reservations);
+        return new CoopWriteGuard(op, profile, actor, affected, vector, null, reservations);
     }
 
     /** Offline migration: no claim; every store format and record the migration touches is in the vector. */

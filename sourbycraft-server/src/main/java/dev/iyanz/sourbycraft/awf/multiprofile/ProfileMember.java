@@ -14,8 +14,10 @@ import java.util.UUID;
  *
  * <p>No personal state, balance or contribution lives here: snapshots are per member head, money and
  * contributions are {@link ProfileSharedState}. A profile has exactly one {@link ProfileRole#OWNER},
- * whose player id equals {@link AuroraProfile#accountId()}. Build 51 stores one owner row per profile;
- * membership changes are Build 52.</p>
+ * whose player id equals {@link AuroraProfile#accountId()}. A solo profile holds the owner row only; a
+ * co-op profile adds a row per accepted invite ({@link #admitted}) and drops it on leave or kick. The
+ * row of a removed membership is gone and its epoch's head is {@link MemberStateHead.State#CONSUMED},
+ * so no later operation can present the old epoch as a current membership.</p>
  *
  * @param playerId the member
  * @param epoch membership epoch, see above
@@ -35,6 +37,21 @@ public record ProfileMember(UUID playerId, UUID epoch, ProfileRole role, long jo
     /** The owner row of a new or migrated profile, with a fresh epoch. */
     public static ProfileMember owner(final UUID accountId, final long joinedAtMillis) {
         return new ProfileMember(accountId, UUID.randomUUID(), ProfileRole.OWNER, joinedAtMillis, joinedAtMillis);
+    }
+
+    /**
+     * The row of a member admitted now (an accepted invite), with a fresh epoch that is never reused: a player
+     * that left and rejoins gets a new one. Never {@link ProfileRole#OWNER}: a profile has exactly one owner row,
+     * written at creation.
+     */
+    public static ProfileMember admitted(final UUID playerId, final ProfileRole role, final long joinedAtMillis) {
+        if (role == ProfileRole.OWNER) throw new IllegalArgumentException("a member is admitted as MANAGER or MEMBER, never OWNER");
+        return new ProfileMember(playerId, UUID.randomUUID(), role, joinedAtMillis, joinedAtMillis);
+    }
+
+    /** Whether the member was last seen {@code inactiveMillis} or longer before {@code now} (the two-member kick rule). */
+    public boolean inactiveFor(final long inactiveMillis, final long now) {
+        return inactiveMillis > 0 && now - this.lastSeenAtMillis >= inactiveMillis;
     }
 
     public ProfileMember seenAt(final long millis) {

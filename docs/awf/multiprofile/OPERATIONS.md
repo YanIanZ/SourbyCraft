@@ -88,7 +88,7 @@ Redis back to files.
 ## Format 2, migration and rollback (Build 51)
 
 Build 51 code written; not built by an agent; not tested by the owner. MultiProfile stays disabled by
-default, and co-op membership is not part of this build (Build 52).
+default. Co-op membership is Build 52 and is described in [Enabling co-op](#enabling-co-op-build-52).
 
 Build 51 writes the profile store in **record format 2** (file and Redis repositories), which carries
 the profile's name and policy type. A store written by Build 50 or earlier is format 1.
@@ -101,9 +101,11 @@ the profile's name and policy type. A store written by Build 50 or earlier is fo
   that cannot be read at that point counts as format 2, fail closed), the auto-updater refuses to copy
   `<jar>.prev` back after a failed first boot (`RESTORE_FAILED` with the reason, the new jar stays in
   place), refuses to stage a release whose build number is below 51, and refuses to swap in a staged jar
-  whose build number is below 51 or unreadable (ERROR naming the store and OD-2). The Redis marker is
-  checked only while MultiProfile is enabled with `repository: redis`. Mixing old and new writers on one
-  store is unsupported. There is no downgrade exporter and no in-place downgrade.
+  whose build number is below 51 or unreadable (ERROR naming the store and OD-2). Since Build 52 the bar
+  is the store's required build rather than a fixed 51: 51 for a format-2 store, 52 once it holds a co-op
+  record ([Store level](#enabling-co-op-build-52)), and, for a marker that cannot be read, 52 (fail closed).
+  The Redis marker is checked only while MultiProfile is enabled with `repository: redis`. Mixing old and
+  new writers on one store is unsupported. There is no downgrade exporter and no in-place downgrade.
 - **Rollback = restore the backup.** Stop every server on the store, put the complete pre-migration
   backup (`migration.backup-dir`, written before anything is converted) back into an isolated store
   and start the older build against that. Everything written to the store after the migration is not in
@@ -138,6 +140,84 @@ the profile's name and policy type. A store written by Build 50 or earlier is fo
   receipts of a resource; a full index) is `CAPACITY_EXCEEDED`: pending operations resolve through
   recovery (`/awf multiprofile format` lists them); retry afterwards.
 
+## Enabling co-op (Build 52)
+
+Build 52 code written and compiled by an agent; not tested by the owner. Co-op is off by default. To turn
+it on:
+
+1. `aurora.awf.multiprofile.enabled: true` and a **format-2** store. A store still in format 1 refuses
+   every co-op operation with `MIGRATION_REQUIRED`; run the migration first (previous section).
+2. `aurora.awf.multiprofile.coop.enabled: true`, then **restart**: every `coop.*` key is RESTART_REQUIRED
+   ([CONFIGURATION.md](CONFIGURATION.md#build-52-co-op-membership)). With `enabled: false` the co-op key is
+   ignored with a WARN.
+3. Decide `coop.allowed-types` (default classic only) and `coop.max-members` (default 5, at most 8) before
+   players convert profiles. Conversion is one way, and narrowing `allowed-types` or lowering `max-members`
+   later changes nothing for co-ops that already exist.
+
+Turning `coop.enabled` back to `false` and restarting does not delete anything: co-op profiles, memberships,
+open invitations and votes stay in the store and stay readable, and every co-op operation is refused with
+`COOP_DISABLED`. A format-2 store (and the co-op records in it) is refused by builds older than Build 51;
+rolling back means restoring the pre-migration backup, which loses everything written since.
+
+**Store level (Build 52).** Before the first co-op record is written (the first conversion, normally), the
+store marker is raised once, durably, to payload schema 2 and minimum build 52: `format.awfm` gains a
+4-byte `minimumBuild` trailer, the Redis `meta` hash gets `schema 2` and a `minimumBuild 52` field, and the
+startup log says `the profile store now requires Build 52 or newer`. `/awf multiprofile format` shows it
+(`requires Build 52`). From then on Build 51 refuses the store at startup (FILE: it cannot parse the
+trailer; Redis: it refuses schema 2, and a Build 51 node still running against the same Redis has its next
+write refused), and the auto-updater refuses to install or restore a jar below Build 52
+([AUTO-UPDATER.md](../../development/AUTO-UPDATER.md)). There is no in-place way back: restore the
+pre-migration backup (it predates every co-op record) into an isolated store. A store that never held a
+co-op record keeps the Build 51 marker and stays openable by Build 51.
+
+What Build 52 refuses on purpose (each with a reason code, nothing written): a member switching into a
+co-op profile they do not own (`COOP_SWITCH_UNAVAILABLE`, Build 53); removing a membership that is the
+member's active profile (`MEMBER_ONLINE`, Build 53; a member online in another profile can leave or be
+kicked); owner transfer, the owner leaving and kicking the owner, and deleting a co-op profile that still
+has other members (`OWNER_ACTION_REFUSED`); a membership change while another node holds the profile's
+claim, i.e. plays its bound world (`WRONG_NODE`, OD-1); removing a member whose session is on another node
+(`OWNERSHIP_CONFLICT`). A removed member's state is recorded for salvage but nothing is delivered (Build
+54). A member added by an accepted invitation is listed and counts against the size cap and the account's
+slot limit, but cannot play the profile yet.
+
+### Commands (Build 52)
+
+Players: `/coop` (permission `sourbycraft.coop.use`, granted to everyone by default; a permissions plugin
+can remove it). The command exists only while `coop.enabled` is true (RESTART_REQUIRED); with co-op off nothing
+is registered. At boot SourbyCraft registers `/sourbycraft:coop`; the bare `/coop` is claimed after every plugin
+enabled (`ServerLoadEvent` STARTUP) and only when no plugin registered one, otherwise the holder is logged at INFO
+and `/sourbycraft:coop` stays the way in. A `profile` is the UUID or the name of one of your profiles (default: your active
+profile); an `invite` is its UUID (for `accept`/`decline` also a prefix of it, or nothing when you have exactly
+one invitation); `cancel` and `vote` take the full UUID the replies print. `info` and `members` show a co-op to
+its members only.
+
+| Command | Does |
+|---|---|
+| `/coop [info [profile]]` | label, members and cap; the open kick vote |
+| `/coop convert [profile]` | one-way conversion of your solo profile |
+| `/coop invite <player> [profile]` | invite (owner, manager); the player is an online name, a cached name or a UUID |
+| `/coop invites` | your open invitations |
+| `/coop accept [invite]`, `/coop decline <invite>` | answer an invitation |
+| `/coop cancel <invite>` | cancel an invitation (owner any, manager its own) |
+| `/coop leave <profile>` | leave (not the owner; not while it is your active profile) |
+| `/coop kick <player> [profile]`, `/coop vote <vote> <yes\|no>` | kick votes |
+| `/coop members [profile]` | members |
+| `/coop label <text...>` / `/coop label --clear` | the shared label of your active co-op profile (owner) |
+
+Operators: `/awf multiprofile coop ...` acts on behalf of a named player. `info <profile>`,
+`members <profile> [cursor]`, `invites <profile> [cursor]` and `invites for <player> [cursor]` need
+`sourbycraft.command.awf.multiprofile`; every change also needs `sourbycraft.command.awf.admin`:
+`convert <owner> <profile>`, `invite <actor> <profile> <invitee>`, `accept|decline <player> <invite>`,
+`cancel <actor> <invite>`, `leave <player> <profile>`, `kick <actor> <profile> <target>`,
+`vote <voter> <vote> <yes|no>`, `label <actor> <profile> <text...|--clear>`. Both forms run on the
+profile I/O lane; the reply arrives on the sender's own scheduler (a player's entity scheduler) and names
+the error code with a hint. Changes made by an operator are checked against the named player's role like
+any other call.
+
+A membership intent that a crash left PREPARED or COMMITTED is resolved at the next start or the player's
+next login ([PROFILE-LIFECYCLE.md](PROFILE-LIFECYCLE.md#co-op-membership-build-52)). `/awf multiprofile
+format` lists pending intents.
+
 ## Backups
 
 Before the Build 51 format-2 migration the backup in `migration.backup-dir` is the only rollback
@@ -165,6 +245,16 @@ backup is Redis's own persistence (RDB/AOF) of the `<prefix>fabric:mp:*` and ses
 | WARN `... was taken over by ... and was dropped` | another process holds the player's profile | saves for that player are refused until their next join claims it again |
 | Idle worlds never unload | players inside, `idle-unload-seconds: 0`, or the world is not an AWF world bound to a profile | expected: the sweep skips worlds with players without saving or warning, and never unloads the main world or a world no binding touched |
 | Shutdown logs "profile I/O still queued" | the drain budget elapsed | transitions stay in the journal; they are recoverable |
+| co-op call fails with `COOP_DISABLED` | `coop.enabled` is false (default), or `enabled: false` | set `coop.enabled: true` and restart; WARN at startup names the key when `enabled` is false |
+| co-op call fails with `MIGRATION_REQUIRED` | the store is still format 1 | run the format-2 migration |
+| `MEMBER_ONLINE` on leave or kick | the co-op profile is the member's **active** profile; Build 52 does not remove an active membership | the member switches to another profile first (being online elsewhere is fine); enabled in Build 53 |
+| `WRONG_NODE` on a membership change | another node holds the profile's claim, i.e. plays its bound world (OD-1) | run it on that node, or when nobody plays the profile |
+| `OWNERSHIP_CONFLICT` on a kick | the target has a session on another node | run it on that node, or while the target is offline |
+| kick fails after `vote passed and is recorded` | the vote committed, the removal did not | fix the cause named in the message, then approve the vote again (`/coop vote <vote> yes`) |
+| startup: `store format marker ... cannot be read` / `schema 2` on Build 51 | the store holds co-op records (minimum build 52) | run Build 52 or newer; going back means restoring the pre-migration backup |
+| `OWNER_ACTION_REFUSED` on delete | the co-op profile still has other members | they leave or are kicked first |
+| `COOP_SWITCH_UNAVAILABLE` | a member tried to switch into a co-op profile they do not own | not available until Build 53 |
+| `UNKNOWN_OUTCOME` on a membership call | the store did not confirm the write | do not repeat; list members/invitations and let recovery resolve the intent |
 
 ## Shutdown
 

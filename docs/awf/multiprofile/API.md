@@ -107,8 +107,8 @@ profiles.createProfile(ProfileRequest.of(player.getUniqueId(), "skyblock"))
 
 ## Names and policy types (Build 51)
 
-Build 51 code written; not built by an agent; not tested by the owner. Co-op membership is **not**
-available (Build 52); nothing in this API creates, lists or changes shared profiles.
+Build 51 code written; not built by an agent; not tested by the owner. Co-op membership is the next
+section (Build 52); the Build 51 types below carry none of it.
 
 Every profile has two independent type-like fields. `ProfileInfo.type()` is the free consumer
 namespace (`skyblock`, a plugin's own name) that the core never interprets. The new
@@ -143,6 +143,135 @@ profiles.createProfile(ProfileRequest.of(accountId, "skyblock", ProfileType.IRON
 - A profile that existed before the store was migrated receives its name at migration time (stable
   across restarts) and the policy type `classic`.
 
+## Co-op membership (Build 52)
+
+Build 52 code written and compiled by an agent; not tested by the owner. Co-op is **off by default**:
+`aurora.awf.multiprofile.coop.enabled` is `false`, and every method below then fails with
+`ProfileErrorCode.COOP_DISABLED` (`getCoopDetails` too). All of them are `default` methods on
+`AuroraProfiles` that fail with `UnsupportedOperationException` on an implementation built before
+Build 52. `ProfileInfo`, `ProfileDetails` and `ProfileRequest` are unchanged; the co-op view is a
+separate record. The arguments named `actorId`, `playerId` or `voterId` say who asks; the service checks
+that account's role at the repository commit, but, as for every mutator in this API, a plugin must still
+decide which player may ask for what.
+
+| Method | Who | Result |
+|---|---|---|
+| `getCoopDetails(UUID profileId)` | anyone | `Optional<CoopDetails>`: label, members, size cap; empty for a solo or unknown profile |
+| `convertToCoop(UUID actorId, UUID profileId)` | the profile's owner | `CoopDetails`. One way: a co-op profile never becomes solo again. The profile's policy type must be in `coop.allowed-types` |
+| `invite(UUID actorId, UUID profileId, UUID inviteeId)` | owner, manager | `CoopInviteInfo` (state `OPEN`), expires `coop.invite-expiry-minutes` after issue |
+| `acceptInvite(UUID playerId, UUID inviteId)` | the invitee | `CoopMemberInfo` of the new `MEMBER` |
+| `declineInvite(UUID playerId, UUID inviteId)` | the invitee | `Void` |
+| `cancelInvite(UUID actorId, UUID inviteId)` | owner (any invite of the profile), manager (its own) | `Void` |
+| `listInvitesFor(UUID playerId, String cursor)` | the invitee | `CoopPage<CoopInviteInfo>` of open invitations |
+| `listInvites(UUID actorId, UUID profileId, String cursor)` | owner, manager | `CoopPage<CoopInviteInfo>` of open invitations of the profile |
+| `leave(UUID playerId, UUID profileId)` | the member | `Void` |
+| `startKickVote(UUID actorId, UUID profileId, UUID targetId)` | owner, manager | `CoopKickVoteInfo` |
+| `voteKick(UUID voterId, UUID voteId, boolean approve)` | a member of the frozen electorate | `CoopKickVoteInfo`; `false` declines and closes the vote |
+| `getOpenKickVote(UUID profileId)` | anyone | `Optional<CoopKickVoteInfo>` |
+| `listMembers(UUID profileId, String cursor)` | anyone | `CoopPage<CoopMemberInfo>`, owner first, then by join time |
+| `setCoopLabel(UUID actorId, UUID profileId, String label)` | owner | `Void`; 1 to 32 characters (`NAME_INVALID` otherwise); a solo profile is `NOT_COOP` |
+
+`convertToCoop` by anyone but the owner is `NOT_OWNED`. `listInvites` by a member that is not the owner or a
+manager is `ROLE_FORBIDDEN`. Every call runs on the profile I/O lane and returns at once; nothing blocks the
+calling thread.
+
+Value types: `CoopRole` (`OWNER`, `MANAGER`, `MEMBER`), `CoopMemberInfo(playerId, role, joinedAtMillis,
+lastSeenAtMillis)`, `CoopInviteInfo(id, profileId, inviter, invitee, createdAtMillis, expiresAtMillis,
+state)` with `CoopInviteState` (`OPEN`, `ACCEPTED`, `DECLINED`, `CANCELLED`, `EXPIRED`),
+`CoopKickVoteInfo(id, profileId, target, votes, electorateSize, createdAtMillis, expiresAtMillis, state)`
+with `CoopKickVoteState` (`OPEN`, `PASSED`, `EXECUTED`, `DECLINED`, `CANCELLED`, `EXPIRED`),
+`CoopDetails(profileId, label, members, maxMembers)` and `CoopPage<T>(items, nextCursor)`. Enums only gain
+constants at the end.
+
+**Permissions** (checked at the commit, not only in a command): the OWNER converts, invites, cancels any
+invitation, starts and votes in kick votes, and sets the label. A MANAGER invites, cancels the invitations
+it issued, starts and votes in kick votes, and may leave. A MEMBER may leave and vote when it is in the
+electorate. Build 52 has no operation that changes a role: an invitee joins as `MEMBER`; `MANAGER` is
+stored and read but cannot yet be assigned.
+
+**Sizes and limits.** A co-op holds at most `coop.max-members` members (default 5, 2 to 8), owner
+included; open invitations do not count, accepting does (`COOP_FULL`). A co-op membership uses one of the
+account's profile slots (`SLOT_LIMIT` on accept). Lists are paged: a page holds at most 32 entries and the
+cursor is opaque, bound to the listing and refused with `INVALID_REQUEST` when the underlying index
+changed (restart from a `null` cursor). A reached store bound is `CAPACITY_EXCEEDED`.
+
+**Kick vote.** The electorate is every member except the target, owner included, frozen when the vote
+opens; approval must be unanimous. The starter's approval is counted when the vote opens, so a vote the
+owner starts carries the owner's approval, while a vote a manager starts still needs the owner's. The
+target never votes. One vote can be open per profile (`VOTE_OPEN`) and it expires `coop.kick-vote.
+expiry-minutes` after opening. A membership or role change cancels an open vote (`ELECTORATE_CHANGED`);
+a fresh vote is needed. In a **two-member** co-op the target must have been inactive for
+`coop.kick-vote.inactive-days` or the start is refused with `TARGET_NOT_INACTIVE`; Build 52 records a
+member's last activity at join time and on membership changes only, not from gameplay, so the rule
+compares against that value. When the last approval arrives the removal commits in the same call, as a
+second intent after the vote's: if that removal fails, the call fails with the removal's code, the vote
+stays `PASSED`, and `voteKick(voter, voteId, true)` by an eligible voter retries the removal. Before a
+vote is cast or a new one opened, an undecided vote that expired is closed (`EXPIRED`; the cast fails with
+`VOTE_NOT_FOUND`) and one whose electorate no longer matches the members is cancelled (`CANCELLED`; the
+cast fails with `ELECTORATE_CHANGED`). `getOpenKickVote` returns the undecided (`OPEN` or `PASSED`),
+unexpired vote.
+
+**Expired invitations.** An invitation expires by the store clock (Redis `TIME` with a Redis repository).
+`invite` first closes, as `EXPIRED`, up to 32 expired invitations still indexed for the profile and for
+the invitee, so the bound of 64 open invitations per profile and per invitee counts live ones; accepting
+an expired one closes it and fails with `INVITE_EXPIRED`, and an accept whose commit lands after the
+expiry fails the same way. A repeated `acceptInvite` of an invitation whose accept already committed
+returns the same membership without writing.
+
+**Names.** A profile's immutable name and each account's persisted alias stay as in Build 51 and Build
+52 never changes them; the shared label (`CoopDetails.label()`, `setCoopLabel`) is a separate,
+non-unique, owner-set text. Changing the label changes no member's alias.
+
+**Refused in Build 52** (nothing is written; the failure carries the code):
+
+| Operation | Code |
+|---|---|
+| any co-op operation while `coop.enabled` is false | `COOP_DISABLED` |
+| any co-op operation on a format-1 store | `MIGRATION_REQUIRED` |
+| removing a membership that is the removed account's **active** profile: leave, or a kick (also refused at the start of a vote and at the approval that would complete it). A player who is online but active in another profile can leave and can be kicked (enabled for the active profile in Build 53) | `MEMBER_ONLINE` |
+| owner transfer, the owner leaving, kicking the owner; deleting a co-op profile that still has other members | `OWNER_ACTION_REFUSED` |
+| `switchProfile` into a co-op profile the player does not own (Build 53: member snapshots and login restore). Since accepting never sets the active profile, a non-owner's login never restores a co-op profile either | `COOP_SWITCH_UNAVAILABLE` |
+| a membership change (convert, label, invite, accept, leave, kick vote start or ballot) while another node holds the profile's claim, which marks the node playing its bound world (OD-1). Decline, cancel and the listings are not refused | `WRONG_NODE` |
+| removing a member whose session is on another node (its account claim cannot be taken here) | `OWNERSHIP_CONFLICT` |
+| converting a profile whose policy type is not in `coop.allowed-types` | `TYPE_NOT_ALLOWED` |
+
+Other codes: `NOT_COOP`, `ALREADY_COOP`, `NOT_A_MEMBER`, `ALREADY_MEMBER`, `ROLE_FORBIDDEN`,
+`INVITE_NOT_FOUND`, `INVITE_EXPIRED` (judged at commit time, not only when listed), `INVITE_EXISTS`,
+`VOTE_NOT_FOUND`, `VOTE_OPEN`, plus the Build 51 `UNKNOWN_OUTCOME`, `CLAIM_LOST`, `COUNTER_EXHAUSTED`,
+`CAPACITY_EXCEEDED`. After `UNKNOWN_OUTCOME` read the state back (`listMembers`, `listInvitesFor`,
+`getOpenKickVote`) instead of repeating the call.
+
+**Store level.** Before the first co-op record of a store is prepared, the store marker is raised once,
+durably, to payload schema 2 and minimum build 52 (`format.awfm` gets a 4-byte trailer; the Redis `meta`
+hash gets `schema 2` and a `minimumBuild` field). Build 51 then refuses the store at startup, and the
+auto-updater refuses to install or restore a build below 52 (see `OPERATIONS.md`). A store that never
+held a co-op record keeps its Build 51 marker.
+
+**Removal.** Committing a leave or a passed kick vote is one recoverable intent (file and Redis): the
+membership epoch is durably consumed, the account's slot is released and the member's personal state is
+recorded as a salvage entry that is unavailable to delivery. **Nothing is delivered in Build 52** (salvage
+delivery is Build 54). Rejoining the same profile later is a new membership with a fresh epoch and an empty
+personal state; the old epoch cannot be restored.
+
+**Not in Build 52:** switching into a co-op profile you do not own, member snapshots and login restore for
+members, shared bank, collections, salvage delivery and ownership transfer. A member added by
+`acceptInvite` can be listed, but cannot play the profile yet.
+
+### Events
+
+`CoopMemberJoinEvent(profileId, playerId, role, inviteId)`, `CoopMemberLeaveEvent(profileId, playerId,
+reason, voteId)` (`Reason.LEFT` or `Reason.KICKED`; `voteId` is null for `LEFT`) and
+`CoopInviteEvent(invite)` (creation, decline and cancellation: read `invite().state()`; not fired for
+acceptance, which is the join event, and not for expiry). They are asynchronous Bukkit events
+(`isAsynchronous()` is true), not cancellable. Each is fired only after the change is durable and never
+for a failed or `UNKNOWN_OUTCOME` operation; it is fired on the profile service's own co-op event thread
+(`SourbyCraft-AWF-coop-events`), which is not a region, entity, global tick or Netty thread, so a handler
+must not touch world, entity or player state directly and should hand work to the right scheduler. A
+slow handler delays the next co-op event, not the storage work. Delivery is not guaranteed: it is fired
+by the node that committed the change, at most 256 events wait for the thread (beyond that one is
+dropped with a warning in the log), and a stop between the commit and the firing loses it. Treat the
+store (`listMembers`, `listInvitesFor`) as the source of truth.
+
 ## Compatibility
 
 `AuroraWorlds` keeps its exact contract. `AuroraProfiles` is a new, separate service; plugins that do
@@ -151,7 +280,8 @@ not use profiles do not depend on Redis or on this API. The newer methods (`bind
 `listProfileDetails`) are `default` methods that fail with `UnsupportedOperationException` on other
 implementations. Build 51 changes no existing signature: `ProfileInfo` and the three-argument
 `ProfileRequest` constructor are as before, `ProfileRequest` gained two optional components, and
-`ProfileErrorCode` constants were only appended.
+`ProfileErrorCode` constants were only appended. Build 52 adds the co-op `default` methods listed above and changes no existing
+signature; `ProfileDetails` is unchanged and the co-op view is `CoopDetails`.
 
 ## Build 50 world-binding API (owner testing pending)
 

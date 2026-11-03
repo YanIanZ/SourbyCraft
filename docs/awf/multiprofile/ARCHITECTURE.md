@@ -80,9 +80,30 @@ record format 2 (file and Redis) with a one-way migration from format 1 and a ba
 than Build 51 refuse a format-2 store ([OPERATIONS.md](OPERATIONS.md#format-2-migration-and-rollback-build-51)).
 Profiles carry a name (unique per account, immutable) and a policy type (`classic`, `ironman`,
 `stranded`, `bingo`), exposed by `ProfileDetails`; the types are stored but their rules are not
-enforced yet. Co-op membership is planned for Build 52, salvage and the shared bank for Build 54,
-type rules and the audit log for Build 55 ([plan](../../releases/BUILD-51-55-PLAN.md),
-[design](COOP-DESIGN.md)); none of it exists in Build 51.
+enforced yet. Salvage delivery and the shared bank are planned for Build 54, type rules and the audit log
+for Build 55 ([plan](../../releases/BUILD-51-55-PLAN.md), [design](COOP-DESIGN.md)); none of that exists
+in Build 52. Co-op membership is Build 52 (next section).
+
+## Build 52 additions
+
+Build 52 code written and compiled by an agent; not tested by the owner. Co-op membership (COOP-DESIGN
+slice 4): a solo profile converts one way to co-op; owners and managers invite; invitees accept or
+decline; members leave; unanimous kick votes remove a member (the owner's approval comes with an
+owner-started vote, and a two-member co-op needs the target to be inactive first). Every membership change
+is a recoverable intent on a format-2 store, on the file and the Redis repository, using the Build 51
+claims, revision vector and reservations. Public surface: the `Coop*` types and the co-op methods of
+`AuroraProfiles`, three asynchronous events ([API.md](API.md#co-op-membership-build-52)); configuration:
+six RESTART_REQUIRED keys under `coop.*` ([CONFIGURATION.md](CONFIGURATION.md#build-52-co-op-membership)),
+default off. A removal durably consumes the membership epoch and records an unavailable-to-delivery
+salvage entry.
+
+Deliberately not in Build 52: a member switching into a co-op profile they do not own, member snapshots and
+login restore for members (Build 53); removing a membership that is the member's active profile (Build 53;
+a member online in another profile can leave or be kicked); owner transfer and
+kicking the owner (refused, no planned build); the shared bank, collections and salvage delivery (Build
+54); type rules and the audit log (Build 55). Joining a co-op profile on a node other than the one holding
+its bound world is refused (OD-1); the co-op metadata may be in a shared store, but the world is loaded on
+one node.
 
 ## What it deliberately does not do
 

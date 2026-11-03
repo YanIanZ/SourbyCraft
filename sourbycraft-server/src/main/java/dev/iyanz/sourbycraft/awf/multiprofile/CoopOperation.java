@@ -111,22 +111,26 @@ public record CoopOperation(UUID operationId, Kind kind, UUID actor, byte[] requ
         LOGIN(10),
         /** Change an account's profile slot limit. */
         ACCOUNT_LIMIT(11),
-        /** Later build: create an invite. */
+        /** Build 52: create an invite ({@link CoopMembership#createInvite}). */
         INVITE_CREATE(20),
-        /** Later build: revoke or decline an invite. */
+        /** Build 52: revoke, decline or expire an invite ({@link CoopMembership#closeInvite}). */
         INVITE_REVOKE(21),
-        /** Later build: accept an invite (admission). */
+        /** Build 52: accept an invite (admission: member row, head, account access, alias). */
         INVITE_ACCEPT(22),
-        /** Later build: remove a member (leave or executed kick). */
+        /** Build 52: remove a member (leave or executed kick): row dropped, head CONSUMED, salvage UNAVAILABLE. */
         MEMBER_REMOVE(23),
         /** Later build: change a member's role. */
         ROLE_CHANGE(24),
-        /** Later build: change the shared display name. */
+        /** Build 52: change the shared display label (never an account alias). */
         RENAME_DISPLAY(25),
-        /** Later build: open a kick vote. */
+        /** Build 52: open a kick vote. */
         VOTE_CREATE(26),
-        /** Later build: cast or decline a kick vote. */
+        /** Build 52: cast an approval in, or decline, a kick vote. */
         VOTE_CAST(27),
+        /** Build 52: the one-way conversion of a solo profile to co-op. */
+        CONVERT_COOP(28),
+        /** Build 52: cancel or expire a kick vote (electorate changed, target left, expiry). */
+        VOTE_CANCEL(29),
         /** Later build: shared or personal bank, collection or contribution mutation. */
         SHARED_MUTATE(40),
         /** Later build: bank transfer with receipt. */

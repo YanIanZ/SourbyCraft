@@ -46,6 +46,11 @@ public final class ProfileConfig {
                     : "; a pre-Build-51 (format 1) profile store is only inspected and reported, nothing is written")
                 + (parsed.settings().enabled() ? "" : " (ignored: aurora.awf.multiprofile.enabled is false)"));
         }
+        final ProfileSettings.Coop coop = parsed.settings().coop();
+        if (coop.enabled() && !parsed.settings().enabled()) {
+            SourbyLogger.warn("AWF MultiProfile: " + ProfileSettings.COOP_ENABLED_KEY
+                + " is true but aurora.awf.multiprofile.enabled is false; co-op stays off");
+        }
         return parsed.settings();
     }
 
@@ -60,6 +65,19 @@ public final class ProfileConfig {
             case ProfileSettings.MIGRATION_MODE_KEY -> "AWF MultiProfile uses migration.mode "
                 + settings.migration().mode().id() + " (apply needs a valid " + ProfileSettings.MIGRATION_BACKUP_DIR_KEY + ")";
             case ProfileSettings.MIGRATION_BACKUP_DIR_KEY -> "AWF MultiProfile has no migration backup directory";
+            case ProfileSettings.COOP_ENABLED_KEY -> "AWF MultiProfile co-op stays "
+                + (settings.coop().enabled() ? "on" : "off");
+            case ProfileSettings.COOP_MAX_MEMBERS_KEY -> "AWF MultiProfile co-op allows "
+                + settings.coop().maxMembers() + " members (allowed " + ProfileSettings.Coop.MIN_MEMBERS + "-"
+                + ProfileSettings.Coop.MAX_MEMBERS_LIMIT + ")";
+            case ProfileSettings.COOP_INVITE_EXPIRY_KEY -> "AWF MultiProfile co-op invitations expire after "
+                + settings.coop().inviteExpiryMinutes() + " minutes";
+            case ProfileSettings.COOP_VOTE_EXPIRY_KEY -> "AWF MultiProfile co-op kick votes expire after "
+                + settings.coop().kickVoteExpiryMinutes() + " minutes";
+            case ProfileSettings.COOP_INACTIVE_DAYS_KEY -> "AWF MultiProfile co-op inactivity rule is "
+                + settings.coop().kickVoteInactiveDays() + " days";
+            case ProfileSettings.COOP_ALLOWED_TYPES_KEY -> "AWF MultiProfile co-op converts only "
+                + String.join(", ", ProfileSettings.typeIds(settings.coop().allowedTypes())) + " profiles";
             default -> "AWF MultiProfile uses its default";
         };
     }

@@ -120,7 +120,7 @@ final class CoopFixtures {
             for (final Path file : (Iterable<Path>) walk::iterator) {
                 if (!Files.isRegularFile(file)) continue;
                 final String name = file.getFileName().toString();
-                if (name.equals("repository.lock") || name.endsWith(".tmp")) continue;
+                if (name.equals("repository.lock") || name.equals("clock.awfc") || name.endsWith(".tmp")) continue;
                 final String relative = root.relativize(file).toString();
                 if (relative.startsWith("staging" + java.io.File.separator)) continue;
                 files.put(relative, sha256(Files.readAllBytes(file)));

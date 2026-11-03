@@ -58,13 +58,13 @@ import java.util.UUID;
  * {@link ProfileIndexPage#LISTING_PAGE} records per page through durable indexes, never a scan.
  * Member lists hold at most {@link AuroraProfile#MAX_MEMBERS}.</p>
  *
- * <h2>Build 51 implementation status</h2>
+ * <h2>Implementation status</h2>
  *
- * <p>Both backends must override every format-2 method. The defaults below refuse with an
- * {@link UnsupportedOperationException} naming the method and the backend: a backend that has not
- * implemented one fails closed and writes nothing, it never pretends to succeed. They exist so the
- * module compiles while the two repositories are being implemented, not as a permissible shipping
- * state; the owner's cases {@code CoopFileClaimAndCasAtCommit} and {@code CoopRedisFencedAndStaleNoWrites}
+ * <p>Both backends override every format-2 method (Build 51 for the solo operations, Build 52 for the
+ * membership after-images, compare-only vector entries, commit deadlines and index bounds). The
+ * defaults below refuse with an {@link UnsupportedOperationException} naming the method and the
+ * backend: a backend that does not implement one fails closed and writes nothing, it never pretends to
+ * succeed. The owner's cases {@code CoopFileClaimAndCasAtCommit} and {@code CoopRedisFencedAndStaleNoWrites}
  * cover them.</p>
  */
 public interface ProfileRepository extends AutoCloseable {
@@ -173,6 +173,19 @@ public interface ProfileRepository extends AutoCloseable {
      */
     default void writeStoreFormat(StoreFormat.Marker marker) throws IOException {
         throw unsupported("writeStoreFormat");
+    }
+
+    /**
+     * Raises the marker of a ready format-2 store, online, to at least payload schema {@code schema} and
+     * {@code minimumBuild} (Build 52: {@link StoreFormat#COOP_SCHEMA} and {@link StoreFormat#COOP_MINIMUM_BUILD},
+     * before the first co-op record is prepared), and returns the marker now stored. Never lowers either value and
+     * writes nothing when the marker already covers both. Durable before it returns (FILE: fsynced marker file;
+     * Redis: the {@code meta} hash, confirmed in the append-only file when {@code wait-for-aof} is on); a failure
+     * throws and the caller writes no co-op record. Refused ({@code STORE_FORMAT_REFUSED}) on a format-1 store, a
+     * store whose migration is in progress or whose marker this build does not know.
+     */
+    default StoreFormat.Marker requireStoreFeature(int schema, int minimumBuild, String writtenBy) throws IOException {
+        throw unsupported("requireStoreFeature");
     }
 
     // ================================================================== format 2: guarded record writes
@@ -311,12 +324,28 @@ public interface ProfileRepository extends AutoCloseable {
     }
 
     /**
-     * COMMIT: re-validates the guard and reservations, compares the post-reservation vector, writes the
-     * COMMITTED marker (the logical commit; Redis confirms AOF on the same connection before returning),
+     * COMMIT: re-validates the guard and reservations, compares the post-reservation vector, refuses a
+     * PREPARED intent whose {@link ProfileIntent#deadlineMillis() deadline} passed by the store clock
+     * ({@code TIMEOUT}; Redis compares {@code TIME} inside the script, FILE its monotonic clock under the
+     * commit lock — an invite accept carries the invite's expiry here, so an expired invitation is never
+     * consumed), checks the §9 index bounds of the membership records it installs ({@code CAPACITY_EXCEEDED}:
+     * {@value ProfileInvite#MAX_OPEN} open invites per profile and per invitee, one undecided vote per
+     * profile, {@value ProfileSalvage#MAX_OUTSTANDING_PER_PROFILE} outstanding salvage per profile) and the
+     * identity of a profile after-image against the stored record (owner, name, namespace, type and
+     * creation time immutable; kind one way; a membership change needs the operation's {@code P}), writes
+     * the COMMITTED marker (the logical commit; Redis confirms AOF on the same connection before returning),
      * then installs the canonical after-images, receipt and index pages idempotently and marks the
      * intent FINALIZED. A failure after the marker is {@link CommitResult.Status#UNKNOWN} or a
      * COMMITTED intent left for {@link #resolveIntent}; before the marker it is an exception and nothing
-     * is committed. Replay returns the receipt.
+     * is committed. Replay returns the receipt. A roll-forward of a COMMITTED intent re-checks neither the
+     * deadline nor the bounds: the decision was taken.
+     *
+     * <p>Vector shape both backends accept: a record the intent reserves is at {@code N} before and
+     * {@code N + 1} after (after-image at {@code N + 2}); a record it only compares — an invite, vote or
+     * salvage record, which has no reservation field, or a metadata record read but not changed — is at
+     * {@code N} before and after (after-image, if any, at {@code N + 1}); a created record is
+     * {@link CoopWriteGuard#ABSENT} both times (after-image at {@code 0}). {@link CoopIntentPlan} builds
+     * exactly these.</p>
      */
     default CommitResult commitIntent(UUID operationId, CoopWriteGuard guard) throws IOException {
         throw unsupported("commitIntent");
@@ -352,7 +381,9 @@ public interface ProfileRepository extends AutoCloseable {
 
     /**
      * The store's own clock in epoch milliseconds, for deadlines several nodes compare (Redis {@code TIME});
-     * a single-node store answers with the local clock.
+     * a single-node store answers with the local clock, never running backwards within the process. Invite
+     * and vote expiries are issued and judged in this clock (COOP-DESIGN §9: a clock set back does not
+     * revive an expired invitation).
      */
     default long storeClockMillis() throws IOException {
         return System.currentTimeMillis();
@@ -376,6 +407,17 @@ public interface ProfileRepository extends AutoCloseable {
      * snapshot ids in {@code R} order with the publishing revision in the time field; both repositories
      * serve it from the stream (its sorted set, its bounded directory). A corrupt or missing page fails
      * the call; it is never reported as empty.
+     *
+     * <p>Membership indexes hold current records only, maintained by the commit that installs the record
+     * (both backends the same): {@link ProfileIndexPage.Kind#INVITES_BY_PROFILE} and
+     * {@link ProfileIndexPage.Kind#INVITES_BY_INVITEE} the OPEN invites; {@link ProfileIndexPage.Kind#VOTES_BY_PROFILE}
+     * and {@link ProfileIndexPage.Kind#VOTES_BY_TARGET} the undecided (OPEN or PASSED) votes;
+     * {@link ProfileIndexPage.Kind#SALVAGE_BY_PROFILE} every salvage record not DELIVERED;
+     * {@link ProfileIndexPage.Kind#SALVAGE_AVAILABLE_BY_PROFILE} the AVAILABLE ones. A closed record keeps
+     * its file or hash (readable by id) and leaves the index in the same commit. An expired invite or vote
+     * stays indexed until a cleanup operation closes it ({@link CoopMembership#closeInvite},
+     * {@link CoopMembership#cancelVote}); listings therefore check expiry against the store clock.
+     * {@link CoopMembership} wraps these pages into record listings.</p>
      */
     default ProfileIndexPage index(ProfileIndexPage.Kind kind, UUID resource, UUID member, UUID epoch, ProfileIndexPage.Cursor cursor)
         throws IOException {
@@ -383,6 +425,8 @@ public interface ProfileRepository extends AutoCloseable {
     }
 
     // ------------------------------------------------------------------ membership records (reads; writes are intent after-images)
+    // Invites, votes and salvage records are written only as after-images of a membership intent
+    // (CoopMembership -> CoopIntentPlan -> stageAfterImage/prepareIntent/commitIntent); they have no direct commit.
 
     default Optional<ProfileInvite> invite(UUID inviteId) throws IOException {
         throw unsupported("invite");

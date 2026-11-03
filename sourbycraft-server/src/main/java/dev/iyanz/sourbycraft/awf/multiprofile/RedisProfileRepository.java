@@ -952,7 +952,7 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
     public StoreFormat.Marker storeFormat() throws IOException {
         ensureOpen();
         final List<?> fields = list(this.client.call("HMGET", meta(), StoreFormat.REDIS_FORMAT_FIELD, StoreFormat.REDIS_MIGRATION_FIELD,
-            StoreFormat.REDIS_SCHEMA_FIELD, "writtenAt", StoreFormat.REDIS_WRITTEN_BY_FIELD));
+            StoreFormat.REDIS_SCHEMA_FIELD, "writtenAt", StoreFormat.REDIS_WRITTEN_BY_FIELD, StoreFormat.REDIS_MINIMUM_BUILD_FIELD));
         final String format = fields.isEmpty() ? null : RedisClient.text(fields.get(0));
         final StoreFormat.Marker marker;
         if (format == null || FORMAT.equals(format)) {
@@ -967,8 +967,10 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
                 final String schema = fields.size() > 2 ? RedisClient.text(fields.get(2)) : null;
                 final String writtenAt = fields.size() > 3 ? RedisClient.text(fields.get(3)) : null;
                 final String writtenBy = fields.size() > 4 ? RedisClient.text(fields.get(4)) : null;
+                final String minimumBuild = fields.size() > 5 ? RedisClient.text(fields.get(5)) : null;
                 marker = new StoreFormat.Marker(formatNumber, migration, schema == null ? 0 : Integer.parseInt(schema),
-                    writtenAt == null ? 0L : Long.parseLong(writtenAt), writtenBy == null ? "" : writtenBy);
+                    writtenAt == null ? 0L : Long.parseLong(writtenAt), writtenBy == null ? "" : writtenBy,
+                    minimumBuild == null ? 0 : Integer.parseInt(minimumBuild));
             } catch (final IllegalArgumentException malformed) {
                 throw new IOException("the store format marker in " + meta() + " is malformed: " + malformed.getMessage());
             }
@@ -1001,6 +1003,11 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
             throw new ProfileOperationException(ProfileErrorCode.INVALID_REQUEST, "the store is already format 2; a migration marker"
                 + " is not written over it");
         }
+        if (!current.legacyFormat() && (current.schema() > marker.schema() || current.minimumBuild() > marker.minimumBuild())) {
+            throw new ProfileOperationException(ProfileErrorCode.STORE_FORMAT_REFUSED, "the store was raised to schema " + current.schema()
+                + " / Build " + current.minimumBuild() + "; a marker below that (schema " + marker.schema() + ", Build "
+                + marker.minimumBuild() + ") is never written. Nothing was written");
+        }
         final Object reply = this.client.eval(RedisProfileScripts.WRITE_FORMAT, 1, meta(), Integer.toString(marker.format()),
             Integer.toString(marker.migration().tag()), Integer.toString(marker.schema()), Long.toString(marker.writtenAtMillis()),
             marker.writtenBy(), Integer.toString(StoreFormat.CURRENT));
@@ -1018,6 +1025,47 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
             }
         }
         this.marker = marker;
+    }
+
+    /**
+     * {@link ProfileRepository#requireStoreFeature}: one script raises {@code schema} and {@code minimumBuild} in the
+     * {@code meta} hash (never lowering them) after checking the store is format 2 and not migrating; with
+     * {@code wait-for-aof} the change must be confirmed in the append-only file before this returns. Every write
+     * script reads the same hash, so a Build 51 node still running against this Redis refuses its next write.
+     */
+    @Override
+    public StoreFormat.Marker requireStoreFeature(final int schema, final int minimumBuild, final String writtenBy) throws IOException {
+        ensureOpen();
+        if (schema > StoreFormat.MAX_SCHEMA || minimumBuild > StoreFormat.READS_UP_TO_BUILD) {
+            throw new ProfileOperationException(ProfileErrorCode.INVALID_REQUEST, "this build raises a store to at most schema "
+                + StoreFormat.MAX_SCHEMA + " and Build " + StoreFormat.READS_UP_TO_BUILD);
+        }
+        final StoreFormat.Marker current = storeFormat();
+        if (current.format() == StoreFormat.CURRENT && current.migration() != StoreFormat.MigrationState.IN_PROGRESS
+            && current.covers(schema, minimumBuild)) {
+            return current;
+        }
+        final String writer = writtenBy == null ? "" : writtenBy.length() <= 64 ? writtenBy : writtenBy.substring(0, 64);
+        final Object reply = this.client.eval(RedisProfileScripts.RAISE_FORMAT, 1, meta(), Integer.toString(schema),
+            Integer.toString(minimumBuild), Long.toString(System.currentTimeMillis()), writer, Integer.toString(StoreFormat.CURRENT));
+        final List<?> fields = list(reply);
+        final String status = fields.isEmpty() ? null : RedisClient.text(fields.get(0));
+        if ("FORMAT".equals(status)) {
+            throw new ProfileOperationException(ProfileErrorCode.STORE_FORMAT_REFUSED, (fields.size() > 1 ? RedisClient.text(fields.get(1))
+                : "refused") + "; no co-op record is written");
+        }
+        if (!"OK".equals(status)) throw new IOException("raising the store format marker returned " + status);
+        if (this.waitForAof) {
+            final int waitMillis = Math.max(1, this.client.remainingTimeoutMillis() / 2);
+            if (!aofConfirmed(waitMillis)) {
+                throw new IOException("the raised store format marker was written but Redis did not confirm it in its append-only"
+                    + " file within " + waitMillis + " ms; no co-op record is written until it is confirmed");
+            }
+        }
+        final StoreFormat.Marker raised = storeFormat();
+        SourbyLogger.info("AWF MultiProfile: the profile store now requires Build " + raised.requiredBuild() + " or newer (schema "
+            + raised.schema() + "); builds below it refuse it");
+        return raised;
     }
 
     // ================================================================== format 2: guarded record writes
@@ -1040,6 +1088,9 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
                     + " is not unique in the account under lower-case comparison; nothing was written");
             }
         }
+        // Co-op access and activation rules against the stored records; the script's A check (and the M entries a
+        // switch guard carries) make the account read exact, so a record that moves in between fails the vector.
+        FileProfileRepository.checkCoopAccess(loadAccount(playerId, this.defaultSlots), after, id -> profile(id).orElse(null), what);
         final String key = accountKey(playerId);
         final Call call = call(playerId, receiptFor(guard));
         call.check(expected, key);
@@ -1091,6 +1142,19 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
                     throw new ProfileOperationException(ProfileErrorCode.INVALID_REQUEST, "a direct commit of " + what + " cannot change"
                         + " its owner, name, creation time or memberships; membership changes are intents. Nothing was written");
                 }
+                if (stored.kind() != after.kind()) {
+                    throw new ProfileOperationException(ProfileErrorCode.INVALID_REQUEST, "a direct commit of " + what + " cannot change"
+                        + " its kind (" + stored.kind() + " to " + after.kind() + "); the conversion to co-op is an intent and one way."
+                        + " Nothing was written");
+                }
+            }
+        }
+        if (!migration && ProfileRecords.needsProfileSchema2(after)) {
+            final StoreFormat.Marker marker = storeFormat();
+            if (!marker.covers(StoreFormat.COOP_SCHEMA, StoreFormat.COOP_MINIMUM_BUILD)) {
+                throw new ProfileOperationException(ProfileErrorCode.STORE_FORMAT_REFUSED, what + " is a co-op or labelled profile"
+                    + " (payload schema 2) but the store marker is schema " + marker.schema() + ", minimum build " + marker.minimumBuild()
+                    + "; raise the store's feature level first (requireStoreFeature). Nothing was written");
             }
         }
         final Expected account = guard.actor() == null ? null : guard.expected(Domain.ACCOUNT, guard.actor().playerId(), null, null);
@@ -1418,15 +1482,18 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
             throw new ProfileOperationException(ProfileErrorCode.INVALID_REQUEST, what + " references " + blobBytes
                 + " bytes of after-images, more than " + MAX_INTENT_BLOB_BYTES);
         }
+        requireCoopStoreLevel(intent, what);
         final UUID resource = receiptResource(guard, intent);
         final Call call = call(resource, null);
         // The vector: the pre-reservation revision of every record (the script itself checks for an existing intent).
         final Map<Expected, String> targets = new LinkedHashMap<>();
+        final Set<Expected> compared = new java.util.HashSet<>();
         for (final Expected after : intent.expectedAfter()) {
             final Expected before = matchingBefore(intent, after, guard, what);
             final String key = recordKey(before, op, hints, what);
             call.check(before, key);
             targets.put(before, key);
+            if (compareOnly(before, after)) compared.add(before);
         }
         call.key(intentKey(op));
         call.key(blobsKey(op));
@@ -1447,6 +1514,7 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
         for (final Map.Entry<Expected, String> target : targets.entrySet()) {
             final Expected before = target.getKey();
             if (before.revision() == CoopWriteGuard.ABSENT && before.domain() != Domain.ACCOUNT) continue;
+            if (compared.contains(before)) continue;   // compared by the script's vector check, not reserved
             final Reserved reserved = reserve(before, target.getValue(), op, what);
             reservedKeys.add(target.getValue());
             reservedRevisions.add(reserved.revision());
@@ -1458,6 +1526,8 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
             call.arg(Long.toString(reservedRevisions.get(i)));
             call.arg(reservedFrames.get(i));
         }
+        // Compared records must not carry another operation's reservation (FILE refuses the same at prepare).
+        appendCompared(call, targets, compared);
         call.arg(Integer.toString(intent.pins().size()));
         for (final SnapshotRef pin : intent.pins()) {
             if (pin.member() == null) {
@@ -1476,6 +1546,41 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
             call.arg(Integer.toString(cap));
         }
         return run(what, RedisProfileScripts.PREPARE_INTENT, guard, call, resource);
+    }
+
+    /**
+     * The store-side counterpart of the engine's feature-level raise: an intent whose after-images include a co-op
+     * record (a schema-2 profile, an invite, vote or salvage record) is refused while the {@code meta} marker is below
+     * schema {@link StoreFormat#COOP_SCHEMA} / Build {@link StoreFormat#COOP_MINIMUM_BUILD}, so no co-op record reaches
+     * a store a Build 51 node could still open. The marker is re-read here (it is only ever raised); the Lua gate keeps
+     * a node of an older build from writing once it is raised.
+     */
+    private void requireCoopStoreLevel(final ProfileIntent intent, final String what) throws IOException {
+        boolean coop = false;
+        for (final BlobRef ref : intent.afterImages()) {
+            switch (ref.recordType()) {
+                case ProfileRecords.TYPE_INVITE, ProfileRecords.TYPE_VOTE, ProfileRecords.TYPE_SALVAGE -> coop = true;
+                case ProfileRecords.TYPE_PROFILE -> {
+                    final String key = blobStageKey(ref);
+                    final Object staged = this.client.callBounded(bound(ref.recordType()), "GET", key);
+                    if (!(staged instanceof byte[] framed)) {
+                        throw new ProfileOperationException(ProfileErrorCode.INVALID_REQUEST, what + ": the staged after-image " + describe(ref)
+                            + " is missing (stage it again); nothing was written");
+                    }
+                    if (ProfileRecords.needsCoopStore(ref.recordType(), decodeAfterImage(ref, framed, key))) coop = true;
+                }
+                default -> { }
+            }
+            if (coop) break;
+        }
+        if (!coop) return;
+        final StoreFormat.Marker marker = storeFormat();
+        if (!marker.covers(StoreFormat.COOP_SCHEMA, StoreFormat.COOP_MINIMUM_BUILD)) {
+            throw new ProfileOperationException(ProfileErrorCode.STORE_FORMAT_REFUSED, what + " installs a co-op record but the store marker "
+                + meta() + " is schema " + marker.schema() + ", minimum build " + marker.minimumBuild() + "; the store's feature level must be"
+                + " raised to schema " + StoreFormat.COOP_SCHEMA + " and Build " + StoreFormat.COOP_MINIMUM_BUILD + " (requireStoreFeature)"
+                + " before the first co-op record. Nothing was written");
+        }
     }
 
     @Override
@@ -1543,6 +1648,8 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
         call.key(blobsKey(op));
         call.arg(ProfileRecords.frame2(ProfileRecords.TYPE_INTENT, finalized.revision(), ProfileRecords.intentPayload2(finalized), intentKey(op)));
         call.arg(Long.toString(finalized.revision()));
+        // The deadline the script compares with Redis TIME before any write (an invite accept carries the invite's expiry).
+        call.arg(Long.toString(intent.deadlineMillis()));
         // After-images: read the staged payloads (bounded), decode for the predicate fields, install.
         final List<BlobRef> images = intent.afterImages();
         final List<Object> payloads = readBlobs(op, images.size());
@@ -1573,6 +1680,11 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
             switch (decoded) {
                 case PlayerAccount account -> fields[0] = account.activeProfile() == null ? "" : account.activeProfile().toString();
                 case AuroraProfile profile -> {
+                    // Identity, one-way kind and P-for-membership checks against the stored record (the script's M
+                    // check makes the read exact: a record that moves in between fails the vector, never these checks).
+                    if (!forward && after.revision() != CoopWriteGuard.ABSENT) {
+                        FileProfileRepository.checkProfileImage(profile(profile.id()).orElse(null), profile, intent);
+                    }
                     names = namesKey(profile.accountId());
                     fields[0] = CuteNames.key(profile.name());
                     fields[1] = profile.accountId().toString();
@@ -1587,14 +1699,16 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
                     (open ? additions : removals).add(new Object[] {indexKey(ProfileIndexPage.Kind.INVITES_BY_INVITEE, invite.invitee(), null, null), member, MAX_INDEXED_RECORDS});
                 }
                 case KickVote vote -> {
-                    final boolean open = vote.status() == KickVote.Status.OPEN;
+                    final boolean open = vote.status().occupiesSlot();   // OPEN or PASSED: the same slot the FILE indexes keep
                     final String member = indexMember(vote.createdAtMillis(), vote.id());
                     (open ? additions : removals).add(new Object[] {indexKey(ProfileIndexPage.Kind.VOTES_BY_PROFILE, vote.profileId(), null, null), member, MAX_OPEN_VOTES});
                     (open ? additions : removals).add(new Object[] {indexKey(ProfileIndexPage.Kind.VOTES_BY_TARGET, vote.target(), null, null), member, MAX_INDEXED_RECORDS});
                 }
                 case ProfileSalvage salvage -> {
+                    // Same index semantics as FILE: outstanding (not DELIVERED) records by profile, AVAILABLE ones separately.
                     final String member = indexMember(salvage.createdAtMillis(), salvage.id());
-                    additions.add(new Object[] {indexKey(ProfileIndexPage.Kind.SALVAGE_BY_PROFILE, salvage.profileId(), null, null), member, MAX_INDEXED_RECORDS});
+                    (salvage.outstanding() ? additions : removals).add(new Object[] {
+                        indexKey(ProfileIndexPage.Kind.SALVAGE_BY_PROFILE, salvage.profileId(), null, null), member, MAX_INDEXED_RECORDS});
                     (salvage.state() == ProfileSalvage.State.AVAILABLE ? additions : removals).add(new Object[] {
                         indexKey(ProfileIndexPage.Kind.SALVAGE_AVAILABLE_BY_PROFILE, salvage.profileId(), null, null), member, MAX_INDEXED_RECORDS});
                 }
@@ -1616,6 +1730,20 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
             releases.add(after);
         }
         appendReleases(call, releases, op, hints, what);
+        // Compared records (same revision before and after, not installed) must not carry another operation's reservation.
+        final Map<Expected, String> comparedKeys = new LinkedHashMap<>();
+        final Set<Expected> comparedSet = new java.util.HashSet<>();
+        for (final Expected after : intent.expectedAfter()) {
+            if (installed.contains(recordIdentity(after)) || after.revision() == CoopWriteGuard.ABSENT) continue;
+            if (after.domain() == Domain.RECORD && after.resource().equals(op)) continue;
+            for (final Expected before : intent.expectedBefore()) {
+                if (before.sameRecord(after) && compareOnly(before, after)) {
+                    comparedKeys.put(after, recordKey(after, op, hints, what));
+                    comparedSet.add(after);
+                }
+            }
+        }
+        appendCompared(call, comparedKeys, comparedSet);
         appendPins(call, intent);
         // Intent indexes to leave, record indexes to join.
         final Map<String, Integer> intentIndexes = intentIndexes(intent);
@@ -1692,15 +1820,37 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
             new byte[0], System.currentTimeMillis());
         final Call call = call(resource, receipt);
         call.check(Expected.record(op, intent.revision()), intentKey(op));
+        // Like the FILE abort: the vector compares the intent's own revision and the records this operation reserved
+        // (they sit at their post-reservation revision under its reservation, which nothing else may move); a record
+        // the intent only compared may have moved since the prepare, and an abort must still be able to clear the
+        // operation's reservations, or the account stays locked behind a PREPARED intent for good.
         final List<Expected> releases = new ArrayList<>();
         for (final Expected after : intent.expectedAfter()) {
+            if (after.domain() == Domain.RECORD && after.resource().equals(op)) continue;
             final Expected named = guard.expected(after.domain(), after.resource(), after.member(), after.epoch());
             if (named.revision() != after.revision()) {
                 throw new ProfileOperationException(ProfileErrorCode.INVALID_REQUEST, what + ": the guard expects " + named.describe()
                     + " at " + named.revision() + " but the intent recorded " + after.revision());
             }
+            // The pre-reservation entry comes from the intent itself (the abort guard carries post-reservation
+            // revisions, so matchingBefore, which compares the guard with the pre-reservation vector, does not apply).
+            Expected before = null;
+            for (final Expected candidate : intent.expectedBefore()) {
+                if (candidate.sameRecord(after)) before = candidate;
+            }
+            if (before == null) {
+                throw new ProfileOperationException(ProfileErrorCode.INVALID_REQUEST, what + ": " + after.describe()
+                    + " is in the post-reservation vector but not in the pre-reservation one");
+            }
+            if (after.revision() == CoopWriteGuard.ABSENT || compareOnly(before, after)) {
+                // Not this abort's to check: run() -> checkVector would otherwise add it back from the guard and
+                // compare a compare-only record at its prepare-time revision (STALE once it moved) or probe an absent
+                // record with no type (INVALID_REQUEST). FILE's abort compares only the intent and its reservations.
+                call.exempt(after);
+                continue;
+            }
             call.check(after, recordKey(after, op, hints, what));
-            if (after.revision() != CoopWriteGuard.ABSENT) releases.add(after);
+            releases.add(after);
         }
         final ProfileIntent aborted = intent.at(ProfileIntent.Phase.ABORTED, "aborted");
         call.key(intentKey(op));
@@ -1840,6 +1990,8 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
         final List<Expected> vector = new ArrayList<>();
         final List<Object> vectorKeys = new ArrayList<>();
         final List<Object> vectorArgs = new ArrayList<>();
+        /** Guard entries deliberately not compared by this call (an abort's compare-only and created records). */
+        final List<Expected> exempt = new ArrayList<>();
         /** The receipt record the script stores on success, or {@code null} for a prepare. */
         final byte[] receipt;
 
@@ -1855,8 +2007,15 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
             this.vectorArgs.add(expected.domain() == Domain.ACCOUNT ? "0" : "-1");
         }
 
+        void exempt(final Expected expected) {
+            this.exempt.add(expected);
+        }
+
         boolean has(final Expected expected) {
             for (final Expected entry : this.vector) {
+                if (entry.sameRecord(expected)) return true;
+            }
+            for (final Expected entry : this.exempt) {
                 if (entry.sameRecord(expected)) return true;
             }
             return false;
@@ -1936,7 +2095,7 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
     private List<Object> fixedArgs(final CoopWriteGuard guard, final byte[] receipt) {
         final List<Object> args = new ArrayList<>(12);
         args.add(guard.operation().kind() == CoopOperation.Kind.MIGRATION ? "1" : "0");
-        args.add(Integer.toString(StoreFormat.SCHEMA));
+        args.add(Integer.toString(StoreFormat.MAX_SCHEMA));
         args.add(guard.operation().operationId().toString());
         args.add(HEX.formatHex(guard.operation().requestDigest()));
         args.add(guard.profile() == null ? "" : guard.profile().session());
@@ -2112,6 +2271,9 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
                 + detail + " of the same account; nothing was written");
             case "LIMIT" -> throw new ProfileOperationException(ProfileErrorCode.CAPACITY_EXCEEDED, what + " was refused: the bound on "
                 + detail + " is reached; retry later or resolve pending operations. Nothing was written");
+            case "EXPIRED" -> throw new ProfileOperationException(ProfileErrorCode.TIMEOUT, what + ": the intent passed its deadline "
+                + detail + " by the Redis clock (" + (fields.size() > 2 ? RedisClient.text(fields.get(2)) : "?") + "); it can only be"
+                + " aborted. Nothing was written");
             case "DECIDED" -> throw new ProfileOperationException(ProfileErrorCode.INVALID_REQUEST, what + ": the intent is already"
                 + " committed and rolls forward; nothing was written");
             case "NOINTENT" -> throw new ProfileOperationException(ProfileErrorCode.INVALID_REQUEST, what + ": no intent is stored for"
@@ -2435,7 +2597,12 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
         return stored == null ? receiptResource(guard, intent) : uuid(stored, intentKey(op) + " resource");
     }
 
-    /** The pre-reservation entry of {@code after}: the guard must name it, and the intent's before vector must agree. */
+    /**
+     * The pre-reservation entry of {@code after}: the guard must name it, and the intent's before vector must agree.
+     * A record the intent reserves moves by exactly one; a record it only compares (same revision before and after:
+     * an invite, vote or salvage record, which carries no reservation field) moves by none. Every membership plan
+     * reserves the profile's metadata record. Same rule as the FILE repository's step plan.
+     */
     private static Expected matchingBefore(final ProfileIntent intent, final Expected after, final CoopWriteGuard guard, final String what) {
         final Expected named = guard.expected(after.domain(), after.resource(), after.member(), after.epoch());
         for (final Expected before : intent.expectedBefore()) {
@@ -2444,10 +2611,11 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
                     throw new ProfileOperationException(ProfileErrorCode.INVALID_REQUEST, what + ": the guard expects " + named.describe()
                         + " at " + named.revision() + " but the intent recorded " + before.revision());
                 }
-                final long required = before.revision() == CoopWriteGuard.ABSENT ? CoopWriteGuard.ABSENT : before.revision() + 1L;
                 if (before.domain() == Domain.ACCOUNT && before.revision() == CoopWriteGuard.ABSENT) {
                     throw new ProfileOperationException(ProfileErrorCode.INVALID_REQUEST, what + ": accounts use revision 0, never ABSENT");
                 }
+                if (compareOnly(before, after)) return before;
+                final long required = before.revision() == CoopWriteGuard.ABSENT ? CoopWriteGuard.ABSENT : before.revision() + 1L;
                 if (after.revision() != required) {
                     throw new ProfileOperationException(ProfileErrorCode.INVALID_REQUEST, what + ": " + after.describe() + " is expected at "
                         + after.revision() + " after reservation, but the reservation of a record at " + before.revision() + " gives " + required);
@@ -2457,6 +2625,11 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
         }
         throw new ProfileOperationException(ProfileErrorCode.INVALID_REQUEST, what + ": " + after.describe()
             + " is in the post-reservation vector but not in the pre-reservation one");
+    }
+
+    /** Whether an intent compares a record without reserving it (same expected revision before and after). */
+    private static boolean compareOnly(final Expected before, final Expected after) {
+        return before.revision() == after.revision();
     }
 
     /** A reserved after-image: the stored record re-encoded at revision + 1 carrying the operation's reservation. */
@@ -2588,6 +2761,16 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
                 return new Reserved(next, ProfileRecords.frame2(type, next, ProfileRecords.bindingPayload2(binding.binding(), next, null), key));
             }
         }
+    }
+
+    /** The keys of compare-only vector entries, for the script's reservation check (count, then keys). */
+    private static void appendCompared(final Call call, final Map<Expected, String> keys, final Set<Expected> compared) {
+        final List<String> selected = new ArrayList<>();
+        for (final Map.Entry<Expected, String> entry : keys.entrySet()) {
+            if (compared.contains(entry.getKey())) selected.add(entry.getValue());
+        }
+        call.arg(Integer.toString(selected.size()));
+        for (final String key : selected) call.key(key);
     }
 
     private void appendPins(final Call call, final ProfileIntent intent) {

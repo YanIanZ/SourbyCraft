@@ -285,7 +285,33 @@ public final class AuroraKeys {
         restart("aurora.awf.multiprofile.migration.backup-dir", "",
             "Where migration.mode: apply writes the pre-migration backup: a path relative to the server directory, or "
                 + "absolute (a separate disk is the point of a backup). Empty = not configured. No .. segment; it must not "
-                + "be inside or contain the store directory. Not used by off or dry-run."));
+                + "be inside or contain the store directory. Not used by off or dry-run."),
+        restart("aurora.awf.multiprofile.coop.enabled", false,
+            "Co-op membership (Build 52): convert a solo profile to co-op, invite, accept, decline, cancel, leave, kick "
+                + "vote, shared label. false = every co-op operation is refused with COOP_DISABLED and nothing co-op is "
+                + "written. Needs aurora.awf.multiprofile.enabled and a store in format 2; a format-1 store refuses "
+                + "with MIGRATION_REQUIRED (see migration.mode). Build 52 does not let a member switch into a co-op "
+                + "profile they do not own (Build 53), does not remove a member who is online (Build 53), does not "
+                + "transfer ownership and does not deliver salvage (Build 54). Conversion is one way."),
+        restart("aurora.awf.multiprofile.coop.max-members", 5,
+            "Members of one co-op, owner included. 2 to 8. Applies to new invitations and accepts; a co-op already "
+                + "above a lowered cap keeps its members. An invalid value is ignored with a WARN (5)."),
+        restart("aurora.awf.multiprofile.coop.invite-expiry-minutes", 5,
+            "How long a co-op invitation stays valid, 1 to 1440 minutes. Expiry is judged at commit time against the "
+                + "repository clock, not only when listed."),
+        restart("aurora.awf.multiprofile.coop.kick-vote.expiry-minutes", 10,
+            "How long a kick vote stays open, 1 to 1440 minutes. Approval must be unanimous among the members other "
+                + "than the target (the owner included); the starter's approval is counted."),
+        restart("aurora.awf.multiprofile.coop.kick-vote.inactive-days", 35,
+            "In a two-member co-op, how many days the other member must have been inactive before a kick vote may "
+                + "start against them (TARGET_NOT_INACTIVE until then), 1 to 3650. Build 52 records a member's last "
+                + "activity at join time and on membership changes only, not from gameplay."),
+        restart("aurora.awf.multiprofile.coop.allowed-types", List.of("classic"),
+            "Policy types (classic, ironman, stranded, bingo) whose solo profile may be converted to co-op; a list or a "
+                + "comma-separated string. Checked at conversion only. A profile of another type is refused "
+                + "(TYPE_NOT_ALLOWED). Build 51 enforces no rule for ironman, stranded or bingo, so widening this list "
+                + "gives those types co-op without any of their intended restrictions. An unknown or empty list is "
+                + "ignored with a WARN."));
 
     // [aurora.awf.redis.fabric] — Aurora Redis Fabric (docs/awf/multiprofile/REDIS-FABRIC.md)
     public static final List<ConfigKey> AWF_REDIS_FABRIC_KEYS = List.of(

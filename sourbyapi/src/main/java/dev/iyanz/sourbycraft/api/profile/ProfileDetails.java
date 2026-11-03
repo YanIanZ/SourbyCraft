@@ -10,8 +10,8 @@ import java.util.UUID;
  * this record is the additive view. Obtain it with {@link AuroraProfiles#getProfileDetails(UUID)} or
  * {@link AuroraProfiles#listProfileDetails(UUID)}.</p>
  *
- * <p>The record carries no co-op membership: co-op is not available in Build 51 (planned for
- * Build 52).</p>
+ * <p>The record carries no co-op membership and is unchanged in Build 52 (binary compatibility): the
+ * co-op view is {@link CoopDetails}, from {@link AuroraProfiles#getCoopDetails(UUID)}.</p>
  *
  * @param info the profile as {@link AuroraProfiles#getProfile(UUID)} returns it
  * @param name the profile's name. Chosen once when the profile is created, never changed afterwards

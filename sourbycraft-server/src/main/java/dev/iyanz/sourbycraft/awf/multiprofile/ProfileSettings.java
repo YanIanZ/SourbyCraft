@@ -23,7 +23,7 @@ import java.util.Set;
  */
 public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int maxSlots, Switching switching,
                               ProfileIsolation isolation, Worlds worlds, Coordination coordination, String directory,
-                              Repository repository, Types types, Names names, Migration migration) {
+                              Repository repository, Types types, Names names, Migration migration, Coop coop) {
 
     public enum Mode {
         STANDALONE,
@@ -226,6 +226,67 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         }
     }
 
+    /**
+     * Co-op membership settings (Build 52). Every key is RESTART_REQUIRED. {@code enabled} defaults to false: with
+     * it false every co-op operation is refused with {@code COOP_DISABLED}, nothing co-op is written and no co-op
+     * record is created (a store already holding co-op profiles stays readable). It has no effect while
+     * {@code aurora.awf.multiprofile.enabled} is false; use {@link ProfileSettings#coopEnabled()} for the effective
+     * value.
+     *
+     * @param enabled whether co-op membership operations are accepted
+     * @param maxMembers members of one co-op, owner included; {@value #MIN_MEMBERS} to {@value #MAX_MEMBERS_LIMIT}.
+     *     Applies to new invites and accepts; a co-op already above a lowered cap keeps its members.
+     * @param inviteExpiryMinutes lifetime of an invitation, 1 to {@value #MAX_EXPIRY_MINUTES} minutes
+     * @param kickVoteExpiryMinutes lifetime of a kick vote, 1 to {@value #MAX_EXPIRY_MINUTES} minutes
+     * @param kickVoteInactiveDays in a two-member co-op, how long the target must have been inactive before a kick
+     *     vote may start, 1 to {@value #MAX_INACTIVE_DAYS} days
+     * @param allowedTypes the {@linkplain dev.iyanz.sourbycraft.api.profile.ProfileType policy types} whose solo
+     *     profile may be converted to co-op; never empty. Checked at conversion only.
+     */
+    public record Coop(boolean enabled, int maxMembers, int inviteExpiryMinutes, int kickVoteExpiryMinutes,
+                       int kickVoteInactiveDays, Set<dev.iyanz.sourbycraft.api.profile.ProfileType> allowedTypes) {
+
+        public static final int MIN_MEMBERS = 2;
+        public static final int MAX_MEMBERS_LIMIT = 8;
+        public static final int MAX_EXPIRY_MINUTES = 1440;
+        public static final int MAX_INACTIVE_DAYS = 3650;
+
+        public Coop {
+            Objects.requireNonNull(allowedTypes, "allowedTypes");
+            if (maxMembers < MIN_MEMBERS || maxMembers > MAX_MEMBERS_LIMIT) {
+                throw new IllegalArgumentException("coop.max-members must be " + MIN_MEMBERS + "-" + MAX_MEMBERS_LIMIT);
+            }
+            if (inviteExpiryMinutes < 1 || inviteExpiryMinutes > MAX_EXPIRY_MINUTES
+                || kickVoteExpiryMinutes < 1 || kickVoteExpiryMinutes > MAX_EXPIRY_MINUTES) {
+                throw new IllegalArgumentException("coop invite/vote expiry must be 1-" + MAX_EXPIRY_MINUTES + " minutes");
+            }
+            if (kickVoteInactiveDays < 1 || kickVoteInactiveDays > MAX_INACTIVE_DAYS) {
+                throw new IllegalArgumentException("coop.kick-vote.inactive-days must be 1-" + MAX_INACTIVE_DAYS);
+            }
+            if (allowedTypes.isEmpty()) {
+                throw new IllegalArgumentException("coop.allowed-types must name at least one type");
+            }
+            allowedTypes = Collections.unmodifiableSet(EnumSet.copyOf(allowedTypes));
+        }
+
+        public long inviteExpiryMillis() {
+            return this.inviteExpiryMinutes * 60_000L;
+        }
+
+        public long kickVoteExpiryMillis() {
+            return this.kickVoteExpiryMinutes * 60_000L;
+        }
+
+        public long inactiveMillis() {
+            return this.kickVoteInactiveDays * 86_400_000L;
+        }
+
+        /** Whether a solo profile of this policy type may be converted to co-op. */
+        public boolean allows(final dev.iyanz.sourbycraft.api.profile.ProfileType type) {
+            return this.allowedTypes.contains(type);
+        }
+    }
+
     /** The record format of stores written before Build 51. */
     public static final int LEGACY_STORE_FORMAT = 1;
     /** The record format Build 51 writes. A store in this format is refused by older builds. */
@@ -236,6 +297,12 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
     public static final String NAMES_POLICY_KEY = "aurora.awf.multiprofile.names.policy";
     public static final String MIGRATION_MODE_KEY = "aurora.awf.multiprofile.migration.mode";
     public static final String MIGRATION_BACKUP_DIR_KEY = "aurora.awf.multiprofile.migration.backup-dir";
+    public static final String COOP_ENABLED_KEY = "aurora.awf.multiprofile.coop.enabled";
+    public static final String COOP_MAX_MEMBERS_KEY = "aurora.awf.multiprofile.coop.max-members";
+    public static final String COOP_INVITE_EXPIRY_KEY = "aurora.awf.multiprofile.coop.invite-expiry-minutes";
+    public static final String COOP_VOTE_EXPIRY_KEY = "aurora.awf.multiprofile.coop.kick-vote.expiry-minutes";
+    public static final String COOP_INACTIVE_DAYS_KEY = "aurora.awf.multiprofile.coop.kick-vote.inactive-days";
+    public static final String COOP_ALLOWED_TYPES_KEY = "aurora.awf.multiprofile.coop.allowed-types";
 
     public static final String ENABLED_KEY = "aurora.awf.multiprofile.enabled";
     public static final String MODE_KEY = "aurora.awf.multiprofile.mode";
@@ -262,7 +329,9 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         WORLDS_IDLE_KEY,
         COORDINATION_PROVIDER_KEY, COORDINATION_FENCING_KEY, COORDINATION_SINGLE_SESSION_KEY, DIRECTORY_KEY,
         REPOSITORY_KEY, REDIS_REQUIRE_AOF_KEY, REDIS_WAIT_FOR_AOF_KEY,
-        TYPES_ALLOWED_KEY, TYPES_DEFAULT_KEY, NAMES_POLICY_KEY, MIGRATION_MODE_KEY, MIGRATION_BACKUP_DIR_KEY);
+        TYPES_ALLOWED_KEY, TYPES_DEFAULT_KEY, NAMES_POLICY_KEY, MIGRATION_MODE_KEY, MIGRATION_BACKUP_DIR_KEY,
+        COOP_ENABLED_KEY, COOP_MAX_MEMBERS_KEY, COOP_INVITE_EXPIRY_KEY, COOP_VOTE_EXPIRY_KEY, COOP_INACTIVE_DAYS_KEY,
+        COOP_ALLOWED_TYPES_KEY);
 
     /** The file repository; a server that sets no repository key keeps the behaviour of earlier builds. */
     public static final Repository DEFAULT_REPOSITORY = new Repository(Backend.FILE, true, true);
@@ -273,11 +342,17 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
     public static final Names DEFAULT_NAMES = new Names(NamePolicy.CUTE);
     /** No migration: a format-1 store is left alone. */
     public static final Migration DEFAULT_MIGRATION = new Migration(MigrationMode.OFF, "");
+    /**
+     * Co-op off; up to 5 members; invitations last 5 minutes, kick votes 10 minutes; a two-member co-op can remove the
+     * other member after 35 days of inactivity; only classic profiles convert.
+     */
+    public static final Coop DEFAULT_COOP = new Coop(false, 5, 5, 10, 35,
+        EnumSet.of(dev.iyanz.sourbycraft.api.profile.ProfileType.CLASSIC));
 
     public static final ProfileSettings DEFAULT = new ProfileSettings(false, Mode.STANDALONE, 3, 8,
         new Switching(true, 15_000, true), ProfileIsolation.ALL, new Worlds(300),
         new Coordination(Provider.LOCAL, true, true), DIRECTORY_DEFAULT, DEFAULT_REPOSITORY,
-        DEFAULT_TYPES, DEFAULT_NAMES, DEFAULT_MIGRATION);
+        DEFAULT_TYPES, DEFAULT_NAMES, DEFAULT_MIGRATION, DEFAULT_COOP);
 
     /** Settings with {@link #DEFAULT_REPOSITORY} and the Build 51 defaults. */
     public ProfileSettings(final boolean enabled, final Mode mode, final int defaultSlots, final int maxSlots,
@@ -287,12 +362,21 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
             DEFAULT_REPOSITORY);
     }
 
-    /** Settings with the Build 51 defaults ({@link #DEFAULT_TYPES}, {@link #DEFAULT_NAMES}, {@link #DEFAULT_MIGRATION}). */
+    /** Settings with the Build 51 defaults ({@link #DEFAULT_TYPES}, {@link #DEFAULT_NAMES}, {@link #DEFAULT_MIGRATION}) and co-op off. */
     public ProfileSettings(final boolean enabled, final Mode mode, final int defaultSlots, final int maxSlots,
                            final Switching switching, final ProfileIsolation isolation, final Worlds worlds,
                            final Coordination coordination, final String directory, final Repository repository) {
         this(enabled, mode, defaultSlots, maxSlots, switching, isolation, worlds, coordination, directory,
             repository, DEFAULT_TYPES, DEFAULT_NAMES, DEFAULT_MIGRATION);
+    }
+
+    /** Settings with the Build 52 co-op defaults ({@link #DEFAULT_COOP}: co-op off). */
+    public ProfileSettings(final boolean enabled, final Mode mode, final int defaultSlots, final int maxSlots,
+                           final Switching switching, final ProfileIsolation isolation, final Worlds worlds,
+                           final Coordination coordination, final String directory, final Repository repository,
+                           final Types types, final Names names, final Migration migration) {
+        this(enabled, mode, defaultSlots, maxSlots, switching, isolation, worlds, coordination, directory,
+            repository, types, names, migration, DEFAULT_COOP);
     }
 
     public ProfileSettings {
@@ -305,6 +389,7 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         Objects.requireNonNull(types, "types");
         Objects.requireNonNull(names, "names");
         Objects.requireNonNull(migration, "migration");
+        Objects.requireNonNull(coop, "coop");
         if (defaultSlots < 1 || maxSlots < 1 || defaultSlots > maxSlots || maxSlots > PlayerAccount.MAX_SLOTS) {
             throw new IllegalArgumentException("default-slots and max-slots must satisfy 1 <= default <= max <= "
                 + PlayerAccount.MAX_SLOTS);
@@ -351,6 +436,14 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
     /** Whether distributed mode was requested. Distributed additionally requires the Redis repository. */
     public boolean distributed() {
         return this.mode == Mode.DISTRIBUTED;
+    }
+
+    /**
+     * Whether co-op membership operations are accepted: MultiProfile and {@code coop.enabled} are both on. The
+     * single check every co-op entry point makes; {@code coop().enabled()} alone ignores the master switch.
+     */
+    public boolean coopEnabled() {
+        return this.enabled && this.coop.enabled();
     }
 
     /** Whether profiles are stored in the Aurora Redis Fabric instead of the directory. */
@@ -433,8 +526,30 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         final Types types = types(values, invalid);
         final Names names = names(values, invalid);
         final Migration migration = migration(values, directory, invalid);
+        final Coop coop = coop(values, invalid);
         return new Parsed(new ProfileSettings(enabled, mode, defaultSlots, maxSlots, switching, isolation, worlds,
-            coordination, directory, repository, types, names, migration), invalid);
+            coordination, directory, repository, types, names, migration, coop), invalid);
+    }
+
+    /** Each unusable co-op key falls back to its own default and is reported; a bad key never enables co-op. */
+    private static Coop coop(final Map<String, Object> values, final List<String> invalid) {
+        Set<dev.iyanz.sourbycraft.api.profile.ProfileType> allowed = DEFAULT_COOP.allowedTypes();
+        final Object raw = values.get(COOP_ALLOWED_TYPES_KEY);
+        if (raw != null) {
+            final Set<dev.iyanz.sourbycraft.api.profile.ProfileType> parsed = typeSet(raw);
+            if (parsed == null) {
+                invalid.add(COOP_ALLOWED_TYPES_KEY);
+            } else {
+                allowed = parsed;
+            }
+        }
+        return new Coop(
+            flag(values, COOP_ENABLED_KEY, DEFAULT_COOP.enabled(), invalid),
+            whole(values, COOP_MAX_MEMBERS_KEY, DEFAULT_COOP.maxMembers(), Coop.MIN_MEMBERS, Coop.MAX_MEMBERS_LIMIT, invalid),
+            whole(values, COOP_INVITE_EXPIRY_KEY, DEFAULT_COOP.inviteExpiryMinutes(), 1, Coop.MAX_EXPIRY_MINUTES, invalid),
+            whole(values, COOP_VOTE_EXPIRY_KEY, DEFAULT_COOP.kickVoteExpiryMinutes(), 1, Coop.MAX_EXPIRY_MINUTES, invalid),
+            whole(values, COOP_INACTIVE_DAYS_KEY, DEFAULT_COOP.kickVoteInactiveDays(), 1, Coop.MAX_INACTIVE_DAYS, invalid),
+            allowed);
     }
 
     private static Types types(final Map<String, Object> values, final List<String> invalid) {
@@ -567,6 +682,12 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         values.put(NAMES_POLICY_KEY, DEFAULT.names().policy().id());
         values.put(MIGRATION_MODE_KEY, DEFAULT.migration().mode().id());
         values.put(MIGRATION_BACKUP_DIR_KEY, DEFAULT.migration().backupDir());
+        values.put(COOP_ENABLED_KEY, DEFAULT.coop().enabled());
+        values.put(COOP_MAX_MEMBERS_KEY, DEFAULT.coop().maxMembers());
+        values.put(COOP_INVITE_EXPIRY_KEY, DEFAULT.coop().inviteExpiryMinutes());
+        values.put(COOP_VOTE_EXPIRY_KEY, DEFAULT.coop().kickVoteExpiryMinutes());
+        values.put(COOP_INACTIVE_DAYS_KEY, DEFAULT.coop().kickVoteInactiveDays());
+        values.put(COOP_ALLOWED_TYPES_KEY, typeIds(DEFAULT.coop().allowedTypes()));
         return values;
     }
 

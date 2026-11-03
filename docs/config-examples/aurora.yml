@@ -184,6 +184,29 @@ aurora:
         # RESTART_REQUIRED. Backup target for mode: apply; relative to the server directory or absolute.
         # No ..; must not be inside or contain the store directory. Empty = not configured.
         backup-dir: ""
+      coop:
+        # RESTART_REQUIRED. Default false. Co-op membership (Build 52): convert a solo profile, invite, accept,
+        # decline, cancel, leave, kick vote, shared label. false = every co-op operation is refused
+        # (COOP_DISABLED) and nothing co-op is written. Needs multiprofile.enabled and a store in format 2.
+        # Build 52 does NOT: let a member switch into a co-op profile they do not own (Build 53), remove a
+        # member whose active profile is the co-op profile (Build 53), transfer ownership, or deliver salvage
+        # (Build 54). The first co-op record raises the store to minimum build 52 (Build 51 then refuses it).
+        enabled: false
+        # RESTART_REQUIRED. Members of one co-op, owner included. 2-8. Invalid = 5, with a WARN.
+        max-members: 5
+        # RESTART_REQUIRED. Invitation lifetime, 1-1440 minutes; judged at commit time.
+        invite-expiry-minutes: 5
+        # RESTART_REQUIRED. Policy types whose solo profile may be converted to co-op. Checked at conversion
+        # only. Build 51 enforces no ironman/stranded/bingo rule, so widening this gives them co-op unrestricted.
+        allowed-types: ["classic"]
+        kick-vote:
+          # RESTART_REQUIRED. Kick-vote lifetime, 1-1440 minutes. Approval is unanimous among the members other
+          # than the target (owner included); the starter's approval counts.
+          expiry-minutes: 10
+          # RESTART_REQUIRED. Two-member co-op only: days the other member must have been inactive before a
+          # vote may start against them. 1-3650. Build 52 records activity at join time and membership changes
+          # only, not from gameplay.
+          inactive-days: 35
     redis:
       fabric:
         # RESTART_REQUIRED, read early (every fabric key). Aurora Redis Fabric. Default false: no socket,

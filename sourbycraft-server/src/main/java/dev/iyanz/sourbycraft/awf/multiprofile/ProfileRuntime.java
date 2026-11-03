@@ -1,6 +1,11 @@
 package dev.iyanz.sourbycraft.awf.multiprofile;
 
 import dev.iyanz.sourbycraft.api.profile.AuroraProfiles;
+import dev.iyanz.sourbycraft.api.profile.CoopDetails;
+import dev.iyanz.sourbycraft.api.profile.CoopInviteInfo;
+import dev.iyanz.sourbycraft.api.profile.CoopKickVoteInfo;
+import dev.iyanz.sourbycraft.api.profile.CoopMemberInfo;
+import dev.iyanz.sourbycraft.api.profile.CoopPage;
 import dev.iyanz.sourbycraft.api.profile.ProfileDetails;
 import dev.iyanz.sourbycraft.api.profile.ProfileErrorCode;
 import dev.iyanz.sourbycraft.api.profile.ProfileInfo;
@@ -23,6 +28,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -278,6 +284,9 @@ public final class ProfileRuntime {
                 : "; " + store.unresolvedIntents().size() + " intent(s) left pending for recovery"));
         engine.onSessionLost(playerId -> disconnect(plugin, playerId,
             "Your profile session was taken over or expired. Rejoin to continue."));
+        engine.storeWriter(writtenBy());
+        // Co-op events are asynchronous: the engine calls this on its own event thread, after the durable commit.
+        engine.onCoopEvent(event -> Bukkit.getPluginManager().callEvent(event));
         ScheduledExecutorService sweeper = null;
         if (settings.worlds().idleUnloadSeconds() > 0) {
             sweeper = Executors.newSingleThreadScheduledExecutor(task -> {
@@ -863,6 +872,79 @@ public final class ProfileRuntime {
         @Override
         public void unregisterProfileStateAdapter(final Plugin owner, final String adapterId) {
             this.adapters.unregister(owner, adapterId);
+        }
+
+        // ---- co-op membership (Build 52): every call goes to the engine, which refuses COOP_DISABLED while
+        // coop.enabled is false and MIGRATION_REQUIRED on a format-1 store.
+
+        @Override
+        public CompletableFuture<Optional<CoopDetails>> getCoopDetails(final UUID profileId) {
+            return this.engine.coopDetails(profileId);
+        }
+
+        @Override
+        public CompletableFuture<CoopDetails> convertToCoop(final UUID actorId, final UUID profileId) {
+            return this.engine.convertToCoop(actorId, profileId);
+        }
+
+        @Override
+        public CompletableFuture<CoopInviteInfo> invite(final UUID actorId, final UUID profileId, final UUID inviteeId) {
+            return this.engine.invite(actorId, profileId, inviteeId);
+        }
+
+        @Override
+        public CompletableFuture<CoopMemberInfo> acceptInvite(final UUID playerId, final UUID inviteId) {
+            return this.engine.acceptInvite(playerId, inviteId);
+        }
+
+        @Override
+        public CompletableFuture<Void> declineInvite(final UUID playerId, final UUID inviteId) {
+            return this.engine.declineInvite(playerId, inviteId);
+        }
+
+        @Override
+        public CompletableFuture<Void> cancelInvite(final UUID actorId, final UUID inviteId) {
+            return this.engine.cancelInvite(actorId, inviteId);
+        }
+
+        @Override
+        public CompletableFuture<CoopPage<CoopInviteInfo>> listInvitesFor(final UUID playerId, final String cursor) {
+            return this.engine.invitesFor(playerId, cursor);
+        }
+
+        @Override
+        public CompletableFuture<CoopPage<CoopInviteInfo>> listInvites(final UUID actorId, final UUID profileId, final String cursor) {
+            return this.engine.invitesOf(Objects.requireNonNull(actorId, "actorId"), profileId, cursor);
+        }
+
+        @Override
+        public CompletableFuture<Void> leave(final UUID playerId, final UUID profileId) {
+            return this.engine.leave(playerId, profileId);
+        }
+
+        @Override
+        public CompletableFuture<CoopKickVoteInfo> startKickVote(final UUID actorId, final UUID profileId, final UUID targetId) {
+            return this.engine.startKickVote(actorId, profileId, targetId);
+        }
+
+        @Override
+        public CompletableFuture<CoopKickVoteInfo> voteKick(final UUID voterId, final UUID voteId, final boolean approve) {
+            return this.engine.voteKick(voterId, voteId, approve);
+        }
+
+        @Override
+        public CompletableFuture<Optional<CoopKickVoteInfo>> getOpenKickVote(final UUID profileId) {
+            return this.engine.openKickVote(profileId);
+        }
+
+        @Override
+        public CompletableFuture<CoopPage<CoopMemberInfo>> listMembers(final UUID profileId, final String cursor) {
+            return this.engine.members(profileId, cursor);
+        }
+
+        @Override
+        public CompletableFuture<Void> setCoopLabel(final UUID actorId, final UUID profileId, final String label) {
+            return this.engine.setCoopLabel(actorId, profileId, Objects.requireNonNull(label, "label"));
         }
     }
 }

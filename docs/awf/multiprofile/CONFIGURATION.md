@@ -46,7 +46,7 @@ are code written and statically reviewed; not built; not tested by the owner, an
 
 Build 51 code written; not built by an agent; not tested by the owner. All five keys are
 **RESTART_REQUIRED** (read early with the rest; the repository is opened once at startup). Co-op
-membership and its keys are Build 52; nothing here enables it.
+membership and its keys are Build 52 (next section); nothing in this table enables it.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -60,6 +60,25 @@ There is deliberately **no** `storage.format` key. The store format is a propert
 setting: it is reported (format 1 = written before Build 51, format 2 = written by Build 51) and
 cannot be chosen. A server with `enabled: false` reports nothing and reads nothing. A
 `storage.format` line in the file is an undocumented key: one WARN per load, ignored.
+
+### Build 52: co-op membership
+
+Build 52 code written and compiled by an agent; not tested by the owner. All six keys are
+**RESTART_REQUIRED**: they are read early with the rest, and no consumer re-reads them while the server
+runs, so a change needs a restart (`/sourbycraft reload` does not apply it). Co-op is off by default.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `coop.enabled` | `false` | `true` accepts the co-op membership operations (convert, invite, accept, decline, cancel, leave, kick vote, label) and registers `/sourbycraft:coop`; the bare `/coop` is claimed after the plugins enabled (`ServerLoadEvent` STARTUP) only if no plugin registered one (otherwise an INFO names the holder). `false`: every one is refused with `COOP_DISABLED`, `/coop` is not registered and no co-op record is written; a store that already holds co-op profiles stays readable. Needs `enabled: true` (with `enabled: false` it is ignored with a WARN) and a format-2 store (`MIGRATION_REQUIRED` otherwise) |
+| `coop.max-members` | `5` | members of one co-op, owner included; allowed `2` to `8`. Applies to new invitations and accepts; a co-op already above a lowered cap keeps its members. Outside the range: WARN, `5` |
+| `coop.invite-expiry-minutes` | `5` | invitation lifetime, `1` to `1440` minutes, judged at commit time against the repository clock. Outside the range: WARN, `5` |
+| `coop.kick-vote.expiry-minutes` | `10` | kick-vote lifetime, `1` to `1440` minutes. Outside the range: WARN, `10` |
+| `coop.kick-vote.inactive-days` | `35` | in a two-member co-op, days the other member must have been inactive before a kick vote may start against them (`TARGET_NOT_INACTIVE` until then); `1` to `3650`. Build 52 records a member's last activity at join time and on membership changes, not from gameplay. Outside the range: WARN, `35` |
+| `coop.allowed-types` | `[classic]` | policy types whose solo profile may be converted to co-op (a list, or a comma-separated string); checked at conversion only, so narrowing it later does not touch existing co-ops. A profile of another type: `TYPE_NOT_ALLOWED`. Build 51 enforces no ironman, stranded or bingo rule, so adding them gives those types co-op without any of their intended restrictions. An unknown name or an empty list: WARN, `[classic]` |
+
+Not configurable in Build 52: the per-account membership limit (it is the account's profile slot limit,
+`default-slots`/`max-slots`), the size of a page (fixed, at most 32), the number of open invitations and
+votes (store bounds, `CAPACITY_EXCEEDED`), and the salvage window (salvage delivery is Build 54).
 
 ## `aurora.awf.redis.fabric.*`
 

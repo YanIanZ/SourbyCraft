@@ -21,6 +21,10 @@ package dev.iyanz.sourbycraft.awf.multiprofile;
  *       {@code DECIDED <phaseTag>} abort after commit; {@code NOINTENT}; {@code REFUSED <why>}.</li>
  * </ul>
  *
+ * <p>The header also fixes {@code READS_UP_TO_BUILD} ({@link StoreFormat#READS_UP_TO_BUILD}) as a Lua constant: the
+ * gate refuses a store whose {@code minimumBuild} is above it, as it refuses a newer payload schema, so a node of an
+ * older build cannot write to a store a newer one raised.</p>
+ *
  * <p>Fixed layout. KEYS: [1] meta, [2] {@code P} claim hash (meta when none), [3] {@code Q} actor claim
  * hash, [4] {@code Q} affected claim hash, [5] receipts hash of the resource, [6] receipt-digest hash of
  * the resource, then the version vector's record keys. ARGV: [1] {@code '1'} when the writer is the
@@ -35,15 +39,14 @@ final class RedisProfileScripts {
 
     private RedisProfileScripts() {}
 
-    static final String HEADER = """
-        #!lua
+    static final String HEADER = "#!lua\nlocal READS_UP_TO_BUILD = " + StoreFormat.READS_UP_TO_BUILD + "\n" + """
         local MAXC = 9007199254740991
         local function now()
           local t = redis.call('TIME')
           return tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
         end
         local function gate()
-          local m = redis.call('HMGET', KEYS[1], 'format', 'migrationState', 'schema')
+          local m = redis.call('HMGET', KEYS[1], 'format', 'migrationState', 'schema', 'minimumBuild')
           local format = m[1] or '1'
           if format == '1' then return {'LEGACY'} end
           if format ~= '2' then return {'FORMAT', 'the store is format ' .. format} end
@@ -55,6 +58,9 @@ final class RedisProfileScripts {
           end
           if (tonumber(m[3] or '0') or 0) > tonumber(ARGV[2]) then
             return {'FORMAT', 'the store uses payload schema ' .. tostring(m[3])}
+          end
+          if (tonumber(m[4] or '0') or 0) > READS_UP_TO_BUILD then
+            return {'FORMAT', 'the store requires Build ' .. tostring(m[4]) .. ' or newer; this build reads stores up to Build ' .. READS_UP_TO_BUILD}
           end
           return nil
         end
@@ -283,9 +289,11 @@ final class RedisProfileScripts {
 
     /**
      * PREPARE. Keys: intent hash, blob hash of the operation, staged after-image keys, reserved record
-     * keys, pin hashes, index sets. Args: intent record, intent revision, phase tag, kind tag, created
-     * ms, receipt resource id, blob count + lengths, reserved count + (revision, record) pairs, pin
-     * count + snapshot ids, index count + (member, cap) pairs. Writes nothing on refusal.
+     * keys, compared record keys, pin hashes, index sets. Args: intent record, intent revision, phase tag,
+     * kind tag, created ms, receipt resource id, blob count + lengths, reserved count + (revision, record)
+     * pairs, compared count (records the intent compares without reserving; refused RESERVED when another
+     * operation's reservation is on them), pin count + snapshot ids, index count + (member, cap) pairs.
+     * Writes nothing on refusal.
      */
     static final String PREPARE_INTENT = HEADER + """
         local refused = gate() or replay()
@@ -334,6 +342,11 @@ final class RedisProfileScripts {
           local r = reserved(rkeys[i])
           if r then return r end
         end
+        local nc = tonumber(na())
+        for i = 1, nc do
+          local r = reserved(nk())
+          if r then return r end
+        end
         local np = tonumber(na())
         local pkeys = {}
         local pids = {}
@@ -370,10 +383,14 @@ final class RedisProfileScripts {
      * COMMIT (and roll-forward of a COMMITTED intent). Keys: intent hash, blob hash, then per
      * after-image: target hash and names hash (meta when not a profile), release record keys, pin
      * hashes, index sets to remove from, index sets to add to. Args: '1' for roll-forward (claims and
-     * vector not re-checked), intent record (FINALIZED), its revision, install count + per install
-     * (blob index, revision, type, f1..f4), release count + (revision, record) pairs, pin count + ids,
-     * removal count + members, addition count + (member, cap) pairs. In Redis COMMITTED and FINALIZED
-     * are one atomic step.
+     * vector not re-checked), intent record (FINALIZED), its revision, the intent's deadline in epoch
+     * milliseconds ('0' none; a PREPARED intent past it by Redis TIME is refused EXPIRED, a roll-forward
+     * never is), install count + per install (blob index, revision, type, f1..f4), release count +
+     * (revision, record) pairs, compared count (keys of compare-only records, refused RESERVED when
+     * another operation holds them), pin count + ids, removal count + members, addition count +
+     * (member, cap) pairs. In Redis COMMITTED and FINALIZED are one atomic step. The addition caps are the §9 bounds of
+     * the membership indexes (64 open invites per profile and per invitee, one open vote per profile, 64
+     * outstanding salvage per profile) and refuse LIMIT before any write.
      */
     static final String COMMIT_INTENT = HEADER + """
         local forward = na()
@@ -389,6 +406,11 @@ final class RedisProfileScripts {
         if forward == '1' and cur[1] ~= '2' then return {'INTENT', cur[1], cur[3] or ''} end
         local rec = na()
         local rev = na()
+        local deadline = tonumber(na())
+        if forward ~= '1' and deadline ~= nil and deadline > 0 then
+          local t = now()
+          if t > deadline then return {'EXPIRED', tostring(deadline), tostring(t)} end
+        end
         local ni = tonumber(na())
         local ikeys = {}
         local inames = {}
@@ -439,6 +461,11 @@ final class RedisProfileScripts {
         end
         for i = 1, nr do
           local r = reserved(rkeys[i])
+          if r then return r end
+        end
+        local nc = tonumber(na())
+        for i = 1, nc do
+          local r = reserved(nk())
           if r then return r end
         end
         local np = tonumber(na())
@@ -636,8 +663,33 @@ final class RedisProfileScripts {
         if tonumber(ARGV[1]) ~= tonumber(ARGV[6]) then
           return {'FORMAT', 'this build writes only format ' .. ARGV[6] .. ' markers; a format ' .. ARGV[1] .. ' (downgrade) marker is never written'}
         end
+        local level = redis.call('HMGET', KEYS[1], 'schema', 'minimumBuild')
+        if stored and (tonumber(stored) or 0) == tonumber(ARGV[6])
+          and ((tonumber(level[1] or '0') or 0) > tonumber(ARGV[3]) or (tonumber(level[2] or '0') or 0) > 0) then
+          return {'FORMAT', 'the store was raised to schema ' .. tostring(level[1]) .. ' / Build ' .. tostring(level[2] or '0')
+            .. '; a marker below that is never written'}
+        end
         redis.call('HSET', KEYS[1], 'format', ARGV[1], 'migrationState', ARGV[2], 'schema', ARGV[3], 'writtenAt', ARGV[4],
           'writtenBy', ARGV[5])
+        return {'OK'}
+        """;
+
+    /**
+     * Store feature level (Build 52). KEYS[1] meta. ARGV: schema, minimum build, written ms, written by, the format
+     * this build writes. Refused unless the store is that format and not migrating; raises {@code schema} and
+     * {@code minimumBuild} to at least the arguments and never lowers them.
+     */
+    static final String RAISE_FORMAT = """
+        #!lua
+        local m = redis.call('HMGET', KEYS[1], 'format', 'migrationState', 'schema', 'minimumBuild')
+        if m[1] ~= ARGV[5] then
+          return {'FORMAT', 'the store is format ' .. tostring(m[1] or '1') .. ', not ' .. ARGV[5]}
+        end
+        if m[2] == '2' then return {'FORMAT', 'a format-2 migration is in progress'} end
+        local schema = math.max(tonumber(m[3] or '0') or 0, tonumber(ARGV[1]))
+        local minimum = math.max(tonumber(m[4] or '0') or 0, tonumber(ARGV[2]))
+        redis.call('HSET', KEYS[1], 'schema', tostring(schema), 'minimumBuild', tostring(minimum), 'writtenAt', ARGV[3],
+          'writtenBy', ARGV[4])
         return {'OK'}
         """;
 }
