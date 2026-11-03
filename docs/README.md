@@ -48,6 +48,10 @@ disagree, the code wins ([DEVELOPMENT.md](DEVELOPMENT.md), truthfulness policy).
 
 **[Aurora Identity + Territory Fabric v3](proposals/aurora-identity-territory-v3/README.md)** — major planned upgrade covering Mojang account UUID + unique character identities, GameProfile presentation, transactional MultiProfile, AWF territory partitioning, cross-server handoff, plugin compatibility, security, migration, owner tests and epic roadmap. This is a **docs-only PROPOSAL**, not Build 50 implementation or a released feature. Existing Build 50 readiness and TODO remain the source of truth.
 
+## Metal Performance Program — planned Builds 56–100
+
+**[Aurora Metal Program](metal/README.md)** (PROPOSAL) designs continued source-owned concurrency, data-structure, chunk/scheduler/storage and territory-adjacent optimization across planned Builds 56–100. The [milestone roadmap](metal/BUILD-56-100-ROADMAP.md) and [owner performance qualification](metal/PERFORMANCE-QUALIFICATION.md) are **not implemented** or benchmark claims. The first PR retains legacy LeafPile as the default and adds only opt-in provider candidates. Existing Build 50 readiness and [TODO.md](TODO.md) remain current status authority.
+
 ## Index
 
 ### Project direction
