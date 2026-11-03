@@ -103,8 +103,9 @@ public enum ProfileErrorCode {
     /** Added in Build 52. The actor's role does not allow the operation (for example a MEMBER inviting). */
     ROLE_FORBIDDEN,
     /**
-     * Added in Build 52. The member to remove (leave or kick) is online. Build 52 refuses it; removing an online
-     * member is enabled in Build 53. Nothing was written.
+     * Added in Build 52. The member to remove (leave or kick) is online. Build 52 refuses it with this code. From
+     * Build 53 an online member is captured and switched out first, so this code is returned only when that
+     * cannot be done safely (for example the member is online on another node). Nothing was written.
      */
     MEMBER_ONLINE,
     /**
@@ -137,8 +138,29 @@ public enum ProfileErrorCode {
     /** Added in Build 52. An open invitation for this invitee and profile exists already. */
     INVITE_EXISTS,
     /**
-     * Added in Build 52. Switching into a co-op profile the player does not own is not available until Build 53
-     * (member snapshots and login restore). Nothing was written.
+     * Added in Build 52. Switching into a co-op profile the player does not own was not available in Build 52.
+     * Build 53 allows it for a member (when co-op is enabled and the profile's world is on this node), so a member
+     * no longer receives this code; it is kept so existing consumers still compile and for a non-member, which is
+     * answered with {@link #NOT_A_MEMBER}.
      */
-    COOP_SWITCH_UNAVAILABLE
+    COOP_SWITCH_UNAVAILABLE,
+    /**
+     * Added in Build 53. A {@link ProfileDataCriticality#REQUIRED} {@link ProfileStateAdapter} failed to capture
+     * or apply (it threw, exceeded its size bound or the snapshot budget). The switch was refused or rolled back
+     * to the previous profile; nothing was skipped. When the failure came after the journal held a target, the
+     * journal records it for recovery.
+     */
+    ADAPTER_REQUIRED_FAILED,
+    /**
+     * Added in Build 53. A {@link ProfileDataCriticality#REQUIRED} adapter that holds data for the profile is not
+     * registered on this node (its plugin is absent, disabled or at another version), so the data cannot be
+     * captured or applied safely. The switch was refused and nothing was written. Load the plugin and retry.
+     */
+    ADAPTER_MISSING,
+    /**
+     * Added in Build 53. Authoritative login could not read the member's committed state head for the active
+     * profile (the store is unreadable or the head is damaged). The join is refused with this reason rather than
+     * loading vanilla player data. Nothing was written.
+     */
+    HEAD_UNREADABLE
 }

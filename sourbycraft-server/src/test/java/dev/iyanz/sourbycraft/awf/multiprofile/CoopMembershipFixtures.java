@@ -321,7 +321,7 @@ final class CoopMembershipFixtures {
         final ExecutorService io = Executors.newFixedThreadPool(2);
         final LocalProfileOwnership profiles = new LocalProfileOwnership("node-a", 600);
         final PlayerSessionOwnership players = PlayerSessionOwnership.local("node-a", 600);
-        final CoopFixtures.QuietPlayers ports = new CoopFixtures.QuietPlayers();
+        final CoopFixtures.QuietPlayers ports;
         final FileProfileRepository file;
         /** Added to every {@code storeClockMillis()} the engine reads; the FILE commit clock is not shifted. */
         final AtomicLong clockOffset = new AtomicLong();
@@ -332,7 +332,14 @@ final class CoopMembershipFixtures {
         final BlockingQueue<org.bukkit.event.Event> events = new LinkedBlockingQueue<>();
 
         CoopEngine(final Path root, final ProfileSettings settings, final boolean format2) throws IOException {
+            this(root, settings, format2, new CoopFixtures.QuietPlayers());
+        }
+
+        /** As above with the given player port (the Build 53 member-play cases pass a stateful one). */
+        CoopEngine(final Path root, final ProfileSettings settings, final boolean format2, final CoopFixtures.QuietPlayers ports)
+            throws IOException {
             this.root = root;
+            this.ports = ports;
             this.file = new FileProfileRepository(root, "node-a");
             if (format2 && this.file.storeFormat().legacyFormat()) this.file.writeStoreFormat(StoreFormat.Marker.ready(CoopFixtures.BUILD));
             this.file.attachClaims(FileProfileClaims.of(this.profiles, this.players));

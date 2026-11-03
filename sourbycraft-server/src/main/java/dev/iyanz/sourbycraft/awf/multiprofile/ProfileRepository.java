@@ -440,6 +440,31 @@ public interface ProfileRepository extends AutoCloseable {
         throw unsupported("salvage");
     }
 
+    // ------------------------------------------------------------------ session markers (Build 53, authoritative login)
+
+    /**
+     * Whether this repository stores {@link SessionMarker session markers}. A repository that does not (the default)
+     * answers every {@link #sessionMarker} with empty and ignores {@link #writeSessionMarker}; the engine then applies
+     * the upgrade rule to every authoritative login and logs it once.
+     */
+    default boolean supportsSessionMarkers() {
+        return false;
+    }
+
+    /** The player's session marker, or empty when none was written (or the repository stores none). */
+    default Optional<SessionMarker> sessionMarker(UUID playerId) throws IOException {
+        return Optional.empty();
+    }
+
+    /**
+     * Writes the player's session marker, replacing the previous one. Not fenced: the marker is advisory input to the
+     * next login's adoption decision, never a write of player state. Returns {@code false} when the repository stores
+     * no markers.
+     */
+    default boolean writeSessionMarker(SessionMarker marker) throws IOException {
+        return false;
+    }
+
     @Override
     void close();
 

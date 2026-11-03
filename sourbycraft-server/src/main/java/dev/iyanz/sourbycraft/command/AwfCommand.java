@@ -799,6 +799,33 @@ public class AwfCommand extends Command {
                         result.success() ? SourbyCraftColors.SUCCESS : SourbyCraftColors.WARNING));
                 }));
             }
+            case "session" -> {
+                // Build 53 operator escape from a fail-closed login or a refused-save freeze (authoritative login).
+                if (!s.hasPermission("sourbycraft.command.awf.multiprofile.admin")) {
+                    s.sendMessage(text("You do not have sourbycraft.command.awf.multiprofile.admin",
+                        SourbyCraftColors.DANGER));
+                    return;
+                }
+                final java.util.UUID player = playerId(s, args);
+                if (player == null) return;
+                final String what = args.length > 3 ? args[3].toLowerCase(Locale.ROOT) : "";
+                switch (what) {
+                    case "reset-marker" -> engine.resetSessionMarker(player).whenComplete((result, failed) -> this.reply.accept(s, () -> {
+                        if (failed != null) {
+                            fail(s, failed);
+                            return;
+                        }
+                        s.sendMessage(text(result, SourbyCraftColors.SUCCESS));
+                    }));
+                    case "clear-refusal" -> s.sendMessage(text(engine.clearSaveRefusal(player)
+                        ? "Lifted the refused-save freeze of " + player + "; their next save is attempted again"
+                        : "No refused-save freeze is set for " + player + " (a new session clears it on its own)",
+                        SourbyCraftColors.SUCCESS));
+                    default -> s.sendMessage(text("Usage: /awf multiprofile session <player> <reset-marker|clear-refusal>: reset-marker"
+                        + " makes the next login restore the committed head (no vanilla playerdata adoption); clear-refusal lifts the"
+                        + " freeze of a save that was refused in the current session", SourbyCraftColors.WARNING));
+                }
+            }
             case "lock", "unlock" -> {
                 if (!s.hasPermission("sourbycraft.command.awf.multiprofile.admin")) {
                     s.sendMessage(text("You do not have sourbycraft.command.awf.multiprofile.admin",
@@ -980,7 +1007,8 @@ public class AwfCommand extends Command {
             default -> s.sendMessage(text("Usage: /awf multiprofile <status|list <player>|create <player> [namespace]"
                 + " [type=<type>] [name=<name>]|switch <player> <profile-uuid>|bind <profile> <world> [template]|"
                 + "unbind <profile>|inspect|info <profile>|lock <profile>|unlock <profile>|slots <player> <n>|"
-                + "recover <transition>|owner <profile>|reclaim <profile> <epoch>|migrate-repository confirm|format|"
+                + "recover <transition>|session <player> <reset-marker|clear-refusal>|owner <profile>|reclaim <profile> <epoch>|"
+                + "migrate-repository confirm|format|"
                 + "migrate <dry-run|apply>|coop <convert|invite|accept|decline|cancel|leave|kick|vote|members|invites|info|label> ...>",
                 SourbyCraftColors.WARNING));
         }
@@ -1025,7 +1053,9 @@ public class AwfCommand extends Command {
 
     private java.util.UUID playerId(final CommandSender s, final String[] args) {
         if (args.length < 3) {
-            s.sendMessage(text("Usage: /awf multiprofile list <player>", SourbyCraftColors.WARNING));
+            s.sendMessage(text("Usage: /awf multiprofile " + (args.length > 1 ? args[1].toLowerCase(Locale.ROOT) : "list")
+                + " <player>" + (args.length > 1 && args[1].equalsIgnoreCase("session") ? " <reset-marker|clear-refusal>" : ""),
+                SourbyCraftColors.WARNING));
             return null;
         }
         final org.bukkit.entity.Player online = org.bukkit.Bukkit.getPlayerExact(args[2]);

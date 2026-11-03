@@ -54,9 +54,14 @@ public final class BukkitPlayerStatePort implements PlayerStatePort {
 
     @Override
     public CompletableFuture<ProfileState> capture(final UUID playerId, final ProfileIsolation isolation) {
+        return captureDetailed(playerId, isolation).thenApply(CaptureResult::state);
+    }
+
+    @Override
+    public CompletableFuture<CaptureResult> captureDetailed(final UUID playerId, final ProfileIsolation isolation) {
         final Player player = Bukkit.getPlayer(playerId);
         if (player == null) return CompletableFuture.failedFuture(new IllegalStateException("player is not online"));
-        return onEntity(player, () -> captureNow(player, isolation), "capture");
+        return onEntity(player, () -> captureNow(player, isolation, null), "capture");
     }
 
     /**
@@ -65,13 +70,71 @@ public final class BukkitPlayerStatePort implements PlayerStatePort {
      * would run after the player was removed.
      *
      * @throws IllegalStateException when the calling thread does not own the player
+     * @throws dev.iyanz.sourbycraft.api.profile.ProfileOperationException {@code ADAPTER_REQUIRED_FAILED} when a
+     *     required adapter failed to capture
      */
     public ProfileState captureOnOwnerThread(final Player player, final ProfileIsolation isolation) {
+        return captureOnOwnerThreadDetailed(player, isolation, null).state();
+    }
+
+    /**
+     * {@link #captureOnOwnerThread} with the adapter decisions. {@code stagedAdapters}, when given, replaces asking
+     * the registered adapters: the shutdown capture stages every adapter blob before the plugins are disabled and
+     * merges it here, after they are, so an adapter unregistered by the disable is not treated as missing.
+     */
+    public CaptureResult captureOnOwnerThreadDetailed(final Player player, final ProfileIsolation isolation,
+                                                      final ProfileStateAdapters.Capture stagedAdapters) {
         if (!Bukkit.isOwnedByCurrentRegion(player)) {
             throw new IllegalStateException("the profile capture of " + player.getUniqueId()
                 + " must run on the thread that owns the player");
         }
-        return captureNow(player, isolation);
+        return captureNow(player, isolation, stagedAdapters);
+    }
+
+    /**
+     * Captures only the registered adapters of a player, on the calling thread, which must own the player; the
+     * shutdown pre-capture, run while the plugins are still enabled.
+     *
+     * @throws dev.iyanz.sourbycraft.api.profile.ProfileOperationException {@code ADAPTER_REQUIRED_FAILED} when a
+     *     required adapter failed to capture
+     */
+    public ProfileStateAdapters.Capture captureAdaptersOnOwnerThread(final Player player) {
+        if (!Bukkit.isOwnedByCurrentRegion(player)) {
+            throw new IllegalStateException("the adapter capture of " + player.getUniqueId()
+                + " must run on the thread that owns the player");
+        }
+        return this.adapters.capture(player);
+    }
+
+    @Override
+    public void validateApply(final ProfileState state) {
+        this.adapters.validateApply(state.adapters());
+    }
+
+    /**
+     * The server's player data directory, resolved once: {@code <level>/players/data} in 26.2
+     * ({@code LevelResource.PLAYER_DATA_DIR}, where {@code PlayerDataStorage} writes {@code <uuid>.dat}; the pre-26.2
+     * {@code <level>/playerdata} is renamed by the server's storage fix), not the overworld's dimension folder.
+     */
+    private volatile java.nio.file.Path playerdata;
+
+    @Override
+    public java.util.OptionalLong vanillaPlayerdataModifiedMillis(final UUID playerId) {
+        try {
+            java.nio.file.Path directory = this.playerdata;
+            if (directory == null) {
+                directory = net.minecraft.server.MinecraftServer.getServer().storageSource
+                    .getLevelPath(net.minecraft.world.level.storage.LevelResource.PLAYER_DATA_DIR);
+                this.playerdata = directory;
+            }
+            final java.nio.file.Path file = directory.resolve(playerId + ".dat");
+            if (!java.nio.file.Files.isRegularFile(file)) return java.util.OptionalLong.empty();
+            return java.util.OptionalLong.of(java.nio.file.Files.getLastModifiedTime(file).toMillis());
+        } catch (final java.io.IOException | RuntimeException unreadable) {
+            SourbyLogger.warn("AWF MultiProfile: the vanilla playerdata of " + playerId + " could not be inspected ("
+                + unreadable.getMessage() + "); it is treated as absent");
+            return java.util.OptionalLong.empty();
+        }
     }
 
     @Override
@@ -116,12 +179,19 @@ public final class BukkitPlayerStatePort implements PlayerStatePort {
         return captured.withAdapters(this.adapters.carryForward(captured.adapters(), previous.adapters()));
     }
 
+    @Override
+    public ProfileState carryAdapters(final ProfileState captured, final ProfileState previous,
+                                      final ProfileStateAdapters.Capture capture) {
+        return captured.withAdapters(this.adapters.carryForward(captured.adapters(), previous.adapters(), capture));
+    }
+
     /**
      * Reads the player on the thread that owns them. Only the player's own state is read: the respawn
      * point is taken as stored ({@code getPotentialRespawnLocation}), because validating it would read
      * the bed or anchor block, which may lie in another region or world.
      */
-    private ProfileState captureNow(final Player player, final ProfileIsolation isolation) {
+    private CaptureResult captureNow(final Player player, final ProfileIsolation isolation,
+                                     final ProfileStateAdapters.Capture stagedAdapters) {
         final PlayerInventory inventory = player.getInventory();
         final List<ProfileState.Item> storage = isolation.inventory() ? items(inventory.getStorageContents()) : List.of();
         final List<ProfileState.Item> armor = isolation.armor() ? items(inventory.getArmorContents()) : List.of();
@@ -148,8 +218,10 @@ public final class BukkitPlayerStatePort implements PlayerStatePort {
         }
         final ProfileState.Location spawn = isolation.location() ? location(player.getPotentialRespawnLocation()) : null;
         final ProfileState.Location returnPoint = isolation.location() ? location(player.getLocation()) : null;
-        return new ProfileState(ProfileState.SCHEMA, storage, armor, offhand, ender, level, experience, health, food,
-            saturation, effects, spawn, returnPoint, this.adapters.capture(player));
+        // A required adapter that fails throws ADAPTER_REQUIRED_FAILED here, so no state is produced at all.
+        final ProfileStateAdapters.Capture captured = stagedAdapters != null ? stagedAdapters : this.adapters.capture(player);
+        return new CaptureResult(new ProfileState(ProfileState.SCHEMA, storage, armor, offhand, ender, level, experience, health,
+            food, saturation, effects, spawn, returnPoint, captured.data()), captured);
     }
 
     /** One active effect as profile state, or {@code null}, with a warning, when the profile cannot hold it. */
@@ -225,6 +297,7 @@ public final class BukkitPlayerStatePort implements PlayerStatePort {
             for (final ProfileState.Effect effect : state.effects()) applyEffect(player, effect);
         }
         if (isolation.location()) applyRespawn(player, state.spawn());
+        // Required adapters that fail throw ADAPTER_REQUIRED_FAILED after the others ran; the apply then fails.
         this.adapters.apply(player, state.adapters());
     }
 

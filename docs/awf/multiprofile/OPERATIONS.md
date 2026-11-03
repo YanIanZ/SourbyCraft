@@ -25,7 +25,7 @@ with `appendonly yes` unless `redis.require-aof: false`, and an ACL user with th
 role, cluster mode or the AOF requirement is not met; it does not fall back to local ownership. An ACL
 that lacks a command other than `INFO` is not detected at startup: the first operation that needs the
 command fails. Every such start logs a WARN naming the open gaps: a player's live state does not follow
-them between servers, no quit snapshot at shutdown, no proxy handoff.
+them between servers, no proxy handoff; the Build 53 quit capture at shutdown is per node and bounded by `shutdown.capture-deadline-ms`.
 
 Profile worlds must exist as AWF worlds, or the profile's binding must name a template to create them
 from: bind with `AuroraProfiles.bindProfileWorlds` ([API.md](API.md#build-50-world-binding-api-owner-testing-pending))
@@ -50,6 +50,8 @@ is granted to operators by default.
 | `/awf multiprofile lock\|unlock <profile-uuid>` | `...multiprofile.admin` | administrative hold of an inactive profile (switching to it is refused) |
 | `/awf multiprofile slots <player> <n>` | `...multiprofile.admin` | the account's slot limit, 1..`max-slots`; profiles above a lowered limit are kept |
 | `/awf multiprofile recover <transition-uuid>` | `...multiprofile.admin` | resolve an incomplete switch; on a terminal (`FAILED`) journal, remove it |
+| `/awf multiprofile session <player> reset-marker` | `...multiprofile.admin` | Build 53: write a closed session marker without provenance, so the player's next authoritative login restores the committed head and adopts no vanilla playerdata (the way out of a join refused by an adoption that cannot be stored; progress held only in vanilla playerdata since the last committed capture is dropped, nothing is duplicated) |
+| `/awf multiprofile session <player> clear-refusal` | `...multiprofile.admin` | Build 53: lift the freeze of a player whose save was refused in the current session (a new session clears it on its own) |
 | `/awf multiprofile reclaim <profile-uuid> <epoch>` | `...multiprofile.admin` | take over and release the claim of a holder that is gone, only at exactly that epoch (Redis provider) |
 | `/awf multiprofile migrate-repository confirm` | `...multiprofile.admin` | one-way copy of the file repository into an empty Redis repository |
 | `/awf redis status` | `sourbycraft.command.awf.redis` | reachability, version, pools, counters |
@@ -170,15 +172,25 @@ write refused), and the auto-updater refuses to install or restore a jar below B
 pre-migration backup (it predates every co-op record) into an isolated store. A store that never held a
 co-op record keeps the Build 51 marker and stays openable by Build 51.
 
-What Build 52 refuses on purpose (each with a reason code, nothing written): a member switching into a
-co-op profile they do not own (`COOP_SWITCH_UNAVAILABLE`, Build 53); removing a membership that is the
-member's active profile (`MEMBER_ONLINE`, Build 53; a member online in another profile can leave or be
-kicked); owner transfer, the owner leaving and kicking the owner, and deleting a co-op profile that still
-has other members (`OWNER_ACTION_REFUSED`); a membership change while another node holds the profile's
-claim, i.e. plays its bound world (`WRONG_NODE`, OD-1); removing a member whose session is on another node
-(`OWNERSHIP_CONFLICT`). A removed member's state is recorded for salvage but nothing is delivered (Build
-54). A member added by an accepted invitation is listed and counts against the size cap and the account's
-slot limit, but cannot play the profile yet.
+What Build 52 refused and Build 53 allows (needs authoritative login: `login.authoritative` `auto` with co-op enabled, or `true`; each below still answers with a reason
+code and writes nothing when refused): a member switching into a co-op profile (`COOP_SWITCH_UNAVAILABLE` in
+Build 52; Build 53 refuses a non-member with `NOT_A_MEMBER` and a node that does not hold the bound world with
+`WRONG_NODE`, OD-1: no cross-node routing); removing a membership that is the member's active profile (`MEMBER_ONLINE`
+in Build 52; Build 53 captures and switches the member out first, see
+[PROFILE-LIFECYCLE.md](PROFILE-LIFECYCLE.md#removing-an-online-member-build-53)).
+
+What Build 53 still refuses on purpose: owner transfer, the owner leaving and kicking the owner, and deleting a
+co-op profile that still has other members (`OWNER_ACTION_REFUSED`); a membership change while another node
+holds the profile's claim, i.e. plays its bound world (`WRONG_NODE`, OD-1); removing a member whose session is on
+another node (`OWNERSHIP_CONFLICT` or `MEMBER_ONLINE`). A removed member's state is recorded for salvage but
+nothing is delivered (Build 54).
+
+**Build 53 settings.** `login.authoritative`, `shutdown.capture-deadline-ms` and `adapters.required` are
+RESTART_REQUIRED ([CONFIGURATION.md](CONFIGURATION.md#build-53-authoritative-login-shutdown-capture-adapters)). They
+apply to every profile, not only co-op. They are read at startup; none of them changes the store format. Authoritative
+login writes per-account session markers (`sessions/<uuid>.awfp` in the file repository, `<fabric prefix>mp:session:<uuid>` keys in Redis) outside the
+store format; a non-owner member's first switch into a co-op raises the store to minimum build 53 (Build 52 then refuses
+it, like Build 51 refuses a co-op store).
 
 ### Commands (Build 52)
 
@@ -199,7 +211,7 @@ its members only.
 | `/coop invites` | your open invitations |
 | `/coop accept [invite]`, `/coop decline <invite>` | answer an invitation |
 | `/coop cancel <invite>` | cancel an invitation (owner any, manager its own) |
-| `/coop leave <profile>` | leave (not the owner; not while it is your active profile) |
+| `/coop leave <profile>` | leave (not the owner; from Build 53 an online member is switched out first) |
 | `/coop kick <player> [profile]`, `/coop vote <vote> <yes\|no>` | kick votes |
 | `/coop members [profile]` | members |
 | `/coop label <text...>` / `/coop label --clear` | the shared label of your active co-op profile (owner) |
@@ -247,13 +259,22 @@ backup is Redis's own persistence (RDB/AOF) of the `<prefix>fabric:mp:*` and ses
 | Shutdown logs "profile I/O still queued" | the drain budget elapsed | transitions stay in the journal; they are recoverable |
 | co-op call fails with `COOP_DISABLED` | `coop.enabled` is false (default), or `enabled: false` | set `coop.enabled: true` and restart; WARN at startup names the key when `enabled` is false |
 | co-op call fails with `MIGRATION_REQUIRED` | the store is still format 1 | run the format-2 migration |
-| `MEMBER_ONLINE` on leave or kick | the co-op profile is the member's **active** profile; Build 52 does not remove an active membership | the member switches to another profile first (being online elsewhere is fine); enabled in Build 53 |
+| `MEMBER_ONLINE` on leave or kick | the member's active profile is the co-op and they cannot be captured and switched out here (for example their session is on another node) | run it on the member's node, or when they are offline; the removal intent is retried, nothing was removed |
 | `WRONG_NODE` on a membership change | another node holds the profile's claim, i.e. plays its bound world (OD-1) | run it on that node, or when nobody plays the profile |
 | `OWNERSHIP_CONFLICT` on a kick | the target has a session on another node | run it on that node, or while the target is offline |
 | kick fails after `vote passed and is recorded` | the vote committed, the removal did not | fix the cause named in the message, then approve the vote again (`/coop vote <vote> yes`) |
 | startup: `store format marker ... cannot be read` / `schema 2` on Build 51 | the store holds co-op records (minimum build 52) | run Build 52 or newer; going back means restoring the pre-migration backup |
 | `OWNER_ACTION_REFUSED` on delete | the co-op profile still has other members | they leave or are kicked first |
-| `COOP_SWITCH_UNAVAILABLE` | a member tried to switch into a co-op profile they do not own | not available until Build 53 |
+| `COOP_SWITCH_UNAVAILABLE` | Build 52 only: a member tried to switch into a co-op profile they do not own | Build 53 allows it; a non-member gets `NOT_A_MEMBER` |
+| `NOT_A_MEMBER` on a switch into a co-op | the account is not a current member (a removed member included) | invite the player again; a rejoin is a new membership with an empty state |
+| `WRONG_NODE` on a switch or join into a co-op | the node does not hold the co-op's bound world (OD-1) | play it on the node that holds the world; nothing routes players between nodes |
+| `HEAD_UNREADABLE` at join | authoritative login could not read the committed head of the player's active profile | the player stays out (kicked with a message) and nothing is loaded from vanilla data; check storage and `/awf multiprofile status`, fix the store or restore the backup, the next join retries |
+| `RECOVERY_REQUIRED` / `OWNERSHIP_CONFLICT` / `IO_FAILURE` at join | a pending journal recovery did not resolve, the node claim or session claim was not granted, or the session marker could not be written | the join is refused rather than played on vanilla playerdata; resolve the journal (`/awf multiprofile recover`), check the other node or the storage, the next join retries |
+| `STATE_TOO_LARGE` / `ADAPTER_REQUIRED_FAILED` during play | a lockstep (autosave) or quit capture cannot be stored: the snapshot or its adapters exceed their bound, or a REQUIRED adapter failed | the player is frozen and disconnected; the WARN names the cause; at the next join the vanilla playerdata written at the quit is adopted only if it can be stored, else the join is refused with the same code until the plugin or the data is fixed |
+| `the session marker of <player> is unreadable` (WARN) | a corrupt `sessions/<uuid>.awfp` (or Redis value) | the join is not refused: the committed head is restored and no vanilla playerdata is adopted (the safe choice: nothing duplicated, progress held only in vanilla playerdata may be lost); the next admission replaces the record; `/awf multiprofile session <player> reset-marker` forces the same outcome |
+| `joined into profile ... adopted the vanilla playerdata` (INFO) | the previous session was unclean (crash, kill, deadline, refused save) or this is the first authoritative login (upgrade), and the vanilla file was newer than the profile head | nothing to do; the vanilla state became the head's next snapshot. A following `the committed head is restored` INFO names why no adoption happened |
+| `ADAPTER_REQUIRED_FAILED` on a switch | a REQUIRED adapter threw, exceeded its size bound or the snapshot budget | the switch was refused or rolled back; read the WARN naming the adapter id and fix the plugin; `adapters.required` lists the ids forced to REQUIRED |
+| `ADAPTER_MISSING` on a switch or join | a REQUIRED adapter that holds data for the profile is not registered here | load or fix the plugin and retry; the data is kept untouched meanwhile |
 | `UNKNOWN_OUTCOME` on a membership call | the store did not confirm the write | do not repeat; list members/invitations and let recovery resolve the intent |
 
 ## Shutdown
@@ -266,6 +287,26 @@ together with the claims of running switches. The drain covers queued steps; a s
 entity-thread task can outlive it, in which case its journal remains and is recovered at the next join.
 A switch is never reported as saved because the process is exiting.
 
-Feature patch 0081 closes SourbyCraft services, MultiProfile included, before the server saves and
-removes players: players online at shutdown get **no quit snapshot** (logged once with the count), and
-their active profile's live state stays in vanilla playerdata until a later save or switch captures it.
+### Shutdown capture (Build 53)
+
+Build 53 changes the order (PM-076, feature patch 0081): on `stop`, MultiProfile gates the online players
+of an active profile, captures each through the ticketed quit capture and saves it, **then** the server removes
+the players, then MultiProfile closes as above. Build 52 closed it first and wrote no quit snapshot.
+
+The wait is bounded by `shutdown.capture-deadline-ms` (default 10000, 1000 to 60000, RESTART_REQUIRED). Stopping the
+server therefore takes up to that long longer when captures are slow; give a service manager or panel a stop
+timeout larger than the deadline plus the existing drain budget, or it may kill the process mid-save.
+
+When the deadline passes:
+
+- players already saved are as after a normal quit;
+- players not saved keep their last committed snapshot and any pending journal or intent; the log names each such
+  player and the profile; progress since their last snapshot is lost;
+- shutdown continues without waiting further; the pending intents are recovered at the next start or the player's
+  next join, and authoritative login does not load vanilla playerdata over them;
+- nothing is reported as saved that was not.
+
+A crash, `kill -9` or a stop timeout that kills the process skips this entirely: only the last lockstep (autosave) or
+quit snapshot exists. The next authoritative login finds the session marker still open and restores that snapshot, or
+adopts the vanilla playerdata when the server wrote it later than the snapshot and it belongs to the active profile
+([PROFILE-LIFECYCLE.md](PROFILE-LIFECYCLE.md#authoritative-login-build-53)).

@@ -23,7 +23,8 @@ import java.util.Optional;
  * <p>Since Build 52 the store also records the oldest build that may open it
  * ({@link StoreFormat.Marker#requiredBuild()}): 51 for a format-2 store without co-op records, 52 once the
  * first co-op record was written (the marker's payload schema is then 2 and its {@code minimumBuild} 52;
- * Build 51 refuses such a store at startup, see {@link StoreFormat}). While the configured store requires
+ * Build 51 refuses such a store at startup, see {@link StoreFormat}), 53 once a non-owner member's switch journal
+ * was written ({@code minimumBuild} 53, Build 53). While the configured store requires
  * build {@code N}, this updater refuses to copy {@code <jar>.prev} back ({@link UpdateRollbackGuard}) and
  * refuses to stage or swap in a release older than {@code N} ({@link SourbyUpdater}, {@link UpdateApplier}).
  * Downgrading such a server is a manual operation: restore the pre-migration backup the migration wrote

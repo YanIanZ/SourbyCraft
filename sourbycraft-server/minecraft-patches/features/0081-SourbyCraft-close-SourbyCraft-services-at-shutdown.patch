@@ -4,15 +4,52 @@ Date: Thu, 22 Oct 2026 05:55:41 +0700
 Subject: [PATCH] SourbyCraft - close SourbyCraft services at shutdown
 
 
+diff --git a/io/papermc/paper/threadedregions/RegionShutdownThread.java b/io/papermc/paper/threadedregions/RegionShutdownThread.java
+index e4922d0b7171faec1e5d84cc13433a5805e87c14..fb1b5572983e36c92c4f19e37b734a6797656fbb 100644
+--- a/io/papermc/paper/threadedregions/RegionShutdownThread.java
++++ b/io/papermc/paper/threadedregions/RegionShutdownThread.java
+@@ -41,6 +41,7 @@ public class RegionShutdownThread extends TickThread {
+             LOGGER.error("Error shutting down server", thr);
+         });
+         this.setPriority(10); // Canvas - region threading - bump priority
++        dev.iyanz.sourbycraft.awf.multiprofile.ProfileShutdownHook.registerInventoryCloser(this::closePlayerInventoriesBeforeProfileCapture); // SourbyCraft - close SourbyCraft services at shutdown: the shutdown capture closes containers through this hook, so no SourbyCraft source names this thread
+     }
+ 
+     @Contract(pure = true)
+@@ -167,6 +168,21 @@ public class RegionShutdownThread extends TickThread {
+             this.shuttingDown = null;
+         }
+     }
++
++    // SourbyCraft start - close SourbyCraft services at shutdown: quit snapshot while players are online
++    /**
++     * Closes every online player's open container and drops the carried item, as the per-world pass in
++     * {@link #run()} does later, so the MultiProfile shutdown capture sees what a container returns to the
++     * inventory. Registered in the constructor with {@code ProfileShutdownHook.registerInventoryCloser} and run by
++     * {@code SourbyCraftBootstrap.close()} only when a capture is registered; the later pass then finds nothing
++     * left to close. The scheduler is halted here, so the regions are walked in place.
++     */
++    public void closePlayerInventoriesBeforeProfileCapture() {
++        for (final ServerLevel world : MinecraftServer.getServer().getAllLevels()) {
++            world.regioniser.computeForAllRegionsUnsynchronised(this::closePlayerInventories);
++        }
++    }
++    // SourbyCraft end - close SourbyCraft services at shutdown: quit snapshot while players are online
+     // Canvas start - region threading
+ 
+     private static volatile boolean IS_SHUTTING_DOWN = false;
 diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
-index a0b7305f5e51b1392ed8abc210aac1271a2525d7..a6185bcbce53adb5cf581203005e2301ad7bf085 100644
+index a0b7305f5e51b1392ed8abc210aac1271a2525d7..f59abc9f5258089b47a50ef86ab1ca026efdf491 100644
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
-@@ -1112,6 +1112,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1110,8 +1110,10 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         // CraftBukkit start
+         if (this.server != null) {
              this.server.spark.disable(); // Paper - spark
++            dev.iyanz.sourbycraft.core.SourbyCraftBootstrap.captureProfileAdaptersBeforePluginsDisabled(); // SourbyCraft - plugins still enabled and players online: MultiProfile captures plugin state adapters (ProfileShutdownHook)
              this.server.disablePlugins();
              this.server.waitForAsyncTasksShutdown(); // Paper - Wait for Async Tasks during shutdown
-+            dev.iyanz.sourbycraft.core.SourbyCraftBootstrap.close();
++            dev.iyanz.sourbycraft.core.SourbyCraftBootstrap.close(); // SourbyCraft - players are still online here: close() runs the MultiProfile shutdown capture first (ProfileShutdownHook)
          }
          // CraftBukkit end
          this.isSaving = true; // Canvas - region threading

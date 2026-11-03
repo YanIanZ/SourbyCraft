@@ -23,7 +23,8 @@ import java.util.Set;
  */
 public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int maxSlots, Switching switching,
                               ProfileIsolation isolation, Worlds worlds, Coordination coordination, String directory,
-                              Repository repository, Types types, Names names, Migration migration, Coop coop) {
+                              Repository repository, Types types, Names names, Migration migration, Coop coop,
+                              Shutdown shutdown, Login login, Adapters adapters) {
 
     public enum Mode {
         STANDALONE,
@@ -287,6 +288,116 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         }
     }
 
+    /**
+     * Shutdown capture (Build 53). RESTART_REQUIRED. At server shutdown MultiProfile captures and saves the online
+     * players before the server removes them, then closes; this is the bound on that work.
+     *
+     * @param captureDeadlineMillis how long shutdown waits for the quit captures and saves, {@value #MIN_MILLIS} to
+     *     {@value #MAX_MILLIS} ms. When it passes, players not yet saved are left with their pending intent (or
+     *     their last committed snapshot) for recovery, and shutdown continues.
+     */
+    public record Shutdown(int captureDeadlineMillis) {
+
+        public static final int MIN_MILLIS = 1000;
+        public static final int MAX_MILLIS = 60_000;
+
+        public Shutdown {
+            if (captureDeadlineMillis < MIN_MILLIS || captureDeadlineMillis > MAX_MILLIS) {
+                throw new IllegalArgumentException("shutdown.capture-deadline-ms must be " + MIN_MILLIS + "-" + MAX_MILLIS);
+            }
+        }
+    }
+
+    /**
+     * Login restore (Build 53). RESTART_REQUIRED.
+     *
+     * @param authoritative {@link Authoritative#TRUE}: on join the committed state of the player's active profile (the
+     *     member head in a co-op) is restored, every vanilla player save publishes a profile snapshot, and a head
+     *     that cannot be read refuses the join ({@code HEAD_UNREADABLE}) instead of loading vanilla {@code playerdata}.
+     *     {@link Authoritative#FALSE}: the Build 52 behaviour, in which the join keeps whatever vanilla playerdata
+     *     loaded unless a switch is recovered; co-op member play is refused while it does not apply.
+     *     {@link Authoritative#AUTO} (default): authoritative exactly when {@code coop.enabled} is true, so a server
+     *     without co-op keeps the Build 52 solo behaviour unchanged.
+     */
+    public record Login(Authoritative authoritative) {
+
+        public Login {
+            Objects.requireNonNull(authoritative, "authoritative");
+        }
+
+        /** {@code true} = {@link Authoritative#TRUE}, {@code false} = {@link Authoritative#FALSE}. */
+        public Login(final boolean authoritative) {
+            this(authoritative ? Authoritative.TRUE : Authoritative.FALSE);
+        }
+
+        /** Whether authoritative login applies given whether co-op is enabled. */
+        public boolean applies(final boolean coopEnabled) {
+            return switch (this.authoritative) {
+                case TRUE -> true;
+                case FALSE -> false;
+                case AUTO -> coopEnabled;
+            };
+        }
+    }
+
+    /** The three values of {@code login.authoritative}. */
+    public enum Authoritative {
+        AUTO("auto"), TRUE("true"), FALSE("false");
+
+        private final String id;
+
+        Authoritative(final String id) {
+            this.id = id;
+        }
+
+        public String id() {
+            return this.id;
+        }
+
+        /** Parses {@code auto}, {@code true} or {@code false} (a YAML boolean included); anything else is refused. */
+        public static Authoritative parse(final Object value) {
+            if (value instanceof Boolean bool) return bool ? TRUE : FALSE;
+            final String text = String.valueOf(value).trim().toLowerCase(Locale.ROOT);
+            for (final Authoritative mode : values()) {
+                if (mode.id.equals(text)) return mode;
+            }
+            throw new IllegalArgumentException("login.authoritative must be auto, true or false: " + value);
+        }
+    }
+
+    /**
+     * Adapters an operator forces to REQUIRED (Build 53). RESTART_REQUIRED.
+     *
+     * @param required adapter ids ({@code [a-z0-9_.:-]{1,64}}, at most {@value #MAX_REQUIRED}) that are treated as
+     *     {@code REQUIRED} whatever their descriptor declares. An operator can only raise strictness: an adapter
+     *     that declares REQUIRED stays REQUIRED when it is not listed.
+     */
+    public record Adapters(Set<String> required) {
+
+        public static final int MAX_REQUIRED = 32;
+        private static final java.util.regex.Pattern ID = java.util.regex.Pattern.compile("[a-z0-9_.:-]{1,64}");
+
+        public Adapters {
+            Objects.requireNonNull(required, "required");
+            if (required.size() > MAX_REQUIRED) {
+                throw new IllegalArgumentException("adapters.required lists more than " + MAX_REQUIRED + " ids");
+            }
+            for (final String id : required) {
+                if (id == null || !ID.matcher(id).matches()) throw new IllegalArgumentException("adapter id: " + id);
+            }
+            required = Collections.unmodifiableSet(new java.util.TreeSet<>(required));
+        }
+
+        /** Whether an operator forces this adapter id to REQUIRED. */
+        public boolean forces(final String adapterId) {
+            return this.required.contains(adapterId);
+        }
+
+        static boolean validId(final Object id) {
+            return id instanceof String text && ID.matcher(text).matches();
+        }
+    }
+
     /** The record format of stores written before Build 51. */
     public static final int LEGACY_STORE_FORMAT = 1;
     /** The record format Build 51 writes. A store in this format is refused by older builds. */
@@ -303,6 +414,9 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
     public static final String COOP_VOTE_EXPIRY_KEY = "aurora.awf.multiprofile.coop.kick-vote.expiry-minutes";
     public static final String COOP_INACTIVE_DAYS_KEY = "aurora.awf.multiprofile.coop.kick-vote.inactive-days";
     public static final String COOP_ALLOWED_TYPES_KEY = "aurora.awf.multiprofile.coop.allowed-types";
+    public static final String SHUTDOWN_CAPTURE_DEADLINE_KEY = "aurora.awf.multiprofile.shutdown.capture-deadline-ms";
+    public static final String LOGIN_AUTHORITATIVE_KEY = "aurora.awf.multiprofile.login.authoritative";
+    public static final String ADAPTERS_REQUIRED_KEY = "aurora.awf.multiprofile.adapters.required";
 
     public static final String ENABLED_KEY = "aurora.awf.multiprofile.enabled";
     public static final String MODE_KEY = "aurora.awf.multiprofile.mode";
@@ -331,7 +445,7 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         REPOSITORY_KEY, REDIS_REQUIRE_AOF_KEY, REDIS_WAIT_FOR_AOF_KEY,
         TYPES_ALLOWED_KEY, TYPES_DEFAULT_KEY, NAMES_POLICY_KEY, MIGRATION_MODE_KEY, MIGRATION_BACKUP_DIR_KEY,
         COOP_ENABLED_KEY, COOP_MAX_MEMBERS_KEY, COOP_INVITE_EXPIRY_KEY, COOP_VOTE_EXPIRY_KEY, COOP_INACTIVE_DAYS_KEY,
-        COOP_ALLOWED_TYPES_KEY);
+        COOP_ALLOWED_TYPES_KEY, SHUTDOWN_CAPTURE_DEADLINE_KEY, LOGIN_AUTHORITATIVE_KEY, ADAPTERS_REQUIRED_KEY);
 
     /** The file repository; a server that sets no repository key keeps the behaviour of earlier builds. */
     public static final Repository DEFAULT_REPOSITORY = new Repository(Backend.FILE, true, true);
@@ -349,10 +463,17 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
     public static final Coop DEFAULT_COOP = new Coop(false, 5, 5, 10, 35,
         EnumSet.of(dev.iyanz.sourbycraft.api.profile.ProfileType.CLASSIC));
 
+    /** Quit captures at shutdown get 10 s. */
+    public static final Shutdown DEFAULT_SHUTDOWN = new Shutdown(10_000);
+    /** Authoritative login {@code auto}: on exactly when co-op is enabled. */
+    public static final Login DEFAULT_LOGIN = new Login(Authoritative.AUTO);
+    /** No adapter is forced to REQUIRED by configuration. */
+    public static final Adapters DEFAULT_ADAPTERS = new Adapters(Set.of());
+
     public static final ProfileSettings DEFAULT = new ProfileSettings(false, Mode.STANDALONE, 3, 8,
         new Switching(true, 15_000, true), ProfileIsolation.ALL, new Worlds(300),
         new Coordination(Provider.LOCAL, true, true), DIRECTORY_DEFAULT, DEFAULT_REPOSITORY,
-        DEFAULT_TYPES, DEFAULT_NAMES, DEFAULT_MIGRATION, DEFAULT_COOP);
+        DEFAULT_TYPES, DEFAULT_NAMES, DEFAULT_MIGRATION, DEFAULT_COOP, DEFAULT_SHUTDOWN, DEFAULT_LOGIN, DEFAULT_ADAPTERS);
 
     /** Settings with {@link #DEFAULT_REPOSITORY} and the Build 51 defaults. */
     public ProfileSettings(final boolean enabled, final Mode mode, final int defaultSlots, final int maxSlots,
@@ -379,6 +500,15 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
             repository, types, names, migration, DEFAULT_COOP);
     }
 
+    /** Settings with the Build 53 defaults ({@link #DEFAULT_SHUTDOWN}, {@link #DEFAULT_LOGIN}, {@link #DEFAULT_ADAPTERS}). */
+    public ProfileSettings(final boolean enabled, final Mode mode, final int defaultSlots, final int maxSlots,
+                           final Switching switching, final ProfileIsolation isolation, final Worlds worlds,
+                           final Coordination coordination, final String directory, final Repository repository,
+                           final Types types, final Names names, final Migration migration, final Coop coop) {
+        this(enabled, mode, defaultSlots, maxSlots, switching, isolation, worlds, coordination, directory,
+            repository, types, names, migration, coop, DEFAULT_SHUTDOWN, DEFAULT_LOGIN, DEFAULT_ADAPTERS);
+    }
+
     public ProfileSettings {
         Objects.requireNonNull(mode, "mode");
         Objects.requireNonNull(switching, "switching");
@@ -390,6 +520,9 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         Objects.requireNonNull(names, "names");
         Objects.requireNonNull(migration, "migration");
         Objects.requireNonNull(coop, "coop");
+        Objects.requireNonNull(shutdown, "shutdown");
+        Objects.requireNonNull(login, "login");
+        Objects.requireNonNull(adapters, "adapters");
         if (defaultSlots < 1 || maxSlots < 1 || defaultSlots > maxSlots || maxSlots > PlayerAccount.MAX_SLOTS) {
             throw new IllegalArgumentException("default-slots and max-slots must satisfy 1 <= default <= max <= "
                 + PlayerAccount.MAX_SLOTS);
@@ -444,6 +577,14 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
      */
     public boolean coopEnabled() {
         return this.enabled && this.coop.enabled();
+    }
+
+    /**
+     * Whether join restores the committed state of the active profile ({@code login.authoritative}) with the
+     * feature on. Co-op member play needs it; {@code coopEnabled()} with this false means members cannot switch in.
+     */
+    public boolean authoritativeLogin() {
+        return this.enabled && this.login.applies(this.coop.enabled());
     }
 
     /** Whether profiles are stored in the Aurora Redis Fabric instead of the directory. */
@@ -527,8 +668,52 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         final Names names = names(values, invalid);
         final Migration migration = migration(values, directory, invalid);
         final Coop coop = coop(values, invalid);
+        final Shutdown shutdown = new Shutdown(whole(values, SHUTDOWN_CAPTURE_DEADLINE_KEY,
+            DEFAULT_SHUTDOWN.captureDeadlineMillis(), Shutdown.MIN_MILLIS, Shutdown.MAX_MILLIS, invalid));
+        Login login = DEFAULT_LOGIN;
+        if (values.get(LOGIN_AUTHORITATIVE_KEY) != null) {
+            try {
+                login = new Login(Authoritative.parse(values.get(LOGIN_AUTHORITATIVE_KEY)));
+            } catch (final IllegalArgumentException bad) {
+                invalid.add(LOGIN_AUTHORITATIVE_KEY);
+            }
+        }
+        final Adapters adapters = adapters(values, invalid);
         return new Parsed(new ProfileSettings(enabled, mode, defaultSlots, maxSlots, switching, isolation, worlds,
-            coordination, directory, repository, types, names, migration, coop), invalid);
+            coordination, directory, repository, types, names, migration, coop, shutdown, login, adapters), invalid);
+    }
+
+    /**
+     * The listed adapter ids. A value that is not a list or a comma-separated string, more than
+     * {@value Adapters#MAX_REQUIRED} entries, or an entry that is not a well-formed id is reported; the well-formed
+     * entries (up to the cap) are kept, so a typo never silently relaxes the other adapters.
+     */
+    private static Adapters adapters(final Map<String, Object> values, final List<String> invalid) {
+        final Object raw = values.get(ADAPTERS_REQUIRED_KEY);
+        if (raw == null) return DEFAULT_ADAPTERS;
+        final List<?> items;
+        if (raw instanceof Collection<?> collection) {
+            items = List.copyOf(collection);
+        } else if (raw instanceof String text) {
+            items = text.isBlank() ? List.of() : List.of(text.split(","));
+        } else {
+            invalid.add(ADAPTERS_REQUIRED_KEY);
+            return DEFAULT_ADAPTERS;
+        }
+        final Set<String> ids = new java.util.TreeSet<>();
+        boolean bad = false;
+        for (final Object item : items) {
+            final Object id = item instanceof String text ? text.trim() : item;
+            if (!Adapters.validId(id)) {
+                bad = true;
+            } else if (ids.size() < Adapters.MAX_REQUIRED || ids.contains((String) id)) {
+                ids.add((String) id);
+            } else {
+                bad = true;
+            }
+        }
+        if (bad) invalid.add(ADAPTERS_REQUIRED_KEY);
+        return new Adapters(ids);
     }
 
     /** Each unusable co-op key falls back to its own default and is reported; a bad key never enables co-op. */
@@ -688,6 +873,9 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         values.put(COOP_VOTE_EXPIRY_KEY, DEFAULT.coop().kickVoteExpiryMinutes());
         values.put(COOP_INACTIVE_DAYS_KEY, DEFAULT.coop().kickVoteInactiveDays());
         values.put(COOP_ALLOWED_TYPES_KEY, typeIds(DEFAULT.coop().allowedTypes()));
+        values.put(SHUTDOWN_CAPTURE_DEADLINE_KEY, DEFAULT.shutdown().captureDeadlineMillis());
+        values.put(LOGIN_AUTHORITATIVE_KEY, DEFAULT.login().authoritative().id());
+        values.put(ADAPTERS_REQUIRED_KEY, List.copyOf(DEFAULT.adapters().required()));
         return values;
     }
 

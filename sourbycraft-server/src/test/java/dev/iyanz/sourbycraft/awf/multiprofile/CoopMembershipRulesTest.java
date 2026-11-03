@@ -285,13 +285,64 @@ class CoopMembershipRulesTest {
         assertEquals(this.member, kick.affectedAccount(), "a kick holds the removed member's Q too");
         assertEquals(coop.member(this.member).epoch(), kick.result().epoch());
         assertEquals(passed.id(), kick.result().recordId());
-        // A removal of the account's active profile needs the Build 53 gated capture.
+        // A removal of the account's active profile without a next profile to point at stays refused (Build 53: the
+        // engine switches an online member out first or passes the next profile; see activeRemovalNeedsNextActive).
         final PlayerAccount active = PlayerAccount.empty(this.member, SLOTS).withProfile(coop.id(), "apple")
             .withActive(coop.id(), coop.member(this.member).epoch());
         refusedWith(ProfileErrorCode.MEMBER_ONLINE, () -> CoopMembership.kick(op(CoopOperation.Kind.MEMBER_REMOVE, this.owner), coop,
             passed, active, null, List.of(), POLICY, NOW, 0L));
         refusedWith(ProfileErrorCode.MEMBER_ONLINE, () -> CoopMembership.leave(op(CoopOperation.Kind.MEMBER_REMOVE, this.member), coop,
             active, null, List.of(), List.of(), NOW, 0L));
+    }
+
+    /**
+     * Build 53: removing the membership that is the removed account's active profile needs the member's next profile
+     * ({@link CoopMembership.NextActive}); the same intent then moves the account's active pointer there and compares
+     * that profile's {@code M} and the member's head in it. The next profile must be another ACTIVE profile the account
+     * lists with the member's membership at that epoch.
+     */
+    @Test
+    void activeRemovalNeedsNextActive() throws Exception {
+        final AuroraProfile coop = coop();
+        final UUID epoch = coop.member(this.member).epoch();
+        final AuroraProfile solo = AuroraProfile.create(this.member, "skyblock", CLASSIC, "Kiwi", Map.of(), NOW);
+        final UUID soloEpoch = solo.member(this.member).epoch();
+        final PlayerAccount active = PlayerAccount.empty(this.member, SLOTS).withProfile(solo.id(), "kiwi")
+            .withProfile(coop.id(), "apple").withActive(coop.id(), epoch);
+
+        refusedWith(ProfileErrorCode.MEMBER_ONLINE, () -> CoopMembership.leave(op(CoopOperation.Kind.MEMBER_REMOVE, this.member), coop,
+            active, null, List.of(), List.of(), null, NOW, 0L));
+
+        final CoopIntentPlan leave = CoopMembership.leave(op(CoopOperation.Kind.MEMBER_REMOVE, this.member), coop, active, null,
+            List.of(), List.of(), new CoopMembership.NextActive(solo, soloEpoch, null), NOW, 0L);
+        final PlayerAccount after = CoopMembershipFixtures.accountImage(leave, this.member);
+        assertEquals(solo.id(), after.activeProfile());
+        assertEquals(soloEpoch, after.activeEpoch());
+        assertFalse(after.owns(coop.id()));
+        assertTrue(after.owns(solo.id()));
+        assertTrue(leave.before().contains(Expected.metadata(solo.id(), solo.revision())), "the next profile's M is not compared");
+        assertTrue(leave.after().contains(Expected.metadata(solo.id(), solo.revision())), "the next profile's M is advanced");
+        assertTrue(leave.before().contains(Expected.head(solo.id(), this.member, soloEpoch, CoopWriteGuard.ABSENT)));
+
+        // The next profile is checked: not the one left, listed with the member's epoch, ACTIVE.
+        assertThrows(IllegalArgumentException.class, () -> CoopMembership.leave(op(CoopOperation.Kind.MEMBER_REMOVE, this.member),
+            coop, active, null, List.of(), List.of(), new CoopMembership.NextActive(coop, epoch, null), NOW, 0L));
+        final AuroraProfile unlisted = AuroraProfile.create(this.member, "skyblock", CLASSIC, "Lime", Map.of(), NOW);
+        refusedWith(ProfileErrorCode.STALE_STATE, () -> CoopMembership.leave(op(CoopOperation.Kind.MEMBER_REMOVE, this.member), coop,
+            active, null, List.of(), List.of(), new CoopMembership.NextActive(unlisted, unlisted.member(this.member).epoch(), null),
+            NOW, 0L));
+        refusedWith(ProfileErrorCode.STALE_STATE, () -> CoopMembership.leave(op(CoopOperation.Kind.MEMBER_REMOVE, this.member), coop,
+            active, null, List.of(), List.of(), new CoopMembership.NextActive(solo, UUID.randomUUID(), null), NOW, 0L));
+        final AuroraProfile locked = solo.withStatus(ProfileStatus.LOCKED);
+        refusedWith(ProfileErrorCode.PROFILE_LOCKED, () -> CoopMembership.leave(op(CoopOperation.Kind.MEMBER_REMOVE, this.member), coop,
+            active, null, List.of(), List.of(), new CoopMembership.NextActive(locked, soloEpoch, null), NOW, 0L));
+
+        // A membership that is not the active one is removed without moving the pointer, next profile or not.
+        final PlayerAccount elsewhere = active.withActive(solo.id(), soloEpoch);
+        final PlayerAccount unchanged = CoopMembershipFixtures.accountImage(CoopMembership.leave(op(CoopOperation.Kind.MEMBER_REMOVE,
+            this.member), coop, elsewhere, null, List.of(), List.of(), null, NOW, 0L), this.member);
+        assertEquals(solo.id(), unchanged.activeProfile());
+        assertFalse(unchanged.owns(coop.id()));
     }
 
     @Test

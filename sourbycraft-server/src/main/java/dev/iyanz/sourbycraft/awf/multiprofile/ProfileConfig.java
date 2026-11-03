@@ -51,7 +51,24 @@ public final class ProfileConfig {
             SourbyLogger.warn("AWF MultiProfile: " + ProfileSettings.COOP_ENABLED_KEY
                 + " is true but aurora.awf.multiprofile.enabled is false; co-op stays off");
         }
-        return parsed.settings();
+        final ProfileSettings settings = parsed.settings();
+        if (settings.enabled() && settings.login().authoritative() == ProfileSettings.Authoritative.FALSE && coop.enabled()) {
+            SourbyLogger.warn("AWF MultiProfile: " + ProfileSettings.LOGIN_AUTHORITATIVE_KEY + " is false while "
+                + ProfileSettings.COOP_ENABLED_KEY + " is true. A join keeps whatever vanilla playerdata loaded instead of"
+                + " restoring the committed state of the active profile, so a quit that was not captured can let a player"
+                + " rejoin with items their profile snapshot does not hold, and co-op members cannot switch into a co-op"
+                + " profile (COOP_SWITCH_UNAVAILABLE).");
+        } else if (settings.enabled() && settings.login().authoritative() == ProfileSettings.Authoritative.AUTO) {
+            SourbyLogger.info("AWF MultiProfile: " + ProfileSettings.LOGIN_AUTHORITATIVE_KEY + " is auto: authoritative login is "
+                + (coop.enabled() ? "on (co-op is enabled): joins restore the committed profile state, every vanilla player save"
+                    + " publishes a profile snapshot, and an unreadable state refuses the join"
+                    : "off (co-op is disabled): joins keep vanilla playerdata exactly as in Build 52"));
+        }
+        if (!settings.adapters().required().isEmpty()) {
+            SourbyLogger.info("AWF MultiProfile: adapters forced to REQUIRED by " + ProfileSettings.ADAPTERS_REQUIRED_KEY
+                + ": " + String.join(", ", settings.adapters().required()));
+        }
+        return settings;
     }
 
     /** What the server does instead of the invalid value, for the WARN. */
@@ -78,6 +95,14 @@ public final class ProfileConfig {
                 + settings.coop().kickVoteInactiveDays() + " days";
             case ProfileSettings.COOP_ALLOWED_TYPES_KEY -> "AWF MultiProfile co-op converts only "
                 + String.join(", ", ProfileSettings.typeIds(settings.coop().allowedTypes())) + " profiles";
+            case ProfileSettings.SHUTDOWN_CAPTURE_DEADLINE_KEY -> "AWF MultiProfile gives shutdown captures "
+                + settings.shutdown().captureDeadlineMillis() + " ms (allowed " + ProfileSettings.Shutdown.MIN_MILLIS
+                + "-" + ProfileSettings.Shutdown.MAX_MILLIS + ")";
+            case ProfileSettings.LOGIN_AUTHORITATIVE_KEY -> "AWF MultiProfile login.authoritative stays "
+                + settings.login().authoritative().id() + " (authoritative login " + (settings.authoritativeLogin() ? "on" : "off") + ")";
+            case ProfileSettings.ADAPTERS_REQUIRED_KEY -> "AWF MultiProfile forces only the well-formed adapter ids to REQUIRED ("
+                + (settings.adapters().required().isEmpty() ? "none" : String.join(", ", settings.adapters().required()))
+                + "); each id is [a-z0-9_.:-]{1,64}, at most " + ProfileSettings.Adapters.MAX_REQUIRED;
             default -> "AWF MultiProfile uses its default";
         };
     }

@@ -77,7 +77,7 @@ public final class CoopCommand extends Command {
     CoopCommand(final String name, final BiConsumer<CommandSender, Runnable> reply) {
         super(name);
         this.description = "Co-op profiles: invite, accept, leave, vote-kick (AWF MultiProfile)";
-        this.usageMessage = "/coop <info|convert|invite|invites|accept|decline|cancel|leave|kick|vote|members|label>";
+        this.usageMessage = "/coop <info|convert|invite|invites|accept|decline|cancel|leave|kick|vote|members|label|switch>";
         this.setPermission(PERMISSION);
         this.reply = reply;
     }
@@ -137,13 +137,28 @@ public final class CoopCommand extends Command {
             }
             case "leave" -> {
                 if (arg(args, 1) == null) {
-                    s.sendMessage(text("Usage: /coop leave <profile> (name or UUID; it cannot be your active profile)",
-                        SourbyCraftColors.WARNING));
+                    s.sendMessage(text("Usage: /coop leave <profile> (name or UUID; if it is your active profile you are"
+                        + " switched to another profile first)", SourbyCraftColors.WARNING));
                     return true;
                 }
                 withProfile(s, engine, me, arg(args, 1), profile -> done(s, engine.leave(me, profile), ignored ->
                     s.sendMessage(text("You left co-op profile " + profile + ". Your items there are recorded for salvage;"
                         + " delivery arrives in a later build", SourbyCraftColors.SUCCESS))));
+            }
+            case "switch" -> {
+                if (arg(args, 1) == null) {
+                    s.sendMessage(text("Usage: /coop switch <profile> (name or UUID of a co-op you are a member of)",
+                        SourbyCraftColors.WARNING));
+                    return true;
+                }
+                withProfile(s, engine, me, arg(args, 1), profile -> done(s, engine.switchProfile(me, profile), result -> {
+                    if (result.success()) {
+                        s.sendMessage(text("Switched into " + profile + " (" + result.durationMillis() + " ms)", SourbyCraftColors.SUCCESS));
+                    } else {
+                        s.sendMessage(text("Refused (" + result.errorCode() + "): " + result.message() + hint(result.errorCode()),
+                            SourbyCraftColors.DANGER));
+                    }
+                }));
             }
             case "kick" -> {
                 final UUID target = playerArg(s, arg(args, 1), "/coop kick <player> [profile]");
@@ -478,14 +493,18 @@ public final class CoopCommand extends Command {
             case INVITE_NOT_FOUND -> " (see /coop invites)";
             case INVITE_EXISTS -> " (that player already has an open invitation to this co-op)";
             case ROLE_FORBIDDEN -> " (your role does not allow it)";
-            case MEMBER_ONLINE -> " (the member has this co-op active; it works once they switched to another profile)";
+            case MEMBER_ONLINE -> " (the member plays this co-op on another server, or could not be switched out of it safely here)";
             case OWNER_ACTION_REFUSED -> " (the owner cannot leave, be kicked or transfer ownership)";
-            case WRONG_NODE -> " (OD-1: run it on the server that holds the profile, or when nobody plays it)";
+            case WRONG_NODE -> " (OD-1: a co-op is played and changed on the server that holds its world; join that server)";
             case VOTE_NOT_FOUND -> " (no undecided vote with that id; it may have expired)";
             case VOTE_OPEN -> " (one kick vote at a time per co-op)";
             case ELECTORATE_CHANGED -> " (the members changed; start a new vote)";
             case TARGET_NOT_INACTIVE -> " (in a two-member co-op see aurora.awf.multiprofile.coop.kick-vote.inactive-days)";
-            case COOP_SWITCH_UNAVAILABLE -> " (only the owner plays a co-op profile until a later build)";
+            case COOP_SWITCH_UNAVAILABLE -> " (members play a co-op only while authoritative login applies: aurora.awf.multiprofile.login.authoritative auto with co-op enabled, or true)";
+            case ADAPTER_REQUIRED_FAILED -> " (a plugin's required profile data failed to capture or apply; nothing was skipped)";
+            case ADAPTER_MISSING -> " (the profile holds required data of a plugin that is not loaded here at that version)";
+            case HEAD_UNREADABLE -> " (the committed profile state could not be read; vanilla playerdata is never used instead)";
+            case SWITCH_IN_PROGRESS -> " (a switch or the login restore is still running; retry in a moment)";
             case SLOT_LIMIT -> " (a co-op membership uses one profile slot)";
             case TYPE_NOT_ALLOWED -> " (see aurora.awf.multiprofile.coop.allowed-types)";
             case NAME_INVALID -> " (1-32 printable characters, no surrounding spaces)";

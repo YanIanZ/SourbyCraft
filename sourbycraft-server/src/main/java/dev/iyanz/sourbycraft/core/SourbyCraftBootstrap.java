@@ -59,6 +59,9 @@ public final class SourbyCraftBootstrap {
      * Runs service cleanup after plugin disable, publishing STOPPING before cleanup and STOPPED
      * after all attempts. Each failure is logged without preventing the remaining cleanup steps;
      * STOPPED reports completion of this sequence, not proof that every service stopped successfully.
+     *
+     * <p>Called on the region shutdown thread while every player is still online; after mods shut down it runs the
+     * MultiProfile shutdown capture (when one is registered) before any service closes.</p>
      */
     public static void close() {
         // Before the first service goes down, so anything consulting stopping() (such as /awf, /speedtest
@@ -67,6 +70,11 @@ public final class SourbyCraftBootstrap {
         // Mods first: they may still need Bukkit and every SourbyCraft service below.
         try { dev.iyanz.sourbycraft.mod.ModLoader.shutdown(); }
         catch (Throwable failure) { SourbyLogger.error("SourbyMod shutdown failed", failure); }
+        // PM-076: every player is still online here (the server sends the disconnects, saves the worlds and writes
+        // vanilla playerdata after close() returns). MultiProfile captures and saves them now, before the AWF
+        // deadline starts and before any service its saves use goes down; it is closed further below.
+        try { captureProfilesBeforePlayersSaved(); }
+        catch (Throwable failure) { SourbyLogger.error("AWF MultiProfile shutdown capture failed", failure); }
         // Before the first AWF wait of the shutdown (the storage lane draining below, then the region
         // saves, the chunk I/O drain and AwfEngine.closeAll): one deadline for all of them.
         try { dev.iyanz.sourbycraft.awf.AwfEngine.beginShutdown(); }
@@ -89,11 +97,48 @@ public final class SourbyCraftBootstrap {
         catch (Throwable failure) { SourbyLogger.error("I/O shutdown failed", failure); }
         // Profile I/O runs on the storage lane; it may use the Redis fabric, whose pools stay open
         // until AwfEngine.closeAll() has committed the last world (see AwfEngine.closeAll).
-        try { dev.iyanz.sourbycraft.awf.multiprofile.ProfileRuntime.stop(10_000L); }
+        // The runtime drains the saves the capture above queued for whatever is left of the configured capture deadline;
+        // this budget only applies when no shutdown capture ran (never below 10 s).
+        try { dev.iyanz.sourbycraft.awf.multiprofile.ProfileRuntime.stop(Math.max(10_000L, profileCaptureDeadlineMillis())); }
         catch (Throwable failure) { SourbyLogger.error("AWF MultiProfile shutdown failed", failure); }
         try { dev.iyanz.sourbycraft.execution.ResourceGovernor.GLOBAL.shutdown(10_000L); }
         catch (Throwable failure) { SourbyLogger.error("Resource Governor shutdown failed", failure); }
         AuroraRuntime.transition(AuroraRuntime.State.STOPPED);
+    }
+
+    /**
+     * Runs the MultiProfile shutdown capture ({@link dev.iyanz.sourbycraft.awf.multiprofile.ProfileShutdownHook}),
+     * bounded by {@code aurora.awf.multiprofile.shutdown.capture-deadline-ms}. Open containers are closed first through the
+     * pass the shutdown thread registered (feature patch 0081), as a quit closes them before its save. Nothing registered:
+     * nothing happens.
+     */
+    private static void captureProfilesBeforePlayersSaved() {
+        if (!dev.iyanz.sourbycraft.awf.multiprofile.ProfileShutdownHook.registered()) return;
+        dev.iyanz.sourbycraft.awf.multiprofile.ProfileShutdownHook.closeInventoriesBeforeCapture();
+        dev.iyanz.sourbycraft.awf.multiprofile.ProfileShutdownHook.runBeforePlayersSaved(profileCaptureDeadlineMillis());
+    }
+
+    /**
+     * Called by the server's stop sequence on the region shutdown thread right before plugins are disabled (players
+     * online, plugin state adapters still registered): runs the MultiProfile adapter capture
+     * ({@link dev.iyanz.sourbycraft.awf.multiprofile.ProfileShutdownHook#runBeforePluginsDisabled}), bounded by
+     * {@code aurora.awf.multiprofile.shutdown.capture-deadline-ms}. Nothing registered: nothing happens. Never throws.
+     */
+    public static void captureProfileAdaptersBeforePluginsDisabled() {
+        try {
+            if (!dev.iyanz.sourbycraft.awf.multiprofile.ProfileShutdownHook.adapterCaptureRegistered()) return;
+            dev.iyanz.sourbycraft.awf.multiprofile.ProfileShutdownHook.runBeforePluginsDisabled(profileCaptureDeadlineMillis());
+        } catch (Throwable failure) {
+            SourbyLogger.error("AWF MultiProfile shutdown adapter capture failed", failure);
+        }
+    }
+
+    private static long profileCaptureDeadlineMillis() {
+        final dev.iyanz.sourbycraft.awf.multiprofile.ProfileRuntime runtime =
+            dev.iyanz.sourbycraft.awf.multiprofile.ProfileRuntime.running();
+        return runtime == null
+            ? dev.iyanz.sourbycraft.awf.multiprofile.ProfileShutdownHook.DEFAULT_DEADLINE_MILLIS
+            : runtime.settings().shutdown().captureDeadlineMillis();
     }
 
     /**

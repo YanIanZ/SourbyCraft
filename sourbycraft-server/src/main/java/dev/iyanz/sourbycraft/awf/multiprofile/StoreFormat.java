@@ -31,6 +31,16 @@ import java.util.Objects;
  * bytes); in Redis the {@code minimumBuild} hash field is ignored by Build 51 and the schema refuses. The
  * auto-updater ({@code StoreDowngradeGuard}) refuses to install or restore a build below
  * {@link Marker#requiredBuild()}.</p>
+ *
+ * <p><b>Build 53</b> keeps {@link #COOP_MINIMUM_BUILD} at 52 and raises {@link #READS_UP_TO_BUILD} to 53 with one new
+ * feature level, {@link #MEMBER_PLAY_MINIMUM_BUILD}: the first switch journal of a <em>non-owner</em> member into a co-op
+ * raises the store to minimum build 53, because Build 52's recovery of such a journal would commit a co-op active
+ * pointer for a non-owner and then refuse it ({@code checkCoopAccess}), leaving the account stuck (review P3-17). Every
+ * other record Build 53 writes (member heads and snapshots of non-owner members, removal intents whose account
+ * after-image moves the active pointer, adapter entries of the state codec including the reserved required-adapter
+ * record, which Build 52 carries forward as an unknown adapter blob) has the Build 52 shape and Build 52 reads it with
+ * the same meaning. Session markers ({@link SessionMarker}) are stored beside the records, under a type Build 52
+ * never reads, and are not part of the level. A store without a non-owner member switch keeps the Build 52 marker.</p>
  */
 public final class StoreFormat {
 
@@ -55,7 +65,9 @@ public final class StoreFormat {
      * The highest {@code minimumBuild} this code reads; a store that requires a newer build is refused. It is the
      * store feature level of this source tree, raised with the code that needs it, not with every release.
      */
-    public static final int READS_UP_TO_BUILD = 52;
+    public static final int READS_UP_TO_BUILD = 53;
+    /** The {@code minimumBuild} a store gets with its first non-owner member switch journal (Build 53). */
+    public static final int MEMBER_PLAY_MINIMUM_BUILD = 53;
     /** Marker file in the FILE repository root. */
     public static final String FILE_NAME = "format.awfm";
     /** Redis {@code meta} hash fields. */

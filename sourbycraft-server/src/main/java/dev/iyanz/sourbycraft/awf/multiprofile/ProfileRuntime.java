@@ -15,6 +15,7 @@ import dev.iyanz.sourbycraft.api.profile.ProfileRequest;
 import dev.iyanz.sourbycraft.api.profile.ProfileStateAdapter;
 import dev.iyanz.sourbycraft.api.profile.ProfileSwitchResult;
 import dev.iyanz.sourbycraft.api.profile.ProfileWorldRef;
+import dev.iyanz.sourbycraft.api.event.PlayerSaveEvent;
 import dev.iyanz.sourbycraft.awf.redis.RedisSettings;
 import dev.iyanz.sourbycraft.awf.redis.fabric.ClaimResult;
 import dev.iyanz.sourbycraft.awf.redis.fabric.EventFabric;
@@ -64,11 +65,23 @@ import org.bukkit.plugin.ServicePriority;
  * plugin that looks it up in {@code onEnable} gets {@code null} exactly as on any server without the
  * feature.</p>
  *
- * <p>Shutdown: {@link #close(long)} drains the engine's queued I/O within a budget before the
- * Resource Governor storage lane is shut down; a drain that times out is logged as incomplete, never
- * as saved. The server closes SourbyCraft services before it saves and removes players, so players
- * still online then get no quit snapshot; their active profile's live state stays in vanilla
- * playerdata, which the next switch captures.</p>
+ * <p>Shutdown (Build 53, PM-076): the server hands the online players to MultiProfile before it saves and
+ * removes them ({@link ProfileShutdownHook}): while the plugins are still enabled every registered adapter is
+ * captured per player ({@link #captureAdaptersAtShutdown}); after they are disabled each player's core state is
+ * captured on the shutdown thread, merged with those adapter blobs and saved under the session's capture ticket
+ * ({@link #captureAllAtShutdown}), within {@code shutdown.capture-deadline-ms}. A player not saved by the deadline
+ * keeps their last committed snapshot and any pending intent, each logged, and shutdown continues. Only then does
+ * {@link #close(long)} drain the engine's queued I/O within a budget before the Resource Governor storage lane is
+ * shut down; a drain that times out is logged as incomplete, never as saved.</p>
+ *
+ * <p>Login (Build 53): while authoritative login applies ({@code login.authoritative} {@code auto} = co-op enabled,
+ * {@code true}, or {@code false}) a join on a format-2 store is gated until the committed member head of the active
+ * profile was restored onto the player, or the vanilla playerdata was adopted once after an unclean session
+ * ({@link ProfileEngine#restoreOnLogin}); every path that cannot do either refuses the join (the gate stays until the
+ * disconnect is final, so nothing of the vanilla state is captured) instead of loading vanilla playerdata. While it
+ * applies, every vanilla player save of the server ({@link PlayerSaveEvent}, autosave) publishes a profile snapshot in
+ * lockstep ({@link Sessions#onPlayerSaved}), and a capture or save that cannot succeed freezes and disconnects the
+ * player ({@link ProfileEngine#refuseSaves}).</p>
  *
  * <p>Store format (Build 51): before the service and listeners are registered, the engine reads the
  * store's format marker on the storage lane ({@link ProfileEngine#open}). A store this build refuses
@@ -240,10 +253,10 @@ public final class ProfileRuntime {
             SourbyLogger.warn("AWF MultiProfile: profiles in the shared Redis repository are EXPERIMENTAL and not"
                 + " qualified on two nodes (owner test MP-010). A profile write made under a session claim is fenced in"
                 + " Redis by that claim; creating a profile, slot limits and journal phases written before a switch holds"
-                + " a claim are checked by revision or not at all. Not handled yet: a player's live state does not follow them to another server (a join"
-                + " keeps that server's vanilla playerdata, only a switch applies a profile snapshot, and the next save"
-                + " or quit snapshot stores that state), players online at shutdown get no quit snapshot, and no proxy"
-                + " hands players between servers. A player who moves between servers can therefore lose progress.");
+                + " a claim are checked by revision or not at all. Not handled: no proxy hands players between servers, and"
+                + " without login.authoritative a join keeps that server's vanilla playerdata (only a switch applies a profile"
+                + " snapshot); with it the join restores the committed member head. A player who moves between servers"
+                + " without authoritative login can therefore lose progress.");
         }
         if (repository instanceof FileProfileRepository file) {
             // Format-2 FILE commits validate the claims they carry at commit time; until a validator is attached,
@@ -253,7 +266,7 @@ public final class ProfileRuntime {
         } else if (repository instanceof RedisProfileRepository redis) {
             redis.attachDefaultSlots(settings.defaultSlots());
         }
-        final ProfileStateAdapters adapters = new ProfileStateAdapters();
+        final ProfileStateAdapters adapters = new ProfileStateAdapters(settings.adapters().required());
         final BukkitPlayerStatePort statePort = new BukkitPlayerStatePort(plugin, adapters);
         final AwfProfileWorldPort worldPort = new AwfProfileWorldPort(
             dev.iyanz.sourbycraft.awf.world.AuroraWorldsRuntime::service);
@@ -284,6 +297,9 @@ public final class ProfileRuntime {
                 : "; " + store.unresolvedIntents().size() + " intent(s) left pending for recovery"));
         engine.onSessionLost(playerId -> disconnect(plugin, playerId,
             "Your profile session was taken over or expired. Rejoin to continue."));
+        engine.onPlayerNotice((playerId, text) -> message(plugin, playerId, text));
+        engine.onSaveRefused((playerId, reason) -> disconnect(plugin, playerId, "Your profile state could not be saved ("
+            + reason + "). You were disconnected so nothing is lost or duplicated; contact the server staff if this repeats."));
         engine.storeWriter(writtenBy());
         // Co-op events are asynchronous: the engine calls this on its own event thread, after the durable commit.
         engine.onCoopEvent(event -> Bukkit.getPluginManager().callEvent(event));
@@ -339,10 +355,15 @@ public final class ProfileRuntime {
             Bukkit.getServicesManager().register(AuroraProfiles.class, runtime.api(), plugin, ServicePriority.Normal);
             Bukkit.getPluginManager().registerEvents(runtime.new Sessions(), plugin);
             Bukkit.getPluginManager().registerEvents(runtime.new SwitchFreeze(), plugin);
+            // PM-076: the server hands the online players to these before it saves and removes them.
+            ProfileShutdownHook.registerAdapterCapture(runtime.shutdownAdapterCapture);
+            ProfileShutdownHook.register(runtime.shutdownCapture);
         } catch (final RuntimeException failed) {
             // The caller closes the repository; the scheduled work must not outlive a failed start.
             if (sweeper != null) sweeper.shutdownNow();
             heartbeats.shutdownNow();
+            ProfileShutdownHook.unregisterAdapterCapture(runtime.shutdownAdapterCapture);
+            ProfileShutdownHook.unregister(runtime.shutdownCapture);
             throw failed;
         }
         SourbyLogger.info("AWF MultiProfile: enabled (" + settings.mode().name().toLowerCase(java.util.Locale.ROOT)
@@ -391,15 +412,51 @@ public final class ProfileRuntime {
         }
     }
 
-    /** Disconnects an online player through their entity scheduler; does nothing for a player who left. */
-    private static void disconnect(final Plugin plugin, final UUID playerId, final String message) {
+    /** Sends a message to an online player through their entity scheduler; does nothing for a player who left. */
+    private static void message(final Plugin plugin, final UUID playerId, final String text) {
         try {
             final Player player = Bukkit.getPlayer(playerId);
             if (player == null) return;
-            player.getScheduler().execute(plugin, () -> player.kick(net.kyori.adventure.text.Component.text(message)),
-                null, 1L);
+            player.getScheduler().execute(plugin, () -> player.sendMessage(net.kyori.adventure.text.Component.text(text)), null, 1L);
         } catch (final RuntimeException retired) {
-            SourbyLogger.warn("AWF MultiProfile: could not disconnect " + playerId + ": " + retired.getMessage());
+            SourbyLogger.warn("AWF MultiProfile: could not message " + playerId + ": " + retired.getMessage());
+        }
+    }
+
+    /** How often a refused join is kicked again when a plugin cancels the kick before giving up. */
+    static final int KICK_ATTEMPTS = 5;
+    /** Ticks between two kick attempts: long enough for an accepted kick to complete, so it is not sent twice. */
+    private static final long KICK_RETRY_TICKS = 5L;
+
+    /** Disconnects an online player through their entity scheduler; does nothing for a player who left. */
+    private static void disconnect(final Plugin plugin, final UUID playerId, final String message) {
+        final Player player = Bukkit.getPlayer(playerId);
+        if (player != null) disconnect(plugin, player, message, KICK_ATTEMPTS);
+    }
+
+    /**
+     * Kicks exactly {@code player} (not a later connection of the same account) on its entity thread; while the player
+     * is still online {@value #KICK_RETRY_TICKS} ticks later (a plugin cancelled the kick), tries again, {@code attempts}
+     * times in all (review P3-11). A player still online afterwards stays frozen with their saves refused until they
+     * quit, logged once.
+     */
+    private static void disconnect(final Plugin plugin, final Player player, final String message, final int attempts) {
+        try {
+            player.getScheduler().execute(plugin, () -> {
+                if (!player.isOnline() || Bukkit.getPlayer(player.getUniqueId()) != player) return;
+                player.kick(net.kyori.adventure.text.Component.text(message));
+                player.getScheduler().execute(plugin, () -> {
+                    if (!player.isOnline() || Bukkit.getPlayer(player.getUniqueId()) != player) return;
+                    if (attempts > 1) {
+                        disconnect(plugin, player, message, attempts - 1);
+                    } else {
+                        SourbyLogger.warn("AWF MultiProfile: " + player.getUniqueId() + " could not be disconnected in " + KICK_ATTEMPTS
+                            + " attempts (a plugin cancels the kick); they stay frozen and their profile saves stay refused until they quit");
+                    }
+                }, null, KICK_RETRY_TICKS);
+            }, null, 1L);
+        } catch (final RuntimeException retired) {
+            SourbyLogger.warn("AWF MultiProfile: could not disconnect " + player.getUniqueId() + ": " + retired.getMessage());
         }
     }
 
@@ -503,6 +560,8 @@ public final class ProfileRuntime {
     public void close(final long budgetMillis) {
         if (this.closed) return;
         this.closed = true;
+        ProfileShutdownHook.unregisterAdapterCapture(this.shutdownAdapterCapture);
+        ProfileShutdownHook.unregister(this.shutdownCapture);
         if (this.idleSweeper != null) this.idleSweeper.shutdownNow();
         if (this.heartbeat != null) this.heartbeat.shutdownNow();
         if (this.routing != null) {
@@ -515,9 +574,14 @@ public final class ProfileRuntime {
                     + failed.getMessage() + "); its entry expires on its own");
             }
         }
-        final boolean drained = this.engine.drain(budgetMillis);
+        // The shutdown saves phase two queued may still be on the lane: wait for them for whatever is left of the configured
+        // capture deadline (one deadline for the whole shutdown capture, review P2-9); without a shutdown capture (tests,
+        // a runtime stopped by hand) the caller's budget applies.
+        final long deadline = this.shutdownDeadlineNanos;
+        final long drainMillis = deadline == 0L ? budgetMillis : Math.max(0L, (deadline - System.nanoTime()) / 1_000_000L);
+        final boolean drained = this.engine.drain(drainMillis);
         if (!drained) {
-            SourbyLogger.warn("AWF MultiProfile: " + budgetMillis + " ms elapsed with profile I/O still queued;"
+            SourbyLogger.warn("AWF MultiProfile: " + drainMillis + " ms elapsed with profile I/O still queued;"
                 + " pending transitions remain in the journal");
         }
         this.engine.releaseSessionsNow();
@@ -534,9 +598,173 @@ public final class ProfileRuntime {
             // Only the notice below depends on it.
         }
         if (online > 0) {
-            SourbyLogger.info("AWF MultiProfile: closed with " + online + " player(s) online; they get no quit"
-                + " snapshot, and their active profile's live state stays in vanilla playerdata");
+            final ShutdownCapture capture = this.shutdownOutcome;
+            SourbyLogger.info("AWF MultiProfile: closed with " + online + " player(s) online; " + (capture == null
+                ? "the shutdown capture did not run before this close, so they get no quit snapshot and their active"
+                    + " profile's live state stays in vanilla playerdata"
+                : "the shutdown capture saved " + capture.saved() + ", skipped " + capture.skipped() + " (no active profile or"
+                    + " a running switch), failed " + capture.failed() + " and left " + capture.unfinished() + " unfinished at the"
+                    + " deadline; unsaved players keep their last committed snapshot and pending intents"));
         }
+    }
+
+    // ------------------------------------------------------------------ shutdown capture (Build 53, PM-076)
+
+    /** What {@link #captureAllAtShutdown} did, for the close() notice. */
+    record ShutdownCapture(int saved, int skipped, int failed, int unfinished) {}
+
+    private volatile ShutdownCapture shutdownOutcome;
+    /** Adapter blobs captured per player while the plugins were still enabled; merged by the final capture. */
+    private final ConcurrentHashMap<UUID, ProfileStateAdapters.Capture> stagedAdapters = new ConcurrentHashMap<>();
+    /** Players whose required adapter failed the pre-capture: their shutdown save is skipped, the last committed snapshot stays. */
+    private final ConcurrentHashMap<UUID, String> stagedFailures = new ConcurrentHashMap<>();
+    private final java.util.function.LongConsumer shutdownAdapterCapture = this::captureAdaptersAtShutdown;
+    private final java.util.function.LongConsumer shutdownCapture = this::captureAllAtShutdown;
+
+    /** How long of the capture budget {@link #captureAdaptersAtShutdown} may use; the rest stays for the saves. */
+    private static final double ADAPTER_PHASE_SHARE = 0.25;
+    /** One adapter capture at shutdown taking longer than this is named in the log (the thread cannot be bounded, P3-13). */
+    private static final long SLOW_ADAPTER_MILLIS = 500L;
+    /** When the shutdown capture (phase one) began; phase two's deadline is this plus the budget: one budget, split once (P2-9). */
+    private volatile long shutdownStartedNanos;
+    /** The configured capture deadline, for {@link #close} to wait out the saves phase two left on the lane. */
+    private volatile long shutdownDeadlineNanos;
+
+    /**
+     * Phase one of the shutdown capture, on the region shutdown thread while the plugins are still enabled: every
+     * registered adapter of every online player is captured into a staging map, exactly as a live capture would
+     * (best-effort failures preserved, nothing cleared without being asked). A required adapter that fails marks
+     * the player: their shutdown save is skipped and they keep their last committed snapshot (never a snapshot
+     * that drops required data), logged. Bounded by a quarter of the budget: players not reached in time have no
+     * staged blobs, so their final capture carries the stored adapter bytes forward unchanged.
+     */
+    void captureAdaptersAtShutdown(final long budgetMillis) {
+        if (this.closed || !this.engine.isOpen()) return;
+        final long started = System.nanoTime();
+        this.shutdownStartedNanos = started;
+        this.shutdownDeadlineNanos = started + Math.max(1L, budgetMillis) * 1_000_000L;
+        final long deadline = started + (long) (Math.max(1L, budgetMillis) * ADAPTER_PHASE_SHARE) * 1_000_000L;
+        int staged = 0;
+        int notReached = 0;
+        for (final Player player : Bukkit.getOnlinePlayers()) {
+            if (System.nanoTime() >= deadline) {
+                notReached++;
+                continue;
+            }
+            final UUID playerId = player.getUniqueId();
+            try {
+                if (!Bukkit.isOwnedByCurrentRegion(player)) {
+                    notReached++;
+                    continue;
+                }
+                final long before = System.nanoTime();
+                this.stagedAdapters.put(playerId, this.statePort.captureAdaptersOnOwnerThread(player));
+                final long tookMillis = (System.nanoTime() - before) / 1_000_000L;
+                if (tookMillis > SLOW_ADAPTER_MILLIS) {
+                    // The adapter contract is synchronous; a capture that waits cannot be interrupted here, only named.
+                    SourbyLogger.warn("AWF MultiProfile: the adapter capture of " + playerId + " at shutdown took " + tookMillis
+                        + " ms; a plugin adapter that waits on a scheduler or I/O delays shutdown (see ProfileStateAdapter)");
+                }
+                staged++;
+            } catch (final ProfileOperationException required) {
+                this.stagedFailures.put(playerId, required.getMessage());
+                SourbyLogger.error("AWF MultiProfile: shutdown capture of " + playerId + ": " + required.getMessage()
+                    + "; their shutdown save is skipped and their last committed snapshot stays");
+            } catch (final RuntimeException failed) {
+                notReached++;
+                SourbyLogger.warn("AWF MultiProfile: capturing the adapters of " + playerId + " at shutdown failed ("
+                    + failed.getMessage() + "); their stored adapter bytes are carried forward unchanged");
+            }
+        }
+        if (staged > 0 || notReached > 0) {
+            SourbyLogger.info("AWF MultiProfile: shutdown adapter capture staged " + staged + " player(s)" + (notReached == 0 ? ""
+                : "; " + notReached + " not reached within the budget (their stored adapter bytes are kept as they are)"));
+        }
+    }
+
+    /**
+     * Phase two of the shutdown capture, on the region shutdown thread after the plugins were disabled and before the
+     * server removes the players (PM-076): every online player with an active profile is captured directly on this
+     * thread (it owns every player once the region scheduler halted), merged with the adapter blobs phase one staged,
+     * and saved under their session's capture ticket, exactly like a quit. The saves run on the storage lane; this
+     * thread waits for all of them until the budget ends. A player whose save did not finish by then is logged and
+     * left to recovery: their last committed snapshot stays authoritative and any pending intent is retained (the
+     * engine's close does not abort intents). Players mid-switch or mid-login keep that flow's outcome and are skipped.
+     */
+    void captureAllAtShutdown(final long budgetMillis) {
+        if (this.closed || !this.engine.isOpen()) return;
+        final long started = System.nanoTime();
+        // One budget for both phases (review P2-9): phase one started the clock when it ran; otherwise it starts here.
+        final long phaseOne = this.shutdownStartedNanos;
+        final long deadlineNanos = phaseOne != 0L && phaseOne <= started && started - phaseOne < Math.max(1L, budgetMillis) * 1_000_000L
+            ? phaseOne + Math.max(1L, budgetMillis) * 1_000_000L : started + Math.max(1L, budgetMillis) * 1_000_000L;
+        this.shutdownDeadlineNanos = deadlineNanos;
+        final ProfileEngine engine = this.engine;
+        final java.util.List<CompletableFuture<Boolean>> saves = new java.util.ArrayList<>();
+        final java.util.List<UUID> players = new java.util.ArrayList<>();
+        int skipped = 0;
+        int failed = 0;
+        for (final Player player : Bukkit.getOnlinePlayers()) {
+            final UUID playerId = player.getUniqueId();
+            if (this.stagedFailures.containsKey(playerId)) {
+                failed++;
+                continue;
+            }
+            if (engine.switchInProgress(playerId)) {
+                skipped++;
+                continue;
+            }
+            final ProfileEngine.CaptureTicket ticket = engine.captureTicket(playerId);
+            if (engine.format2() && (ticket == null || ticket.profileId() == null)) {
+                skipped++;
+                continue;
+            }
+            try {
+                // The region shutdown thread owns every player once the scheduler halted (the port refuses otherwise, P3-12).
+                final PlayerStatePort.CaptureResult captured = this.statePort.captureOnOwnerThreadDetailed(player, this.settings.isolation(),
+                    this.stagedAdapters.get(playerId));
+                saves.add(engine.saveCapturedAndClose(playerId, captured, ticket));
+                players.add(playerId);
+            } catch (final RuntimeException refused) {
+                failed++;
+                SourbyLogger.warn("AWF MultiProfile: capturing " + playerId + " at shutdown failed (" + ProfileEngine.messageOf(refused)
+                    + "); no quit snapshot, their last committed snapshot stays and their session marker stays open");
+            }
+        }
+        int saved = 0;
+        int unfinished = 0;
+        for (int i = 0; i < saves.size(); i++) {
+            final CompletableFuture<Boolean> save = saves.get(i);
+            final UUID playerId = players.get(i);
+            final long remaining = deadlineNanos - System.nanoTime();
+            try {
+                if (remaining <= 0L && !save.isDone()) throw new java.util.concurrent.TimeoutException();
+                final boolean written = save.get(Math.max(1L, remaining), TimeUnit.NANOSECONDS);
+                if (written) {
+                    saved++;
+                } else {
+                    skipped++;
+                }
+            } catch (final java.util.concurrent.TimeoutException notYet) {
+                unfinished++;
+                SourbyLogger.warn("AWF MultiProfile: the shutdown save of " + playerId + " did not finish within "
+                    + budgetMillis + " ms; it may still complete on the storage lane during the drain, otherwise their last"
+                    + " committed snapshot stays and any pending intent is retained for recovery");
+            } catch (final java.util.concurrent.ExecutionException refused) {
+                failed++;
+                SourbyLogger.warn("AWF MultiProfile: the shutdown save of " + playerId + " failed: "
+                    + ProfileEngine.messageOf(refused.getCause()) + "; their last committed snapshot stays");
+            } catch (final InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                unfinished += saves.size() - i;
+                break;
+            }
+        }
+        this.stagedAdapters.clear();
+        this.stagedFailures.clear();
+        this.shutdownOutcome = new ShutdownCapture(saved, skipped, failed, unfinished);
+        SourbyLogger.info("AWF MultiProfile: shutdown capture saved " + saved + " player(s), skipped " + skipped + ", failed " + failed
+            + ", unfinished at the deadline " + unfinished + " (" + (System.nanoTime() - started) / 1_000_000L + " ms of " + budgetMillis + ")");
     }
 
     /** Releases the static handle; used by bootstrap and tests. */
@@ -550,25 +778,35 @@ public final class ProfileRuntime {
         return dev.iyanz.sourbycraft.awf.redis.fabric.FabricRuntime.nodeId();
     }
 
-    /** Join/quit integration: recovery, session claim, the active profile's worlds, save on the way out. */
+    /** Players whose quit listener ran; the server's own player save that follows it must not capture again. */
+    private final java.util.Set<UUID> quitting = ConcurrentHashMap.newKeySet();
+    /** Players with a lockstep save queued and not yet settled (at most one pending autosave per player, D2). */
+    private final java.util.Set<UUID> autosavePending = ConcurrentHashMap.newKeySet();
+
+    /** Join/quit integration: recovery, session claim, the active profile's worlds, save on the way out, lockstep autosave. */
     private final class Sessions implements Listener {
 
         @EventHandler(priority = EventPriority.MONITOR)
         public void onJoin(final PlayerJoinEvent event) {
-            final UUID playerId = event.getPlayer().getUniqueId();
+            final Player player = event.getPlayer();
+            final UUID playerId = player.getUniqueId();
+            ProfileRuntime.this.quitting.remove(playerId);
+            ProfileRuntime.this.autosavePending.remove(playerId);
             // Read here, on the thread that owns the player: the world the join placed them in.
-            final String joinedWorld = event.getPlayer().getWorld().getName();
+            final String joinedWorld = player.getWorld().getName();
             // A quit during a switch asked for the session claim to be released when the switch
             // ends; the player is back, so the claim the switch leaves behind is theirs again.
             ProfileRuntime.this.engine.keepSessionAfterSwitch(playerId);
+            // Build 53 authoritative login: from here until the committed state was restored, the player's item
+            // events are cancelled and nothing of theirs is captured or saved (the join loaded vanilla playerdata).
+            final UUID gate = ProfileRuntime.this.engine.gateLogin(playerId);
+            final Join join = new Join(event, gate, joinedWorld);
             // Format 2: the player's session claim Q comes first, before recovery, capture or restore. A format-1
             // store admits at once.
             ProfileRuntime.this.engine.admitSession(playerId).handle((admission, failed) -> {
                 if (failed != null) {
-                    SourbyLogger.warn("AWF MultiProfile: admitting the session of " + playerId + " failed: "
-                        + ProfileEngine.messageOf(failed) + "; the player is disconnected, nothing of theirs is written");
-                    disconnect(ProfileRuntime.this.plugin, playerId, "Your profile session could not be started ("
-                        + ProfileEngine.codeOf(failed) + "). Try again in a moment.");
+                    join.refuse(ProfileEngine.codeOf(failed), "admitting the session failed: " + ProfileEngine.messageOf(failed),
+                        "Your profile session could not be started (" + ProfileEngine.codeOf(failed) + "). Try again in a moment.");
                     return false;
                 }
                 if (!admission.admitted() && ProfileEngine.OFFLINE.equals(admission.reason())) {
@@ -576,24 +814,70 @@ public final class ProfileRuntime {
                     return false;
                 }
                 if (!admission.admitted()) {
-                    SourbyLogger.warn("AWF MultiProfile: " + playerId + " already has a live session on "
-                        + admission.holderNode() + "; the join is disconnected");
-                    disconnect(ProfileRuntime.this.plugin, playerId, "Your profile is active on " + admission.holderNode()
-                        + ". Try again in a moment.");
+                    join.refuse(ProfileErrorCode.OWNERSHIP_CONFLICT, "another live session on " + admission.holderNode(),
+                        "Your profile is active on " + admission.holderNode() + ". Try again in a moment.");
                     return false;
                 }
                 return true;
-            }).thenCompose(admitted -> !admitted ? CompletableFuture.completedFuture(null)
-                : joinAdmitted(event, playerId, joinedWorld));
+            }).thenCompose(admitted -> !admitted ? CompletableFuture.completedFuture(null) : joinAdmitted(join))
+                .whenComplete((ignored, failed) -> ProfileRuntime.this.engine.releaseLoginGate(playerId, gate));
         }
 
-        /** The rest of the join once the session is admitted: recovery, the solo claim, the active profile's worlds. */
-        private CompletableFuture<Void> joinAdmitted(final PlayerJoinEvent event, final UUID playerId, final String joinedWorld) {
-            return ProfileRuntime.this.engine.recoverPending(playerId).exceptionally(failed -> {
-                SourbyLogger.warn("AWF MultiProfile: recovery for " + playerId + " failed: "
-                    + ProfileEngine.messageOf(failed));
-                return 0;
-            }).thenCompose(recovered -> ProfileRuntime.this.engine.active(playerId)).thenCompose(active -> {
+        /** One join: its player instance, gate token and the world it placed the player in; refuses hold the gate first. */
+        private final class Join {
+            final Player player;
+            final UUID playerId;
+            final UUID gate;
+            final String joinedWorld;
+
+            Join(final PlayerJoinEvent event, final UUID gate, final String joinedWorld) {
+                this.player = event.getPlayer();
+                this.playerId = this.player.getUniqueId();
+                this.gate = gate;
+                this.joinedWorld = joinedWorld;
+            }
+
+            /** Whether this join is no longer the player's current connection (quit, or joined again meanwhile). */
+            boolean stale() {
+                return Bukkit.getPlayer(this.playerId) != this.player
+                    || (this.gate != null && !ProfileRuntime.this.engine.gateHeld(this.playerId, this.gate));
+            }
+
+            /**
+             * Refuses the join (review P1-4, P3-10): the gate is held until this player's quit, so nothing the join loaded is
+             * captured or saved, then exactly this connection is disconnected (review P2-5); a stale join is left alone.
+             */
+            void refuse(final ProfileErrorCode code, final String why, final String message) {
+                SourbyLogger.warn("AWF MultiProfile: the join of " + this.playerId + " is refused (" + code + "): " + why
+                    + "; the player is disconnected and nothing of theirs is written");
+                if (this.gate != null) ProfileRuntime.this.engine.holdLoginGate(this.playerId, this.gate);
+                if (Bukkit.getPlayer(this.playerId) != this.player) return;
+                disconnect(ProfileRuntime.this.plugin, this.player, message, KICK_ATTEMPTS);
+            }
+        }
+
+        /**
+         * The rest of the join once the session is admitted: recovery, the solo claim, the authoritative restore of
+         * the active profile's committed state (Build 53), then the active profile's worlds. While authoritative login
+         * applies every failure refuses the join (review P1-4): a recovery that failed, a claim that failed or was not
+         * granted, a refused restore; the player never plays on vanilla playerdata with their saves refused.
+         */
+        private CompletableFuture<Void> joinAdmitted(final Join join) {
+            final UUID playerId = join.playerId;
+            final boolean authoritative = join.gate != null;
+            final java.util.concurrent.atomic.AtomicBoolean recovered = new java.util.concurrent.atomic.AtomicBoolean();
+            return ProfileRuntime.this.engine.recoverPending(playerId).handle((count, failed) -> {
+                if (failed != null) {
+                    SourbyLogger.warn("AWF MultiProfile: recovery for " + playerId + " failed: " + ProfileEngine.messageOf(failed));
+                    if (authoritative) {
+                        throw new java.util.concurrent.CompletionException(new ProfileOperationException(ProfileErrorCode.RECOVERY_REQUIRED,
+                            "the recovery of a pending transition failed: " + ProfileEngine.messageOf(failed)));
+                    }
+                    return 0;
+                }
+                if (count > 0) recovered.set(true);
+                return count;
+            }).thenCompose(ignored -> ProfileRuntime.this.engine.active(playerId)).thenCompose(active -> {
                 if (active.isEmpty()) return CompletableFuture.completedFuture(null);
                 final UUID profileId = active.get().id();
                 return ProfileRuntime.this.engine.claimSession(playerId, profileId)
@@ -605,25 +889,104 @@ public final class ProfileRuntime {
                             return CompletableFuture.completedFuture(null);
                         }
                         if (!claim.granted()) {
-                            if (ProfileRuntime.this.settings.coordination().singleActiveSession()) {
-                                rejectDuplicate(event.getPlayer(), claim);
+                            final String holder = claim.claim() == null ? "another node" : claim.claim().node();
+                            if (authoritative) {
+                                join.refuse(ProfileErrorCode.OWNERSHIP_CONFLICT, "the node claim on the active profile " + profileId
+                                    + " is held by " + holder, "Your profile is active on " + holder + ". Try again in a moment.");
+                            } else if (ProfileRuntime.this.settings.coordination().singleActiveSession()) {
+                                rejectDuplicate(join.player, claim);
                             }
                             return CompletableFuture.completedFuture(null);
                         }
-                        // Profile worlds are not loaded at startup: load the active profile's worlds and
-                        // bring the player back into them when the join placed them elsewhere.
-                        return ProfileRuntime.this.engine.prepareActive(playerId, joinedWorld).thenAccept(moved -> {
-                            if (moved) {
-                                SourbyLogger.info("AWF MultiProfile: returned " + playerId
-                                    + " to the worlds of their active profile after joining");
-                            }
-                        });
+                        return ProfileRuntime.this.engine.restoreOnLogin(playerId, join.gate, join::stale, recovered.get())
+                            .thenCompose(restore -> {
+                                if (restore.outcome() == ProfileEngine.LoginRestore.Outcome.REFUSED) {
+                                    join.refuse(restore.code(), restore.detail(), "Your profile state could not be restored ("
+                                        + restore.code() + "). Nothing of yours was changed; try again or contact the server staff.");
+                                    return CompletableFuture.completedFuture(false);
+                                }
+                                if (restore.outcome() != ProfileEngine.LoginRestore.Outcome.NONE) {
+                                    SourbyLogger.info("AWF MultiProfile: " + playerId + " joined into profile " + restore.profileId() + ": "
+                                        + restore.detail());
+                                }
+                                if (join.stale()) return CompletableFuture.completedFuture(false);
+                                // Profile worlds are not loaded at startup: load the active profile's worlds and
+                                // bring the player back into them when the join placed them elsewhere.
+                                return ProfileRuntime.this.engine.prepareActive(playerId, join.joinedWorld);
+                            }).thenAccept(moved -> {
+                                if (moved) {
+                                    SourbyLogger.info("AWF MultiProfile: returned " + playerId
+                                        + " to the worlds of their active profile after joining");
+                                }
+                            });
+                    }).handle((ignored, failed) -> {
+                        if (failed == null) return null;
+                        if (authoritative) {
+                            join.refuse(ProfileEngine.codeOf(failed), "the session claim or restore failed: " + ProfileEngine.messageOf(failed),
+                                "Your profile session could not be started (" + ProfileEngine.codeOf(failed) + "). Try again in a moment.");
+                        } else {
+                            SourbyLogger.warn("AWF MultiProfile: session claim for " + playerId + " failed: " + ProfileEngine.messageOf(failed));
+                        }
+                        return null;
                     });
-            }).exceptionally(failed -> {
-                SourbyLogger.warn("AWF MultiProfile: session claim for " + playerId + " failed: "
-                    + ProfileEngine.messageOf(failed));
+            }).handle((ignored, failed) -> {
+                if (failed == null) return null;
+                final ProfileOperationException cause = ProfileEngine.unwrap(failed);
+                if (authoritative) {
+                    join.refuse(cause.code(), cause.getMessage(), "Your profile state could not be restored (" + cause.code()
+                        + "). Nothing of yours was changed; try again or contact the server staff.");
+                } else {
+                    SourbyLogger.warn("AWF MultiProfile: the join of " + playerId + " failed: " + cause.getMessage());
+                }
                 return null;
-            }).thenApply(ignored -> (Void) null);
+            });
+        }
+
+        /**
+         * Lockstep autosave (Build 53, D2): the server just wrote the player's vanilla playerdata ({@code isQuit == false};
+         * autosave, or the per-player interval save). While authoritative login applies, the same state is captured here,
+         * on the thread that owns the player, under a ticket taken first, and published to the active profile's member
+         * stream on the storage lane; this thread never waits for it. At most one autosave per player is pending at a
+         * time. Skipped during a switch, a gated login, a quit already captured, after a refused save, and while the
+         * engine is closing. A capture or publish that fails with a code that repeats (STATE_TOO_LARGE,
+         * ADAPTER_REQUIRED_FAILED) freezes and disconnects the player (D4); any other failure is logged and retried by the
+         * next save.
+         */
+        @EventHandler(priority = EventPriority.MONITOR)
+        public void onPlayerSaved(final PlayerSaveEvent event) {
+            if (event.isQuit() || ProfileRuntime.this.closed) return;
+            final ProfileEngine engine = ProfileRuntime.this.engine;
+            if (!engine.isOpen() || !engine.format2() || !ProfileRuntime.this.settings.authoritativeLogin()) return;
+            final Player player = event.getPlayer();
+            final UUID playerId = player.getUniqueId();
+            if (ProfileRuntime.this.quitting.contains(playerId) || engine.switchInProgress(playerId) || engine.savesRefused(playerId)) return;
+            if (!engine.holdsSession(playerId) || !Bukkit.isOwnedByCurrentRegion(player)) return;
+            final ProfileEngine.CaptureTicket ticket = engine.captureTicket(playerId);
+            if (ticket == null || ticket.profileId() == null) return;
+            if (!ProfileRuntime.this.autosavePending.add(playerId)) return;
+            final PlayerStatePort.CaptureResult captured;
+            try {
+                captured = ProfileRuntime.this.statePort.captureOnOwnerThreadDetailed(player, ProfileRuntime.this.settings.isolation(), null);
+            } catch (final RuntimeException failed) {
+                ProfileRuntime.this.autosavePending.remove(playerId);
+                saveFailed(engine, playerId, failed, "capturing " + playerId + " at the server's player save");
+                return;
+            }
+            engine.saveCaptured(playerId, captured, ticket).whenComplete((written, failed) -> {
+                ProfileRuntime.this.autosavePending.remove(playerId);
+                if (failed != null && engine.isOpen()) saveFailed(engine, playerId, failed, "the lockstep save of " + playerId);
+            });
+        }
+
+        /** D4: a failure that repeats until someone acts freezes and disconnects the player; the rest is logged. */
+        private void saveFailed(final ProfileEngine engine, final UUID playerId, final Throwable failed, final String what) {
+            final ProfileErrorCode code = ProfileEngine.codeOf(failed);
+            if (ProfileEngine.fatalSaveCode(code)) {
+                engine.refuseSaves(playerId, code + ": " + ProfileEngine.messageOf(failed));
+                return;
+            }
+            SourbyLogger.warn("AWF MultiProfile: " + what + " failed (" + code + ": " + ProfileEngine.messageOf(failed)
+                + "); the last committed snapshot stays and the next player save retries");
         }
 
         @EventHandler(priority = EventPriority.MONITOR)
@@ -631,37 +994,50 @@ public final class ProfileRuntime {
             final Player player = event.getPlayer();
             final UUID playerId = player.getUniqueId();
             final ProfileEngine engine = ProfileRuntime.this.engine;
+            // The server's own player save follows this event synchronously; the lockstep listener must not capture again.
+            // The mark is dropped on the next global tick (or at a rejoin), so the set never outgrows the players quitting now.
+            ProfileRuntime.this.quitting.add(playerId);
+            try {
+                Bukkit.getGlobalRegionScheduler().runDelayed(ProfileRuntime.this.plugin, task -> ProfileRuntime.this.quitting.remove(playerId), 2L);
+            } catch (final RuntimeException stopping) {
+                // The scheduler is halting (shutdown): the set dies with the runtime.
+            }
             // Format 2: the ticket is taken before the capture, and exactly this session's claim is released.
             final ProfileEngine.CaptureTicket ticket = engine.captureTicket(playerId);
             final CoopWriteGuard.PlayerClaim session = engine.playerSessionClaim(playerId);
             if (engine.switchInProgress(playerId)) {
                 // A switch already captured the previous profile; a second capture here would write
-                // the target's state under the profile being left. A recovery or the teleport of a join
-                // preparation refuses the save as well; the live state stays in vanilla playerdata.
+                // the target's state under the profile being left. A recovery, the teleport of a join
+                // preparation or a login restore still running (the player holds the join's vanilla
+                // playerdata) refuses the save as well; the committed snapshot stays authoritative, and the session
+                // marker stays open so the next login re-examines the state.
                 engine.releaseSessionAfterSwitch(playerId);
                 return;
             }
             if (!engine.isOpen() || !engine.holdsSession(playerId)) {
-                // Closed: shutdown closes MultiProfile before the server removes players. No session
-                // claim: the join found no active profile to claim. Either way nothing is written.
+                // Closed: at shutdown the players were handed to the shutdown capture before this (PM-076), and
+                // MultiProfile closed before the server removes them. No session claim: the join found no active
+                // profile to claim. Either way nothing is written here.
                 if (engine.isOpen() && session != null) releasePlayerSession(engine, playerId, session);
                 return;
             }
             // Captured here, on the thread that owns the player, while the player still exists; an
-            // entity task scheduled from here would run after the player was removed.
-            ProfileState state = null;
+            // entity task scheduled from here would run after the player was removed. A required adapter that
+            // fails refuses the capture (ADAPTER_REQUIRED_FAILED): no partial snapshot is written and the session
+            // marker stays open (D4), so the next login re-examines the vanilla playerdata the server writes now.
+            PlayerStatePort.CaptureResult captured = null;
             try {
-                state = ProfileRuntime.this.statePort.captureOnOwnerThread(player, ProfileRuntime.this.settings.isolation());
+                captured = ProfileRuntime.this.statePort.captureOnOwnerThreadDetailed(player, ProfileRuntime.this.settings.isolation(), null);
             } catch (final RuntimeException failed) {
-                SourbyLogger.warn("AWF MultiProfile: capturing " + playerId + " on quit failed (" + failed.getMessage()
-                    + "); no quit snapshot was written");
+                SourbyLogger.warn("AWF MultiProfile: capturing " + playerId + " on quit failed (" + ProfileEngine.messageOf(failed)
+                    + "); no quit snapshot was written and the last committed snapshot stays");
             }
-            final CompletableFuture<Boolean> saved = state == null
-                ? CompletableFuture.completedFuture(false) : engine.saveCaptured(playerId, state, ticket);
+            final CompletableFuture<Boolean> saved = captured == null
+                ? CompletableFuture.completedFuture(false) : engine.saveCapturedAndClose(playerId, captured, ticket);
             saved.handle((written, failed) -> {
                 if (failed != null && engine.isOpen()) {
                     SourbyLogger.warn("AWF MultiProfile: saving the active profile of " + playerId + " on quit failed: "
-                        + ProfileEngine.messageOf(failed));
+                        + ProfileEngine.messageOf(failed) + "; the session marker stays open");
                 }
                 return null;
             }).thenCompose(ignored -> engine.releaseSession(playerId))

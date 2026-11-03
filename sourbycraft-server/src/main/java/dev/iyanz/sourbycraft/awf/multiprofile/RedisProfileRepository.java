@@ -643,6 +643,35 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
         return List.copyOf(found);
     }
 
+    // ------------------------------------------------------------------ session markers (Build 53)
+
+    @Override
+    public boolean supportsSessionMarkers() {
+        return true;
+    }
+
+    /** {@code <namespace>session:<player>}: the marker's frame as a plain string value; Build 52 never reads the key. */
+    @Override
+    public Optional<SessionMarker> sessionMarker(final UUID playerId) throws IOException {
+        ensureOpen();
+        final String key = sessionMarkerKey(playerId);
+        final Object stored = this.client.callBounded(bound(ProfileRecords.TYPE_SESSION_MARKER), "GET", key);
+        if (stored == null) return Optional.empty();
+        if (!(stored instanceof byte[] bytes)) throw new IOException("the session marker " + key + " is not a bulk string");
+        final ProfileRecords.Frame frame = ProfileRecords.unframe(bytes, ProfileRecords.FORMAT_2, ProfileRecords.TYPE_SESSION_MARKER, key);
+        return Optional.of(SessionMarker.decode(frame.payload(), playerId, key));
+    }
+
+    @Override
+    public boolean writeSessionMarker(final SessionMarker marker) throws IOException {
+        ensureWritable();
+        final String key = sessionMarkerKey(marker.playerId());
+        final byte[] frame = ProfileRecords.frame2(ProfileRecords.TYPE_SESSION_MARKER, marker.generation(), marker.encode(), key);
+        final Object reply = this.client.call("SET", key, frame);
+        if (!"OK".equals(RedisClient.text(reply))) throw new IOException("writing the session marker " + key + " answered " + reply);
+        return true;
+    }
+
     @Override
     public Optional<ProfileSnapshot> legacySnapshot(final UUID playerId) throws IOException {
         ensureOpen();
@@ -3617,6 +3646,10 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
 
     private String legacyKey(final UUID playerId) {
         return this.namespace + "legacy:" + playerId;
+    }
+
+    private String sessionMarkerKey(final UUID playerId) {
+        return this.namespace + "session:" + playerId;
     }
 
     private String stageKey(final UUID snapshotId) {

@@ -164,6 +164,8 @@ public final class FileProfileRepository implements ProfileRepository, ProfileMi
     private final Path intents;
     private final Path receipts;
     private final Path staging;
+    /** Build 53 session markers, one file per account. */
+    private final Path sessionMarkers;
     private final FileProfileIndex indexes;
     private final FileChannel lockChannel;
     private final FileLock lock;
@@ -222,6 +224,7 @@ public final class FileProfileRepository implements ProfileRepository, ProfileMi
         this.intents = this.root.resolve("intents");
         this.receipts = this.root.resolve("receipts");
         this.staging = this.root.resolve("staging");
+        this.sessionMarkers = this.root.resolve("sessions");
         this.indexes = new FileProfileIndex(this.root.resolve("indexes"), this.root);
         for (final Path directory : List.of(this.accounts, this.profiles, this.bindings, this.snapshots, this.transitions)) {
             Files.createDirectories(directory);
@@ -465,6 +468,40 @@ public final class FileProfileRepository implements ProfileRepository, ProfileMi
             durable(file, ProfileRecords.frame2(TYPE_SNAPSHOT, snapshot.revision(), ProfileRecords.legacyArchivePayload2(snapshot),
                 file.toString()));
         }
+    }
+
+    // ------------------------------------------------------------------ session markers (Build 53)
+
+    @Override
+    public boolean supportsSessionMarkers() {
+        return true;
+    }
+
+    /**
+     * {@code sessions/<player>.awfp}: a format-2 frame of type {@link ProfileRecords#TYPE_SESSION_MARKER} whose revision is
+     * the marker's generation. The directory is created on the first write; Build 52 never looks at it.
+     */
+    @Override
+    public synchronized Optional<SessionMarker> sessionMarker(final UUID playerId) throws IOException {
+        format2Read();
+        final Path file = this.sessionMarkers.resolve(playerId + ".awfp");
+        if (!Files.isRegularFile(file)) return Optional.empty();
+        final ProfileRecords.Frame frame = read(file, ProfileRecords.TYPE_SESSION_MARKER);
+        return Optional.of(SessionMarker.decode(frame.payload(), playerId, file.toString()));
+    }
+
+    @Override
+    public synchronized boolean writeSessionMarker(final SessionMarker marker) throws IOException {
+        format2Read();
+        requireTransactional();
+        Files.createDirectories(this.sessionMarkers);
+        final Path file = this.sessionMarkers.resolve(marker.playerId() + ".awfp");
+        try {
+            durable(file, ProfileRecords.frame2(ProfileRecords.TYPE_SESSION_MARKER, marker.generation(), marker.encode(), file.toString()));
+        } catch (final FileProfileIo.OutcomeUnknown unknown) {
+            throw new IOException("writing the session marker " + file + " did not finish cleanly: " + unknown.getMessage(), unknown);
+        }
+        return true;
     }
 
     @Override
@@ -809,10 +846,10 @@ public final class FileProfileRepository implements ProfileRepository, ProfileMi
      * The account side of "membership changes are intents" (the counterpart of the member-row check of
      * {@code commitProfile}), shared with the Redis repository: a direct account commit may not add or drop access to
      * a co-op profile (an accept, leave or kick does that in one intent with the member row), and may make a co-op
-     * profile the active one only for a current member, which in Build 52 is its OWNER only
-     * ({@code COOP_SWITCH_UNAVAILABLE} for every other member: member switching arrives in Build 53), at that
-     * member's epoch. Solo profiles, account-local aliases, slot limits, sessions and cleanups are unaffected (Build 51
-     * behaviour), and so is a profile the store does not hold (a creation in the same operation).
+     * profile the active one only for a current member ({@code NOT_A_MEMBER} otherwise), at that member's epoch
+     * (Build 52 additionally allowed the OWNER only, {@code COOP_SWITCH_UNAVAILABLE}; Build 53 lets every member play
+     * from their own stream). Solo profiles, account-local aliases, slot limits, sessions and cleanups are unaffected
+     * (Build 51 behaviour), and so is a profile the store does not hold (a creation in the same operation).
      */
     static void checkCoopAccess(final PlayerAccount stored, final PlayerAccount after, final ProfileLookup profiles, final String what)
         throws IOException {
@@ -835,14 +872,9 @@ public final class FileProfileRepository implements ProfileRepository, ProfileMi
             throw new ProfileOperationException(ProfileErrorCode.NOT_A_MEMBER, what + " would make co-op profile " + active + " active but "
                 + after.playerId() + " is not one of its members. Nothing was written");
         }
-        if (row.role() != ProfileRole.OWNER) {
-            throw new ProfileOperationException(ProfileErrorCode.COOP_SWITCH_UNAVAILABLE, what + " would make co-op profile " + active
-                + " active for its " + row.role() + " " + after.playerId() + "; in Build 52 only the OWNER plays a co-op profile (member"
-                + " switching arrives in Build 53). Nothing was written");
-        }
-        if (after.activeEpoch() != null && !after.activeEpoch().equals(row.epoch())) {
-            throw invalid(what + " names active epoch " + after.activeEpoch() + " but the owner's membership epoch in " + active + " is "
-                + row.epoch() + ". Nothing was written");
+        if (after.activeEpoch() == null || !after.activeEpoch().equals(row.epoch())) {
+            throw invalid(what + " names active epoch " + after.activeEpoch() + " but the membership epoch of " + after.playerId() + " in "
+                + active + " is " + row.epoch() + ". Nothing was written");
         }
     }
 

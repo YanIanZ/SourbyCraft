@@ -377,8 +377,11 @@ final class CoopFixtures {
 
     // ------------------------------------------------------------------ engine
 
-    /** Player and world ports that do nothing: the names, types and recovery cases never touch a player. */
-    static final class QuietPlayers implements PlayerStatePort {
+    /**
+     * Player and world ports that do nothing: the names, types and recovery cases never touch a player. Not final:
+     * the Build 53 member-play cases extend it with a per-player state ({@code MemberPlayFixtures.PlayingPorts}).
+     */
+    static class QuietPlayers implements PlayerStatePort {
 
         final Set<UUID> online = java.util.concurrent.ConcurrentHashMap.newKeySet();
 

@@ -29,17 +29,41 @@ import org.jspecify.annotations.Nullable;
  * vote-kick, list and a shared label. They are {@code default} methods that fail with
  * {@link UnsupportedOperationException} on an implementation that does not provide them. They are refused
  * with {@link ProfileErrorCode#COOP_DISABLED} unless {@code aurora.awf.multiprofile.coop.enabled} is true
- * (default false), and with {@link ProfileErrorCode#MIGRATION_REQUIRED} on a store still in format 1. What
- * Build 52 does <b>not</b> do: a member cannot yet {@linkplain #switchProfile switch into} a co-op profile
- * they do not own ({@link ProfileErrorCode#COOP_SWITCH_UNAVAILABLE}, Build 53); a member whose
- * <i>active</i> profile is the co-op profile cannot be removed ({@link ProfileErrorCode#MEMBER_ONLINE}, Build 53;
- * a member online in another profile can); ownership cannot be transferred;
- * the owner cannot leave or be kicked ({@link ProfileErrorCode#OWNER_ACTION_REFUSED}); a removed member's
- * state is recorded for salvage but nothing is delivered (Build 54). Every membership change is a
- * recoverable intent: a failed or {@link ProfileErrorCode#UNKNOWN_OUTCOME} call must be re-read, not
+ * (default false), and with {@link ProfileErrorCode#MIGRATION_REQUIRED} on a store still in format 1.
+ * Ownership cannot be transferred and the owner cannot leave or be kicked
+ * ({@link ProfileErrorCode#OWNER_ACTION_REFUSED}); a removed member's state is recorded for salvage but
+ * nothing is delivered (Build 54). Every membership change is a recoverable intent: a failed or
+ * {@link ProfileErrorCode#UNKNOWN_OUTCOME} call must be re-read, not
  * blindly repeated. The {@code actor} and {@code player} arguments identify who asks; like the other
  * mutators, the plugin must authorise player requests itself, and the service checks the actor's role at
  * commit.</p>
+ *
+ * <p><b>Co-op play (Build 53).</b> A member can {@linkplain #switchProfile switch into} the co-op profile and
+ * play it: each member has their own state in it (inventory, ender chest, experience, health, location and the
+ * registered adapters), captured and restored per member, never shared between members. The switch is refused
+ * with {@link ProfileErrorCode#NOT_A_MEMBER} for a player who is not a member (a removed member included) and
+ * {@link ProfileErrorCode#WRONG_NODE} when the
+ * profile's bound world is held by another node (OD-1: no cross-node routing). A member who is online with the
+ * co-op as their active profile can now leave or be kicked: the server first captures and switches them out
+ * (to their next profile, or a fresh solo profile) and only then removes them; if that cannot be done safely
+ * the call fails with {@link ProfileErrorCode#MEMBER_ONLINE} and nothing is removed.</p>
+ *
+ * <p><b>Adapters (Build 53).</b> {@link ProfileStateAdapter#descriptor()} declares an adapter
+ * {@link ProfileDataCriticality#REQUIRED} or {@link ProfileDataCriticality#BEST_EFFORT}; a REQUIRED adapter that
+ * fails or is missing refuses a switch with {@link ProfileErrorCode#ADAPTER_REQUIRED_FAILED} or
+ * {@link ProfileErrorCode#ADAPTER_MISSING}. An adapter may also implement {@link ProfileStateAdapter#migrate} to
+ * convert data it stored under an older version; a REQUIRED adapter that cannot migrate refuses the apply.</p>
+ *
+ * <p><b>Authoritative login (Build 53).</b> {@code aurora.awf.multiprofile.login.authoritative} is {@code auto}
+ * (default), {@code true} or {@code false}; {@code auto} means authoritative exactly when {@code coop.enabled} is
+ * true. While it applies, a join restores the committed member state of the player's active profile instead of the
+ * vanilla playerdata the server loaded, the server publishes a profile snapshot every time it saves that player's
+ * vanilla playerdata (autosave) and at quit, and a join whose committed state cannot be read or restored is refused
+ * ({@link ProfileErrorCode#HEAD_UNREADABLE} and the other codes the server reports). A join after a crash or an
+ * upgrade from Build 52 may adopt the player's vanilla playerdata into the active profile once (see the server's
+ * {@code docs/awf/multiprofile/PROFILE-LIFECYCLE.md}). While it does not apply, a join keeps the vanilla
+ * playerdata, exactly as in Build 52, and co-op members cannot switch into a co-op
+ * ({@link ProfileErrorCode#COOP_SWITCH_UNAVAILABLE}).</p>
  *
  * <p>The service is optional: plugins must handle {@code isEnabled() == false} and a missing service
  * registration, which is what a server without MultiProfile looks like.</p>
@@ -87,7 +111,12 @@ public interface AuroraProfiles {
 
     CompletableFuture<Optional<ProfileInfo>> getActiveProfile(UUID accountId);
 
-    /** Switches the player's active profile; the result carries the reason on failure. */
+    /**
+     * Switches the player's active profile; the result carries the reason on failure. Since Build 53 the
+     * target may be a co-op profile the player is a member of (see the class description); refusals added for
+     * play are {@link ProfileErrorCode#NOT_A_MEMBER}, {@link ProfileErrorCode#WRONG_NODE},
+     * {@link ProfileErrorCode#ADAPTER_REQUIRED_FAILED} and {@link ProfileErrorCode#ADAPTER_MISSING}.
+     */
     CompletableFuture<ProfileSwitchResult> switchProfile(UUID playerId, UUID profileId);
 
     /** Captures and persists the profile's current state, if its owner is online. */
@@ -185,7 +214,7 @@ public interface AuroraProfiles {
      * {@link ProfileErrorCode#COOP_FULL}, {@link ProfileErrorCode#SLOT_LIMIT} (a co-op membership uses one of
      * the account's profile slots), {@link ProfileErrorCode#WRONG_NODE} (OD-1: the node does not hold the
      * profile's bound world). Fires {@link CoopMemberJoinEvent}.
-     * Build 52 does not let the new member switch into the profile; that is Build 53.
+     * From Build 53 the new member can switch into the profile ({@link #switchProfile}).
      */
     default CompletableFuture<CoopMemberInfo> acceptInvite(UUID playerId, UUID inviteId) {
         return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op unavailable"));
@@ -223,9 +252,11 @@ public interface AuroraProfiles {
 
     /**
      * The player leaves a co-op profile. The owner cannot leave
-     * ({@link ProfileErrorCode#OWNER_ACTION_REFUSED}); in Build 52 a player whose <i>active</i> profile is this
-     * co-op profile cannot leave ({@link ProfileErrorCode#MEMBER_ONLINE}, enabled in Build 53). A player who is
-     * online but active in another profile, or offline, can. Committing the leave consumes the membership epoch durably, frees the account's
+     * ({@link ProfileErrorCode#OWNER_ACTION_REFUSED}); a player whose <i>active</i> profile is this
+     * co-op profile is captured and switched out first (Build 53; in Build 52 this was refused with
+     * {@link ProfileErrorCode#MEMBER_ONLINE}, which Build 53 returns only when that cannot be done safely, for
+     * example when the player is online on another node). A player who is online but active in another profile,
+     * or offline, can leave. Committing the leave consumes the membership epoch durably, frees the account's
      * slot and records the member's personal state as an unavailable-to-delivery salvage entry. Fires
      * {@link CoopMemberLeaveEvent} with {@link CoopMemberLeaveEvent.Reason#LEFT}. Build 52.
      */
@@ -235,9 +266,9 @@ public interface AuroraProfiles {
 
     /**
      * Opens a kick vote against a member. The actor must be the owner or a manager and may not be the target; the
-     * target may not be the owner ({@link ProfileErrorCode#OWNER_ACTION_REFUSED}) and, in Build 52, may not have
-     * this co-op profile as its active profile ({@link ProfileErrorCode#MEMBER_ONLINE}; a target online in another
-     * profile can be kicked). One vote can be open per profile
+     * target may not be the owner ({@link ProfileErrorCode#OWNER_ACTION_REFUSED}) and, from Build 53, may have
+     * this co-op profile as its active profile: the removal first captures and switches it out
+     * ({@link ProfileErrorCode#MEMBER_ONLINE} when that cannot be done safely, for example on another node). One vote can be open per profile
      * ({@link ProfileErrorCode#VOTE_OPEN}); in a two-member co-op the target must have been inactive for
      * {@code coop.kick-vote.inactive-days} ({@link ProfileErrorCode#TARGET_NOT_INACTIVE}). The starter's
      * approval is counted. If that already makes the vote unanimous (the owner started it against the only
@@ -254,7 +285,7 @@ public interface AuroraProfiles {
      * role change since the vote opened cancels it ({@link ProfileErrorCode#ELECTORATE_CHANGED}). Fails with
      * {@link ProfileErrorCode#VOTE_NOT_FOUND} (also for an expired vote, which is closed),
      * {@link ProfileErrorCode#NOT_A_MEMBER} or {@link ProfileErrorCode#MEMBER_ONLINE} (the approval would remove
-     * a target whose active profile is this one). When the last eligible voter approves, the removal commits in
+     * a target that cannot be switched out safely, for example one online on another node). When the last eligible voter approves, the removal commits in
      * the same call and {@link CoopMemberLeaveEvent} fires with {@link CoopMemberLeaveEvent.Reason#KICKED};
      * approving a {@link CoopKickVoteState#PASSED} vote retries a removal that failed.
      * Build 52.
