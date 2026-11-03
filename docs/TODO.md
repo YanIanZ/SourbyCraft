@@ -28,9 +28,11 @@ Rencana dan keputusan OD-1…4: [BUILD-51-55-PLAN.md](releases/BUILD-51-55-PLAN.
 (keputusan owner); tes ditulis agen, tidak dijalankan agen; CI menjalankannya saat push.
 
 - [-] Build 51 — slice 2+3 + nama/tipe (G1): format 2 FILE+Redis, intent + recovery, migrasi 1→2 dengan backup,
-  gate downgrade updater (OD-2), nama unik immutable, tipe profil disimpan. Kode ditulis, direview dua kali, dikompilasi;
-  belum diuji owner: TO-B51-01…07 di [catatan rilis Build 51](releases/26.2-build-51-aurora-nexus.md).
-- [ ] Build 52 — slice 4: keanggotaan co-op (undang/terima/tolak/kedaluwarsa, keluar, peran, vote kick).
+  gate downgrade updater (OD-2), nama unik immutable, tipe profil disimpan. Dipublikasikan `v26.2-r51`
+  (2026-11-03, CI hijau run 41653665686); belum diuji owner: TO-B51-01…07 di [catatan rilis Build 51](releases/26.2-build-51-aurora-nexus.md).
+- [-] Build 52 — slice 4: keanggotaan co-op (undang/terima/tolak/kedaluwarsa, keluar, peran, vote kick, batas anggota),
+  intent FILE+Redis, level store minimumBuild 52, `/coop`. Kode ditulis, direview, dikompilasi; belum diuji owner:
+  TO-B52-01…07 di [catatan rilis Build 52](releases/26.2-build-52-aurora-nexus.md).
 - [ ] Build 53 — slice 5 + RFC E03: switching v2, login dari snapshot, adapter REQUIRED, snapshot quit saat shutdown (PM-076).
 - [ ] Build 54 — slice 6: bank bersama/pribadi, koleksi, transfer dengan receipt, salvage exactly-once (OD-3), purse via adapter (OD-4).
 - [ ] Build 55 — slice 7 + G5–G7: audit, switch guard, aturan tipe, paritas API, antrean I/O per akun (PM-091).
