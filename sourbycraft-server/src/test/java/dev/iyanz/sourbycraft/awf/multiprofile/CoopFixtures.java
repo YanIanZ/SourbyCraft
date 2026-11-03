@@ -108,7 +108,11 @@ final class CoopFixtures {
 
     // ------------------------------------------------------------------ file trees
 
-    /** Relative path to SHA-256 of every regular file below {@code root} (lock file and temporaries excluded). */
+    /**
+     * Relative path to SHA-256 of every regular file below {@code root}. The lock file, temporaries and {@code staging/}
+     * are excluded: staging holds uncommitted after-images outside the commit decision (as {@code CoopRedisTest.keyspace}
+     * excludes Redis staging keys), and a refused prepare deliberately removes its own staging (review P3-17).
+     */
     static Map<String, String> tree(final Path root) throws IOException {
         final TreeMap<String, String> files = new TreeMap<>();
         if (!Files.isDirectory(root)) return files;
@@ -117,7 +121,9 @@ final class CoopFixtures {
                 if (!Files.isRegularFile(file)) continue;
                 final String name = file.getFileName().toString();
                 if (name.equals("repository.lock") || name.endsWith(".tmp")) continue;
-                files.put(root.relativize(file).toString(), sha256(Files.readAllBytes(file)));
+                final String relative = root.relativize(file).toString();
+                if (relative.startsWith("staging" + java.io.File.separator)) continue;
+                files.put(relative, sha256(Files.readAllBytes(file)));
             }
         }
         return files;
