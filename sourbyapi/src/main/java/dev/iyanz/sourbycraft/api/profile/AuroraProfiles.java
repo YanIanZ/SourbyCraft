@@ -22,7 +22,17 @@ import org.jspecify.annotations.Nullable;
  * transition is recorded and can be finished with an operator command or at the player's next join.</p>
  *
  * <p>Build 51 adds the profile's immutable name and policy type ({@link ProfileDetails},
- * {@link ProfileType}), which are stored but not yet used to restrict any gameplay.</p>
+ * {@link ProfileType}). Build 54 adds the {@link ProfileTypeRegistry} ({@link #typeRegistry()},
+ * {@link #rules(UUID)}, {@link #allows(UUID, String)}): each type's action rules, which the server checks for the
+ * actions it owns (bank, collections, co-op, salvage) and a consumer checks for its own.</p>
+ *
+ * <p><b>Co-op bank and salvage (Build 54).</b> {@link #bank}, {@link #deposit}, {@link #withdraw},
+ * {@link #depositPersonal}, {@link #withdrawPersonal}, {@link #transfer}, {@link #applyInterest}, {@link #collections},
+ * {@link #contribute}, {@link #salvage} and {@link #claimSalvage}: a shared bank, a personal bank per member, collections
+ * with a per-member contribution ledger, and exactly-once salvage delivery. They are {@code default} methods that fail
+ * with {@link UnsupportedOperationException} on an implementation without them. Committed changes fire
+ * {@link ProfileBankTransactionEvent} and {@link ProfileSalvageDeliveredEvent}. The purse is not part of it (owner
+ * decision OD-4, {@link ProfileErrorCode#PURSE_TRANSFER_UNSUPPORTED}).</p>
  *
  * <p><b>Co-op (Build 52).</b> The co-op methods at the end of this interface manage membership of a
  * profile shared by several accounts: convert a solo profile, invite, accept, decline, cancel, leave,
@@ -31,8 +41,8 @@ import org.jspecify.annotations.Nullable;
  * with {@link ProfileErrorCode#COOP_DISABLED} unless {@code aurora.awf.multiprofile.coop.enabled} is true
  * (default false), and with {@link ProfileErrorCode#MIGRATION_REQUIRED} on a store still in format 1.
  * Ownership cannot be transferred and the owner cannot leave or be kicked
- * ({@link ProfileErrorCode#OWNER_ACTION_REFUSED}); a removed member's state is recorded for salvage but
- * nothing is delivered (Build 54). Every membership change is a recoverable intent: a failed or
+ * ({@link ProfileErrorCode#OWNER_ACTION_REFUSED}); a removed member's state is recorded for salvage, which
+ * Build 54 delivers ({@link #claimSalvage}). Every membership change is a recoverable intent: a failed or
  * {@link ProfileErrorCode#UNKNOWN_OUTCOME} call must be re-read, not
  * blindly repeated. The {@code actor} and {@code player} arguments identify who asks; like the other
  * mutators, the plugin must authorise player requests itself, and the service checks the actor's role at
@@ -315,5 +325,215 @@ public interface AuroraProfiles {
      */
     default CompletableFuture<Void> setCoopLabel(UUID actorId, UUID profileId, String label) {
         return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op unavailable"));
+    }
+
+    // ------------------------------------------------------------------ profile types (Build 54)
+
+    /**
+     * Added in Build 54. The profile type registry ({@link ProfileTypeRegistry}): built-in and plugin-registered
+     * profile types and their action rules. The default looks it up in Bukkit's services manager, where the server
+     * registers it while MultiProfile is enabled.
+     *
+     * @throws UnsupportedOperationException when no registry is registered (MultiProfile disabled, or a server
+     *     before Build 54)
+     */
+    default ProfileTypeRegistry typeRegistry() {
+        final ProfileTypeRegistry registry = org.bukkit.Bukkit.getServicesManager().load(ProfileTypeRegistry.class);
+        if (registry == null) throw new UnsupportedOperationException("profile type registry unavailable");
+        return registry;
+    }
+
+    /**
+     * Added in Build 54. The rules in force for a profile ({@link ProfileTypeRegistry#rules(UUID)}), for a consumer's
+     * own actions (for example {@code island-bank}). The engine enforces the actions it owns itself.
+     */
+    default CompletableFuture<ProfileRuleSet> rules(UUID profileId) {
+        try {
+            return typeRegistry().rules(profileId);
+        } catch (final UnsupportedOperationException unavailable) {
+            return CompletableFuture.failedFuture(unavailable);
+        }
+    }
+
+    /** Added in Build 54. Whether the profile's type allows the action ({@link ProfileTypeRegistry#allows(UUID, String)}). */
+    default CompletableFuture<Boolean> allows(UUID profileId, String action) {
+        return rules(profileId).thenApply(rules -> rules.allows(action));
+    }
+
+    // ------------------------------------------------------------------ co-op bank, collections, salvage (Build 54)
+    //
+    // Common rules of the methods below. They need co-op enabled (COOP_DISABLED), a format-2 store
+    // (MIGRATION_REQUIRED) and a co-op profile (NOT_COOP; PROFILE_NOT_FOUND). Amounts are long minor units of the bank's
+    // ProfileCurrency and must be positive (INVALID_REQUEST). A mutator is refused while another node holds the profile's
+    // bound world (WRONG_NODE, OD-1), its actor must be a member with this co-op as the active profile (NOT_A_MEMBER,
+    // STALE_STATE) and the profile's type must allow the action (ACTION_FORBIDDEN_BY_TYPE). Each committed change leaves a
+    // permanent receipt; a call that fails with UNKNOWN_OUTCOME must be re-read (bank(), salvage(), or bankReceipt() with
+    // ProfileOperationException.operationId()), not repeated. A ledger method with an operationId parameter takes the
+    // caller's own operation id (any UUID the caller never used before, kept by the caller until the outcome is known).
+    // Retry contract: the server looks the id up FIRST (the permanent receipt on the profile; for transfer also the stored
+    // intent) and validates the request only when the id is unknown. A known id is answered without validating anything
+    // against the current state (balance, capacity, interest interval, role, type rules, active profile):
+    //   - same request (same actor, profile, amount, accounts or collection, and the actor's same membership), committed:
+    //     completes with the bank as stored now; nothing is posted again and no ProfileBankTransactionEvent fires, even
+    //     when the balance moved, the cap was reached or the interest interval has not elapsed since;
+    //   - same request, aborted (a transfer only): IO_FAILURE, nothing was applied under the id; a new attempt needs a new id;
+    //   - same request, still undecided (a transfer intent awaiting recovery): RECOVERY_REQUIRED; retry the same id later;
+    //   - another request under the id: INVALID_REQUEST ("already used for a different request");
+    //   - the actor is no longer a member of the profile: INVALID_REQUEST (the retry cannot be matched to the request).
+    // Every such refusal names the id (ProfileOperationException.operationId()). A consumer that debited a purse before a
+    // deposit must not refund it on a failure until bankReceipt(null, profileId, id) shows no COMMITTED receipt.
+    // The server moves no purse money (owner decision OD-4): to move coins between a purse and the bank, the
+    // consumer plugin changes the purse itself and then calls deposit or withdraw. The plugin must authorise player
+    // requests itself.
+
+    /**
+     * Added in Build 54. The bank of a co-op profile as {@code viewerId} sees it (a member; {@code null} = operator view,
+     * {@link ProfileBankInfo#personalBalance()} 0). A profile with no committed bank change answers an empty bank in the
+     * configured currency. Fails with {@link ProfileErrorCode#NOT_A_MEMBER} for a viewer who is not a member.
+     */
+    default CompletableFuture<ProfileBankInfo> bank(@Nullable UUID viewerId, UUID profileId) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op bank unavailable"));
+    }
+
+    /**
+     * Added in Build 54. Credits the shared bank ({@code bank.deposit}); any member. A ledger credit: the plugin debits the
+     * purse first. Refused with {@link ProfileErrorCode#INVALID_REQUEST} past the shared capacity or the long range.
+     * Fires {@link ProfileBankTransactionEvent}.
+     */
+    default CompletableFuture<ProfileBankInfo> deposit(UUID actorId, UUID profileId, long amount) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op bank unavailable"));
+    }
+
+    /** Added in Build 54. {@link #deposit(UUID, UUID, long)} under the caller's operation id (see the common rules above). */
+    default CompletableFuture<ProfileBankInfo> deposit(UUID actorId, UUID profileId, long amount, UUID operationId) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op bank unavailable"));
+    }
+
+    /**
+     * Added in Build 54. Debits the shared bank ({@code bank.withdraw}); the OWNER or a MANAGER
+     * ({@link ProfileErrorCode#ROLE_FORBIDDEN}). Refused with {@link ProfileErrorCode#INVALID_REQUEST} beyond the available
+     * balance. The plugin credits the purse after this completes.
+     */
+    default CompletableFuture<ProfileBankInfo> withdraw(UUID actorId, UUID profileId, long amount) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op bank unavailable"));
+    }
+
+    /** Added in Build 54. {@link #withdraw(UUID, UUID, long)} under the caller's operation id. */
+    default CompletableFuture<ProfileBankInfo> withdraw(UUID actorId, UUID profileId, long amount, UUID operationId) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op bank unavailable"));
+    }
+
+    /**
+     * Added in Build 54. Credits the actor's own personal bank in this co-op ({@code bank.personal}), under the personal cap
+     * ({@link ProfileBankInfo#personalCapacity()}; {@link ProfileErrorCode#INVALID_REQUEST} past it). A bound of the shared
+     * record itself (personal accounts, contributors, collections) is {@link ProfileErrorCode#CAPACITY_EXCEEDED}.
+     */
+    default CompletableFuture<ProfileBankInfo> depositPersonal(UUID actorId, UUID profileId, long amount) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op bank unavailable"));
+    }
+
+    /** Added in Build 54. {@link #depositPersonal(UUID, UUID, long)} under the caller's operation id. */
+    default CompletableFuture<ProfileBankInfo> depositPersonal(UUID actorId, UUID profileId, long amount, UUID operationId) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op bank unavailable"));
+    }
+
+    /** Added in Build 54. Debits the actor's own personal bank in this co-op ({@code bank.personal}). */
+    default CompletableFuture<ProfileBankInfo> withdrawPersonal(UUID actorId, UUID profileId, long amount) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op bank unavailable"));
+    }
+
+    /** Added in Build 54. {@link #withdrawPersonal(UUID, UUID, long)} under the caller's operation id. */
+    default CompletableFuture<ProfileBankInfo> withdrawPersonal(UUID actorId, UUID profileId, long amount, UUID operationId) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op bank unavailable"));
+    }
+
+    /**
+     * Added in Build 54. Moves {@code amount} between the shared bank and the actor's personal bank ({@code bank.transfer})
+     * as one recoverable intent: both postings commit together or not at all. Shared to personal needs the OWNER or a
+     * MANAGER ({@link ProfileErrorCode#ROLE_FORBIDDEN}); {@code from == to} is {@link ProfileErrorCode#INVALID_REQUEST}. The
+     * type must allow {@code bank.transfer}, {@code bank.personal} and the shared posting of the direction ({@code bank.withdraw}
+     * out of the shared bank, {@code bank.deposit} into it), so a type that denies the bank denies every route into or out of
+     * it. The purse is not an account here (OD-4, see {@link ProfileBankAccount}). Fires {@link ProfileBankTransactionEvent}.
+     */
+    default CompletableFuture<ProfileBankInfo> transfer(UUID actorId, UUID profileId, ProfileBankAccount from, ProfileBankAccount to,
+                                                        long amount) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op bank unavailable"));
+    }
+
+    /** Added in Build 54. {@link #transfer(UUID, UUID, ProfileBankAccount, ProfileBankAccount, long)} under the caller's operation id. */
+    default CompletableFuture<ProfileBankInfo> transfer(UUID actorId, UUID profileId, ProfileBankAccount from, ProfileBankAccount to,
+                                                        long amount, UUID operationId) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op bank unavailable"));
+    }
+
+    /**
+     * Added in Build 54. Credits the bank policy's interest percentage to the shared balance and the current members'
+     * personal banks, each capped at its capacity; the OWNER only, and the type must allow {@code bank.deposit} (personal
+     * banks are credited only when it also allows {@code bank.personal}; a removed membership's frozen money earns nothing).
+     * The server schedules no interest: the caller decides when, but a posting sooner than
+     * {@code aurora.awf.multiprofile.bank.interest-interval-hours} (default 24) after the previous one, on the store clock, is
+     * refused with {@link ProfileErrorCode#INVALID_REQUEST} naming the wait; so is a call that would credit nothing.
+     */
+    default CompletableFuture<ProfileBankInfo> applyInterest(UUID actorId, UUID profileId) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op bank unavailable"));
+    }
+
+    /** Added in Build 54. {@link #applyInterest(UUID, UUID)} under the caller's operation id. */
+    default CompletableFuture<ProfileBankInfo> applyInterest(UUID actorId, UUID profileId, UUID operationId) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op bank unavailable"));
+    }
+
+    /**
+     * Added in Build 54. The permanent receipt of a bank, collection, transfer or salvage operation on this co-op, by its
+     * operation id (the caller's own, or {@link ProfileOperationException#operationId()} of an
+     * {@link ProfileErrorCode#UNKNOWN_OUTCOME} failure); empty when the store holds none, which after an UNKNOWN_OUTCOME
+     * means the operation is still undecided or aborted (read {@link #bank} as well). {@code viewerId} as for {@link #bank}.
+     */
+    default CompletableFuture<Optional<ProfileReceiptInfo>> bankReceipt(@Nullable UUID viewerId, UUID profileId, UUID operationId) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op bank unavailable"));
+    }
+
+    /**
+     * Added in Build 54. The collections of a co-op profile with their contribution ledgers, by collection id (at most 256).
+     * {@code viewerId} as for {@link #bank}.
+     */
+    default CompletableFuture<List<ProfileCollectionInfo>> collections(@Nullable UUID viewerId, UUID profileId) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op collections unavailable"));
+    }
+
+    /**
+     * Added in Build 54. Adds {@code amount} to a collection ({@code [a-z0-9_:.-]{1,64}}) and credits the actor in its
+     * contribution ledger ({@code collections.contribute}; allowed unless the type denies it). Moves no items or money.
+     * Completes with the collection after the commit. {@link ProfileErrorCode#CAPACITY_EXCEEDED} past 256 collections.
+     */
+    default CompletableFuture<ProfileCollectionInfo> contribute(UUID actorId, UUID profileId, String collection, long amount) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op collections unavailable"));
+    }
+
+    /** Added in Build 54. {@link #contribute(UUID, UUID, String, long)} under the caller's operation id. */
+    default CompletableFuture<ProfileCollectionInfo> contribute(UUID actorId, UUID profileId, String collection, long amount, UUID operationId) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op collections unavailable"));
+    }
+
+    /**
+     * Added in Build 54. The outstanding salvage records of a co-op profile, oldest first, one {@linkplain CoopPage page} at
+     * a time. {@code viewerId} as for {@link #bank}.
+     */
+    default CompletableFuture<CoopPage<ProfileSalvageInfo>> salvage(@Nullable UUID viewerId, UUID profileId, @Nullable String cursor) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op salvage unavailable"));
+    }
+
+    /**
+     * Added in Build 54 (owner decision OD-3). Delivers a salvage record into the claimant's committed state, exactly once:
+     * the claimant must be a member, online on this node ({@link ProfileErrorCode#PLAYER_OFFLINE}) with this co-op as the
+     * active profile ({@link ProfileErrorCode#STALE_STATE}), and the type must allow {@code salvage.claim}. The items go
+     * into free inventory slots, then free ender-chest slots; what does not fit stays in the record for a later claim
+     * ({@link SalvageDeliveryResult#remainingStacks()}), and with no free slot at all the claim is refused with
+     * {@link ProfileErrorCode#CAPACITY_EXCEEDED} and nothing changes. Nothing is dropped into the world. A delivered record
+     * is refused with {@link ProfileErrorCode#INVALID_REQUEST}. The first claim on a store raises its minimum build to 54.
+     * Fires {@link ProfileSalvageDeliveredEvent}.
+     */
+    default CompletableFuture<SalvageDeliveryResult> claimSalvage(UUID claimantId, UUID salvageId) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op salvage unavailable"));
     }
 }

@@ -131,8 +131,26 @@ public final class ProfileEngine {
     private final FabricMetrics metrics;
     private final EventFabric events;
     private final ConcurrentHashMap<UUID, UUID> switches = new ConcurrentHashMap<>();
-    /** Players whose state a running switch captured; the runtime's freeze listener cancels their item events. */
-    private final java.util.Set<UUID> frozen = ConcurrentHashMap.newKeySet();
+    /**
+     * Players whose state a running switch or salvage delivery captured, by player id, value the run that froze them
+     * ({@link #SWITCH_FREEZE} for a switch, the {@link DeliveryHold} for a claim); the runtime's freeze listener cancels their
+     * item events. A claim removes only its own entry, so a claim that ends after the player rejoined (whose
+     * {@link #admitSession} cleared the stale entry) never lifts a newer run's freeze.
+     */
+    private final ConcurrentHashMap<UUID, Object> frozen = new ConcurrentHashMap<>();
+    /** The {@link #frozen} value of a switch or recovery run (cleared unconditionally by {@link #transitionEnded}). */
+    private static final Object SWITCH_FREEZE = new Object();
+    /**
+     * Salvage deliveries holding a player's saves (Build 54, review P1-1), by player id, value the salvage id: from the
+     * admission of {@link #claimSalvage} until the committed state is applied to the player, every capture, save and switch
+     * of the player is refused like a running switch ({@link #switchInProgress}), so no pre-delivery capture overwrites the
+     * destination head. A failed apply keeps the entry until the session ends ({@link #sessionFlagsCleared}): the quit
+     * takes the no-save branch and the next authoritative login restores the committed head with the items.
+     */
+    private final ConcurrentHashMap<UUID, DeliveryHold> deliveries = new ConcurrentHashMap<>();
+
+    /** One {@link #deliveries} entry: the salvage being delivered and a token naming the run that holds it. */
+    private record DeliveryHold(UUID salvageId, UUID runToken) {}
     /** The claim that keeps a player's active profile owned on this node, by player id. */
     private final ConcurrentHashMap<UUID, OwnerClaim> sessionClaims = new ConcurrentHashMap<>();
     /** Players who quit mid-switch; their adopted claim is released when the switch ends. */
@@ -632,32 +650,30 @@ public final class ProfileEngine {
             if (this.switches.containsKey(request.accountId())) {
                 throw error(ProfileErrorCode.SWITCH_IN_PROGRESS, "account transition in progress");
             }
-            final dev.iyanz.sourbycraft.api.profile.ProfileType type = request.profileType() != null
-                ? request.profileType() : this.settings.types().defaultType();
-            if (!this.settings.types().allows(type)) {
-                throw error(ProfileErrorCode.TYPE_NOT_ALLOWED, "profile type " + type.id() + " is not in types.allowed "
-                    + ProfileSettings.typeIds(this.settings.types().allowed()));
-            }
+            // Build 54: the type registry decides the policy type, the stored type id (metadata aurora:type for a
+            // registered type), creatability and the name pool; a type not registered here is TYPE_UNKNOWN.
+            final ProfileTypes.CreatePlan plan = ProfileTypes.get().planCreate(request, this.settings.types());
             final PlayerAccount account = this.repository.loadAccount(request.accountId(), this.settings.defaultSlots());
             if (account.full() || account.profileIds().size() >= this.settings.maxSlots()) {
                 throw error(ProfileErrorCode.SLOT_LIMIT, "the account already owns " + account.profileIds().size()
                     + " of " + account.slotLimit() + " profiles");
             }
-            return format2() ? createFormat2(request, type, account) : createFormat1(request, type, account);
+            return format2() ? createFormat2(request, plan, account) : createFormat1(request, plan, account);
         });
     }
 
-    private ProfileDetails createFormat1(final ProfileRequest request, final dev.iyanz.sourbycraft.api.profile.ProfileType type,
+    private ProfileDetails createFormat1(final ProfileRequest request, final ProfileTypes.CreatePlan plan,
                                          final PlayerAccount account) throws IOException {
-        if (request.name() != null || type != dev.iyanz.sourbycraft.api.profile.ProfileType.CLASSIC) {
+        final dev.iyanz.sourbycraft.api.profile.ProfileType type = plan.policyType();
+        if (request.name() != null || type != dev.iyanz.sourbycraft.api.profile.ProfileType.CLASSIC || !plan.typeId().equals(type.id())) {
             throw error(ProfileErrorCode.MIGRATION_REQUIRED, "the profile store is format 1, which stores no profile name"
-                + " and no type besides classic; " + (request.name() != null ? "a requested name" : "type " + type.id())
+                + " and no type besides classic; " + (request.name() != null ? "a requested name" : "type " + plan.typeId())
                 + " cannot be kept. Migrate the store to format 2 (migration.mode: apply) first. Nothing was written");
         }
         final AuroraProfile profile;
         try {
             profile = new AuroraProfile(UUID.randomUUID(), request.accountId(), request.type(),
-                request.metadata(), System.currentTimeMillis(), 0L, ProfileStatus.ACTIVE);
+                plan.metadata(), System.currentTimeMillis(), 0L, ProfileStatus.ACTIVE);
         } catch (final IllegalArgumentException invalid) {
             // A bad type or metadata is the caller's mistake, not a server fault.
             throw error(ProfileErrorCode.INVALID_REQUEST, invalid.getMessage());
@@ -672,42 +688,29 @@ public final class ProfileEngine {
         return details(profile, null);
     }
 
-    private ProfileDetails createFormat2(final ProfileRequest request, final dev.iyanz.sourbycraft.api.profile.ProfileType type,
+    private ProfileDetails createFormat2(final ProfileRequest request, final ProfileTypes.CreatePlan plan,
                                          final PlayerAccount account) throws IOException {
         final UUID accountId = request.accountId();
+        final dev.iyanz.sourbycraft.api.profile.ProfileType type = plan.policyType();
         requireNoUnresolvedIntent(accountId);
         if (account.pendingIntent() != null) {
             throw error(ProfileErrorCode.RECOVERY_REQUIRED, "the account is reserved by intent " + account.pendingIntent());
         }
         final java.util.Set<String> taken = new java.util.HashSet<>();
         for (final AuroraProfile existing : this.repository.profiles(accountId)) taken.add(CuteNames.key(existing.name()));
-        final String name;
-        if (request.name() != null) {
-            final String requested = request.name().strip();
-            if (!CuteNames.valid(requested)) {
-                throw error(ProfileErrorCode.NAME_INVALID, "'" + request.name() + "' is not a profile name: names.policy cute"
-                    + " accepts a name from the server's fruit and vegetable pool, optionally followed by a space and a"
-                    + " number 1-999");
-            }
-            name = CuteNames.normalize(requested);
-            if (taken.contains(CuteNames.key(name))) {
-                throw error(ProfileErrorCode.NAME_TAKEN, "the account already has a profile named " + name
-                    + " (names are compared ignoring case)");
-            }
-        } else {
-            try {
-                name = CuteNames.generate(taken);
-            } catch (final IllegalStateException exhausted) {
-                throw error(ProfileErrorCode.NAME_TAKEN, "no free profile name is left for this account");
-            }
-        }
+        // The type's pool (or the server pool) and account uniqueness: NAME_INVALID / NAME_TAKEN (ProfileTypes.chooseName).
+        final String name = ProfileTypes.get().chooseName(plan.definition(), request.name(), taken);
         final AuroraProfile profile;
         try {
-            profile = AuroraProfile.create(accountId, request.type(), type, name, request.metadata(), System.currentTimeMillis());
+            profile = AuroraProfile.create(accountId, request.type(), type, name, plan.metadata(), System.currentTimeMillis());
         } catch (final IllegalArgumentException invalid) {
             throw error(ProfileErrorCode.INVALID_REQUEST, invalid.getMessage());
         }
         final String alias = CuteNames.allocateAlias(CuteNames.alias(name), account.takenAliases());
+        // Build 54: a profile of a registered type (metadata aurora:type) or named from a type pool is not safe for Build 53:
+        // Build 53 refuses a name outside the server pool, and it would read a registered type as plain classic and lift the
+        // type's denies. The store is raised to minimum build 54 before the first such record is prepared.
+        if (!plan.typeId().equals(type.id()) || !CuteNames.validIn(name, CuteNames.NAMES)) requireTypedProfileStoreLevel();
         // After-images carry the revisions COMMIT installs: the account after its reservation (A + 1) advances once
         // more (A + 2); the new profile record starts at 0.
         final long accountRevision = account.revision();
@@ -717,7 +720,7 @@ public final class ProfileEngine {
         try {
             final PlayerClaim q = actorClaim(accountId, acquired);
             final CoopOperation op = operation(CoopOperation.Kind.CREATE_PROFILE, accountId, profile.id(), name, type,
-                request.type(), alias, accountRevision);
+                request.type(), alias, accountRevision, plan.typeId());
             runIntent(op, null, q,
                 List.of(Expected.account(accountId, accountRevision), Expected.metadata(profile.id(), CoopWriteGuard.ABSENT)),
                 List.of(Expected.account(accountId, accountRevision + 1L), Expected.metadata(profile.id(), CoopWriteGuard.ABSENT)),
@@ -728,7 +731,7 @@ public final class ProfileEngine {
             releasePlayerClaims(acquired);
         }
         publish(FabricEventType.PROFILE_CREATED, Map.of("profile", profile.id().toString(),
-            "account", profile.accountId().toString(), "type", profile.type(), "profile-type", type.id(), "name", name));
+            "account", profile.accountId().toString(), "type", profile.type(), "profile-type", plan.typeId(), "name", name));
         return details(profile, after.activeProfile());
     }
 
@@ -999,6 +1002,12 @@ public final class ProfileEngine {
                 throw error(ProfileErrorCode.STATE_TOO_LARGE, "the state of " + playerId + " could not be saved in this session;"
                     + " they are frozen until they rejoin and nothing is switched");
             }
+            if (this.frozen.containsKey(playerId) || this.deliveries.containsKey(playerId)) {
+                // Build 54 (review P1-1): a frozen player (a run captured their state, or a salvage delivery is committed
+                // but not applied) is not switched; the capture would carry a state the store must not see.
+                throw error(ProfileErrorCode.SWITCH_IN_PROGRESS, playerId + " is frozen by a running switch or a salvage delivery;"
+                    + " nothing is switched");
+            }
             if (format2() && !target.get().accountId().equals(playerId)) {
                 // Build 53 (review P3-17): a non-owner's switch journal names a co-op the member does not own; Build 52's
                 // rollback would commit that pointer for a non-owner and checkCoopAccess would then refuse recovery, so a
@@ -1124,8 +1133,9 @@ public final class ProfileEngine {
                 final UUID member = entry.getKey();
                 final PlayerSession session = entry.getValue();
                 if (!profileId.equals(session.activeProfile()) || !this.players.online(member)) continue;
-                if (this.switches.containsKey(member) || this.loginGates.containsKey(member) || this.saveRefused.contains(member)) {
-                    skipped.add(member + " (switching, logging in, or frozen after a refused save)");
+                if (this.switches.containsKey(member) || this.deliveries.containsKey(member) || this.loginGates.containsKey(member)
+                    || this.saveRefused.contains(member)) {
+                    skipped.add(member + " (switching, logging in, delivering salvage, or frozen after a refused save)");
                     continue;
                 }
                 requireNoUnresolvedIntent(member);
@@ -1151,9 +1161,9 @@ public final class ProfileEngine {
             for (final CaptureTicket ticket : tickets) {
                 saves.add(this.players.captureDetailed(ticket.playerId(), this.settings.isolation())
                     .thenCompose(captured -> this.<Void>io(() -> {
-                        if (this.switches.containsKey(ticket.playerId())) {
-                            throw error(ProfileErrorCode.SWITCH_IN_PROGRESS, "a profile switch of " + ticket.playerId() + " started while"
-                                + " the state was captured; the snapshot was not written");
+                        if (this.switches.containsKey(ticket.playerId()) || this.deliveries.containsKey(ticket.playerId())) {
+                            throw error(ProfileErrorCode.SWITCH_IN_PROGRESS, "a profile switch or salvage delivery of " + ticket.playerId()
+                                + " started while the state was captured; the snapshot was not written");
                         }
                         requireNoLoginGate(ticket.playerId());
                         final long began = System.nanoTime();
@@ -1321,6 +1331,12 @@ public final class ProfileEngine {
             if (this.switches.containsKey(accountId)) {
                 throw error(ProfileErrorCode.SWITCH_IN_PROGRESS, "a profile switch is running for " + accountId
                     + "; its capture is the authoritative save");
+            }
+            if (this.deliveries.containsKey(accountId)) {
+                // Build 54 (review P1-1): the delivery's committed destination head is authoritative; a capture taken before
+                // the items were applied to the player must not overwrite it.
+                throw error(ProfileErrorCode.SWITCH_IN_PROGRESS, "salvage " + salvageHeld(accountId) + " is being delivered to "
+                    + accountId + "; its committed state is the authoritative save and this capture was not written");
             }
             requireNoLoginGate(accountId);
             if (format2()) {
@@ -1676,6 +1692,11 @@ public final class ProfileEngine {
             if (previous != null) releaseQuietly(previous.claim());
             this.lostSessions.remove(playerId);
             this.saveRefused.remove(playerId);
+            this.deliveries.remove(playerId);
+            // No switch runs (checked above), so a freeze left now belongs to a salvage claim of an earlier session whose
+            // capture or apply has not finished: the new session generation starts unfrozen. That claim cannot commit any
+            // more (its capture ticket names the old session claim: CLAIM_LOST), and when it ends it removes only its own entry.
+            this.frozen.remove(playerId);
             final PlayerSessionOwnership.Grant grant = this.playerSessions.claim(playerId, UUID.randomUUID()).join();
             if (!grant.granted()) {
                 if ("exhausted".equals(grant.reason())) {
@@ -1773,6 +1794,7 @@ public final class ProfileEngine {
             if (!this.sessions.remove(playerId, session)) return false;
             this.lostSessions.remove(playerId);
             this.saveRefused.remove(playerId);
+            this.deliveries.remove(playerId);
             return this.playerSessions.release(session.claim()).join();
         });
     }
@@ -2696,15 +2718,30 @@ public final class ProfileEngine {
         return false;
     }
 
-    /** Whether a switch, a recovery or the teleport of a join preparation ({@link #prepareActive}) runs for the player. */
+    /**
+     * Whether a switch, a recovery, the teleport of a join preparation ({@link #prepareActive}) or a salvage delivery
+     * ({@link #claimSalvage}, from admission until the committed state is applied or, after a failed apply, until the
+     * session ends) runs for the player: every save path takes its no-save branch.
+     */
     public boolean switchInProgress(final UUID playerId) {
-        return this.switches.containsKey(playerId) || this.loginGates.containsKey(playerId);
+        return this.switches.containsKey(playerId) || this.loginGates.containsKey(playerId) || this.deliveries.containsKey(playerId);
     }
 
-    /** Clears the per-session flags a quit ends: the login gate and a refused-save freeze. */
+    /** Whether a salvage delivery holds the player's saves ({@link #claimSalvage}); for the runtime's diagnostics. */
+    public boolean deliveryInProgress(final UUID playerId) {
+        return this.deliveries.containsKey(playerId);
+    }
+
+    private String salvageHeld(final UUID playerId) {
+        final DeliveryHold hold = this.deliveries.get(playerId);
+        return hold == null ? "(none)" : hold.salvageId().toString();
+    }
+
+    /** Clears the per-session flags a quit ends: the login gate, a refused-save freeze and a salvage delivery's hold. */
     private void sessionFlagsCleared(final UUID playerId) {
         this.loginGates.remove(playerId);
         this.saveRefused.remove(playerId);
+        this.deliveries.remove(playerId);
     }
 
     /**
@@ -2712,8 +2749,8 @@ public final class ProfileEngine {
      * nor rolled back. Cheap enough for an event handler on the player's thread.
      */
     public boolean frozen(final UUID playerId) {
-        return this.frozen.contains(playerId) || this.lostSessions.contains(playerId) || this.loginGates.containsKey(playerId)
-            || this.saveRefused.contains(playerId);
+        return this.frozen.containsKey(playerId) || this.lostSessions.contains(playerId) || this.loginGates.containsKey(playerId)
+            || this.saveRefused.contains(playerId) || this.deliveries.containsKey(playerId);
     }
 
     /** Releases every claim on the calling thread; shutdown only, after the I/O drain. */
@@ -3117,6 +3154,7 @@ public final class ProfileEngine {
         final java.util.concurrent.ThreadPoolExecutor events = this.coopEventLane;
         if (events != null) events.shutdown();
         this.switches.clear();
+        this.deliveries.clear();
         this.runs.clear();
         this.frozen.clear();
         this.sessionClaims.clear();
@@ -3219,7 +3257,7 @@ public final class ProfileEngine {
                 // From the capture until this run ends, the runtime's freeze listener cancels the
                 // player's item and interaction events: a pickup in between would be lost and an item
                 // put into a container would exist twice once the target state is applied.
-                ProfileEngine.this.frozen.add(playerId());
+                ProfileEngine.this.frozen.put(playerId(), SWITCH_FREEZE);
                 return phase(TransitionPhase.FREEZING);
             });
             chain = chain.thenCompose(ignored -> claimPrevious());
@@ -3993,11 +4031,22 @@ public final class ProfileEngine {
     // ------------------------------------------------------------------ format-2 commits
 
     private static CoopOperation operation(final CoopOperation.Kind kind, final UUID actor, final Object... request) {
+        return operation(null, kind, actor, request);
+    }
+
+    /**
+     * {@link #operation(CoopOperation.Kind, UUID, Object...)} under a caller-supplied operation id (review P2-5): the id is
+     * bound to the request digest, so a retry with the same id and request is answered from the receipt (REPLAYED) and the
+     * same id with another request is {@code INVALID_REQUEST}; {@code null} mints a fresh id.
+     */
+    private static CoopOperation operation(final UUID operationId, final CoopOperation.Kind kind, final UUID actor, final Object... request) {
         final Object[] parts = new Object[request.length + 2];
         parts[0] = kind;
         parts[1] = actor;
         System.arraycopy(request, 0, parts, 2, request.length);
-        return CoopOperation.start(kind, actor, CoopOperation.digest(parts));
+        final byte[] digest = CoopOperation.digest(parts);
+        return operationId == null ? CoopOperation.start(kind, actor, digest)
+            : new CoopOperation(operationId, kind, actor, digest, System.currentTimeMillis());
     }
 
     /** A write of the account record only: {@code Q(account)}, expected {@code A}, optionally the active profile. */
@@ -4075,21 +4124,30 @@ public final class ProfileEngine {
      * recovery rules apply. Before the first co-op record of the store is prepared the store's feature level is
      * raised ({@link #requireCoopStoreLevel}), so no build that cannot read a co-op record opens the store after it.
      */
-    private void runPlan(final CoopIntentPlan plan, final ProfileClaim p, final PlayerClaim q, final PlayerClaim affected)
+    private boolean runPlan(final CoopIntentPlan plan, final ProfileClaim p, final PlayerClaim q, final PlayerClaim affected)
         throws IOException {
         requireCoopStoreLevel();
         final List<ProfileIntent.BlobRef> refs = plan.stage(this.repository);
         final CoopWriteGuard prepareGuard = plan.prepareGuard(p, q, affected);
-        driveIntent(plan.op(), p, q, affected, prepareGuard, plan.prepared(prepareGuard, refs));
+        return driveIntent(plan.op(), p, q, affected, prepareGuard, plan.prepared(prepareGuard, refs));
     }
 
-    /** PREPARE then COMMIT of a staged intent; see {@link #runIntent}. Runs inside an I/O step. */
-    private void driveIntent(final CoopOperation op, final ProfileClaim p, final PlayerClaim q, final PlayerClaim affected,
-                             final CoopWriteGuard prepareGuard, final ProfileIntent intent) throws IOException {
+    /**
+     * PREPARE then COMMIT of a staged intent; see {@link #runIntent}. Runs inside an I/O step.
+     *
+     * @return {@code true} when the operation id was already decided (a replay of a caller-supplied id, review P2-5): the
+     *     stored outcome stands, nothing was applied now and no event is fired for it
+     */
+    private boolean driveIntent(final CoopOperation op, final ProfileClaim p, final PlayerClaim q, final PlayerClaim affected,
+                                final CoopWriteGuard prepareGuard, final ProfileIntent intent) throws IOException {
         final UUID id = op.operationId();
         final CommitResult prepared = this.repository.prepareIntent(intent, prepareGuard);
         ProfileIntent stored = this.repository.intent(id).orElse(null);
         if (stored == null) {
+            if (prepared.status() == CommitResult.Status.REPLAYED) {
+                // Decided earlier and already finalized: only its permanent receipt remains.
+                return true;
+            }
             if (prepared.unknown()) {
                 // The prepare's reply was lost and no intent is stored yet: the request may still reach the store
                 // and install its reservations. Nothing is applied now; should it land, the intent is PREPARED and
@@ -4097,7 +4155,7 @@ public final class ProfileEngine {
                 // or the next start aborts it. Until then the account's format-2 changes are refused.
                 markUnresolved(intent, "its prepare reply was lost and the intent was not stored when read back");
                 throw error(ProfileErrorCode.UNKNOWN_OUTCOME, op.kind() + " " + id + " was not prepared when read back ("
-                    + prepared.detail() + "); if the store still applies the prepare, recovery aborts it");
+                    + prepared.detail() + "); if the store still applies the prepare, recovery aborts it", id);
             }
             throw error(ProfileErrorCode.IO_FAILURE, op.kind() + " " + id + " was not prepared (" + prepared.detail()
                 + "); nothing was applied");
@@ -4109,7 +4167,7 @@ public final class ProfileEngine {
             stored = this.repository.intent(id).orElse(stored);
         }
         if (!stored.pending()) {
-            if (stored.committed()) return;
+            if (stored.committed()) return prepared.status() == CommitResult.Status.REPLAYED;
             throw error(ProfileErrorCode.IO_FAILURE, op.kind() + " " + id + " was aborted before it committed (" + stored.outcome()
                 + "); nothing was applied");
         }
@@ -4120,11 +4178,11 @@ public final class ProfileEngine {
             abortUncommitted(op, p, q, affected, refused);
             throw refused;
         }
-        if (!committed.unknown()) return;
+        if (!committed.unknown()) return false;
         final ProfileIntent outcome = this.repository.intent(id).orElse(null);
         if (outcome != null && outcome.committed()) {
             acceptCommitted(op, p, q, affected, outcome, committed.detail());
-            return;
+            return false;
         }
         if (outcome != null && outcome.phase() == ProfileIntent.Phase.PREPARED) {
             // The abort races a commit request that may still be in flight: the intent read after the abort
@@ -4133,7 +4191,7 @@ public final class ProfileEngine {
             final ProfileIntent decided = abortUncommitted(op, p, q, affected, null);
             if (decided != null && decided.committed()) {
                 acceptCommitted(op, p, q, affected, decided, committed.detail() + "; a delayed commit landed before the abort");
-                return;
+                return false;
             }
             if (decided != null && decided.phase() == ProfileIntent.Phase.ABORTED) {
                 throw error(ProfileErrorCode.IO_FAILURE, op.kind() + " " + id + " did not commit (" + committed.detail()
@@ -4142,10 +4200,10 @@ public final class ProfileEngine {
             markUnresolved(decided != null ? decided : outcome, "its commit reply was lost and the abort did not decide it");
             throw error(ProfileErrorCode.UNKNOWN_OUTCOME, "the store did not confirm the commit of " + op.kind() + " " + id + " ("
                 + committed.detail() + ") and aborting it did not decide it either (intent " + (decided == null ? "unreadable"
-                : decided.phase()) + "); it stays pending for recovery, neither retried nor compensated");
+                : decided.phase()) + "); it stays pending for recovery, neither retried nor compensated", id);
         }
         throw error(ProfileErrorCode.UNKNOWN_OUTCOME, "the store did not confirm the commit of " + op.kind() + " " + id + " ("
-            + committed.detail() + ") and reading the intent back did not establish it; it was neither retried nor compensated");
+            + committed.detail() + ") and reading the intent back did not establish it; it was neither retried nor compensated", id);
     }
 
     /**
@@ -4160,7 +4218,7 @@ public final class ProfileEngine {
             markUnresolved(outcome, "its commit was read back but not confirmed durable");
             throw error(ProfileErrorCode.UNKNOWN_OUTCOME, "the store did not confirm the commit of " + op.kind() + " " + id
                 + " (" + detail + "); reading it back shows the intent is " + outcome.phase() + " but the store"
-                + " did not confirm it durable; it is neither retried nor compensated and stays pending for recovery");
+                + " did not confirm it durable; it is neither retried nor compensated and stays pending for recovery", id);
         }
         SourbyLogger.warn("AWF MultiProfile: the store did not confirm the commit of " + op.kind() + " " + id + " ("
             + detail + "); reading it back shows the intent is " + outcome.phase() + ", so it counts as applied");
@@ -4240,7 +4298,7 @@ public final class ProfileEngine {
         }
         throw error(ProfileErrorCode.UNKNOWN_OUTCOME, "the store did not confirm the write of " + what + " ("
             + result.detail() + ") and reading it back did not establish it" + (readFailure == null ? "" : " (" + readFailure + ")")
-            + "; operation " + result.operationId() + " was neither retried nor compensated");
+            + "; operation " + result.operationId() + " was neither retried nor compensated", result.operationId());
     }
 
     /** {@link ProfileRepository#durable()}; a failed probe is "not durable". */
@@ -4426,6 +4484,7 @@ public final class ProfileEngine {
                     + ", which is not in coop.allowed-types " + ProfileSettings.typeIds(this.settings.coop().allowedTypes())
                     + ". Nothing was written");
             }
+            ProfileTypes.get().require(profile, ProfileTypes.COOP_CONVERT);
             requireProfileNode(profileId);
             requireProfileReady(profile);
             final PlayerAccount account = loadReadyAccount(actor);
@@ -4471,6 +4530,7 @@ public final class ProfileEngine {
         return coop(() -> {
             if (actor.equals(invitee)) throw error(ProfileErrorCode.INVALID_REQUEST, "a member cannot invite itself. Nothing was written");
             final AuroraProfile first = coopProfile(profileId, true);
+            ProfileTypes.get().require(first, ProfileTypes.COOP_INVITE);
             requireProfileNode(profileId);
             requireProfileReady(first);
             final PlayerAccount account = loadReadyAccount(actor);
@@ -4482,7 +4542,7 @@ public final class ProfileEngine {
             final AuroraProfile profile = readyAgain(profileId, first);
             final long issuedAt = this.repository.storeClockMillis();
             final CoopIntentPlan plan = CoopMembership.createInvite(operation(CoopOperation.Kind.INVITE_CREATE, actor, profileId, invitee,
-                profile.revision()), profile, account, invitee, inviteeAccount, open, coopPolicy(), issuedAt, issuedAt + INTENT_DEADLINE_MILLIS);
+                profile.revision()), profile, account, invitee, inviteeAccount, open, coopPolicy(profile), issuedAt, issuedAt + INTENT_DEADLINE_MILLIS);
             runCoopPlan(plan);
             final ProfileInvite created = this.repository.invite(plan.result().recordId()).orElseThrow(() -> readBack("invite",
                 plan.result().recordId()));
@@ -4509,6 +4569,7 @@ public final class ProfileEngine {
                 throw error(ProfileErrorCode.INVITE_NOT_FOUND, "invite " + inviteId + " was accepted earlier and that membership has"
                     + " ended; a new invitation is needed. Nothing was written");
             }
+            ProfileTypes.get().require(profile, ProfileTypes.COOP_ACCEPT);
             requireProfileNode(profile.id());
             requireProfileReady(profile);
             final PlayerAccount account = loadReadyAccount(player);
@@ -4519,7 +4580,7 @@ public final class ProfileEngine {
                     + " (store clock " + storeNow + "). Nothing was written");
             }
             final CoopIntentPlan plan = CoopMembership.acceptInvite(operation(CoopOperation.Kind.INVITE_ACCEPT, player, inviteId,
-                invite.revision()), profile, invite, account, coopPolicy(), undecidedVotes(profile), storeNow, storeNow + INTENT_DEADLINE_MILLIS);
+                invite.revision()), profile, invite, account, coopPolicy(profile), undecidedVotes(profile), storeNow, storeNow + INTENT_DEADLINE_MILLIS);
             try {
                 runCoopPlan(plan);
             } catch (final ProfileOperationException refused) {
@@ -4827,7 +4888,10 @@ public final class ProfileEngine {
             throw error(ProfileErrorCode.SLOT_LIMIT, member + " has no other profile to move to and no free slot for a fresh one ("
                 + occupied + " of " + account.slotLimit() + " used, the co-op being left included). Nothing was written");
         }
-        final ProfileDetails created = createFormat2(new ProfileRequest(member, "solo", Map.of(), type, null), type, account);
+        final ProfileRequest request = new ProfileRequest(member, "solo", Map.of(), type, null);
+        // Review P3-10: the default type's definition may say creatable: false (an addon override); an evacuation is not a
+        // player's create and must not be blocked by it, so the member can still leave or be removed.
+        final ProfileDetails created = createFormat2(request, ProfileTypes.get().planCreate(request, this.settings.types(), true), account);
         return this.repository.profile(created.info().id())
             .orElseThrow(() -> readBack("profile", created.info().id()));
     }
@@ -4851,7 +4915,7 @@ public final class ProfileEngine {
             final AuroraProfile profile = readyAgain(profileId, first);
             final long openedAt = this.repository.storeClockMillis();
             final CoopIntentPlan plan = CoopMembership.createVote(operation(CoopOperation.Kind.VOTE_CREATE, actor, profileId, target,
-                profile.revision()), profile, account, target, undecided, coopPolicy(), openedAt, openedAt + INTENT_DEADLINE_MILLIS);
+                profile.revision()), profile, account, target, undecided, coopPolicy(profile), openedAt, openedAt + INTENT_DEADLINE_MILLIS);
             runCoopPlan(plan);
             return this.repository.vote(plan.result().recordId()).orElseThrow(() -> readBack("vote", plan.result().recordId()));
         }).thenCompose(vote -> vote.status() == KickVote.Status.PASSED ? executeKick(actor, vote) : CompletableFuture.completedFuture(vote))
@@ -4941,6 +5005,764 @@ public final class ProfileEngine {
         });
     }
 
+    // ------------------------------------------------------------------ profile type registry lookup (Build 54)
+
+    /**
+     * A built-in type was overridden with a definition that denies an action (review P3-8): the store's minimum build is
+     * raised to 54 on the I/O lane, so a downgrade to Build 53 (no registry: the built-in would apply) is refused by the
+     * marker. A store that cannot be raised (a format-1 Redis store, see {@link #requireTypedProfileStoreLevel}) is logged:
+     * the deny holds on this build, but is not protected against that downgrade.
+     */
+    public void protectBuiltinOverride(final String typeId) {
+        if (!this.settings.enabled() || this.closed) return;
+        this.<Void>io(() -> {
+            requireTypedProfileStoreLevel();
+            return null;
+        }).whenComplete((ignored, failed) -> {
+            if (failed != null) {
+                SourbyLogger.warn("AWF MultiProfile: the override of the built-in profile type '" + typeId + "' denies an action, but the store's"
+                    + " minimum build could not be raised to 54 (" + messageOf(failed) + "); the deny holds here and is lifted if a build"
+                    + " without the type registry opens this store");
+            }
+        });
+    }
+
+    /** The stored profile record for {@code AuroraProfiles.rules(profileId)}; read on the I/O lane, never on the caller's thread. */
+    public CompletableFuture<Optional<AuroraProfile>> profileRecord(final UUID profileId) {
+        if (!this.settings.enabled() || this.closed) return CompletableFuture.completedFuture(Optional.empty());
+        return io(() -> this.repository.profile(profileId).filter(found -> found.status() != ProfileStatus.DELETED));
+    }
+
+    // ------------------------------------------------------------------ bank, collections (Build 54, COOP-DESIGN §8)
+
+    private volatile ProfileBank.Policy bankPolicy = ProfileBank.Policy.DEFAULT;
+    private volatile Consumer<ProfileBank.LedgerEvent> ledgerSink = event -> {};
+    private volatile Consumer<SalvageDelivery> salvageSink = event -> {};
+    /** Set once this engine raised (or found) the store's Build 54 feature level (salvage, extended bank record); never lowered. */
+    private volatile boolean build54StoreLevel;
+
+    /** The bank policy (RESTART_REQUIRED: the runtime sets it once from the configuration before players join). */
+    public void bankPolicy(final ProfileBank.Policy policy) {
+        this.bankPolicy = Objects.requireNonNull(policy, "policy");
+    }
+
+    public ProfileBank.Policy bankPolicy() {
+        return this.bankPolicy;
+    }
+
+    /** Ledger events (deposit, withdrawal, transfer, contribution, interest) after their durable commit, on the co-op event thread. */
+    public void onLedgerEvent(final Consumer<ProfileBank.LedgerEvent> sink) {
+        this.ledgerSink = Objects.requireNonNull(sink, "sink");
+    }
+
+    /** Salvage deliveries after their durable commit (before or without the player apply), on the co-op event thread. */
+    public void onSalvageDelivered(final Consumer<SalvageDelivery> sink) {
+        this.salvageSink = Objects.requireNonNull(sink, "sink");
+    }
+
+    /** The bank of a co-op profile as seen by {@code viewer} (a member; {@code null} is the operator's view). */
+    public CompletableFuture<ProfileBank.View> bank(final UUID viewer, final UUID profileId) {
+        return coop(() -> {
+            final AuroraProfile profile = coopProfile(profileId, true);
+            requireViewer(profile, viewer);
+            final ProfileSharedState shared = this.repository.shared(profileId).orElseGet(() -> this.bankPolicy.empty(profileId));
+            return ProfileBank.view(shared, viewer == null ? null : profile.member(viewer), this.bankPolicy, profile);
+        });
+    }
+
+    /** The collections of a co-op profile with the per-member contribution ledger. */
+    public CompletableFuture<ProfileBank.Collections> collections(final UUID viewer, final UUID profileId) {
+        return coop(() -> {
+            final AuroraProfile profile = coopProfile(profileId, true);
+            requireViewer(profile, viewer);
+            return ProfileBank.collections(this.repository.shared(profileId).orElseGet(() -> this.bankPolicy.empty(profileId)));
+        });
+    }
+
+    /**
+     * Credits the shared bank ({@code bank.deposit}). This is a ledger credit by an active member; the engine moves no
+     * purse money (OD-4): the consumer plugin that holds the purse debits it on its side before calling this.
+     */
+    public CompletableFuture<ProfileBank.View> deposit(final UUID actor, final UUID profileId, final long amount) {
+        return deposit(actor, profileId, amount, null);
+    }
+
+    /**
+     * {@link #deposit(UUID, UUID, long)} under a caller-supplied operation id (review P2-5; {@code null} mints one): the id is
+     * looked up before any validation ({@link #replayedBank}), so a retry with the same id and the same request returns the
+     * committed bank without posting again, whatever the balances are now; the same id with another request is
+     * {@code INVALID_REQUEST}. The same for every other ledger method with an {@code operationId} parameter.
+     */
+    public CompletableFuture<ProfileBank.View> deposit(final UUID actor, final UUID profileId, final long amount, final UUID operationId) {
+        return mutateBank(operationId, actor, profileId, ProfileTypes.BANK_DEPOSIT, ProfileBank.Entry.DEPOSIT, null, "deposit", amount,
+            (shared, row, profile) -> shared.depositShared(amount)).thenApply(BankCommit::view);
+    }
+
+    /** Debits the shared bank ({@code bank.withdraw}; OWNER or MANAGER). A ledger debit; see {@link #deposit}. */
+    public CompletableFuture<ProfileBank.View> withdraw(final UUID actor, final UUID profileId, final long amount) {
+        return withdraw(actor, profileId, amount, null);
+    }
+
+    public CompletableFuture<ProfileBank.View> withdraw(final UUID actor, final UUID profileId, final long amount, final UUID operationId) {
+        return mutateBank(operationId, actor, profileId, ProfileTypes.BANK_WITHDRAW, ProfileBank.Entry.WITHDRAW, null, "withdraw", amount,
+            (shared, row, profile) -> {
+                if (!ProfileBank.mayWithdrawShared(row.role())) {
+                    throw error(ProfileErrorCode.ROLE_FORBIDDEN, actor + " is a " + row.role() + "; the OWNER or a MANAGER withdraws from the"
+                        + " shared bank. Nothing was written");
+                }
+                return shared.withdrawShared(amount);
+            }).thenApply(BankCommit::view);
+    }
+
+    /** Credits the actor's personal subaccount ({@code bank.personal}), under the personal cap of the policy. */
+    public CompletableFuture<ProfileBank.View> depositPersonal(final UUID actor, final UUID profileId, final long amount) {
+        return depositPersonal(actor, profileId, amount, null);
+    }
+
+    public CompletableFuture<ProfileBank.View> depositPersonal(final UUID actor, final UUID profileId, final long amount, final UUID operationId) {
+        return mutateBank(operationId, actor, profileId, ProfileTypes.BANK_PERSONAL, ProfileBank.Entry.DEPOSIT_PERSONAL, null, "deposit-personal",
+            amount, (shared, row, profile) -> shared.depositPersonal(ProfileSharedState.MemberKey.of(row), amount,
+                this.bankPolicy.personalCapacity(shared)))
+            .thenApply(BankCommit::view);
+    }
+
+    /** Debits the actor's personal subaccount ({@code bank.personal}). */
+    public CompletableFuture<ProfileBank.View> withdrawPersonal(final UUID actor, final UUID profileId, final long amount) {
+        return withdrawPersonal(actor, profileId, amount, null);
+    }
+
+    public CompletableFuture<ProfileBank.View> withdrawPersonal(final UUID actor, final UUID profileId, final long amount, final UUID operationId) {
+        return mutateBank(operationId, actor, profileId, ProfileTypes.BANK_PERSONAL, ProfileBank.Entry.WITHDRAW_PERSONAL, null, "withdraw-personal",
+            amount, (shared, row, profile) -> shared.withdrawPersonal(ProfileSharedState.MemberKey.of(row), amount)).thenApply(BankCommit::view);
+    }
+
+    /**
+     * The permanent receipt of a bank, collection or salvage operation on {@code profileId} (review P2-5), for a consumer
+     * reconciling an {@code UNKNOWN_OUTCOME} or a caller-supplied operation id; empty when the store holds none.
+     */
+    public CompletableFuture<Optional<ProfileReceipt>> receipt(final UUID viewer, final UUID profileId, final UUID operationId) {
+        Objects.requireNonNull(operationId, "operationId");
+        return coop(() -> {
+            final AuroraProfile profile = coopProfile(profileId, true);
+            requireViewer(profile, viewer);
+            return this.repository.receipt(profileId, operationId);
+        });
+    }
+
+    /**
+     * Adds to a collection and credits the actor in its contribution ledger ({@code collections.contribute}, allowed unless
+     * the type denies it; any active member). Not a bank posting: no money moves.
+     */
+    public CompletableFuture<ProfileBank.View> contribute(final UUID actor, final UUID profileId, final String collection, final long amount) {
+        return contributeCommit(null, actor, profileId, collection, amount).thenApply(BankCommit::view);
+    }
+
+    /** {@link #contribute} answering the committed collections and contribution ledger. */
+    public CompletableFuture<ProfileBank.Collections> contributeCollections(final UUID actor, final UUID profileId, final String collection,
+                                                                           final long amount) {
+        return contributeCollections(actor, profileId, collection, amount, null);
+    }
+
+    /** {@link #contributeCollections(UUID, UUID, String, long)} under a caller-supplied operation id (review P2-5). */
+    public CompletableFuture<ProfileBank.Collections> contributeCollections(final UUID actor, final UUID profileId, final String collection,
+                                                                           final long amount, final UUID operationId) {
+        return contributeCommit(operationId, actor, profileId, collection, amount).thenApply(commit -> ProfileBank.collections(commit.after()));
+    }
+
+    private CompletableFuture<BankCommit> contributeCommit(final UUID operationId, final UUID actor, final UUID profileId, final String collection,
+                                                           final long amount) {
+        return mutateBank(operationId, actor, profileId, ProfileTypes.COLLECTIONS_CONTRIBUTE, ProfileBank.Entry.CONTRIBUTE, collection,
+            "contribute:" + collection, amount, (shared, row, profile) -> {
+                if (!ProfileSharedState.validCollection(collection)) {
+                    throw error(ProfileErrorCode.INVALID_REQUEST, "a collection id is [a-z0-9_:.-]{1," + ProfileSharedState.MAX_COLLECTION_ID
+                        + "}, not '" + collection + "'. Nothing was written");
+                }
+                return shared.contribute(collection, ProfileSharedState.MemberKey.of(row), amount);
+            });
+    }
+
+    /**
+     * Credits the policy's interest to the shared balance and the current members' personal subaccounts, each capped (OWNER
+     * only; the type must allow {@code bank.deposit}, and the personal subaccounts are credited only when it also allows
+     * {@code bank.personal}, review P2-2; a removed membership's frozen money earns nothing, review P2-4). One guarded
+     * commit; a repeat is a second posting no sooner than {@code bank.interest-interval-hours} after the previous one on the
+     * store clock (review P3-22; the record remembers its last posting), so the caller (an operator or the consumer's
+     * scheduler) decides when. The engine schedules no interest itself.
+     */
+    public CompletableFuture<ProfileBank.View> applyInterest(final UUID actor, final UUID profileId) {
+        return applyInterest(actor, profileId, null);
+    }
+
+    public CompletableFuture<ProfileBank.View> applyInterest(final UUID actor, final UUID profileId, final UUID operationId) {
+        return mutateBank(operationId, actor, profileId, ProfileTypes.BANK_DEPOSIT, ProfileBank.Entry.INTEREST, null, "interest", 0L,
+            (shared, row, profile) -> {
+                if (row.role() != ProfileRole.OWNER) {
+                    throw error(ProfileErrorCode.ROLE_FORBIDDEN, "only the OWNER applies interest. Nothing was written");
+                }
+                final long storeNow = storeClock();
+                final long interval = this.bankPolicy.interestIntervalMillis();
+                if (interval > 0 && shared.lastInterestAtMillis() > 0 && storeNow - shared.lastInterestAtMillis() < interval) {
+                    final long waitMillis = interval - (storeNow - shared.lastInterestAtMillis());
+                    throw error(ProfileErrorCode.INVALID_REQUEST, "interest was posted to " + profileId + " " + ((storeNow
+                        - shared.lastInterestAtMillis()) / 60_000L) + " minute(s) ago; " + ProfileSettings.BANK_INTEREST_INTERVAL_KEY + " is "
+                        + (interval / 3_600_000L) + " h, so the next posting is possible in " + Math.max(1L, (waitMillis + 59_999L) / 60_000L)
+                        + " minute(s). Nothing was written");
+                }
+                final ProfileSharedState credited = ProfileBank.withInterest(shared, this.bankPolicy, currentMemberKeys(profile),
+                    ProfileTypes.get().allows(profile, ProfileTypes.BANK_PERSONAL));
+                if (credited == null) {
+                    throw error(ProfileErrorCode.INVALID_REQUEST, "no interest to credit (policy " + this.bankPolicy.interestPercent()
+                        + " %, balances at their caps or zero). Nothing was written");
+                }
+                return credited.withLastInterestAt(storeNow);
+            }).thenApply(BankCommit::view);
+    }
+
+    /** {@link ProfileRepository#storeClockMillis()} inside a bank mutation; a clock the store cannot give is an I/O failure. */
+    private long storeClock() {
+        try {
+            return this.repository.storeClockMillis();
+        } catch (final IOException unavailable) {
+            throw error(ProfileErrorCode.IO_FAILURE, "the store clock is unavailable (" + unavailable.getMessage() + "). Nothing was written");
+        }
+    }
+
+    /** The membership keys of the profile's current members (compaction and interest decide by them). */
+    private static java.util.Set<ProfileSharedState.MemberKey> currentMemberKeys(final AuroraProfile profile) {
+        final java.util.Set<ProfileSharedState.MemberKey> keys = new java.util.HashSet<>();
+        for (final ProfileMember member : profile.members()) keys.add(ProfileSharedState.MemberKey.of(member));
+        return keys;
+    }
+
+    /**
+     * A shared↔personal transfer ({@code bank.transfer}) as one recoverable intent with a permanent receipt: both postings
+     * are in the one after-image of the shared record, so no partial movement exists; {@code shared → personal} needs the
+     * OWNER or a MANAGER (it leaves the shared bank). The purse is refused (OD-4, {@code PURSE_TRANSFER_UNSUPPORTED}).
+     */
+    public CompletableFuture<ProfileBank.View> transfer(final UUID actor, final UUID profileId, final ProfileBank.Account from,
+                                                        final ProfileBank.Account to, final long amount) {
+        return transfer(actor, profileId, from, to, amount, null);
+    }
+
+    /**
+     * {@link #transfer(UUID, UUID, ProfileBank.Account, ProfileBank.Account, long)} under a caller-supplied operation id (review
+     * P2-5). Besides {@code bank.transfer} the type must allow {@code bank.personal} and the direction's shared posting
+     * ({@code bank.withdraw} out of the shared bank, {@code bank.deposit} into it; review P2-2): a type that denies the bank
+     * denies every route that moves money in or out of it.
+     */
+    public CompletableFuture<ProfileBank.View> transfer(final UUID actor, final UUID profileId, final ProfileBank.Account from,
+                                                        final ProfileBank.Account to, final long amount, final UUID operationId) {
+        // The digest names the request, not the revision it was planned against: a caller retrying with the same operation id
+        // after a committed attempt sees a newer S, and must still get REPLAYED (review P2-5).
+        final java.util.function.Function<UUID, CoopOperation> opFor = epoch -> operation(operationId, CoopOperation.Kind.BANK_TRANSFER,
+            actor, profileId, from, to, amount, epoch);
+        return coop(() -> {
+            ProfileBank.requireBankAccount(from);
+            ProfileBank.requireBankAccount(to);
+            if (operationId != null) {
+                // Replay before validation, and before anything is staged (no after-image is left behind for a replay).
+                final BankCommit replay = replayedBank(operationId, actor, profileId, true, opFor);
+                if (replay != null) return replay.view();
+            }
+            final BankContext context = bankContext(actor, profileId, ProfileTypes.BANK_TRANSFER);
+            ProfileTypes.get().require(context.profile(), ProfileTypes.BANK_PERSONAL);
+            ProfileTypes.get().require(context.profile(), from == ProfileBank.Account.SHARED ? ProfileTypes.BANK_WITHDRAW : ProfileTypes.BANK_DEPOSIT);
+            if (from == ProfileBank.Account.SHARED && !ProfileBank.mayWithdrawShared(context.row().role())) {
+                throw error(ProfileErrorCode.ROLE_FORBIDDEN, actor + " is a " + context.row().role() + "; the OWNER or a MANAGER moves money"
+                    + " out of the shared bank. Nothing was written");
+            }
+            final ProfileSharedState after = checkedMutation(() -> ProfileBank.transferred(context.shared(),
+                ProfileSharedState.MemberKey.of(context.row()), from, to, amount, this.bankPolicy));
+            if (after.extended()) requireBuild54StoreLevel("the bank change");
+            final CoopOperation op = opFor.apply(context.row().epoch());
+            final long storeNow = this.repository.storeClockMillis();
+            final boolean replayed = runCoopPlan(ProfileBank.transferPlan(op, context.profile(), context.account(), context.shared(),
+                context.exists(), after, storeNow + INTENT_DEADLINE_MILLIS));
+            final ProfileSharedState stored = this.repository.shared(profileId).orElseThrow(() -> readBack("shared state", profileId));
+            if (!replayed) {
+                fireLedger(new ProfileBank.LedgerEvent(profileId, actor, op.kind(), ProfileBank.Entry.TRANSFER, null, from, to, amount,
+                    stored.sharedBalance(), stored.currency(), op.operationId()));
+            }
+            return ProfileBank.view(stored, context.row(), this.bankPolicy, context.profile());
+        });
+    }
+
+    private interface BankMutation {
+        ProfileSharedState apply(ProfileSharedState shared, ProfileMember actor, AuroraProfile profile);
+    }
+
+    /**
+     * What a bank operation read: the co-op profile, the actor's member row and account, and the shared record (or an empty
+     * one) with the balances and contributions of removed memberships already folded into its archived totals (review
+     * P2-4; {@code shared} keeps the stored revision, so the compaction commits with the operation's own after-image).
+     */
+    private record BankContext(AuroraProfile profile, ProfileMember row, PlayerAccount account, ProfileSharedState shared, boolean exists) {}
+
+    /** A committed direct bank mutation: the after-image and the actor's view of it. */
+    private record BankCommit(ProfileSharedState after, ProfileBank.View view) {}
+
+    /**
+     * Runs a checked mutation; a bound of the shared record (members, collections, contributors per collection) that the
+     * after-image would break is {@code CAPACITY_EXCEEDED} before anything is written, never an internal error.
+     */
+    private static ProfileSharedState checkedMutation(final java.util.function.Supplier<ProfileSharedState> mutation) {
+        try {
+            return mutation.get();
+        } catch (final IllegalArgumentException | ArithmeticException bound) {
+            throw new ProfileOperationException(ProfileErrorCode.CAPACITY_EXCEEDED, "the bank change would break a bound of the shared"
+                + " record (" + bound.getMessage() + "). Nothing was written");
+        }
+    }
+
+    /**
+     * The admission every bank operation shares: co-op profile on this node and not reserved, the type allows
+     * {@code action} ({@code ACTION_FORBIDDEN_BY_TYPE}), the actor is a member with the profile <em>active</em> (the
+     * repository checks the same at commit), the stored record is kept in the configured currency, and the shared record
+     * carries no reservation.
+     */
+    private BankContext bankContext(final UUID actor, final UUID profileId, final String action) throws IOException {
+        final AuroraProfile profile = coopProfile(profileId, true);
+        ProfileTypes.get().require(profile, action);
+        requireProfileNode(profileId);
+        requireProfileReady(profile);
+        final ProfileMember row = profile.member(actor);
+        if (row == null) throw error(ProfileErrorCode.NOT_A_MEMBER, actor + " is not a member of " + profileId + ". Nothing was written");
+        final PlayerAccount account = loadReadyAccount(actor);
+        if (!profileId.equals(account.activeProfile()) || !row.epoch().equals(account.activeEpoch())) {
+            throw error(ProfileErrorCode.STALE_STATE, actor + " does not have profile " + profileId + " active (active: " + account.activeProfile()
+                + "); bank operations run on the active profile only. Nothing was written");
+        }
+        final Optional<ProfileSharedState> stored = this.repository.shared(profileId);
+        final ProfileSharedState shared = stored.orElseGet(() -> this.bankPolicy.empty(profileId));
+        ProfileBank.requireCurrency(shared, this.bankPolicy);
+        if (shared.pendingIntent() != null) {
+            throw error(ProfileErrorCode.RECOVERY_REQUIRED, "the shared state of " + profileId + " is reserved by intent " + shared.pendingIntent()
+                + "; it is resolved at the next start or the owner's next login. Nothing was written");
+        }
+        return new BankContext(profile, row, account, shared.compacted(currentMemberKeys(profile)), stored.isPresent());
+    }
+
+    /**
+     * One direct guarded mutation of the shared record ({@link ProfileRepository#mutateShared}: {@code P}, the actor's
+     * {@code Q}, {@code A}, {@code M}, {@code S} and the active-profile predicate compared in the same step as the
+     * install). The balances are decided in Java by {@code mutation}; an UNKNOWN outcome is settled from the receipt or
+     * the record, never retried or compensated. Leaves a permanent receipt ({@code SHARED_MUTATE}). The ledger event fires
+     * after the commit (or after an UNKNOWN outcome settled as committed), never before.
+     */
+    private CompletableFuture<BankCommit> mutateBank(final UUID operationId, final UUID actor, final UUID profileId, final String action,
+                                                     final ProfileBank.Entry entry, final String collection, final String what, final long amount,
+                                                     final BankMutation mutation) {
+        // The digest names the request, not the revision it was planned against (review P2-5; see transfer).
+        final java.util.function.Function<UUID, CoopOperation> opFor = epoch -> operation(operationId, CoopOperation.Kind.SHARED_MUTATE,
+            actor, profileId, what, amount, epoch);
+        return coop(() -> {
+            if (operationId != null) {
+                // Replay before validation (review P2-5): a decided id is answered from its receipt, whatever the balances are now.
+                final BankCommit replay = replayedBank(operationId, actor, profileId, false, opFor);
+                if (replay != null) return replay;
+            }
+            final BankContext context = bankContext(actor, profileId, action);
+            final ProfileSharedState mutated = checkedMutation(() -> mutation.apply(context.shared(), context.row(), context.profile()));
+            final long expectedShared = context.exists() ? context.shared().revision() : CoopWriteGuard.ABSENT;
+            final ProfileSharedState after = mutated.atRevision(expectedShared == CoopWriteGuard.ABSENT ? 0L : expectedShared + 1L);
+            final CoopOperation op = opFor.apply(context.row().epoch());
+            requireNoUnresolvedIntent(actor);
+            requireCoopStoreLevel();
+            if (after.extended()) requireBuild54StoreLevel("the bank change");
+            final List<PlayerClaim> acquired = new ArrayList<>(1);
+            ProfileClaim transaction = null;
+            try {
+                final PlayerClaim q = actorClaim(actor, acquired);
+                transaction = transactionClaim(profileId);
+                final CommitResult result = this.repository.mutateShared(after, CoopWriteGuard.shared(op, transaction, q,
+                    context.account().revision(), context.profile().revision(), expectedShared));
+                if (result.unknown()) {
+                    settle("the shared state of " + profileId, result, () -> receipted(profileId, op)
+                        || after.equals(this.repository.shared(profileId).orElse(null)));
+                } else if (result.status() == CommitResult.Status.REPLAYED) {
+                    // A caller-supplied id decided between the replay check above and this commit (a concurrent retry; review
+                    // P2-5): the stored record is the answer, nothing posted, no event.
+                    final ProfileSharedState current = this.repository.shared(profileId).orElseGet(() -> this.bankPolicy.empty(profileId));
+                    return new BankCommit(current, ProfileBank.view(current, context.row(), this.bankPolicy, context.profile()));
+                }
+            } finally {
+                if (transaction != null) releaseTransactionClaim(transaction);
+                releasePlayerClaims(acquired);
+            }
+            final long posted = entry == ProfileBank.Entry.INTEREST ? ProfileBank.credited(context.shared(), after) : amount;
+            fireLedger(new ProfileBank.LedgerEvent(profileId, actor, op.kind(), entry, collection, null, null, posted, after.sharedBalance(),
+                after.currency(), op.operationId()));
+            return new BankCommit(after, ProfileBank.view(after, context.row(), this.bankPolicy, context.profile()));
+        });
+    }
+
+    /**
+     * The retry contract of a ledger call under a caller-supplied operation id (review P2-5), checked <em>before</em> any
+     * validation: an id the store already decided is answered from that decision, never re-validated against the balances,
+     * the caps, the interest interval, the role or the type as they are now (otherwise a retried withdraw after the balance
+     * moved, a retried deposit near the cap or a retried interest inside the interval would be refused while the original
+     * posting stands, and a consumer refunding the purse on that refusal would duplicate money). The decision is the
+     * permanent receipt on the profile ({@link ProfileRepository#receipt}: both backends keep the receipt of a direct
+     * {@code SHARED_MUTATE} commit and of a {@code BANK_TRANSFER} intent on the profile id) and, for a transfer
+     * ({@code intent}), the stored intent when no receipt exists yet:
+     * <ul>
+     *   <li>neither: {@code null}; the call validates and runs as a new operation;</li>
+     *   <li>the digest of this request (kind, actor, profile, request fields, the actor's membership epoch; never a
+     *       revision) differs from the stored one: {@code INVALID_REQUEST}, the id was already used for a different request;</li>
+     *   <li>committed (a COMMITTED receipt, a COMMITTED or FINALIZED intent): REPLAYED, the shared record as stored now and
+     *       the actor's view of it; nothing is posted and no ledger event fires;</li>
+     *   <li>aborted: {@code IO_FAILURE}, nothing was applied under the id (a new attempt takes a new id);</li>
+     *   <li>an intent still PREPARED or RECOVERY_REQUIRED: {@code RECOVERY_REQUIRED}, undecided until recovery resolves it.</li>
+     * </ul>
+     * The digest needs the actor's current membership epoch, so a decided id whose actor is no longer a member of the profile
+     * cannot be matched: {@code INVALID_REQUEST} naming the stored outcome ({@link #receipt} reads it). Every refusal names
+     * the operation id ({@link ProfileOperationException#operationId()}). Runs inside an I/O step.
+     */
+    private BankCommit replayedBank(final UUID operationId, final UUID actor, final UUID profileId, final boolean intent,
+                                    final java.util.function.Function<UUID, CoopOperation> opFor) throws IOException {
+        final ProfileReceipt receipt = this.repository.receipt(profileId, operationId).orElse(null);
+        final ProfileIntent stored = receipt == null && intent ? this.repository.intent(operationId).orElse(null) : null;
+        if (receipt == null && stored == null) return null;
+        final String decided = receipt != null ? receipt.kind() + " " + receipt.outcome() : stored.kind() + " " + stored.phase();
+        final AuroraProfile profile = coopProfile(profileId, true);
+        final ProfileMember row = profile.member(actor);
+        if (row == null) {
+            throw error(ProfileErrorCode.INVALID_REQUEST, "operation id " + operationId + " is already decided on profile " + profileId + " ("
+                + decided + "), but " + actor + " is no longer a member of it, so this retry cannot be matched to that request; its"
+                + " receipt tells the outcome. Nothing was written", operationId);
+        }
+        final byte[] digest = opFor.apply(row.epoch()).requestDigest();
+        if (receipt != null ? !receipt.sameRequest(digest) : !stored.sameRequest(digest)) {
+            throw error(ProfileErrorCode.INVALID_REQUEST, "operation id " + operationId + " was already used for a different request ("
+                + decided + "). Nothing was written", operationId);
+        }
+        final boolean committed = receipt != null ? receipt.outcome() == ProfileReceipt.Outcome.COMMITTED : stored.committed();
+        if (!committed) {
+            if (receipt != null || stored.phase() == ProfileIntent.Phase.ABORTED) {
+                throw error(ProfileErrorCode.IO_FAILURE, "operation " + operationId + " was aborted before it committed (" + decided
+                    + "); nothing was applied under it. A new attempt needs a new operation id", operationId);
+            }
+            throw error(ProfileErrorCode.RECOVERY_REQUIRED, "operation " + operationId + " is still undecided (" + decided + "); it is"
+                + " resolved at the next start or the actor's next login. Nothing was written now; retry with the same id after"
+                + " that", operationId);
+        }
+        final ProfileSharedState current = this.repository.shared(profileId).orElseGet(() -> this.bankPolicy.empty(profileId));
+        return new BankCommit(current, ProfileBank.view(current, row, this.bankPolicy, profile));
+    }
+
+    private void fireLedger(final ProfileBank.LedgerEvent event) {
+        if (this.closed) return;
+        try {
+            coopEventLane().execute(() -> {
+                try {
+                    this.ledgerSink.accept(event);
+                } catch (final RuntimeException failed) {
+                    SourbyLogger.warn("AWF MultiProfile: a ledger event handler failed: " + failed.getMessage());
+                }
+            });
+        } catch (final RejectedExecutionException full) {
+            SourbyLogger.warn("AWF MultiProfile: a ledger event of " + event.profileId() + " was dropped (queue full or closed); the receipt is"
+                + " the source of truth");
+        }
+    }
+
+    // ------------------------------------------------------------------ salvage (Build 54, owner decision OD-3)
+
+    /** A page of a profile's outstanding salvage records (summaries; never item blobs). */
+    public record SalvageListing(List<ProfileSalvage> items, String nextCursor) {
+
+        public SalvageListing {
+            items = List.copyOf(items);
+        }
+    }
+
+    /**
+     * The outcome of a claim: how many item stacks moved into the claimant's committed head and how many stay in the
+     * record. {@code applied} is whether the committed state also reached the online player; {@code false} means the
+     * delivery is committed and the player's saves were refused until their next authoritative login restores it.
+     */
+    public record SalvageDelivery(UUID salvageId, UUID profileId, UUID claimant, int delivered, int remaining, boolean complete,
+                                  UUID operationId, boolean applied) {
+
+        SalvageDelivery notApplied() {
+            return new SalvageDelivery(this.salvageId, this.profileId, this.claimant, this.delivered, this.remaining, this.complete,
+                this.operationId, false);
+        }
+    }
+
+    /** The outstanding salvage of a co-op profile, oldest first; members only ({@code null} viewer = operator). */
+    public CompletableFuture<SalvageListing> salvage(final UUID viewer, final UUID profileId, final String cursor) {
+        return coop(() -> {
+            final AuroraProfile profile = coopProfile(profileId, true);
+            requireViewer(profile, viewer);
+            final CoopMembership.Page<ProfileSalvage> page = CoopMembership.salvageByProfile(this.repository, profileId,
+                listingCursor(cursor, ProfileIndexPage.Kind.SALVAGE_BY_PROFILE, profileId));
+            return new SalvageListing(page.items(), nextCursor(page));
+        });
+    }
+
+    /** What the first I/O step of a claim decided, carried to the capture and the commit step. */
+    private record ClaimPrep(ProfileSalvage salvage, AuroraProfile profile, ProfileMember row, CaptureTicket ticket,
+                             ProfileSnapshot payload, List<ProfileState.Item> items) {}
+
+    private record Delivered(ProfileState state, SalvageDelivery result) {}
+
+    /**
+     * Delivers a salvage record into the claimant's active profile exactly once (COOP-DESIGN §7; OD-3):
+     * <ol>
+     *   <li>admission on the I/O lane: the record is claimable, the profile is on this node, the type allows
+     *       {@code salvage.claim}, the claimant is a member with this profile <em>active</em> and an admitted online session
+     *       here, no switch or login runs for them; the items are read from the exact pinned source (or remainder) blob,
+     *       checksum-verified, and the store level is raised to Build 54; the claimant is frozen (the runtime's freeze
+     *       listener cancels their item interactions from here until the end);</li>
+     *   <li>their state is captured on the entity thread with the capture ticket minted in step 1, bounded by
+     *       {@code switching.timeout-ms} like a switch's steps ({@code TIMEOUT}: nothing written, the hold released);</li>
+     *   <li>on the I/O lane the ticket is compared with the session and account again, the items are placed into the free
+     *       slots of the captured state, the destination snapshot (and a remainder snapshot, when not everything fits) is
+     *       staged, and one intent installs the claimant's head at the destination together with the salvage after-image
+     *       (DELIVERED, or AVAILABLE with the remainder) and its permanent receipt. No free slot: {@code CAPACITY_EXCEEDED},
+     *       nothing written, the salvage stays;</li>
+     *   <li>the committed state replaces the claimant's isolated state on the entity thread. If that fails, the delivery
+     *       stays committed: the player's saves stay refused ({@link #refuseSaves}, and the delivery hold below) so no
+     *       pre-delivery capture overwrites the head, and their next authoritative login restores the committed head with the
+     *       items. Nothing is refunded or re-offered; a replay of the same operation returns the receipt; a new claim finds the
+     *       record DELIVERED.</li>
+     * </ol>
+     * From step 1 until the apply succeeded the claimant holds a delivery entry (review P1-1) that every save path checks
+     * through {@link #switchInProgress} and {@link #saveCaptured}: the lockstep autosave, the quit capture, the shutdown
+     * capture and {@link #save(UUID)} take their no-save branch ({@code SWITCH_IN_PROGRESS}), and no switch is admitted. A
+     * claim that fails before the commit releases the hold; a failed apply keeps it until the session ends, so the quit
+     * writes nothing and the session marker stays open.
+     * A crash before the COMMITTED marker leaves reservations that recovery aborts (the salvage stays claimable); after it,
+     * the intent rolls forward and the head already names the destination, so the next login restores it: no duplicate.
+     */
+    public CompletableFuture<SalvageDelivery> claimSalvage(final UUID claimant, final UUID salvageId) {
+        final AtomicBoolean frozenHere = new AtomicBoolean();
+        final AtomicBoolean keepHold = new AtomicBoolean();
+        final DeliveryHold hold = new DeliveryHold(salvageId, UUID.randomUUID());
+        return this.<ClaimPrep>coop(() -> {
+            final ProfileSalvage salvage = this.repository.salvage(salvageId)
+                .orElseThrow(() -> error(ProfileErrorCode.INVALID_REQUEST, "no salvage record " + salvageId));
+            final AuroraProfile profile = coopProfile(salvage.profileId(), true);
+            ProfileTypes.get().require(profile, ProfileTypes.SALVAGE_CLAIM);
+            if (!salvage.claimable()) {
+                throw error(ProfileErrorCode.INVALID_REQUEST, "salvage " + salvageId + " was delivered to " + salvage.claimant() + " by operation "
+                    + salvage.deliveryOperationId() + " into snapshot " + salvage.destinationSnapshotId() + "; nothing is granted twice");
+            }
+            requireProfileNode(profile.id());
+            requireProfileReady(profile);
+            final ProfileMember row = profile.member(claimant);
+            if (row == null) throw error(ProfileErrorCode.NOT_A_MEMBER, claimant + " is not a member of " + profile.id() + ". Nothing was written");
+            final PlayerAccount account = loadReadyAccount(claimant);
+            if (!profile.id().equals(account.activeProfile()) || !row.epoch().equals(account.activeEpoch())) {
+                throw error(ProfileErrorCode.STALE_STATE, "owner decision OD-3: the claimant must have profile " + profile.id() + " active"
+                    + " (active: " + account.activeProfile() + "); switch into it first. Nothing was written");
+            }
+            final PlayerSession session = this.sessions.get(claimant);
+            if (session == null || !this.players.online(claimant)) {
+                throw error(ProfileErrorCode.PLAYER_OFFLINE, claimant + " has no admitted session on this node; salvage is delivered to the"
+                    + " online claimant only (its inventory decides what fits). Nothing was written");
+            }
+            if (frozen(claimant) || this.switches.containsKey(claimant)) {
+                throw error(ProfileErrorCode.SWITCH_IN_PROGRESS, "a switch, login restore or another delivery is running for " + claimant
+                    + ". Nothing was written");
+            }
+            final ProfileSnapshot payload = salvagePayload(salvage);
+            final List<ProfileState.Item> items = payload == null ? List.of()
+                : ProfileSalvageDelivery.extract(ProfileStateCodec.decode(payload.state()));
+            final CaptureTicket ticket = captureTicket(claimant);
+            if (ticket == null || !profile.id().equals(ticket.profileId())) {
+                throw error(ProfileErrorCode.CLAIM_LOST, "no capture ticket for " + claimant + " on profile " + profile.id() + ". Nothing was written");
+            }
+            if (this.deliveries.putIfAbsent(claimant, hold) != null) {
+                throw error(ProfileErrorCode.SWITCH_IN_PROGRESS, "salvage " + salvageHeld(claimant) + " is being delivered to "
+                    + claimant + "; nothing was written");
+            }
+            frozenHere.set(true);
+            if (this.frozen.putIfAbsent(claimant, hold) != null) {
+                this.deliveries.remove(claimant, hold);
+                frozenHere.set(false);
+                throw error(ProfileErrorCode.SWITCH_IN_PROGRESS, claimant + " is frozen by another run");
+            }
+            return new ClaimPrep(salvage, profile, row, ticket, payload, items);
+        }).thenCompose(prep -> boundedClaimStep(this.players.captureDetailed(claimant, this.settings.isolation()),
+                "capturing the state of " + claimant + " for salvage " + salvageId)
+            .thenCompose(capture -> this.<Delivered>coop(() -> deliverSalvage(claimant, prep, capture))))
+            .thenCompose(delivered -> {
+                if (delivered.state() == null) return CompletableFuture.completedFuture(delivered.result());
+                return this.players.apply(claimant, delivered.state(), this.settings.isolation())
+                    .orTimeout(this.settings.switching().timeoutMillis(), TimeUnit.MILLISECONDS)
+                    .handle((ignored, failed) -> {
+                        if (failed == null) return delivered.result();
+                        final String why = unwrapCompletion(failed) instanceof TimeoutException ? "not within switching.timeout-ms" : messageOf(failed);
+                        // The hold stays (review P1-1): until the session ends every capture of the pre-delivery state is refused;
+                        // refuseSaves disconnects the player, and the quit then writes nothing.
+                        keepHold.set(true);
+                        refuseSaves(claimant, "salvage " + salvageId + " is committed into your profile but could not be applied to the player ("
+                            + why + "); the committed state is restored at your next login");
+                        return delivered.result().notApplied();
+                    });
+            })
+            .whenComplete((ignored, failed) -> {
+                if (!frozenHere.get()) return;
+                // Both by value: a rejoin clears this run's entries itself (admitSession), and a quit during the run cleared the
+                // hold (sessionFlagsCleared) and released the session claim at once; a newer run's freeze and hold are left alone.
+                this.frozen.remove(claimant, hold);
+                if (!keepHold.get()) this.deliveries.remove(claimant, hold);
+            });
+    }
+
+    /**
+     * Bounds an entity-thread step of {@link #claimSalvage} by {@code switching.timeout-ms}, as a switch bounds its steps: a
+     * step that does not finish in time fails the claim with {@link ProfileErrorCode#TIMEOUT} before anything is written, so
+     * the freeze and the delivery hold are released and never outlive the claim (a late result is ignored).
+     */
+    private <T> CompletableFuture<T> boundedClaimStep(final CompletableFuture<T> step, final String what) {
+        final long timeout = this.settings.switching().timeoutMillis();
+        return step.orTimeout(timeout, TimeUnit.MILLISECONDS)
+            .exceptionallyCompose(failed -> CompletableFuture.failedFuture(unwrapCompletion(failed) instanceof TimeoutException
+                ? error(ProfileErrorCode.TIMEOUT, what + " did not finish within switching.timeout-ms (" + timeout + " ms); nothing was"
+                    + " written and the salvage stays claimable")
+                : failed));
+    }
+
+    /**
+     * The blob a claim takes items from: the remainder snapshot of an AVAILABLE record, the exact source snapshot of an
+     * UNAVAILABLE one, or {@code null} when the source never published. A blob that is missing or does not match the record
+     * fails closed ({@code STALE_STATE}); nothing is substituted.
+     */
+    private ProfileSnapshot salvagePayload(final ProfileSalvage salvage) throws IOException {
+        if (salvage.state() == ProfileSalvage.State.AVAILABLE) {
+            final ProfileSnapshot blob = this.repository.memberSnapshot(salvage.profileId(), salvage.removedMember(), salvage.removedEpoch(),
+                salvage.payloadBlobId()).orElseThrow(() -> error(ProfileErrorCode.STALE_STATE, "the remainder blob " + salvage.payloadBlobId()
+                + " of salvage " + salvage.id() + " is not stored; the record cannot be delivered and nothing is substituted"));
+            if (!blob.checksum().equals(salvage.payloadChecksum()) || blob.size() != salvage.payloadLength()) {
+                throw error(ProfileErrorCode.STALE_STATE, "the remainder blob of salvage " + salvage.id() + " does not match the record");
+            }
+            return blob;
+        }
+        if (ProfileSalvage.NIL.equals(salvage.sourceSnapshotId())) return null;
+        final ProfileSnapshot source = this.repository.memberSnapshot(salvage.profileId(), salvage.removedMember(), salvage.removedEpoch(),
+            salvage.sourceSnapshotId()).orElseThrow(() -> error(ProfileErrorCode.STALE_STATE, "the source snapshot " + salvage.sourceSnapshotId()
+            + " of salvage " + salvage.id() + " is not stored; the record cannot be delivered and nothing is substituted"));
+        if (!source.checksum().equals(salvage.sourceChecksum()) || source.revision() != salvage.sourceRevision()) {
+            throw error(ProfileErrorCode.STALE_STATE, "the source snapshot of salvage " + salvage.id() + " does not match the consumed head");
+        }
+        return source;
+    }
+
+    /** Step 3 of {@link #claimSalvage}; runs inside an I/O step. */
+    private Delivered deliverSalvage(final UUID claimant, final ClaimPrep prep, final PlayerStatePort.CaptureResult capture) throws IOException {
+        final CaptureTicket ticket = prep.ticket();
+        final PlayerSession session = this.sessions.get(claimant);
+        if (session == null || !session.claim().equals(ticket.claim())) {
+            throw error(ProfileErrorCode.CLAIM_LOST, "the player session that captured this state is no longer the admitted one; nothing was written");
+        }
+        requireLive(claimant, session);
+        requireNoUnresolvedIntent(claimant);
+        if (this.switches.containsKey(claimant)) throw error(ProfileErrorCode.SWITCH_IN_PROGRESS, "a switch started for " + claimant + "; nothing was written");
+        final PlayerAccount account = this.repository.loadAccount(claimant, this.settings.defaultSlots());
+        if (!prep.profile().id().equals(account.activeProfile()) || !prep.row().epoch().equals(account.activeEpoch())
+            || account.sessionGeneration() != ticket.sessionGeneration() || account.revision() != ticket.accountRevision()) {
+            throw error(ProfileErrorCode.STALE_STATE, "the account of " + claimant + " changed while its state was captured; nothing was written");
+        }
+        final AuroraProfile profile = readyAgain(prep.profile().id(), prep.profile());
+        if (!profile.hasMember(claimant, prep.row().epoch())) {
+            throw error(ProfileErrorCode.STALE_STATE, "membership " + prep.row().epoch() + " of " + claimant + " is no longer current; nothing was written");
+        }
+        final ProfileSalvage salvage = this.repository.salvage(prep.salvage().id())
+            .orElseThrow(() -> error(ProfileErrorCode.STALE_STATE, "salvage " + prep.salvage().id() + " disappeared"));
+        if (salvage.revision() != prep.salvage().revision() || !salvage.claimable()) {
+            throw error(ProfileErrorCode.STALE_STATE, "salvage " + salvage.id() + " changed (revision " + prep.salvage().revision() + " -> "
+                + salvage.revision() + ", " + salvage.state() + "); nothing was written. Retry");
+        }
+        final MemberStateHead head = this.repository.memberHead(profile.id(), claimant, prep.row().epoch()).orElse(null);
+        if (head != null && head.state() == MemberStateHead.State.CONSUMED) {
+            throw error(ProfileErrorCode.STALE_STATE, "member stream " + head.describe() + " was consumed; nothing was written");
+        }
+        if (head != null && head.pendingIntent() != null) {
+            throw error(ProfileErrorCode.RECOVERY_REQUIRED, "member stream " + head.describe() + " is reserved by intent " + head.pendingIntent());
+        }
+        final ProfileState carried = withCarriedAdapters(capture.state(), capture.adapters(),
+            () -> head == null ? Optional.empty() : exactHeadSnapshot(head), profile.id());
+        final ProfileSalvageDelivery.Merged merged = ProfileSalvageDelivery.merge(carried, prep.items());
+        if (!prep.items().isEmpty() && merged.placed().isEmpty()) {
+            throw error(ProfileErrorCode.CAPACITY_EXCEEDED, "the inventory and ender chest of " + claimant + " have no free slot; salvage "
+                + salvage.id() + " stays available (" + prep.items().size() + " stack(s)). Nothing was written");
+        }
+        // After every refusal (review P3-17): the store level is raised only for a delivery that is about to be written.
+        requireBuild54StoreLevel("the salvage delivery");
+        final long headExpected = head == null ? CoopWriteGuard.ABSENT : head.revision();
+        final long destinationRevision = head == null ? 0L : head.revision() + 2L;
+        final CoopOperation op = operation(CoopOperation.Kind.SALVAGE_DELIVER, claimant, salvage.id(), salvage.revision(), profile.id(),
+            prep.row().epoch(), headExpected, merged.placed().size());
+        final ProfileSnapshot destination = ProfileSnapshot.forMember(profile.id(), claimant, prep.row().epoch(), destinationRevision,
+            encode(profile.id(), merged.state()), op.operationId());
+        ProfileSnapshot remainder = null;
+        final ProfileSalvage after;
+        if (merged.remainder().isEmpty()) {
+            after = salvage.delivered(claimant, prep.row().epoch(), destination, op.operationId(), prep.payload());
+        } else {
+            remainder = ProfileSnapshot.forMember(profile.id(), salvage.removedMember(), salvage.removedEpoch(),
+                CoopWriteGuard.next(Math.addExact(salvage.sourceRevision(), salvage.revision()), "salvage remainder of " + salvage.id()),
+                encode(profile.id(), ProfileSalvageDelivery.remainderState(merged.remainder())), op.operationId());
+            after = salvage.remaining(remainder);
+        }
+        // Immutable blobs first (named by id and checksum, pinned by the intent); the head after-image makes the destination authoritative.
+        this.repository.stageMemberSnapshot(destination);
+        if (remainder != null) this.repository.stageMemberSnapshot(remainder);
+        final long storeNow = this.repository.storeClockMillis();
+        runCoopPlan(ProfileSalvageDelivery.plan(op, profile, account, prep.row(), head, destination, salvage, after, remainder,
+            storeNow + INTENT_DEADLINE_MILLIS));
+        final ProfileSalvage stored = this.repository.salvage(salvage.id()).orElseThrow(() -> readBack("salvage record", salvage.id()));
+        final SalvageDelivery result = new SalvageDelivery(salvage.id(), profile.id(), claimant, merged.placed().size(),
+            merged.remainder().size(), stored.state() == ProfileSalvage.State.DELIVERED, op.operationId(), true);
+        fireSalvage(result);
+        notify(claimant, merged.remainder().isEmpty()
+            ? "Salvage " + salvage.id().toString().substring(0, 8) + " delivered: " + merged.placed().size() + " stack(s)."
+            : "Salvage " + salvage.id().toString().substring(0, 8) + ": " + merged.placed().size() + " stack(s) delivered, "
+                + merged.remainder().size() + " left for a later claim (free some slots).");
+        return new Delivered(merged.placed().isEmpty() ? null : merged.state(), result);
+    }
+
+    private void fireSalvage(final SalvageDelivery event) {
+        if (this.closed) return;
+        try {
+            coopEventLane().execute(() -> {
+                try {
+                    this.salvageSink.accept(event);
+                } catch (final RuntimeException failed) {
+                    SourbyLogger.warn("AWF MultiProfile: a salvage event handler failed: " + failed.getMessage());
+                }
+            });
+        } catch (final RejectedExecutionException full) {
+            SourbyLogger.warn("AWF MultiProfile: a salvage event of " + event.salvageId() + " was dropped (queue full or closed); the record is"
+                + " the source of truth");
+        }
+    }
+
+    /**
+     * Raises the store to minimum build {@link StoreFormat#SALVAGE_MINIMUM_BUILD} (54) before the first delivery intent (a Build
+     * 53 node cannot read a delivered record's new shapes and would overwrite the destination head from an older state) and
+     * before the first shared record with a Build 54 trailing section ({@link ProfileSharedState#extended()}; a Build 51-53
+     * decoder refuses it); a failure refuses the operation named by {@code what}.
+     */
+    private void requireBuild54StoreLevel(final String what) throws IOException {
+        if (this.build54StoreLevel) return;
+        requireCoopStoreLevel();
+        final StoreFormat.Marker raised = this.repository.requireStoreFeature(StoreFormat.COOP_SCHEMA, StoreFormat.SALVAGE_MINIMUM_BUILD,
+            this.storeWriter);
+        if (!raised.covers(StoreFormat.COOP_SCHEMA, StoreFormat.SALVAGE_MINIMUM_BUILD)) {
+            throw error(ProfileErrorCode.STORE_FORMAT_REFUSED, "the store marker was not raised to Build " + StoreFormat.SALVAGE_MINIMUM_BUILD
+                + " (" + describe(raised) + "); " + what + " was not written");
+        }
+        this.build54StoreLevel = true;
+        final StoreStatus status = this.storeStatus;
+        if (status != null) {
+            this.storeStatus = new StoreStatus(raised, status.gate(), status.reason(), status.migration(), status.unresolvedIntents());
+        }
+    }
+
     // ---- co-op internals (every method below runs inside an I/O step)
 
     /** The co-op gate: MultiProfile and co-op enabled, then (on the lane) a format-2 store. */
@@ -4959,9 +5781,11 @@ public final class ProfileEngine {
         });
     }
 
-    private CoopMembership.Policy coopPolicy() {
+    /** The co-op policy for a profile: the member cap is the type's when its definition sets one, else {@code coop.max-members}. */
+    private CoopMembership.Policy coopPolicy(final AuroraProfile profile) {
         final ProfileSettings.Coop coop = this.settings.coop();
-        return new CoopMembership.Policy(coop.maxMembers(), coop.inviteExpiryMillis(), coop.kickVoteExpiryMillis(), coop.inactiveMillis());
+        return new CoopMembership.Policy(ProfileTypes.get().maxMembers(profile, coop.maxMembers()), coop.inviteExpiryMillis(),
+            coop.kickVoteExpiryMillis(), coop.inactiveMillis());
     }
 
     private AuroraProfile coopProfile(final UUID profileId, final boolean requireCoop) throws IOException {
@@ -5052,7 +5876,7 @@ public final class ProfileEngine {
      * is released afterwards. Accounts the plan rewrites are re-read before the claims go, so an admitted session's
      * capture ticket follows the commit.
      */
-    private void runCoopPlan(final CoopIntentPlan plan) throws IOException {
+    private boolean runCoopPlan(final CoopIntentPlan plan) throws IOException {
         requireNoUnresolvedIntent(plan.op().actor());
         if (plan.affectedAccount() != null) requireNoUnresolvedIntent(plan.affectedAccount());
         final List<PlayerClaim> acquired = new ArrayList<>(2);
@@ -5084,10 +5908,11 @@ public final class ProfileEngine {
                 }
             }
             transaction = transactionClaim(plan.profileId());
-            runPlan(plan, transaction, q, affected);
+            final boolean replayed = runPlan(plan, transaction, q, affected);
             for (final CoopIntentPlan.Image image : plan.images()) {
                 if (image.recordType() == ProfileRecords.TYPE_ACCOUNT) refreshAccount(image.id());
             }
+            return replayed;
         } finally {
             if (transaction != null) releaseTransactionClaim(transaction);
             releasePlayerClaims(acquired);
@@ -5123,6 +5948,34 @@ public final class ProfileEngine {
                 + " (" + describe(raised) + "); no member switch journal is written");
         }
         this.memberPlayStoreLevel = true;
+        final StoreStatus status = this.storeStatus;
+        if (status != null) {
+            this.storeStatus = new StoreStatus(raised, status.gate(), status.reason(), status.migration(), status.unresolvedIntents());
+        }
+    }
+
+    /** Set once this engine raised (or found) the store's registered-type feature level (Build 54); never lowered. */
+    private volatile boolean typedProfileStoreLevel;
+
+    /**
+     * Raises the store to minimum build {@link StoreFormat#REGISTERED_TYPE_MINIMUM_BUILD} before the first profile record of a
+     * registered type or with a type-pool name is prepared; keeps the store's schema. A failure refuses the create.
+     */
+    private void requireTypedProfileStoreLevel() throws IOException {
+        if (this.typedProfileStoreLevel) return;
+        if (!format2() && this.repository instanceof RedisProfileRepository) {
+            // Review P3-7: a Build 51 node opens a format-1 Redis store without honouring minimumBuild, so the marker alone
+            // does not keep it from reading a registered-type profile as classic. Fail safe: such a profile needs format 2.
+            throw error(ProfileErrorCode.MIGRATION_REQUIRED, "a profile of a registered type (or with a type-pool name) on a Redis store"
+                + " needs a format-2 store: /awf multiprofile migrate dry-run, then migration.mode: apply and restart. Nothing was written");
+        }
+        final StoreFormat.Marker raised = this.repository.requireStoreFeature(StoreFormat.SCHEMA, StoreFormat.REGISTERED_TYPE_MINIMUM_BUILD,
+            this.storeWriter);
+        if (!raised.covers(StoreFormat.SCHEMA, StoreFormat.REGISTERED_TYPE_MINIMUM_BUILD)) {
+            throw error(ProfileErrorCode.STORE_FORMAT_REFUSED, "the store marker was not raised to Build " + StoreFormat.REGISTERED_TYPE_MINIMUM_BUILD
+                + " (" + describe(raised) + "); no profile of a registered type is created");
+        }
+        this.typedProfileStoreLevel = true;
         final StoreStatus status = this.storeStatus;
         if (status != null) {
             this.storeStatus = new StoreStatus(raised, status.gate(), status.reason(), status.migration(), status.unresolvedIntents());
@@ -5262,7 +6115,7 @@ public final class ProfileEngine {
             final MemberStateHead head = target == null ? null
                 : this.repository.memberHead(profile.id(), target.playerId(), target.epoch()).orElse(null);
             runCoopPlan(CoopMembership.kick(operation(CoopOperation.Kind.MEMBER_REMOVE, actor, vote.id(), vote.target(),
-                profile.revision()), profile, vote, targetAccount, head, issued, coopPolicy(), next, storeNow, storeNow + INTENT_DEADLINE_MILLIS));
+                profile.revision()), profile, vote, targetAccount, head, issued, coopPolicy(profile), next, storeNow, storeNow + INTENT_DEADLINE_MILLIS));
             fireCoopEvent(new dev.iyanz.sourbycraft.api.profile.CoopMemberLeaveEvent(first.id(), vote.target(),
                 dev.iyanz.sourbycraft.api.profile.CoopMemberLeaveEvent.Reason.KICKED, vote.id()));
             notify(vote.target(), "You were removed from co-op profile " + profile.shownLabel() + " by vote"
@@ -5351,7 +6204,7 @@ public final class ProfileEngine {
         final List<dev.iyanz.sourbycraft.api.profile.CoopMemberInfo> members = new ArrayList<>(profile.members().size());
         for (final ProfileMember member : profile.members()) members.add(memberInfo(member));
         return new dev.iyanz.sourbycraft.api.profile.CoopDetails(profile.id(), profile.displayLabel() == null ? "" : profile.displayLabel(),
-            members, this.settings.coop().maxMembers());
+            members, ProfileTypes.get().maxMembers(profile, this.settings.coop().maxMembers()));
     }
 
     private static dev.iyanz.sourbycraft.api.profile.CoopRole role(final ProfileRole role) {
@@ -5477,6 +6330,11 @@ public final class ProfileEngine {
 
     private static ProfileOperationException error(final ProfileErrorCode code, final String message) {
         return new ProfileOperationException(code, message);
+    }
+
+    /** An error naming the operation it concerns, so a consumer can reconcile it ({@link ProfileOperationException#operationId()}). */
+    private static ProfileOperationException error(final ProfileErrorCode code, final String message, final UUID operationId) {
+        return new ProfileOperationException(code, message, operationId);
     }
 
     private static Throwable unwrapCompletion(final Throwable failed) {

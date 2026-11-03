@@ -18,9 +18,16 @@ import java.util.UUID;
  * anything is consumed). A Build 51 binary refuses an UNAVAILABLE record (unknown state tag 3) rather
  * than misread it.</p>
  *
- * <p>{@link State#AVAILABLE} and {@link State#DELIVERED} keep the Build 51 shape: the item payload is an
- * immutable blob named by length and SHA-256, never embedded here; DELIVERED names the exact destination
- * snapshot and the delivery operation, so a replay returns the receipt and never re-grants.</p>
+ * <p><b>Build 54</b> (owner decision OD-3) delivers. The claim reads the exact source snapshot the UNAVAILABLE record
+ * pins (or the remainder blob of an AVAILABLE one), extracts the isolated item sections (inventory, armour, off-hand,
+ * ender chest) and places them into the free slots of the claimant's captured state; one intent installs the claimant's
+ * head at the destination snapshot and this record's after-image, and leaves the permanent receipt. {@link State#DELIVERED}
+ * names the claimant, epoch, exact destination snapshot and delivery operation, so a replay returns the receipt and never
+ * re-grants; a record whose source published nothing (or held no items) is DELIVERED with an empty payload. When not every
+ * item fits, the record stays {@link State#AVAILABLE} with the <em>remainder</em> as its payload blob: an immutable member
+ * snapshot staged in the consumed source stream (never a head), named by id, length and SHA-256 and verified on read; the
+ * next claim delivers from it. Nothing is ever dropped into the world. Build 53 refuses an empty-payload DELIVERED record
+ * (its constructor demanded a blob), which is one reason a delivery raises the store level to Build 54.</p>
  *
  * @param id salvage id
  * @param revision the record's own revision
@@ -75,6 +82,15 @@ public record ProfileSalvage(UUID id, long revision, UUID profileId, UUID remove
             if (NIL.equals(sourceSnapshotId) != sourceChecksum.isEmpty()) {
                 throw new IllegalArgumentException("an UNAVAILABLE salvage names its source snapshot and checksum together or neither");
             }
+        } else if (state == State.DELIVERED && payloadLength == 0) {
+            // Build 54: delivered with nothing to deliver (the source published no snapshot, or it held no isolated item).
+            if (extractionSchema < 1) throw new IllegalArgumentException("extraction schema " + extractionSchema);
+            if (!payloadChecksum.isEmpty() || !NIL.equals(payloadBlobId)) {
+                throw new IllegalArgumentException("an empty delivery names no item blob");
+            }
+            if (NIL.equals(sourceSnapshotId) != sourceChecksum.isEmpty()) {
+                throw new IllegalArgumentException("a salvage names its source snapshot and checksum together or neither");
+            }
         } else {
             if (extractionSchema < 1) throw new IllegalArgumentException("extraction schema " + extractionSchema);
             if (payloadLength < 1 || payloadLength > MAX_PAYLOAD_BYTES) throw new IllegalArgumentException("payload length " + payloadLength);
@@ -101,6 +117,57 @@ public record ProfileSalvage(UUID id, long revision, UUID profileId, UUID remove
             0, 0, "", NIL, State.UNAVAILABLE, null, null, null, null, now);
     }
 
+    /** The item extraction schema Build 54 writes: {@link ProfileState} item sections with their original slot tags. */
+    public static final int EXTRACTION_SCHEMA = 1;
+
+    /**
+     * Build 54: this record delivered completely into {@code destination} (the claimant's new head snapshot) by
+     * {@code operationId}, at revision + 1. {@code payload} is the blob the items were taken from (the source snapshot of an
+     * UNAVAILABLE record, the remainder blob of an AVAILABLE one), or {@code null} when nothing existed to deliver.
+     */
+    public ProfileSalvage delivered(final UUID claimant, final UUID claimantEpoch, final ProfileSnapshot destination,
+                                    final UUID operationId, final ProfileSnapshot payload) {
+        if (this.state == State.DELIVERED) throw new IllegalStateException("salvage " + this.id + " is already delivered");
+        Objects.requireNonNull(destination, "destination");
+        final long next = CoopWriteGuard.next(this.revision, "salvage " + this.id);
+        if (payload == null) {
+            return new ProfileSalvage(this.id, next, this.profileId, this.removedMember, this.removedEpoch, this.removalIntentId,
+                this.sourceSnapshotId, this.sourceRevision, this.sourceChecksum, EXTRACTION_SCHEMA, 0, "", NIL, State.DELIVERED,
+                claimant, claimantEpoch, destination.snapshotId(), operationId, this.createdAtMillis);
+        }
+        return new ProfileSalvage(this.id, next, this.profileId, this.removedMember, this.removedEpoch, this.removalIntentId,
+            this.sourceSnapshotId, this.sourceRevision, this.sourceChecksum, EXTRACTION_SCHEMA, payload.size(), payload.checksum(),
+            payload.snapshotId(), State.DELIVERED, claimant, claimantEpoch, destination.snapshotId(), operationId, this.createdAtMillis);
+    }
+
+    /**
+     * Build 54: a partial delivery. The record stays AVAILABLE at revision + 1 with {@code remainder} (a member snapshot
+     * staged in the consumed source stream holding only the items not yet delivered) as its payload blob.
+     */
+    public ProfileSalvage remaining(final ProfileSnapshot remainder) {
+        if (this.state == State.DELIVERED) throw new IllegalStateException("salvage " + this.id + " is already delivered");
+        Objects.requireNonNull(remainder, "remainder");
+        if (!remainder.inStream(this.profileId, this.removedMember, this.removedEpoch)) {
+            throw new IllegalArgumentException("the remainder must be staged in the consumed source stream");
+        }
+        return new ProfileSalvage(this.id, CoopWriteGuard.next(this.revision, "salvage " + this.id), this.profileId, this.removedMember,
+            this.removedEpoch, this.removalIntentId, this.sourceSnapshotId, this.sourceRevision, this.sourceChecksum, EXTRACTION_SCHEMA,
+            remainder.size(), remainder.checksum(), remainder.snapshotId(), State.AVAILABLE, null, null, null, null, this.createdAtMillis);
+    }
+
+    /** The same record at an explicit revision (decoders and after-images only). */
+    public ProfileSalvage atRevision(final long revision) {
+        return new ProfileSalvage(this.id, revision, this.profileId, this.removedMember, this.removedEpoch, this.removalIntentId,
+            this.sourceSnapshotId, this.sourceRevision, this.sourceChecksum, this.extractionSchema, this.payloadLength, this.payloadChecksum,
+            this.payloadBlobId, this.state, this.claimant, this.claimantEpoch, this.destinationSnapshotId, this.deliveryOperationId,
+            this.createdAtMillis);
+    }
+
+    /** Whether a claim can still take items from this record: not DELIVERED. */
+    public boolean claimable() {
+        return this.state != State.DELIVERED;
+    }
+
     /** Whether the record still counts toward the per-profile outstanding bound. */
     public boolean outstanding() {
         return this.state != State.DELIVERED;
@@ -112,7 +179,7 @@ public record ProfileSalvage(UUID id, long revision, UUID profileId, UUID remove
         AVAILABLE(1),
         /** Delivered exactly once into {@code destinationSnapshotId}. */
         DELIVERED(2),
-        /** Build 52: the epoch is consumed, nothing was extracted; not offered to any claimant (extraction is Build 54). */
+        /** Build 52: the epoch is consumed, nothing was extracted yet; Build 54 extracts from the pinned source at claim time. */
         UNAVAILABLE(3);
 
         private final int tag;

@@ -159,15 +159,32 @@ profiles.createProfile(ProfileRequest.of(accountId, "skyblock", ProfileType.IRON
   the account already uses fails with `NAME_TAKEN`. There is no rename.
 - The **policy type** must be in `types.allowed` or creation fails with `TYPE_NOT_ALLOWED`; a request
   without one gets `types.default`.
-- **Enforcement:** Build 51 stores and returns the type. It enforces no ironman, stranded or bingo rule
-  (no trading, auction, bazaar, island or seasonal restriction): those are planned for Build 55. A
-  consumer that needs a restriction before then enforces it itself.
+- **Enforcement:** Build 51 stores and returns the type and enforces nothing. Since Build 54 the rules come
+  from the `ProfileTypeRegistry` (next section): the server checks its own actions (bank, co-op, salvage);
+  `trade`, `auction`, `bazaar` and every other consumer action are the consumer's to check with `allows`.
 - `STORE_FORMAT_REFUSED` means the store is in a record format this build does not use; nothing was
   written. `MIGRATION_REQUIRED` means the store is still format 1 and the operation needs format 2 (an
   operator runs the migration, see [OPERATIONS.md](OPERATIONS.md#format-2-migration-and-rollback-build-51)).
   Both are failures of the operation, not of the player.
 - A profile that existed before the store was migrated receives its name at migration time (stable
   across restarts) and the policy type `classic`.
+
+## Profile type registry (Build 54)
+
+Build 54 code written; compiled by an agent; not tested by the owner. Full contract:
+[PROFILE-TYPES.md](PROFILE-TYPES.md).
+
+- `ProfileTypeRegistry` is a Bukkit service while MultiProfile is enabled
+  (`Bukkit.getServicesManager().load(ProfileTypeRegistry.class)`, or `AuroraProfiles.typeRegistry()`, a default
+  method that looks the service up and throws `UnsupportedOperationException` without it).
+- Value types: `ProfileTypeDefinition` (with a `Builder`), `ProfileRule`, `ProfileNaming`, `ProfileRuleSet`,
+  `ProfileTypeSource`. Error codes appended: `ACTION_FORBIDDEN_BY_TYPE`, `TYPE_UNKNOWN`.
+- `register(plugin, definition)` / `unregister(plugin, id)`; the last definition stays in force (stored) when the
+  plugin unregisters or disables, so a deny is never lifted by a missing plugin.
+- `allows(typeId, action)` is synchronous (no I/O); `rules(profileId)` / `allows(profileId, action)` (also on
+  `AuroraProfiles`) are asynchronous because they read the profile.
+- `ProfileRequest.withTypeId(id)` creates a profile of a registered type (stored as `classic` plus the metadata entry
+  `aurora:type`); `ProfileDetails.typeId()` returns the effective id.
 
 ## Co-op membership (Build 52)
 
@@ -276,8 +293,8 @@ held a co-op record keeps its Build 51 marker.
 
 **Removal.** Committing a leave or a passed kick vote is one recoverable intent (file and Redis): the
 membership epoch is durably consumed, the account's slot is released and the member's personal state is
-recorded as a salvage entry that is unavailable to delivery. **Nothing is delivered in Build 52** (salvage
-delivery is Build 54). Rejoining the same profile later is a new membership with a fresh epoch and an empty
+recorded as a salvage entry that is unavailable to delivery. **Nothing is delivered in Build 52 or 53**; Build 54
+delivers it on a claim (`claimSalvage`, next section). Rejoining the same profile later is a new membership with a fresh epoch and an empty
 personal state; the old epoch cannot be restored.
 
 **Playing a co-op (Build 53).** A member `switchProfile`s into the co-op like any profile. The state is the member's
@@ -298,7 +315,7 @@ active profile is allowed: `CoopMemberLeaveEvent` still carries `LEFT` or `KICKE
 member was switched out and removed. See [PROFILE-LIFECYCLE.md](PROFILE-LIFECYCLE.md#member-switching-and-play-build-53).
 
 **Not in Build 53** (see [BUILD-51-55-PLAN](../../releases/BUILD-51-55-PLAN.md)): shared bank, personal bank,
-collections, salvage delivery and the purse (Build 54); the audit log, switch guard and cooldown, ironman,
+collections and salvage delivery (Build 54, next section; the purse stays per profile, OD-4); the audit log, switch guard and cooldown, ironman,
 stranded and bingo rules, API parity fields and `/perf` metrics (Build 55). Ownership transfer is in none of
 those builds. Co-op stays off by default.
 
@@ -317,6 +334,109 @@ by the node that committed the change, at most 256 events wait for the thread (b
 dropped with a warning in the log), and a stop between the commit and the firing loses it. Treat the
 store (`listMembers`, `listInvitesFor`) as the source of truth.
 
+## Co-op bank, collections and salvage (Build 54)
+
+Build 54 code written; compiled by an agent; not tested by the owner. Co-op must be enabled (`COOP_DISABLED`
+otherwise) on a format-2 store (`MIGRATION_REQUIRED`), and the profile must be a co-op (`NOT_COOP`). All methods are
+`default` methods on `AuroraProfiles` (`UnsupportedOperationException` on an implementation without them), run on
+the profile I/O lane and never block the caller. Design: [COOP-DESIGN.md](COOP-DESIGN.md) §7, §8;
+lifecycle: [PROFILE-LIFECYCLE.md](PROFILE-LIFECYCLE.md#co-op-bank-collections-and-salvage-build-54).
+
+| Method | Who | Type action | Result |
+|---|---|---|---|
+| `bank(UUID viewerId, UUID profileId)` | a member, or `null` (operator) | none | `ProfileBankInfo` |
+| `deposit(UUID actorId, UUID profileId, long amount)` | any member | `bank.deposit` | `ProfileBankInfo` |
+| `withdraw(actorId, profileId, amount)` | OWNER, MANAGER | `bank.withdraw` | `ProfileBankInfo` |
+| `depositPersonal(actorId, profileId, amount)` / `withdrawPersonal(...)` | any member, own personal bank | `bank.personal` | `ProfileBankInfo` |
+| `transfer(actorId, profileId, ProfileBankAccount from, ProfileBankAccount to, amount)` | any member; `SHARED`→`PERSONAL` needs OWNER or MANAGER | `bank.transfer` | `ProfileBankInfo` |
+| `applyInterest(actorId, profileId)` | OWNER | `bank.deposit` | `ProfileBankInfo` |
+| `collections(UUID viewerId, UUID profileId)` | a member, or `null` | none | `List<ProfileCollectionInfo>` |
+| `contribute(actorId, profileId, String collection, long amount)` | any member | `collections.contribute` | `ProfileCollectionInfo` |
+| `salvage(UUID viewerId, UUID profileId, String cursor)` | a member, or `null` | none | `CoopPage<ProfileSalvageInfo>` (outstanding records, oldest first) |
+| `claimSalvage(UUID claimantId, UUID salvageId)` | a member, online here, co-op active | `salvage.claim` | `SalvageDeliveryResult` |
+
+**Money.** Amounts are `long` minor units of the bank record's `ProfileCurrency(providerId, currencyId, scale)`
+(`1250` at scale 2 is 12.50) and must be positive (`INVALID_REQUEST`). Arithmetic is checked in Java: insufficient
+available funds, a cap and a `long` overflow are refused before anything is written (`INVALID_REQUEST`). The personal
+cap is `bank.personal-cap-percent` of the record's shared capacity (no cap when either is 0). A bank record keeps the
+currency and shared capacity it was first written with; while the configured currency differs from a record's,
+that bank's changes are refused (`INVALID_REQUEST`), reads still work. Personal banks are keyed by membership epoch:
+a member who leaves and rejoins starts with a new, empty personal bank; the old balance is not paid out by the
+server. The next bank change after a removal folds the removed membership's personal balance and contributions into
+the record's archived totals (frozen, never credited, debited or paid interest; COOP-DESIGN §8), so the per-member
+maps stay bounded by the current members (see Known gaps in PROFILE-LIFECYCLE.md).
+
+**Who may.** A mutator's actor must be a member with this co-op as the **active** profile (`NOT_A_MEMBER`,
+`STALE_STATE`; the repository checks the same at commit), the profile's type must allow the action
+(`ACTION_FORBIDDEN_BY_TYPE`, [PROFILE-TYPES.md](PROFILE-TYPES.md); a `transfer` needs `bank.transfer`, `bank.personal`
+and `bank.withdraw` out of or `bank.deposit` into the shared bank, and `applyInterest` credits personal banks only
+while `bank.personal` is allowed, so a type that denies the bank denies every route into or out of it), and another
+node must not hold the profile's bound world (`WRONG_NODE`, OD-1). A shared record reserved by a pending transfer refuses changes with
+`RECOVERY_REQUIRED` until recovery resolves it. A bound of the shared record (256 collections, contributors per
+collection, personal accounts) is `CAPACITY_EXCEEDED`.
+
+**Commit and receipts.** `deposit`, `withdraw`, the personal postings, `applyInterest` and `contribute` are one direct
+guarded commit of the shared record (`SHARED_MUTATE`); `transfer` is one recoverable intent (`BANK_TRANSFER`) whose
+after-image holds both postings, so no half-moved amount exists after a crash. Each leaves a **permanent receipt**
+that is never pruned; a resource that holds 1,000,000 of them refuses the next financial or delivery operation with
+`CAPACITY_EXCEEDED` (archival is an offline owner policy). A call without an operation id mints a new one, so
+repeating it posts again. Every ledger method has an overload taking the caller's own `operationId` (any UUID the
+caller never used before, kept until the outcome is known), bound to a digest of the request (kind, actor, profile,
+amount, accounts or collection, the actor's membership epoch; never a revision). **Retry contract:** the server looks
+the id up *before* validating anything (the permanent receipt on the profile; for `transfer` also the stored intent),
+and validates and runs the request only when the id is unknown. A known id is answered without checking the current
+balance, capacity, interest interval, role, type rules or active profile:
+
+| Stored under the id | Answer |
+| --- | --- |
+| the same request, committed | the bank as stored now; nothing posted again, no `ProfileBankTransactionEvent` (a withdraw retried after the balance moved, a deposit retried at the cap, interest retried inside the interval all complete this way) |
+| the same request, aborted (transfer only) | `IO_FAILURE`: nothing was applied under the id; a new attempt needs a new id |
+| the same request, undecided (a transfer intent awaiting recovery) | `RECOVERY_REQUIRED`: retry the same id after recovery |
+| another request | `INVALID_REQUEST` ("already used for a different request") |
+| any decision, but the actor is no longer a member | `INVALID_REQUEST`: the retry cannot be matched (the digest names the membership); `bankReceipt` tells the outcome |
+
+Each of these failures names the id in `ProfileOperationException.operationId()`. A consumer that debited the purse
+before `deposit` refunds it after a failure only when `bankReceipt(null, profileId, id)` shows no `COMMITTED`
+receipt. A retried transfer stages nothing. An `UNKNOWN_OUTCOME` failure names its operation in
+`ProfileOperationException.operationId()`; `bankReceipt(viewerId, profileId, operationId)` answers the permanent
+receipt (`ProfileReceiptInfo`: kind, committed or aborted, decided-at) or empty while the store holds none. Read
+`bank()` back as well; never repeat without the id. `applyInterest` posts when the OWNER calls it, no sooner than
+`bank.interest-interval-hours` (default 24) after the previous posting on the store clock (`INVALID_REQUEST` naming
+the wait; the record remembers its last posting); the server schedules no interest.
+
+**Purse (owner decision OD-4).** The purse stays per profile through its REQUIRED state adapter. `ProfileBankAccount`
+has only `SHARED` and `PERSONAL`; there is no purse↔bank transfer in the server (`/awf multiprofile coop bank transfer`
+naming the purse fails with `PURSE_TRANSFER_UNSUPPORTED`). A consumer that offers "deposit coins" debits its purse
+itself and then calls `deposit` (and `withdraw` before crediting the purse). The two steps are not one transaction:
+the consumer owns their ordering and its own compensation.
+
+**Salvage (owner decision OD-3).** `claimSalvage` delivers a removed membership's items (inventory, armour, off-hand,
+ender chest, in that order) into free inventory slots, then free ender-chest slots, of the claimant's captured state;
+the claimant's head, the salvage record and the permanent receipt commit in one intent, and only then is the state
+applied to the online player. What does not fit stays in the record (`remainingStacks`, the record's info shows
+`partial`); with no free slot at all the claim fails with `CAPACITY_EXCEEDED` and nothing changes; a delivered record
+fails with `INVALID_REQUEST`. The claimant must be online on this node (`PLAYER_OFFLINE`) with the co-op active
+(`STALE_STATE`), and no switch or login restore may be running (`SWITCH_IN_PROGRESS`). From admission until the
+committed state is applied, the claimant holds a delivery hold that every save path honours like a running switch
+(lockstep autosave, quit, shutdown capture and `save()` write nothing, `SWITCH_IN_PROGRESS`; no switch is admitted),
+so no pre-delivery capture overwrites the destination head. The capture is bounded by `switching.timeout-ms` like a
+switch's steps: a capture that does not finish in time fails the claim with `TIMEOUT`, nothing written and the hold
+released. A rejoin of the claimant starts unfrozen; a claim of the previous session can no longer commit
+(`CLAIM_LOST`). `applied == false` means the delivery is committed but the
+apply to the player failed: the hold stays until their session ends, they are disconnected, their quit writes nothing
+and the next authoritative login restores the committed state with the items. The first delivery that is about to be
+written raises the store to minimum build 54 (a refused claim raises nothing).
+
+**Events.** `ProfileBankTransactionEvent(profileId, actorId, type, collection, from, to, amount, sharedBalanceAfter,
+currency, operationId)` with `Type` `DEPOSIT`, `WITHDRAW`, `DEPOSIT_PERSONAL`, `WITHDRAW_PERSONAL`, `CONTRIBUTE`,
+`INTEREST` (amount = total credited), `TRANSFER`; and `ProfileSalvageDeliveredEvent(result)`. Both are asynchronous,
+fired on the co-op event thread after the durable commit only, with the same delivery limits as the co-op events
+above. `ProfileSalvageDeliveredEvent` fires before the apply to the player, so its `result().applied()` is `true`; the
+`claimSalvage` result is the one that reports a failed apply.
+
+New codes (appended): `PURSE_TRANSFER_UNSUPPORTED`. New value types: `ProfileBankInfo`, `ProfileCurrency`,
+`ProfileBankAccount`, `ProfileCollectionInfo` (with `Contribution`), `ProfileSalvageInfo`, `SalvageDeliveryResult`.
+
 ## Compatibility
 
 `AuroraWorlds` keeps its exact contract. `AuroraProfiles` is a new, separate service; plugins that do
@@ -326,7 +446,9 @@ not use profiles do not depend on Redis or on this API. The newer methods (`bind
 implementations. Build 51 changes no existing signature: `ProfileInfo` and the three-argument
 `ProfileRequest` constructor are as before, `ProfileRequest` gained two optional components, and
 `ProfileErrorCode` constants were only appended. Build 52 adds the co-op `default` methods listed above and changes no existing
-signature; `ProfileDetails` is unchanged and the co-op view is `CoopDetails`.
+signature; `ProfileDetails` is unchanged and the co-op view is `CoopDetails`. Build 54 only appends: the type registry, the
+bank/collections/salvage `default` methods, new records and events, and the codes `ACTION_FORBIDDEN_BY_TYPE`,
+`TYPE_UNKNOWN`, `PURSE_TRANSFER_UNSUPPORTED`; `ProfileDetails` gained the method `typeId()`.
 
 ## Build 50 world-binding API (owner testing pending)
 

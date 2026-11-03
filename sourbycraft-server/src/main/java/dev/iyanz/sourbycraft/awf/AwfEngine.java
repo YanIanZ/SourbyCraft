@@ -54,6 +54,27 @@ public final class AwfEngine {
      * folder is refused before it touches the store (recovery, temp cleanup, a Redis lease).
      */
     private final java.util.Set<String> opening = ConcurrentHashMap.newKeySet();
+    /**
+     * Managed worlds whose deletion is running (review P2-6): {@link #open} refuses to attach a storage under their folder
+     * while the mark is set, so a {@code createWorld} that races the deletion fails loudly instead of loading from a folder
+     * being emptied. Static: the deletion and the attach may run before or after the engine instance exists.
+     */
+    private static final java.util.Set<String> DELETING = ConcurrentHashMap.newKeySet();
+
+    /** Marks a managed world as being deleted; {@code false} when a deletion of it is already running. */
+    public static boolean beginDeletion(final String worldName) {
+        return DELETING.add(worldName);
+    }
+
+    /** Ends the deletion mark of {@link #beginDeletion}. */
+    public static void endDeletion(final String worldName) {
+        DELETING.remove(worldName);
+    }
+
+    /** Whether a deletion of the managed world is running. */
+    public static boolean deleting(final String worldName) {
+        return DELETING.contains(worldName);
+    }
     /** Why the configured backend is not registered, when the engine refused to register it itself. */
     private volatile String backendRefusal;
     private volatile boolean warnedMissingBackend;
@@ -472,6 +493,12 @@ public final class AwfEngine {
     }
 
     AwfRegionStorage open(final Path regionFolder, final RegionSink exportSink) throws IOException {
+        for (final String name : AwfRegionStorage.managedNames(regionFolder)) {
+            if (DELETING.contains(name)) {
+                throw new IOException("the AWF world " + name + " is being deleted; refusing to attach a storage under " + regionFolder
+                    + " while its folder is emptied (retry once the deletion finished, or create the world again afterwards)");
+            }
+        }
         final boolean managedWorld = managedFolder(regionFolder);
         final boolean listed = managedWorld || AwfRegionStorage.listed(regionFolder, this.settings.worlds());
         final boolean exporting = AwfRegionStorage.listed(regionFolder, this.settings.export());

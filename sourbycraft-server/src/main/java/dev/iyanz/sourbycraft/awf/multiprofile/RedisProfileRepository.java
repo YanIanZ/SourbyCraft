@@ -431,6 +431,11 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
     private volatile StoreFormat.Marker marker = StoreFormat.Marker.legacy();
     private volatile boolean closed;
 
+    /** The profile type definitions kept in this store's namespace ({@code <prefix>types}; Build 54, the same key {@code ProfileTypes.open} uses). */
+    public ProfileTypesStore typesStore() {
+        return ProfileTypesStore.redis(this.client, this.namespace + "types");
+    }
+
     private RedisProfileRepository(final RedisClient client, final SessionFabric sessions, final String namespace,
                                    final Durability durability, final boolean waitForAof) {
         this.client = client;
@@ -1418,6 +1423,40 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
         return pins;
     }
 
+    /**
+     * Build 54: writes a member snapshot into its stream hash and revision index without touching the head, any revision
+     * or receipt; the same snapshot twice is a no-op, another snapshot under the same id fails. A ready format-2 store is
+     * required. The blob is named by the head after-image of a delivery intent and pinned by it; until that commits it is
+     * an unreferenced entry the stream's pruning may remove.
+     */
+    @Override
+    public void stageMemberSnapshot(final ProfileSnapshot snapshot) throws IOException {
+        requireFormat2Read("stageMemberSnapshot");
+        if (StoreFormat.gate(this.marker).gate() != StoreFormat.Gate.FORMAT_2) {
+            throw new ProfileOperationException(ProfileErrorCode.STORE_FORMAT_REFUSED, "member snapshots are staged in a ready format-2"
+                + " store only; nothing was written");
+        }
+        if (!snapshot.member()) {
+            throw new ProfileOperationException(ProfileErrorCode.INVALID_REQUEST, "a staged member snapshot names member and epoch");
+        }
+        ensureWritable();
+        final Optional<ProfileSnapshot> existing = memberSnapshot(snapshot.profileId(), snapshot.memberId(), snapshot.membershipEpoch(),
+            snapshot.snapshotId());
+        if (existing.isPresent()) {
+            if (existing.get().revision() == snapshot.revision() && existing.get().checksum().equals(snapshot.checksum())) return;
+            throw new IOException("member stream " + memberSnapsKey(snapshot.profileId(), snapshot.memberId(), snapshot.membershipEpoch())
+                + " already holds snapshot " + snapshot.snapshotId() + " with other content");
+        }
+        final String snaps = memberSnapsKey(snapshot.profileId(), snapshot.memberId(), snapshot.membershipEpoch());
+        final byte[] frame = ProfileRecords.frame2(ProfileRecords.TYPE_MEMBER_SNAPSHOT, snapshot.revision(),
+            ProfileRecords.memberSnapshotPayload2(snapshot), snaps + " " + snapshot.snapshotId());
+        final List<Object[]> commands = new ArrayList<>(2);
+        commands.add(new Object[] {"HSET", snaps, snapshot.snapshotId().toString(), frame});
+        commands.add(new Object[] {"ZADD", memberSnapIndexKey(snapshot.profileId(), snapshot.memberId(), snapshot.membershipEpoch()),
+            Long.toString(snapshot.revision()), snapshot.snapshotId().toString()});
+        this.client.pipeline(commands);
+    }
+
     // ------------------------------------------------------------------ shared state
 
     @Override
@@ -1920,10 +1959,13 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
     @Override
     public Optional<ProfileReceipt> receipt(final UUID resource, final UUID operationId) throws IOException {
         requireFormat2Read("receipt");
-        final Object stored = this.client.callBounded(bound(ProfileRecords.TYPE_PAGE), "HGET", receiptsKey(resource), operationId.toString());
-        if (!(stored instanceof byte[] bytes)) return Optional.empty();
-        final ProfileReceipt receipt = decodeReceipt(bytes, resource, operationId, receiptsKey(resource) + " " + operationId);
-        return Optional.ofNullable(receipt);
+        // Retained kinds in the resource's hash, permanent kinds (Build 54) in its permanent hash: a lookup knows no kind.
+        for (final boolean permanent : new boolean[] {false, true}) {
+            final String key = receiptsKey(resource, permanent);
+            final Object stored = this.client.callBounded(bound(ProfileRecords.TYPE_PAGE), "HGET", key, operationId.toString());
+            if (stored instanceof byte[] bytes) return Optional.ofNullable(decodeReceipt(bytes, resource, operationId, key + " " + operationId));
+        }
+        return Optional.empty();
     }
 
     // ------------------------------------------------------------------ indexes
@@ -2129,8 +2171,9 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
         keys.add(guard.profile() == null ? meta() : this.coop.key(CoopClaimFabric.Kind.PROFILE, guard.profile().profileId()));
         keys.add(guard.actor() == null ? meta() : this.coop.key(CoopClaimFabric.Kind.PLAYER, guard.actor().playerId()));
         keys.add(guard.affected() == null ? meta() : this.coop.key(CoopClaimFabric.Kind.PLAYER, guard.affected().playerId()));
-        keys.add(receiptsKey(resource));
-        keys.add(receiptDigestKey(resource));
+        final boolean permanent = guard.operation().kind().permanent();
+        keys.add(receiptsKey(resource, permanent));
+        keys.add(receiptDigestKey(resource, permanent));
         return keys;
     }
 
@@ -2202,13 +2245,15 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
             return CommitResult.unknown(op, what + " was applied by Redis but not confirmed in its append-only file within "
                 + waitMillis + " ms; hold the gate and re-read the receipt or intent before any effect follows");
         }
-        if (result.status() == CommitResult.Status.COMMITTED && call.receipt != null) pruneReceipts(resource);
+        if (result.status() == CommitResult.Status.COMMITTED && call.receipt != null && !guard.operation().kind().permanent()) pruneReceipts(resource);
         return result;
     }
 
     /**
-     * Keeps at most {@link ProfileReceipt#RETAINED_PER_RESOURCE} receipts per resource (COOP-DESIGN §9 bounds): when
-     * the hash grows past it, the oldest by decision time are dropped from both receipt hashes. A dropped receipt
+     * Keeps at most {@link ProfileReceipt#RETAINED_PER_RESOURCE} receipts of the retained kinds per resource (COOP-DESIGN §9
+     * bounds): when the hash grows past it, the oldest by decision time are dropped from both receipt hashes. Permanent
+     * kinds (Build 54) use separate hashes that are never pruned; the write script refuses a new one past
+     * {@link ProfileReceipt.Page#MAX_RECEIPTS_PER_RESOURCE} ({@code LIMIT}, before any write). A dropped receipt
      * can no longer replay or refuse its operation id; the retention is sized so that any reconcile of a lost
      * reply (which happens right after the write) still finds its receipt. Best effort: a failure is logged.
      */
@@ -2231,7 +2276,7 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
             for (int i = 0; i < excess; i++) {
                 final String id = receipts.get(i).operationId().toString();
                 commands.add(new Object[] {"HDEL", receiptsKey(resource), id});
-                commands.add(new Object[] {"HDEL", receiptDigestKey(resource), id});
+                commands.add(new Object[] {"HDEL", receiptDigestKey(resource, false), id});
             }
             this.client.pipeline(commands);
         } catch (final IOException | RuntimeException failed) {
@@ -2253,7 +2298,7 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
             }
             case "REPLAYED" -> {
                 final ProfileReceipt receipt = fields.size() > 1 && fields.get(1) instanceof byte[] bytes && bytes.length > 0
-                    ? decodeReceipt(bytes, resource, op, receiptsKey(resource) + " " + op) : null;
+                    ? decodeReceipt(bytes, resource, op, receiptsKey(resource, guard.operation().kind().permanent()) + " " + op) : null;
                 if (receipt != null) requireOutcome(what, op, receipt.outcome(), proof);
                 return CommitResult.replayed(op, receipt, what + ": operation " + op + " was already decided; nothing changed");
             }
@@ -3726,11 +3771,16 @@ public final class RedisProfileRepository implements ProfileRepository, ProfileM
     }
 
     private String receiptsKey(final UUID resource) {
-        return this.namespace + "receipts:" + resource;
+        return receiptsKey(resource, false);
     }
 
-    private String receiptDigestKey(final UUID resource) {
-        return this.namespace + "rdigest:" + resource;
+    /** Receipts of the retained kinds, or (Build 54) the never-pruned permanent receipts of financial and delivery kinds. */
+    private String receiptsKey(final UUID resource, final boolean permanent) {
+        return this.namespace + (permanent ? "preceipts:" : "receipts:") + resource;
+    }
+
+    private String receiptDigestKey(final UUID resource, final boolean permanent) {
+        return this.namespace + (permanent ? "prdigest:" : "rdigest:") + resource;
     }
 
     private String inviteKey(final UUID inviteId) {

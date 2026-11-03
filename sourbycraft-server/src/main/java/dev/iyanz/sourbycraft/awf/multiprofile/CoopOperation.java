@@ -131,13 +131,13 @@ public record CoopOperation(UUID operationId, Kind kind, UUID actor, byte[] requ
         CONVERT_COOP(28),
         /** Build 52: cancel or expire a kick vote (electorate changed, target left, expiry). */
         VOTE_CANCEL(29),
-        /** Later build: shared or personal bank, collection or contribution mutation. */
+        /** Build 54: shared or personal bank, collection or contribution mutation (direct commit, permanent receipt). */
         SHARED_MUTATE(40),
-        /** Later build: bank transfer with receipt. */
+        /** Build 54: shared/personal bank transfer within one profile, run as an intent with a permanent receipt. */
         BANK_TRANSFER(41),
-        /** Later build: salvage preparation (source consumption). */
+        /** Reserved: salvage preparation (source consumption); Build 52 consumes the source inside {@link #MEMBER_REMOVE}. */
         SALVAGE_PREPARE(50),
-        /** Later build: salvage delivery into the claimant's head. */
+        /** Build 54: salvage delivery into the claimant's head (one intent: head, salvage record, receipt). */
         SALVAGE_DELIVER(51);
 
         private final int tag;
@@ -161,6 +161,20 @@ public record CoopOperation(UUID operationId, Kind kind, UUID actor, byte[] requ
             return switch (this) {
                 case MIGRATION, SAVE_MEMBER, LOGIN -> false;
                 default -> true;
+            };
+        }
+
+        /**
+         * Whether this kind's receipts are <em>permanent</em> (COOP-DESIGN §9): financial and delivery receipts are never
+         * dropped by the per-resource retention that bounds the other kinds ({@link ProfileReceipt#RETAINED_PER_RESOURCE});
+         * instead a resource holding {@link ProfileReceipt.Page#MAX_RECEIPTS_PER_RESOURCE} of them refuses the next such
+         * operation ({@code CAPACITY_EXCEEDED}) before any write. Replay protection of money and items therefore does not
+         * depend on how many other operations ran since.
+         */
+        public boolean permanent() {
+            return switch (this) {
+                case SHARED_MUTATE, BANK_TRANSFER, SALVAGE_PREPARE, SALVAGE_DELIVER -> true;
+                default -> false;
             };
         }
 

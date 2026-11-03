@@ -51,6 +51,15 @@ import java.util.UUID;
  * cannot mistake it for "not applied": it holds its gate, reads the intent or receipt, and resumes or
  * rolls forward. It never compensates on UNKNOWN.</p>
  *
+ * <h2>Receipts</h2>
+ *
+ * <p>Receipts of the retained kinds are bounded per resource ({@link ProfileReceipt#RETAINED_PER_RESOURCE}, oldest
+ * dropped). Receipts of the <em>permanent</em> kinds ({@link CoopOperation.Kind#permanent}: bank mutations, bank
+ * transfers, salvage delivery) are never dropped: both backends keep them apart (FILE: the resource's
+ * {@code permanent/} directory; Redis: separate hashes) and refuse the next such operation with
+ * {@code CAPACITY_EXCEEDED} once a resource holds {@link ProfileReceipt.Page#MAX_RECEIPTS_PER_RESOURCE} of them,
+ * before any write. {@link #receipt} finds both kinds.</p>
+ *
  * <h2>Bounds</h2>
  *
  * <p>Every read is bounded by the record type's payload limit ({@link ProfileRecords#maxPayload}) and
@@ -264,6 +273,18 @@ public interface ProfileRepository extends AutoCloseable {
     default CommitResult publishMemberSnapshot(MemberStateHead next, ProfileSnapshot snapshot, int retain, CoopWriteGuard guard)
         throws IOException {
         throw unsupported("publishMemberSnapshot");
+    }
+
+    /**
+     * Build 54: writes a member snapshot into its stream as an immutable blob without touching the head, any revision,
+     * index bound or receipt (FILE: the {@code <revision>-<id>.awfp} file; Redis: the stream hash and revision index).
+     * The same snapshot twice is a no-op; another snapshot under the same id fails. A ready format-2 store is required.
+     * Used by salvage delivery: the destination (and remainder) snapshots are staged before PREPARE, pinned by the intent
+     * and made authoritative only by the head after-image COMMIT installs; until then the blob is unreferenced and the
+     * stream's pruning may remove it. Never a substitute for {@link #publishMemberSnapshot} on a live stream.
+     */
+    default void stageMemberSnapshot(ProfileSnapshot snapshot) throws IOException {
+        throw unsupported("stageMemberSnapshot");
     }
 
     /**

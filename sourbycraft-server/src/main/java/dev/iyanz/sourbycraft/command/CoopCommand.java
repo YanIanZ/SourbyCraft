@@ -9,8 +9,10 @@ import dev.iyanz.sourbycraft.api.profile.CoopPage;
 import dev.iyanz.sourbycraft.api.profile.ProfileDetails;
 import dev.iyanz.sourbycraft.api.profile.ProfileErrorCode;
 import dev.iyanz.sourbycraft.api.profile.ProfileOperationException;
+import dev.iyanz.sourbycraft.awf.multiprofile.ProfileBank;
 import dev.iyanz.sourbycraft.awf.multiprofile.ProfileEngine;
 import dev.iyanz.sourbycraft.awf.multiprofile.ProfileRuntime;
+import dev.iyanz.sourbycraft.awf.multiprofile.ProfileSalvage;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
@@ -45,7 +47,17 @@ import static net.kyori.adventure.text.Component.text;
  * /coop vote &lt;vote-uuid&gt; &lt;yes|no&gt;      cast your ballot (the full id /coop info and the kick reply print)
  * /coop members [profile]              the members
  * /coop label &lt;text...|--clear&gt;        the shared display label of your active co-op profile (owner)
+ * /coop bank [profile]                 shared and personal bank balances (Build 54)
+ * /coop bank transfer &lt;to-personal|to-shared&gt; &lt;amount&gt;   move money between the shared bank and your personal bank
+ * /coop bank collections [profile]     the collections and who contributed
+ * /coop salvage [profile]              the outstanding salvage of your active co-op
+ * /coop salvage claim &lt;salvage-uuid&gt;   deliver a salvage record into your inventory (the profile must be active)
  * </pre>
+ *
+ * <p>Build 54 (owner decisions OD-3/OD-4): a player deposits or withdraws nothing here; the engine mints no money on a
+ * command and the purse is not a transfer party. Ledger credits and debits are the consumer plugin's (API) or the
+ * operator's ({@code /awf multiprofile coop bank deposit|withdraw ...} on behalf of an active member, receipted as that
+ * member's operation). Salvage is delivered into free inventory and ender-chest slots; what does not fit stays in the record.</p>
  *
  * <p>A {@code profile} is a profile UUID or the name of one of your profiles; an {@code invite} is its UUID or
  * the first characters of it ({@code accept}, {@code decline}); {@code cancel} and {@code vote} take the full UUID
@@ -66,7 +78,7 @@ public final class CoopCommand extends Command {
     static final String ADMIN_PERMISSION = "sourbycraft.command.awf.admin";
 
     private static final List<String> SUBCOMMANDS = List.of("info", "convert", "invite", "invites", "accept", "decline", "cancel",
-        "leave", "kick", "vote", "members", "label");
+        "leave", "kick", "vote", "members", "label", "bank", "salvage");
 
     private final BiConsumer<CommandSender, Runnable> reply;
 
@@ -77,7 +89,7 @@ public final class CoopCommand extends Command {
     CoopCommand(final String name, final BiConsumer<CommandSender, Runnable> reply) {
         super(name);
         this.description = "Co-op profiles: invite, accept, leave, vote-kick (AWF MultiProfile)";
-        this.usageMessage = "/coop <info|convert|invite|invites|accept|decline|cancel|leave|kick|vote|members|label|switch>";
+        this.usageMessage = "/coop <info|convert|invite|invites|accept|decline|cancel|leave|kick|vote|members|label|switch|bank|salvage>";
         this.setPermission(PERMISSION);
         this.reply = reply;
     }
@@ -125,8 +137,8 @@ public final class CoopCommand extends Command {
                 s.sendMessage(UiPanel.footer());
             });
             case "accept" -> withInvite(s, engine, me, arg(args, 1), invite -> done(s, engine.acceptInvite(me, invite), member ->
-                s.sendMessage(text("You joined the co-op as " + member.role() + ". Switching into it arrives in a later build;"
-                    + " until then only its owner plays it", SourbyCraftColors.SUCCESS))));
+                s.sendMessage(text("You joined the co-op as " + member.role() + ". Play it with /coop switch <profile>",
+                    SourbyCraftColors.SUCCESS))));
             case "decline" -> withInvite(s, engine, me, arg(args, 1), invite -> done(s, engine.declineInvite(me, invite), ignored ->
                 s.sendMessage(text("Declined invite " + shortId(invite), SourbyCraftColors.SUCCESS))));
             case "cancel" -> {
@@ -142,8 +154,8 @@ public final class CoopCommand extends Command {
                     return true;
                 }
                 withProfile(s, engine, me, arg(args, 1), profile -> done(s, engine.leave(me, profile), ignored ->
-                    s.sendMessage(text("You left co-op profile " + profile + ". Your items there are recorded for salvage;"
-                        + " delivery arrives in a later build", SourbyCraftColors.SUCCESS))));
+                    s.sendMessage(text("You left co-op profile " + profile + ". Your items there are recorded as salvage; a member"
+                        + " with the profile active claims them with /coop salvage claim", SourbyCraftColors.SUCCESS))));
             }
             case "switch" -> {
                 if (arg(args, 1) == null) {
@@ -187,6 +199,8 @@ public final class CoopCommand extends Command {
                 withProfile(s, engine, me, null, profile -> done(s, engine.setCoopLabel(me, profile, label), ignored ->
                     s.sendMessage(text(label == null ? "Label cleared" : "Label set to \"" + label + "\"", SourbyCraftColors.SUCCESS))));
             }
+            case "bank" -> bank(s, engine, me, args);
+            case "salvage" -> salvage(s, engine, me, args);
             default -> usage(s);
         }
         return true;
@@ -203,7 +217,9 @@ public final class CoopCommand extends Command {
     static void admin(final CommandSender s, final ProfileEngine engine, final String[] args, final BiConsumer<CommandSender, Runnable> reply,
                       final boolean admin) {
         final String sub = args.length > 2 ? args[2].toLowerCase(Locale.ROOT) : "";
-        final boolean read = sub.equals("info") || sub.equals("members") || sub.equals("invites");
+        final boolean read = sub.equals("info") || sub.equals("members") || sub.equals("invites")
+            || (sub.equals("bank") && (arg(args, 3) == null || arg(args, 3).equalsIgnoreCase("balance") || arg(args, 3).equalsIgnoreCase("collections")))
+            || (sub.equals("salvage") && (arg(args, 3) == null || arg(args, 3).equalsIgnoreCase("list")));
         if (!read && !sub.isEmpty() && SUBCOMMANDS.contains(sub) && !admin) {
             s.sendMessage(text("You do not have " + ADMIN_PERMISSION + "; co-op changes on behalf of a player need it",
                 SourbyCraftColors.DANGER));
@@ -263,7 +279,7 @@ public final class CoopCommand extends Command {
                 final UUID player = playerArg(s, arg(args, 3), usage);
                 final UUID profile = player == null ? null : uuid(s, arg(args, 4), usage);
                 if (profile != null) r.done(engine.leave(player, profile), ignored -> r.ok(player + " left " + profile
-                    + "; an UNAVAILABLE salvage record was written"));
+                    + "; a salvage record was written (see /awf multiprofile coop salvage list " + profile + ")"));
             }
             case "kick" -> {
                 final String usage = "/awf multiprofile coop kick <actor> <profile-uuid> <target>";
@@ -284,6 +300,8 @@ public final class CoopCommand extends Command {
                 }
                 r.done(engine.voteKick(voter, vote, choice.equalsIgnoreCase("yes")), info -> r.vote(info));
             }
+            case "bank" -> adminBank(s, engine, args, r);
+            case "salvage" -> adminSalvage(s, engine, args, r);
             case "label" -> {
                 final String usage = "/awf multiprofile coop label <actor> <profile-uuid> <text...|--clear>";
                 final UUID actor = playerArg(s, arg(args, 3), usage);
@@ -299,7 +317,8 @@ public final class CoopCommand extends Command {
             default -> s.sendMessage(text("Usage: /awf multiprofile coop <convert <owner> <profile>|invite <actor> <profile> <invitee>|"
                 + "accept <player> <invite>|decline <player> <invite>|cancel <actor> <invite>|leave <player> <profile>|"
                 + "kick <actor> <profile> <target>|vote <voter> <vote> <yes|no>|members <profile> [cursor]|"
-                + "invites <profile> [cursor]|invites for <player>|info <profile>|label <actor> <profile> <text|--clear>>",
+                + "invites <profile> [cursor]|invites for <player>|info <profile>|label <actor> <profile> <text|--clear>|"
+                + "bank ...|salvage ...>",
                 SourbyCraftColors.WARNING));
         }
     }
@@ -463,7 +482,219 @@ public final class CoopCommand extends Command {
         s.sendMessage(UiPanel.row("/coop leave <profile>", "leave a co-op (not your active profile)"));
         s.sendMessage(UiPanel.row("/coop kick <player> [profile] | vote <vote> <yes|no>", "kick votes"));
         s.sendMessage(UiPanel.row("/coop members [profile] | label <text|--clear>", "members, shared label"));
+        s.sendMessage(UiPanel.row("/coop bank [transfer <to-personal|to-shared> <amount>|collections]", "shared and personal bank"));
+        s.sendMessage(UiPanel.row("/coop salvage [claim <salvage-uuid>]", "items left by removed members"));
         s.sendMessage(UiPanel.footer());
+    }
+
+    // ------------------------------------------------------------------ bank and salvage (Build 54)
+
+    /** {@code /coop bank [profile] | bank transfer <to-personal|to-shared> <amount> [profile] | bank collections [profile]}. */
+    private void bank(final CommandSender s, final ProfileEngine engine, final UUID me, final String[] args) {
+        final String sub = arg(args, 1) == null ? "balance" : args[1].toLowerCase(Locale.ROOT);
+        switch (sub) {
+            case "transfer" -> {
+                final String direction = arg(args, 2);
+                final String amount = arg(args, 3);
+                if (direction == null || amount == null) {
+                    s.sendMessage(text("Usage: /coop bank transfer <to-personal|to-shared> <amount> [profile]", SourbyCraftColors.WARNING));
+                    return;
+                }
+                final ProfileBank.Account from;
+                final ProfileBank.Account to;
+                switch (direction.toLowerCase(Locale.ROOT)) {
+                    case "to-personal", "withdraw" -> {
+                        from = ProfileBank.Account.SHARED;
+                        to = ProfileBank.Account.PERSONAL;
+                    }
+                    case "to-shared", "deposit" -> {
+                        from = ProfileBank.Account.PERSONAL;
+                        to = ProfileBank.Account.SHARED;
+                    }
+                    default -> {
+                        s.sendMessage(text("Direction is to-personal (shared -> your personal bank) or to-shared; the purse is not a"
+                            + " transfer party (owner decision OD-4)", SourbyCraftColors.WARNING));
+                        return;
+                    }
+                }
+                withProfile(s, engine, me, arg(args, 4), profile -> withAmount(s, engine, amount, minor ->
+                    done(s, engine.transfer(me, profile, from, to, minor), view -> bankView(s, view, me))));
+            }
+            case "collections" -> withProfile(s, engine, me, arg(args, 2), profile -> done(s, engine.collections(me, profile),
+                collections -> collectionsView(s, collections)));
+            case "balance" -> withProfile(s, engine, me, arg(args, 2), profile -> done(s, engine.bank(me, profile), view -> bankView(s, view, me)));
+            default -> {
+                // "/coop bank <profile>": the balances of that profile
+                withProfile(s, engine, me, args[1], profile -> done(s, engine.bank(me, profile), view -> bankView(s, view, me)));
+            }
+        }
+    }
+
+    /** {@code /coop salvage [profile] | salvage claim <salvage-uuid>}. */
+    private void salvage(final CommandSender s, final ProfileEngine engine, final UUID me, final String[] args) {
+        if ("claim".equalsIgnoreCase(arg(args, 1))) {
+            final UUID salvage = uuid(s, arg(args, 2), "/coop salvage claim <salvage-uuid> (the full id /coop salvage prints)");
+            if (salvage == null) return;
+            done(s, engine.claimSalvage(me, salvage), delivery -> deliveryReply(s, delivery));
+            return;
+        }
+        final String typed = "list".equalsIgnoreCase(arg(args, 1)) ? arg(args, 2) : arg(args, 1);
+        withProfile(s, engine, me, typed, profile -> done(s, engine.salvage(me, profile, null), listing -> salvageView(s, listing)));
+    }
+
+    /** The operator's bank form; every change runs on behalf of a named active member and is receipted as that member's operation. */
+    private static void adminBank(final CommandSender s, final ProfileEngine engine, final String[] args, final Responder r) {
+        final String sub = arg(args, 3) == null ? "balance" : args[3].toLowerCase(Locale.ROOT);
+        switch (sub) {
+            case "balance" -> {
+                final UUID profile = uuid(s, arg(args, 4), "/awf multiprofile coop bank balance <profile-uuid>");
+                if (profile != null) r.done(engine.bank(null, profile), view -> bankView(s, view, null));
+            }
+            case "collections" -> {
+                final UUID profile = uuid(s, arg(args, 4), "/awf multiprofile coop bank collections <profile-uuid>");
+                if (profile != null) r.done(engine.collections(null, profile), collections -> collectionsView(s, collections));
+            }
+            case "deposit", "withdraw", "personal-deposit", "personal-withdraw" -> {
+                final String usage = "/awf multiprofile coop bank " + sub + " <actor> <profile-uuid> <amount>";
+                final UUID actor = playerArg(s, arg(args, 4), usage);
+                final UUID profile = actor == null ? null : uuid(s, arg(args, 5), usage);
+                if (profile == null || arg(args, 6) == null) {
+                    if (profile != null) s.sendMessage(text("Usage: " + usage, SourbyCraftColors.WARNING));
+                    return;
+                }
+                withAmount(s, engine, arg(args, 6), minor -> r.done(switch (sub) {
+                    case "deposit" -> engine.deposit(actor, profile, minor);
+                    case "withdraw" -> engine.withdraw(actor, profile, minor);
+                    case "personal-deposit" -> engine.depositPersonal(actor, profile, minor);
+                    default -> engine.withdrawPersonal(actor, profile, minor);
+                }, view -> bankView(s, view, actor)));
+            }
+            case "transfer" -> {
+                final String usage = "/awf multiprofile coop bank transfer <actor> <profile-uuid> <shared|personal> <shared|personal> <amount>";
+                final UUID actor = playerArg(s, arg(args, 4), usage);
+                final UUID profile = actor == null ? null : uuid(s, arg(args, 5), usage);
+                if (profile == null || arg(args, 8) == null) {
+                    if (profile != null) s.sendMessage(text("Usage: " + usage, SourbyCraftColors.WARNING));
+                    return;
+                }
+                final ProfileBank.Account from;
+                final ProfileBank.Account to;
+                try {
+                    from = ProfileBank.Account.parse(arg(args, 6));
+                    to = ProfileBank.Account.parse(arg(args, 7));
+                } catch (final IllegalArgumentException invalid) {
+                    s.sendMessage(text(invalid.getMessage() + ". Usage: " + usage, SourbyCraftColors.DANGER));
+                    return;
+                }
+                withAmount(s, engine, arg(args, 8), minor -> r.done(engine.transfer(actor, profile, from, to, minor), view -> bankView(s, view, actor)));
+            }
+            case "contribute" -> {
+                final String usage = "/awf multiprofile coop bank contribute <actor> <profile-uuid> <collection> <amount>";
+                final UUID actor = playerArg(s, arg(args, 4), usage);
+                final UUID profile = actor == null ? null : uuid(s, arg(args, 5), usage);
+                if (profile == null || arg(args, 7) == null) {
+                    if (profile != null) s.sendMessage(text("Usage: " + usage, SourbyCraftColors.WARNING));
+                    return;
+                }
+                withAmount(s, engine, arg(args, 7), minor -> r.done(engine.contribute(actor, profile, arg(args, 6), minor), view -> bankView(s, view, actor)));
+            }
+            case "interest" -> {
+                final String usage = "/awf multiprofile coop bank interest <owner> <profile-uuid>";
+                final UUID actor = playerArg(s, arg(args, 4), usage);
+                final UUID profile = actor == null ? null : uuid(s, arg(args, 5), usage);
+                if (profile != null) r.done(engine.applyInterest(actor, profile), view -> bankView(s, view, actor));
+            }
+            default -> s.sendMessage(text("Usage: /awf multiprofile coop bank <balance <profile>|collections <profile>|deposit|withdraw|"
+                + "personal-deposit|personal-withdraw <actor> <profile> <amount>|transfer <actor> <profile> <from> <to> <amount>|"
+                + "contribute <actor> <profile> <collection> <amount>|interest <owner> <profile>>", SourbyCraftColors.WARNING));
+        }
+    }
+
+    private static void adminSalvage(final CommandSender s, final ProfileEngine engine, final String[] args, final Responder r) {
+        final String sub = arg(args, 3) == null ? "list" : args[3].toLowerCase(Locale.ROOT);
+        switch (sub) {
+            case "list" -> {
+                final UUID profile = uuid(s, arg(args, 4), "/awf multiprofile coop salvage list <profile-uuid> [cursor]");
+                if (profile != null) r.done(engine.salvage(null, profile, arg(args, 5)), listing -> salvageView(s, listing));
+            }
+            case "claim" -> {
+                final String usage = "/awf multiprofile coop salvage claim <claimant> <salvage-uuid>";
+                final UUID claimant = playerArg(s, arg(args, 4), usage);
+                final UUID salvage = claimant == null ? null : uuid(s, arg(args, 5), usage);
+                if (salvage != null) r.done(engine.claimSalvage(claimant, salvage), delivery -> deliveryReply(s, delivery));
+            }
+            default -> s.sendMessage(text("Usage: /awf multiprofile coop salvage <list <profile> [cursor]|claim <claimant> <salvage-uuid>>",
+                SourbyCraftColors.WARNING));
+        }
+    }
+
+    /** Parses an amount in the engine's currency (exact; decimals only up to the currency scale) and runs {@code action} with the minor units. */
+    private static void withAmount(final CommandSender s, final ProfileEngine engine, final String typed, final java.util.function.LongConsumer action) {
+        final long minor;
+        try {
+            minor = ProfileBank.parseAmount(typed, engine.bankPolicy().currency());
+        } catch (final ProfileOperationException invalid) {
+            s.sendMessage(text(invalid.getMessage(), SourbyCraftColors.DANGER));
+            return;
+        }
+        action.accept(minor);
+    }
+
+    private static void bankView(final CommandSender s, final ProfileBank.View view, final UUID viewer) {
+        final var currency = view.currency();
+        s.sendMessage(UiPanel.header("Bank of " + view.profileId()));
+        s.sendMessage(UiPanel.row("shared", ProfileBank.format(view.sharedBalance(), currency) + " " + currency.currencyId()
+            + (view.sharedCapacity() > 0 ? " of " + ProfileBank.format(view.sharedCapacity(), currency) : "")
+            + (view.pendingTransfers() > 0 ? " (" + ProfileBank.format(view.sharedAvailable(), currency) + " available)" : "")));
+        if (viewer != null) {
+            s.sendMessage(UiPanel.row("personal", ProfileBank.format(view.personalBalance(), currency) + " " + currency.currencyId()
+                + (view.personalCapacity() > 0 ? " of " + ProfileBank.format(view.personalCapacity(), currency) : "")));
+        } else {
+            for (final var entry : view.personalBalances().entrySet()) {
+                s.sendMessage(UiPanel.row("  " + nameOf(entry.getKey()), ProfileBank.format(entry.getValue(), currency)));
+            }
+        }
+        s.sendMessage(UiPanel.hint("ledger revision " + view.revision() + "; /coop bank transfer <to-personal|to-shared> <amount>"));
+        s.sendMessage(UiPanel.footer());
+    }
+
+    private static void collectionsView(final CommandSender s, final ProfileBank.Collections collections) {
+        s.sendMessage(UiPanel.header("Collections of " + collections.profileId()));
+        if (collections.totals().isEmpty()) s.sendMessage(UiPanel.row("none", "nothing contributed yet"));
+        for (final var entry : collections.totals().entrySet()) {
+            final StringBuilder who = new StringBuilder();
+            final var ledger = collections.contributions().getOrDefault(entry.getKey(), java.util.Map.of());
+            for (final var contribution : ledger.entrySet()) {
+                if (!who.isEmpty()) who.append(", ");
+                who.append(nameOf(contribution.getKey())).append(' ').append(contribution.getValue());
+            }
+            s.sendMessage(UiPanel.row(entry.getKey(), entry.getValue() + (who.isEmpty() ? "" : " (" + who + ")")));
+        }
+        s.sendMessage(UiPanel.footer());
+    }
+
+    private static void salvageView(final CommandSender s, final ProfileEngine.SalvageListing listing) {
+        s.sendMessage(UiPanel.header("Salvage"));
+        if (listing.items().isEmpty()) s.sendMessage(UiPanel.row("none", "no outstanding salvage"));
+        for (final ProfileSalvage salvage : listing.items()) {
+            final String what = switch (salvage.state()) {
+                case UNAVAILABLE -> ProfileSalvage.NIL.equals(salvage.sourceSnapshotId()) ? "nothing was published; claim closes it"
+                    : "items of the removed member's last snapshot";
+                case AVAILABLE -> "remainder of an earlier claim (" + salvage.payloadLength() + " bytes)";
+                case DELIVERED -> "delivered";
+            };
+            s.sendMessage(UiPanel.row(salvage.id().toString(), "from " + nameOf(salvage.removedMember()) + ": " + what));
+        }
+        if (listing.nextCursor() != null) s.sendMessage(UiPanel.hint("next page: " + listing.nextCursor()));
+        s.sendMessage(UiPanel.hint("/coop salvage claim <salvage-uuid> delivers into your free inventory and ender chest slots"));
+        s.sendMessage(UiPanel.footer());
+    }
+
+    private static void deliveryReply(final CommandSender s, final ProfileEngine.SalvageDelivery delivery) {
+        final String rest = delivery.complete() ? "the record is delivered" : delivery.remaining() + " stack(s) stay in the record (free some slots and claim again)";
+        s.sendMessage(text("Salvage " + shortId(delivery.salvageId()) + ": " + delivery.delivered() + " stack(s) delivered; " + rest
+            + (delivery.applied() ? "" : ". The delivery is committed but could not be applied to the player; it is restored at the next login")
+            + " (operation " + delivery.operationId() + ")", delivery.applied() ? SourbyCraftColors.SUCCESS : SourbyCraftColors.WARNING));
     }
 
     // ------------------------------------------------------------------ shared helpers
@@ -509,7 +740,9 @@ public final class CoopCommand extends Command {
             case TYPE_NOT_ALLOWED -> " (see aurora.awf.multiprofile.coop.allowed-types)";
             case NAME_INVALID -> " (1-32 printable characters, no surrounding spaces)";
             case UNKNOWN_OUTCOME -> " (the store did not confirm the write; check before retrying)";
-            case CAPACITY_EXCEEDED -> " (a co-op bound is reached: open invitations, votes or salvage records)";
+            case CAPACITY_EXCEEDED -> " (a bound is reached: open invitations, votes, salvage records, permanent receipts, or no free slot for a delivery)";
+            case ACTION_FORBIDDEN_BY_TYPE -> " (the profile's type does not allow this action)";
+            case PLAYER_OFFLINE -> " (the player must be online here with the profile active)";
             case RECOVERY_REQUIRED -> " (a pending operation is resolved at the next login or start)";
             case OWNERSHIP_CONFLICT -> " (the account or profile is busy on another server; retry later)";
             default -> "";
@@ -587,6 +820,9 @@ public final class CoopCommand extends Command {
             return SUBCOMMANDS.stream().filter(sub -> sub.startsWith(lower)).toList();
         }
         if (args.length == 3 && args[0].equalsIgnoreCase("vote")) return List.of("yes", "no");
+        if (args.length == 2 && args[0].equalsIgnoreCase("bank")) return List.of("transfer", "collections");
+        if (args.length == 3 && args[0].equalsIgnoreCase("bank") && args[1].equalsIgnoreCase("transfer")) return List.of("to-personal", "to-shared");
+        if (args.length == 2 && args[0].equalsIgnoreCase("salvage")) return List.of("claim");
         return List.of();
     }
 }

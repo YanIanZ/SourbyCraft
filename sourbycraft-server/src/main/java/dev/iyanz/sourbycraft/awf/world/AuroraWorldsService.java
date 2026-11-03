@@ -55,6 +55,14 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
     /** The chunk I/O drain each world's save is running or waiting behind, by world; see {@link #boundedDrain}. */
     private final java.util.Map<String, CompletableFuture<Void>> drains = new java.util.concurrent.ConcurrentHashMap<>();
     private final WorldOperationGate operations = new WorldOperationGate(AuroraWorldsService::onGlobalTick);
+    /** When the last save through this service completed durably, by world (wall clock, since startup). */
+    private final java.util.Map<String, java.time.Instant> lastSaved = new java.util.concurrent.ConcurrentHashMap<>();
+    /** Disposable instances whose deletion the sweep has started and not seen finish; see {@link #sweepDisposableInstances}. */
+    private final Set<String> instanceDeletes = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    /** Disposable instances whose failed deletion was logged, so it is logged once until it succeeds. */
+    private final Set<String> instanceDeleteWarned = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    /** Set once startup has finished ({@link #scheduleAutoload}); the sweep runs only from then on. */
+    private volatile boolean sweeping;
 
     /** A world's dimension folder; the server's storage source in production. */
     private final java.util.function.Function<String, Path> folders;
@@ -79,6 +87,48 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
         for (final String stuck : this.operations.overdue(WorldOperationGate.OVERDUE_NANOS)) {
             SourbyLogger.warn("Aurora World Fabric: operation " + stuck + " has not finished; its world stays"
                 + " locked against other operations until it does (or until restart)");
+        }
+        sweepDisposableInstances();
+    }
+
+    /**
+     * Starts the deletion of every disposable instance ({@link #createInstance}) that is unloaded,
+     * has no AWF storage open under its folder and no operation in progress: one unloaded other than
+     * through {@link #unload}, one whose deletion after its unload could not run yet, and, after a
+     * restart, one the server stopped or crashed with. Runs once a second on the AWF maintenance
+     * thread, from the end of startup on and not while the server stops. Does no I/O itself: the
+     * deletion is {@link #delete}'s, under the world's reservation, on the I/O lane. A world that is
+     * busy is retried at the next pass; a deletion that fails is logged once and retried too.
+     */
+    void sweepDisposableInstances() {
+        if (!this.sweeping || serverStopping()) return;
+        for (final AuroraWorldRegistry.Entry entry : this.registry.all()) {
+            if (!entry.deletedOnUnload()) continue;
+            final String name = entry.name();
+            if (this.instanceDeletes.contains(name) || Bukkit.getWorld(name) != null) continue;
+            if (!AwfEngine.storagesUnder(this.folders.apply(name)).isEmpty()) continue;
+            if (!this.instanceDeletes.add(name)) continue;
+            final CompletableFuture<Void> deleted;
+            try {
+                deleted = this.operations.run("deleteInstance", worldResources(name), () -> deleteInternal(name, false));
+            } catch (final RuntimeException failed) {
+                this.instanceDeletes.remove(name);
+                continue;
+            }
+            deleted.whenComplete((ok, failed) -> {
+                this.instanceDeletes.remove(name);
+                if (failed == null) {
+                    this.instanceDeleteWarned.remove(name);
+                    return;
+                }
+                final Throwable reason = cause(failed);
+                if (reason instanceof dev.iyanz.sourbycraft.api.world.WorldOperationBusyException) return;
+                if (this.instanceDeleteWarned.add(name)) {
+                    SourbyLogger.warn("Aurora World Fabric: the disposable instance " + name + " is unloaded but could"
+                        + " not be deleted yet (" + (reason.getMessage() == null ? reason.getClass().getSimpleName()
+                        : reason.getMessage()) + "); retrying every second (logged once)");
+                }
+            });
         }
     }
 
@@ -160,7 +210,7 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
 
     @Override
     public CompletableFuture<Void> delete(final String name) {
-        return this.operations.run("delete", worldResources(name), () -> deleteInternal(name));
+        return this.operations.run("delete", worldResources(name), () -> deleteInternal(name, true));
     }
 
     @Override
@@ -185,6 +235,163 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
     @Override
     public boolean isLoaded(final String name) {
         return Bukkit.getWorld(name) != null;
+    }
+
+    @Override
+    public CompletableFuture<World> createInstance(final String template, final String name) {
+        final var resources = new java.util.ArrayList<>(worldResources(name));
+        resources.add(new WorldOperationGate.Resource("template:" + template, true));
+        return this.operations.run("createInstance", resources, () -> createFromTemplateInternal(template, name, false, true));
+    }
+
+    /** No I/O: the registry's published snapshot, the configured backend and the loaded worlds. */
+    @Override
+    public List<dev.iyanz.sourbycraft.api.world.AwfWorldSummary> listWorlds() {
+        final Backend backend = backend();
+        final List<dev.iyanz.sourbycraft.api.world.AwfWorldSummary> worlds = new java.util.ArrayList<>();
+        for (final AuroraWorldRegistry.Entry entry : this.registry.all()) worlds.add(summary(entry, backend));
+        return List.copyOf(worlds);
+    }
+
+    /** The configured backend and persistence mode, as the API names them. */
+    private record Backend(dev.iyanz.sourbycraft.api.world.AwfBackendKind kind, String name,
+                           dev.iyanz.sourbycraft.api.world.AwfPersistenceMode persistence) {}
+
+    /**
+     * The configured backend. {@link AwfEngine#backendName()} creates the engine on first use, as
+     * {@link #storage()} always has; by the time plugins enable it exists (the default worlds' storages
+     * attached through it).
+     */
+    private static Backend backend() {
+        final String name = AwfEngine.backendName();
+        final dev.iyanz.sourbycraft.api.world.AwfBackendKind kind = switch (name) {
+            case "file" -> dev.iyanz.sourbycraft.api.world.AwfBackendKind.FILE;
+            case "redis" -> dev.iyanz.sourbycraft.api.world.AwfBackendKind.REDIS;
+            default -> dev.iyanz.sourbycraft.api.world.AwfBackendKind.OTHER;
+        };
+        final AwfEngine engine = AwfEngine.ifStarted();
+        final dev.iyanz.sourbycraft.awf.PersistenceMode mode = engine == null
+            ? dev.iyanz.sourbycraft.awf.PersistenceMode.INCREMENTAL : engine.settings().persistence();
+        return new Backend(kind, name, dev.iyanz.sourbycraft.api.world.AwfPersistenceMode.valueOf(mode.name()));
+    }
+
+    private static dev.iyanz.sourbycraft.api.world.AwfWorldSummary summary(final AuroraWorldRegistry.Entry entry,
+                                                                           final Backend backend) {
+        return new dev.iyanz.sourbycraft.api.world.AwfWorldSummary(entry.name(), Bukkit.getWorld(entry.name()) != null,
+            entry.autoload(), Optional.ofNullable(entry.template()), backend.kind(), backend.name(), backend.persistence(),
+            entry.deletedOnUnload());
+    }
+
+    /**
+     * Gathered on the I/O lane: the open storages' uncommitted chunks (in memory) and, on the FILE
+     * backend, the stores' size and the time of their newest commit, read from disk.
+     */
+    @Override
+    public CompletableFuture<Optional<dev.iyanz.sourbycraft.api.world.AwfWorldInfo>> info(final String name) {
+        final AuroraWorldRegistry.Entry entry = this.registry.get(name).orElse(null);
+        if (entry == null) return CompletableFuture.completedFuture(Optional.empty());
+        return dev.iyanz.sourbycraft.util.VirtualExecutor.supply(() -> {
+            final Backend backend = backend();
+            final Path folder = this.folders.apply(name);
+            int dirty = 0;
+            int open = 0;
+            for (final AwfRegionStorage storage : AwfEngine.storagesUnder(folder)) {
+                if (!folder.equals(Path.of(storage.name()).getParent())) continue;
+                open++;
+                dirty += storage.dirtyCount();
+            }
+            java.util.OptionalLong bytes = java.util.OptionalLong.empty();
+            java.time.Instant lastCommit = null;
+            final String format;
+            if (backend.kind() == dev.iyanz.sourbycraft.api.world.AwfBackendKind.FILE) {
+                format = "awf-generations";
+                final FileStores stores = fileStores(folder);
+                bytes = stores.bytes();
+                lastCommit = stores.lastCommit();
+            } else {
+                format = backend.name();
+            }
+            if (lastCommit == null) lastCommit = this.lastSaved.get(name);
+            return Optional.of(new dev.iyanz.sourbycraft.api.world.AwfWorldInfo(summary(entry, backend), format, bytes,
+                dirty, open, Optional.ofNullable(lastCommit)));
+        });
+    }
+
+    /** What the FILE backend's stores of a dimension folder hold on disk. */
+    private record FileStores(java.util.OptionalLong bytes, java.time.Instant lastCommit) {}
+
+    /**
+     * Sums the files of the world's {@code <storage>.awf} directories (at most
+     * {@link dev.iyanz.sourbycraft.api.world.AwfWorldInfo#MAX_COUNTED_FILES}, else the size is unknown) and
+     * takes the newest modification time of their {@code generations-root/CURRENT} pointers. Blocking: the
+     * I/O lane only.
+     */
+    private static FileStores fileStores(final Path folder) {
+        long total = 0L;
+        int files = 0;
+        boolean known = true;
+        java.time.Instant newest = null;
+        for (final String storage : AwfEngine.STORAGE_FOLDERS) {
+            final Path store = Path.of(AwfEngine.storeId(folder, storage) + AwfRegionStorage.STORE_SUFFIX);
+            if (!Files.isDirectory(store)) continue;
+            try {
+                final java.nio.file.attribute.FileTime written = Files.getLastModifiedTime(
+                    store.resolve("generations-root").resolve("CURRENT"));
+                if (newest == null || written.toInstant().isAfter(newest)) newest = written.toInstant();
+            } catch (final IOException noCommitYet) {
+                // no committed generation yet, or unreadable: no commit time from this store
+            }
+            if (!known) continue;
+            try (Stream<Path> walk = Files.walk(store)) {
+                final java.util.Iterator<Path> paths = walk.iterator();
+                while (paths.hasNext()) {
+                    final Path path = paths.next();
+                    final java.nio.file.attribute.BasicFileAttributes attributes;
+                    try {
+                        attributes = Files.readAttributes(path, java.nio.file.attribute.BasicFileAttributes.class);
+                    } catch (final IOException vanished) {
+                        continue; // removed by a concurrent commit's garbage collection
+                    }
+                    if (!attributes.isRegularFile()) continue;
+                    if (++files > dev.iyanz.sourbycraft.api.world.AwfWorldInfo.MAX_COUNTED_FILES) {
+                        known = false;
+                        break;
+                    }
+                    total += attributes.size();
+                }
+            } catch (final IOException | java.io.UncheckedIOException unreadable) {
+                known = false;
+            }
+        }
+        return new FileStores(known ? java.util.OptionalLong.of(total) : java.util.OptionalLong.empty(), newest);
+    }
+
+    @Override
+    public CompletableFuture<Set<String>> listTemplates() {
+        return dev.iyanz.sourbycraft.util.VirtualExecutor.supply(() -> {
+            try {
+                return this.templates.list();
+            } catch (final IOException failed) {
+                throw new CompletionException(failed);
+            }
+        });
+    }
+
+    /**
+     * A world managed through this service, or one whose dimension folder has an AWF storage open
+     * directly in it (a world listed in {@code aurora.awf.worlds}). No I/O.
+     */
+    @Override
+    public boolean isAwfWorld(final World world) {
+        if (this.registry.contains(world.getName())) return true;
+        if (!(world instanceof CraftWorld craft)) return false;
+        final MinecraftServer server = MinecraftServer.getServer();
+        if (server == null) return false;
+        final Path folder = server.storageSource.getDimensionPath(craft.getHandle().dimension()).toAbsolutePath().normalize();
+        for (final AwfRegionStorage storage : AwfEngine.storagesUnder(folder)) {
+            if (folder.equals(Path.of(storage.name()).getParent())) return true;
+        }
+        return false;
     }
 
     @Override
@@ -283,6 +490,10 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
     private void setAutoloadInternal(final String name, final boolean autoload) {
         final AuroraWorldRegistry.Entry entry = this.registry.get(name)
             .orElseThrow(() -> new IllegalArgumentException("no AWF world named " + name));
+        if (autoload && entry.deletedOnUnload()) {
+            throw new IllegalStateException("AWF world " + name + " is a disposable instance (deleted once unloaded)"
+                + " and cannot be loaded at startup");
+        }
         try {
             this.registry.put(entry.withAutoload(autoload));
         } catch (final IOException failed) {
@@ -384,6 +595,12 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
     }
 
     private CompletableFuture<World> createFromTemplateInternal(final String template, final String name, final boolean autoload) {
+        return createFromTemplateInternal(template, name, autoload, false);
+    }
+
+    /** @param disposable a {@link #createInstance} instance: no autoload, deleted once unloaded */
+    private CompletableFuture<World> createFromTemplateInternal(final String template, final String name, final boolean autoload,
+                                                                final boolean disposable) {
         if (AuroraWorldRegistry.invalidTemplateName(template).isPresent()) {
             return invalidTemplate(template).orElseThrow().thenApply(ignored -> null);
         }
@@ -396,7 +613,8 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
         if (description == null) {
             return CompletableFuture.failedFuture(new IllegalArgumentException("no template named " + template));
         }
-        return start(description.named(name, template, autoload), null);
+        final AuroraWorldRegistry.Entry instance = description.named(name, template, autoload);
+        return start(disposable ? instance.asDeletedOnUnload() : instance, null);
     }
 
     @Override
@@ -538,6 +756,10 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
         if (entry == null) return CompletableFuture.failedFuture(new IllegalArgumentException("no AWF world named " + name));
         final World loaded = Bukkit.getWorld(name);
         if (loaded != null) return CompletableFuture.completedFuture(loaded);
+        if (entry.deletedOnUnload()) {
+            return CompletableFuture.failedFuture(new IllegalStateException("AWF world " + name + " is a disposable"
+                + " instance, deleted once it is unloaded; it cannot be loaded again (create a new instance)"));
+        }
         if (entry.template() != null && !this.templates.exists(entry.template())) {
             // Without its template an instance would open empty stores and later commit a void/terrain
             // world over a real one. Refuse instead of silently replacing its content.
@@ -799,6 +1021,7 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
                     }
                 }
                 recordKnownStores(name);
+                this.lastSaved.put(name, java.time.Instant.now());
             }, ioExecutor);
     }
 
@@ -860,6 +1083,13 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
     private CompletableFuture<UnloadResult> unloadInternal(final String name, final boolean save) {
         final World world = Bukkit.getWorld(name);
         if (world == null) return CompletableFuture.failedFuture(new IllegalStateException(name + " is not loaded"));
+        final AuroraWorldRegistry.Entry disposable = this.registry.get(name).filter(AuroraWorldRegistry.Entry::deletedOnUnload)
+            .orElse(null);
+        if (disposable != null) {
+            // Deleted right after: nothing is saved (its storages discard), whatever save asked for.
+            return unloadNow(name, world, false).thenCompose(result -> result != UnloadResult.SUCCESS
+                ? CompletableFuture.completedFuture(result) : deleteAfterUnload(name).thenApply(ignored -> result));
+        }
         // A stopping server refuses the unload itself once its shutdown thread started (SERVER_STOPPING)
         // and saves the world in its own shutdown; a save first would wait on region tickets that may
         // never run again. The unload is asked for as before.
@@ -874,6 +1104,30 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
                 + " before the unload did not complete durably (" + (reason.getMessage() == null
                 ? reason.getClass().getSimpleName() : reason.getMessage()) + "); it stays loaded and the unload can be"
                 + " retried", reason));
+        });
+    }
+
+    /**
+     * Deletes a disposable instance its unload has just removed, within the unload's reservation.
+     * Never fails: when the deletion cannot run yet (a storage still closing) it is logged and left
+     * to {@link #sweepDisposableInstances}, and the unload's own result stands.
+     */
+    private CompletableFuture<Void> deleteAfterUnload(final String name) {
+        if (Bukkit.getWorld(name) != null) return CompletableFuture.completedFuture(null);
+        final CompletableFuture<Void> deleted;
+        try {
+            deleted = deleteInternal(name, false);
+        } catch (final RuntimeException failed) {
+            return CompletableFuture.completedFuture(null);
+        }
+        return deleted.handle((ok, failed) -> {
+            if (failed != null) {
+                final Throwable reason = cause(failed);
+                SourbyLogger.info("Aurora World Fabric: the disposable instance " + name + " is unloaded; its deletion"
+                    + " will be retried shortly (" + (reason.getMessage() == null ? reason.getClass().getSimpleName()
+                    : reason.getMessage()) + ")");
+            }
+            return null;
         });
     }
 
@@ -908,7 +1162,17 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
         return this.unloadWithoutSaving.contains(name);
     }
 
-    private CompletableFuture<Void> deleteInternal(final String name) {
+    /**
+     * Deletes a world's folder and stores off the region threads. The checks run again inside the task under the
+     * deletion mark ({@link AwfEngine#beginDeletion}; review P2-6): a {@code createWorld} that began between the caller's
+     * check and the task can no longer attach a storage under the folder, and one that already loaded the world (or
+     * attached a storage, when {@code discardOpenStorages} is false) makes the deletion fail instead of destroying it.
+     *
+     * @param discardOpenStorages {@code true} for the operator's explicit {@link #delete}: storages still open under the
+     *     folder (a creation that failed after they attached) are discarded and closed; {@code false} for the automatic
+     *     deletions of disposable instances, which fail and are retried while any storage is open
+     */
+    private CompletableFuture<Void> deleteInternal(final String name, final boolean discardOpenStorages) {
         if (!this.registry.contains(name)) {
             return CompletableFuture.failedFuture(new IllegalArgumentException("no AWF world named " + name));
         }
@@ -916,15 +1180,30 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
             return CompletableFuture.failedFuture(new IllegalStateException(name + " is loaded; unload it first"));
         }
         return CompletableFuture.runAsync(() -> {
+            if (!AwfEngine.beginDeletion(name)) {
+                throw new CompletionException(new IllegalStateException(name + " is already being deleted"));
+            }
             try {
-                closeOpenStorages(folder(name));
-                AwfEngine.deleteStores(folder(name));
-                deleteRecursively(folder(name));
+                if (!this.registry.contains(name)) throw new CompletionException(new IllegalArgumentException("no AWF world named " + name));
+                if (Bukkit.getWorld(name) != null) {
+                    throw new CompletionException(new IllegalStateException(name + " was loaded while its deletion started; nothing was deleted"));
+                }
+                final Path folder = folder(name);
+                if (discardOpenStorages) {
+                    closeOpenStorages(folder);
+                } else if (!AwfEngine.storagesUnder(folder).isEmpty()) {
+                    throw new CompletionException(new IOException("AWF storages under " + folder + " are open (a load or unload of " + name
+                        + " is in progress); nothing was deleted, retried later"));
+                }
+                AwfEngine.deleteStores(folder);
+                deleteRecursively(folder);
                 this.registry.remove(name);
                 AwfEngine.release(name);
                 SourbyLogger.info("Aurora World Fabric: deleted world " + name);
             } catch (final IOException failed) {
                 throw new CompletionException(failed);
+            } finally {
+                AwfEngine.endDeletion(name);
             }
         }, dev.iyanz.sourbycraft.util.VirtualExecutor.executor());
     }
@@ -993,13 +1272,14 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
 
     /** Loads every autoload world on the global tick, after the default worlds exist. */
     public void scheduleAutoload() {
+        this.sweeping = true;
         RegionizedServer.getInstance().addTask(this::loadAutoloadWorlds);
     }
 
     /** Loads every autoload world. Runs on the global region thread. */
     void loadAutoloadWorlds() {
         for (final AuroraWorldRegistry.Entry entry : this.registry.all()) {
-            if (!entry.autoload()) continue;
+            if (!entry.autoload() || entry.deletedOnUnload()) continue;
             load(entry.name()).whenComplete((world, failed) -> {
                 if (failed != null) {
                     SourbyLogger.warn("Aurora World Fabric could not load " + entry.name() + " at startup", failed);

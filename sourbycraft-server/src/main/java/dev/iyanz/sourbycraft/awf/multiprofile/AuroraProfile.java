@@ -80,7 +80,9 @@ public record AuroraProfile(UUID id, UUID accountId, String type, dev.iyanz.sour
         Objects.requireNonNull(status, "status");
         Objects.requireNonNull(kind, "kind");
         if (!type.matches("[a-z0-9_-]{1,32}")) throw new IllegalArgumentException("profile type: " + type);
-        if (!CuteNames.valid(name)) throw new IllegalArgumentException("profile name: " + name);
+        // Decoding is lenient (a stored name of a type pool whose definition is not registered here still reads);
+        // the create path validates strictly against the pool (ProfileTypes.chooseName).
+        if (!validStoredName(name)) throw new IllegalArgumentException("profile name: " + name);
         if (metadata == null) metadata = Map.of();
         if (metadata.size() > MAX_METADATA) throw new IllegalArgumentException("too much profile metadata");
         final Map<String, String> copy = new LinkedHashMap<>();
@@ -145,6 +147,20 @@ public record AuroraProfile(UUID id, UUID accountId, String type, dev.iyanz.sour
                                        final Map<String, String> metadata, final long now) {
         return new AuroraProfile(UUID.randomUUID(), accountId, type, profileType, name, metadata, now, 0L,
             ProfileStatus.ACTIVE, List.of(ProfileMember.owner(accountId, now)), 0L, null, ProfileKind.SOLO, null);
+    }
+
+    /**
+     * Whether a name may be <em>stored</em>: 1-{@value CuteNames#MAX_LENGTH} printable characters without surrounding
+     * whitespace. Build 54: creation chooses names from the server pool or the profile type's pool
+     * ({@code ProfileTypes.chooseName}); a record whose type definition is not registered on this node must still decode,
+     * so this check is deliberately not the pool check ({@link CuteNames#valid}). Never brick startup over a name.
+     */
+    public static boolean validStoredName(final String name) {
+        if (name == null || name.isEmpty() || name.length() > CuteNames.MAX_LENGTH || !name.equals(name.strip())) return false;
+        for (int i = 0; i < name.length(); i++) {
+            if (Character.isISOControl(name.charAt(i))) return false;
+        }
+        return true;
     }
 
     /**

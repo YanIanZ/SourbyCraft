@@ -51,6 +51,25 @@ public record ProfileRequest(UUID accountId, String type, Map<String, String> me
         return new ProfileRequest(this.accountId, this.type, this.metadata, profileType, this.name);
     }
 
+    /**
+     * Added in Build 54. A copy asking for a profile type by id ({@link ProfileTypeDefinition#id()}): a built-in id
+     * sets {@link #profileType()} and removes {@link ProfileTypeRegistry#TYPE_METADATA_KEY}; any other id sets that
+     * metadata key and leaves {@code profileType} unset (the server stores {@link ProfileType#CLASSIC} with it). The
+     * server refuses an id it does not know ({@link ProfileErrorCode#TYPE_UNKNOWN}) or one that is not creatable
+     * ({@link ProfileErrorCode#TYPE_NOT_ALLOWED}).
+     */
+    public ProfileRequest withTypeId(final String typeId) {
+        Objects.requireNonNull(typeId, "typeId");
+        final java.util.Map<String, String> next = new java.util.HashMap<>(this.metadata);
+        final java.util.Optional<ProfileType> builtin = ProfileType.fromId(typeId);
+        if (builtin.isPresent()) {
+            next.remove(ProfileTypeRegistry.TYPE_METADATA_KEY);
+            return new ProfileRequest(this.accountId, this.type, next, builtin.get(), this.name);
+        }
+        next.put(ProfileTypeRegistry.TYPE_METADATA_KEY, typeId);
+        return new ProfileRequest(this.accountId, this.type, next, null, this.name);
+    }
+
     /** A copy asking for the given name ({@code null} = the server rolls one). */
     public ProfileRequest withName(final @Nullable String name) {
         return new ProfileRequest(this.accountId, this.type, this.metadata, this.profileType, name);

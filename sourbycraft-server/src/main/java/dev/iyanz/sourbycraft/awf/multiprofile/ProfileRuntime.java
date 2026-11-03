@@ -6,6 +6,13 @@ import dev.iyanz.sourbycraft.api.profile.CoopInviteInfo;
 import dev.iyanz.sourbycraft.api.profile.CoopKickVoteInfo;
 import dev.iyanz.sourbycraft.api.profile.CoopMemberInfo;
 import dev.iyanz.sourbycraft.api.profile.CoopPage;
+import dev.iyanz.sourbycraft.api.profile.ProfileBankAccount;
+import dev.iyanz.sourbycraft.api.profile.ProfileBankInfo;
+import dev.iyanz.sourbycraft.api.profile.ProfileBankTransactionEvent;
+import dev.iyanz.sourbycraft.api.profile.ProfileCollectionInfo;
+import dev.iyanz.sourbycraft.api.profile.ProfileCurrency;
+import dev.iyanz.sourbycraft.api.profile.ProfileSalvageInfo;
+import dev.iyanz.sourbycraft.api.profile.SalvageDeliveryResult;
 import dev.iyanz.sourbycraft.api.profile.ProfileDetails;
 import dev.iyanz.sourbycraft.api.profile.ProfileErrorCode;
 import dev.iyanz.sourbycraft.api.profile.ProfileInfo;
@@ -107,6 +114,8 @@ public final class ProfileRuntime {
     private final ProfileSettings settings;
     private final ProfileEngine engine;
     private final ProfileStateAdapters adapters;
+    /** Build 54: the profile type registry this runtime opened (closed with it); {@code null} in a runtime built by hand. */
+    private volatile ProfileTypes types;
     private final BukkitPlayerStatePort statePort;
     private final AuroraProfiles api;
     private final ScheduledExecutorService idleSweeper;
@@ -274,6 +283,17 @@ public final class ProfileRuntime {
         final ProfileEngine engine = new ProfileEngine(settings, repository, ownership, playerSessions, statePort, worldPort,
             nodeId, ResourceGovernor.GLOBAL.lane(ResourceGovernor.Lane.STORAGE), fabric == null ? null : fabric.metrics(),
             events);
+        // Build 54: the bank policy (aurora.awf.multiprofile.bank.*, RESTART_REQUIRED) is set once, before any operation.
+        engine.bankPolicy(settings.bank().policy());
+        // Build 54: the profile type registry opens before the store is read, so the stored type definitions (and their
+        // name pools) are known before any profile record decodes; it is the ProfileTypeRegistry service from here on.
+        final ProfileTypes types;
+        try {
+            types = ProfileTypes.open(plugin, settings, fabric);
+        } catch (final IOException | RuntimeException failed) {
+            closeQuietly(ownership, playerSessions);
+            throw new IllegalStateException("the profile type registry could not be opened: " + failed.getMessage(), failed);
+        }
         // The store format decides every path: read it (and migrate, and resolve pending intents) on the storage
         // lane before anything is scheduled or registered, so no player is admitted before it is decided.
         final ProfileEngine.StoreMigration migration = storeMigration(settings);
@@ -281,17 +301,22 @@ public final class ProfileRuntime {
         try {
             store = engine.open(migration).get(STARTUP_BUDGET_MINUTES, TimeUnit.MINUTES);
         } catch (final java.util.concurrent.ExecutionException failed) {
+            types.close(0L);
             closeQuietly(ownership, playerSessions);
             throw new IllegalStateException(ProfileEngine.messageOf(failed.getCause()), failed.getCause());
         } catch (final java.util.concurrent.TimeoutException slow) {
+            types.close(0L);
             closeQuietly(ownership, playerSessions);
             throw new IllegalStateException("the profile store check did not finish within " + STARTUP_BUDGET_MINUTES
                 + " minutes; MultiProfile did not start");
         } catch (final InterruptedException interrupted) {
             Thread.currentThread().interrupt();
+            types.close(0L);
             closeQuietly(ownership, playerSessions);
             throw new IllegalStateException("interrupted while checking the profile store");
         }
+        // AuroraProfiles.rules(profileId) / allows(profileId, action) read the profile record on the engine's I/O lane.
+        types.attachLookup(engine::profileRecord);
         SourbyLogger.info("AWF MultiProfile: profile store " + ProfileEngine.describe(store.marker()) + " (" + store.reason()
             + "); migration " + store.migration() + (store.unresolvedIntents().isEmpty() ? ""
                 : "; " + store.unresolvedIntents().size() + " intent(s) left pending for recovery"));
@@ -301,8 +326,16 @@ public final class ProfileRuntime {
         engine.onSaveRefused((playerId, reason) -> disconnect(plugin, playerId, "Your profile state could not be saved ("
             + reason + "). You were disconnected so nothing is lost or duplicated; contact the server staff if this repeats."));
         engine.storeWriter(writtenBy());
+        // Build 54 (review P3-8): a built-in override that denies an action raises the store level (after the writer is
+        // named), so a downgrade to a build without the registry cannot lift the deny; the raise runs on the I/O lane,
+        // never on the registering thread. Stored overrides read at startup are reported by this call.
+        types.onBuiltinOverrideDenied(engine::protectBuiltinOverride);
         // Co-op events are asynchronous: the engine calls this on its own event thread, after the durable commit.
         engine.onCoopEvent(event -> Bukkit.getPluginManager().callEvent(event));
+        // Build 54: bank/collection postings and salvage deliveries, on the same co-op event thread, after the durable commit.
+        engine.onLedgerEvent(event -> Bukkit.getPluginManager().callEvent(bankEvent(event)));
+        engine.onSalvageDelivered(delivery -> Bukkit.getPluginManager().callEvent(
+            new dev.iyanz.sourbycraft.api.profile.ProfileSalvageDeliveredEvent(deliveryResult(delivery))));
         ScheduledExecutorService sweeper = null;
         if (settings.worlds().idleUnloadSeconds() > 0) {
             sweeper = Executors.newSingleThreadScheduledExecutor(task -> {
@@ -351,6 +384,7 @@ public final class ProfileRuntime {
         }
         final ProfileRuntime runtime = new ProfileRuntime(plugin, settings, engine, adapters, statePort, sweeper,
             heartbeats, nodeId, routing ? fabric : null, migration);
+        runtime.types = types;
         try {
             Bukkit.getServicesManager().register(AuroraProfiles.class, runtime.api(), plugin, ServicePriority.Normal);
             Bukkit.getPluginManager().registerEvents(runtime.new Sessions(), plugin);
@@ -591,6 +625,8 @@ public final class ProfileRuntime {
             SourbyLogger.warn("AWF MultiProfile: unregistering the service failed: " + failed.getMessage());
         }
         this.engine.close();
+        final ProfileTypes types = this.types;
+        if (types != null) types.close(Math.min(budgetMillis, 5_000L));
         int online = 0;
         try {
             online = Bukkit.getOnlinePlayers().size();
@@ -1165,6 +1201,13 @@ public final class ProfileRuntime {
             return !ProfileRuntime.this.closed && this.engine.isOpen();
         }
 
+        /** Build 54: the registry this runtime opened, without a services-manager lookup; the service otherwise. */
+        @Override
+        public dev.iyanz.sourbycraft.api.profile.ProfileTypeRegistry typeRegistry() {
+            final ProfileTypes types = ProfileRuntime.this.types;
+            return types != null ? types : AuroraProfiles.super.typeRegistry();
+        }
+
         @Override
         public CompletableFuture<ProfileInfo> createProfile(final ProfileRequest request) {
             return this.engine.create(request);
@@ -1322,5 +1365,189 @@ public final class ProfileRuntime {
         public CompletableFuture<Void> setCoopLabel(final UUID actorId, final UUID profileId, final String label) {
             return this.engine.setCoopLabel(actorId, profileId, Objects.requireNonNull(label, "label"));
         }
+
+        // ---- co-op bank, collections, salvage (Build 54): 1:1 onto the engine
+
+        @Override
+        public CompletableFuture<ProfileBankInfo> bank(final UUID viewerId, final UUID profileId) {
+            return this.engine.bank(viewerId, Objects.requireNonNull(profileId, "profileId")).thenApply(ProfileRuntime::bankInfo);
+        }
+
+        @Override
+        public CompletableFuture<ProfileBankInfo> deposit(final UUID actorId, final UUID profileId, final long amount) {
+            return deposit(actorId, profileId, amount, null);
+        }
+
+        @Override
+        public CompletableFuture<ProfileBankInfo> deposit(final UUID actorId, final UUID profileId, final long amount, final UUID operationId) {
+            return this.engine.deposit(Objects.requireNonNull(actorId, "actorId"), Objects.requireNonNull(profileId, "profileId"), amount,
+                operationId).thenApply(ProfileRuntime::bankInfo);
+        }
+
+        @Override
+        public CompletableFuture<ProfileBankInfo> withdraw(final UUID actorId, final UUID profileId, final long amount) {
+            return withdraw(actorId, profileId, amount, null);
+        }
+
+        @Override
+        public CompletableFuture<ProfileBankInfo> withdraw(final UUID actorId, final UUID profileId, final long amount, final UUID operationId) {
+            return this.engine.withdraw(Objects.requireNonNull(actorId, "actorId"), Objects.requireNonNull(profileId, "profileId"), amount,
+                operationId).thenApply(ProfileRuntime::bankInfo);
+        }
+
+        @Override
+        public CompletableFuture<ProfileBankInfo> depositPersonal(final UUID actorId, final UUID profileId, final long amount) {
+            return depositPersonal(actorId, profileId, amount, null);
+        }
+
+        @Override
+        public CompletableFuture<ProfileBankInfo> depositPersonal(final UUID actorId, final UUID profileId, final long amount,
+                                                                  final UUID operationId) {
+            return this.engine.depositPersonal(Objects.requireNonNull(actorId, "actorId"), Objects.requireNonNull(profileId, "profileId"),
+                amount, operationId).thenApply(ProfileRuntime::bankInfo);
+        }
+
+        @Override
+        public CompletableFuture<ProfileBankInfo> withdrawPersonal(final UUID actorId, final UUID profileId, final long amount) {
+            return withdrawPersonal(actorId, profileId, amount, null);
+        }
+
+        @Override
+        public CompletableFuture<ProfileBankInfo> withdrawPersonal(final UUID actorId, final UUID profileId, final long amount,
+                                                                   final UUID operationId) {
+            return this.engine.withdrawPersonal(Objects.requireNonNull(actorId, "actorId"), Objects.requireNonNull(profileId, "profileId"),
+                amount, operationId).thenApply(ProfileRuntime::bankInfo);
+        }
+
+        @Override
+        public CompletableFuture<ProfileBankInfo> transfer(final UUID actorId, final UUID profileId, final ProfileBankAccount from,
+                                                           final ProfileBankAccount to, final long amount) {
+            return transfer(actorId, profileId, from, to, amount, null);
+        }
+
+        @Override
+        public CompletableFuture<ProfileBankInfo> transfer(final UUID actorId, final UUID profileId, final ProfileBankAccount from,
+                                                           final ProfileBankAccount to, final long amount, final UUID operationId) {
+            return this.engine.transfer(Objects.requireNonNull(actorId, "actorId"), Objects.requireNonNull(profileId, "profileId"),
+                account(from), account(to), amount, operationId).thenApply(ProfileRuntime::bankInfo);
+        }
+
+        @Override
+        public CompletableFuture<ProfileBankInfo> applyInterest(final UUID actorId, final UUID profileId) {
+            return applyInterest(actorId, profileId, null);
+        }
+
+        @Override
+        public CompletableFuture<ProfileBankInfo> applyInterest(final UUID actorId, final UUID profileId, final UUID operationId) {
+            return this.engine.applyInterest(Objects.requireNonNull(actorId, "actorId"), Objects.requireNonNull(profileId, "profileId"),
+                operationId).thenApply(ProfileRuntime::bankInfo);
+        }
+
+        @Override
+        public CompletableFuture<java.util.Optional<dev.iyanz.sourbycraft.api.profile.ProfileReceiptInfo>> bankReceipt(
+            final UUID viewerId, final UUID profileId, final UUID operationId) {
+            return this.engine.receipt(viewerId, Objects.requireNonNull(profileId, "profileId"), Objects.requireNonNull(operationId, "operationId"))
+                .thenApply(found -> found.map(receipt -> new dev.iyanz.sourbycraft.api.profile.ProfileReceiptInfo(receipt.operationId(),
+                    receipt.kind().name(), receipt.outcome() == ProfileReceipt.Outcome.COMMITTED, receipt.decidedAtMillis())));
+        }
+
+        @Override
+        public CompletableFuture<List<ProfileCollectionInfo>> collections(final UUID viewerId, final UUID profileId) {
+            return this.engine.collections(viewerId, Objects.requireNonNull(profileId, "profileId")).thenApply(ProfileRuntime::collectionInfos);
+        }
+
+        @Override
+        public CompletableFuture<ProfileCollectionInfo> contribute(final UUID actorId, final UUID profileId, final String collection,
+                                                                   final long amount) {
+            return contribute(actorId, profileId, collection, amount, null);
+        }
+
+        @Override
+        public CompletableFuture<ProfileCollectionInfo> contribute(final UUID actorId, final UUID profileId, final String collection,
+                                                                   final long amount, final UUID operationId) {
+            Objects.requireNonNull(collection, "collection");
+            return this.engine.contributeCollections(Objects.requireNonNull(actorId, "actorId"), Objects.requireNonNull(profileId, "profileId"),
+                collection, amount, operationId).thenApply(collections -> collectionInfo(collection, collections));
+        }
+
+        @Override
+        public CompletableFuture<CoopPage<ProfileSalvageInfo>> salvage(final UUID viewerId, final UUID profileId, final String cursor) {
+            return this.engine.salvage(viewerId, Objects.requireNonNull(profileId, "profileId"), cursor).thenApply(listing -> {
+                final List<ProfileSalvageInfo> items = new java.util.ArrayList<>(listing.items().size());
+                for (final ProfileSalvage salvage : listing.items()) {
+                    items.add(new ProfileSalvageInfo(salvage.id(), salvage.profileId(), salvage.removedMember(), salvage.createdAtMillis(),
+                        salvage.state() == ProfileSalvage.State.AVAILABLE));
+                }
+                return new CoopPage<>(items, listing.nextCursor());
+            });
+        }
+
+        @Override
+        public CompletableFuture<SalvageDeliveryResult> claimSalvage(final UUID claimantId, final UUID salvageId) {
+            return this.engine.claimSalvage(Objects.requireNonNull(claimantId, "claimantId"), Objects.requireNonNull(salvageId, "salvageId"))
+                .thenApply(ProfileRuntime::deliveryResult);
+        }
+    }
+
+    // ---- Build 54 API mapping (engine values -> sourbyapi records)
+
+    static ProfileCurrency currency(final ProfileSharedState.Currency currency) {
+        return new ProfileCurrency(currency.providerId(), currency.currencyId(), currency.scale());
+    }
+
+    static ProfileBankInfo bankInfo(final ProfileBank.View view) {
+        return new ProfileBankInfo(view.profileId(), view.revision(), currency(view.currency()), view.sharedBalance(), view.sharedAvailable(),
+            view.sharedCapacity(), view.personalBalance(), view.personalCapacity(), view.personalBalances(), view.pendingTransfers());
+    }
+
+    static ProfileBank.Account account(final ProfileBankAccount account) {
+        return switch (Objects.requireNonNull(account, "account")) {
+            case SHARED -> ProfileBank.Account.SHARED;
+            case PERSONAL -> ProfileBank.Account.PERSONAL;
+        };
+    }
+
+    private static ProfileBankAccount apiAccount(final ProfileBank.Account account) {
+        if (account == null) return null;
+        return switch (account) {
+            case SHARED -> ProfileBankAccount.SHARED;
+            case PERSONAL -> ProfileBankAccount.PERSONAL;
+            // Never posted: OD-4 refuses a purse transfer before anything is written.
+            case PURSE -> throw new IllegalStateException("a purse posting cannot exist");
+        };
+    }
+
+    static List<ProfileCollectionInfo> collectionInfos(final ProfileBank.Collections collections) {
+        final List<ProfileCollectionInfo> infos = new java.util.ArrayList<>(collections.totals().size());
+        for (final String collection : new java.util.TreeSet<>(collections.totals().keySet())) infos.add(collectionInfo(collection, collections));
+        return List.copyOf(infos);
+    }
+
+    static ProfileCollectionInfo collectionInfo(final String collection, final ProfileBank.Collections collections) {
+        final List<ProfileCollectionInfo.Contribution> entries = new java.util.ArrayList<>();
+        collections.contributions().getOrDefault(collection, Map.of())
+            .forEach((player, amount) -> entries.add(new ProfileCollectionInfo.Contribution(player, amount)));
+        entries.sort(java.util.Comparator.comparingLong(ProfileCollectionInfo.Contribution::amount).reversed()
+            .thenComparing(ProfileCollectionInfo.Contribution::playerId));
+        return new ProfileCollectionInfo(collection, collections.totals().getOrDefault(collection, 0L), entries);
+    }
+
+    static SalvageDeliveryResult deliveryResult(final ProfileEngine.SalvageDelivery delivery) {
+        return new SalvageDeliveryResult(delivery.salvageId(), delivery.profileId(), delivery.claimant(), delivery.delivered(),
+            delivery.remaining(), delivery.complete(), delivery.operationId(), delivery.applied());
+    }
+
+    static ProfileBankTransactionEvent bankEvent(final ProfileBank.LedgerEvent event) {
+        final ProfileBankTransactionEvent.Type type = switch (event.entry()) {
+            case DEPOSIT -> ProfileBankTransactionEvent.Type.DEPOSIT;
+            case WITHDRAW -> ProfileBankTransactionEvent.Type.WITHDRAW;
+            case DEPOSIT_PERSONAL -> ProfileBankTransactionEvent.Type.DEPOSIT_PERSONAL;
+            case WITHDRAW_PERSONAL -> ProfileBankTransactionEvent.Type.WITHDRAW_PERSONAL;
+            case CONTRIBUTE -> ProfileBankTransactionEvent.Type.CONTRIBUTE;
+            case INTEREST -> ProfileBankTransactionEvent.Type.INTEREST;
+            case TRANSFER -> ProfileBankTransactionEvent.Type.TRANSFER;
+        };
+        return new ProfileBankTransactionEvent(event.profileId(), event.actor(), type, event.collection(), apiAccount(event.from()),
+            apiAccount(event.to()), event.amount(), event.sharedBalanceAfter(), currency(event.currency()), event.operationId());
     }
 }

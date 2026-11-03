@@ -164,13 +164,24 @@ aurora:
         # in /awf multiprofile status. Unsupported by Redis: logged once, then acknowledged from memory.
         wait-for-aof: true
       types:
-        # RESTART_REQUIRED. Policy types a profile may be created with (classic, ironman, stranded,
-        # bingo). Not the free consumer namespace (ProfileRequest.type). Build 51 stores and returns the
-        # type only: no ironman, stranded or bingo rule is enforced yet.
+        # RESTART_REQUIRED. Built-in policy types a profile may be created with (classic, ironman, stranded,
+        # bingo). Not the free consumer namespace (ProfileRequest.type), not a plugin-registered type. Since
+        # Build 54 each type's rules come from the profile type registry (PROFILE-TYPES.md): the engine
+        # enforces its own actions (bank, co-op, salvage); trade/auction/bazaar are the consumer's to enforce.
         allowed: ["classic", "ironman", "stranded", "bingo"]
         # RESTART_REQUIRED. Type of a profile created without one; must be in allowed (else the first
         # allowed type is used, with a WARN).
         default: "classic"
+        # RESTART_REQUIRED (Build 54). deny | allow. A profile whose type has no known definition (not built
+        # in, never registered here, no readable stored copy): deny = every action refused, bank/co-op/salvage
+        # included (ACTION_FORBIDDEN_BY_TYPE), one WARN per type, until its plugin registers it. allow = every
+        # action allowed as for classic, which lifts what the lost definition denied. Invalid = deny + WARN.
+        unknown-type-policy: "deny"
+        registry:
+          # RESTART_REQUIRED (Build 54). Whether a plugin may replace a built-in type (classic, ironman,
+          # stranded, bingo) with its own definition. false = refused (TYPE_NOT_ALLOWED) and a stored
+          # override is ignored with a WARN. Invalid = true + WARN.
+          allow-override-builtins: true
       names:
         # RESTART_REQUIRED. cute = the server assigns a fruit or vegetable name when the profile is
         # created: unique per account, immutable. The only policy.
@@ -192,7 +203,8 @@ aurora:
         # can be removed (captured and switched out first). false = every co-op operation is refused
         # (COOP_DISABLED) and nothing co-op is written. Needs multiprofile.enabled, a store in format 2 and
         # authoritative login (login.authoritative auto or true). A member can play only on the node that holds the co-op's bound world
-        # (WRONG_NODE elsewhere). Build 53 does NOT: transfer ownership or deliver salvage (Build 54).
+        # (WRONG_NODE elsewhere). Build 54 adds the shared/personal bank, collections and salvage delivery
+        # (bank: below). No build transfers ownership.
         # The first co-op record raises the store to minimum build 52 (Build 51 then refuses it).
         enabled: false
         # RESTART_REQUIRED. Members of one co-op, owner included. 2-8. Invalid = 5, with a WARN.
@@ -200,7 +212,8 @@ aurora:
         # RESTART_REQUIRED. Invitation lifetime, 1-1440 minutes; judged at commit time.
         invite-expiry-minutes: 5
         # RESTART_REQUIRED. Policy types whose solo profile may be converted to co-op. Checked at conversion
-        # only. Build 51 enforces no ironman/stranded/bingo rule, so widening this gives them co-op unrestricted.
+        # only, together with the type's registry rule coop.convert (Build 54). The engine does not enforce
+        # trade/auction/bazaar, so widening this gives those types co-op with only engine-owned rules applied.
         allowed-types: ["classic"]
         kick-vote:
           # RESTART_REQUIRED. Kick-vote lifetime, 1-1440 minutes. Approval is unanimous among the members other
@@ -234,6 +247,30 @@ aurora:
         # (ADAPTER_REQUIRED_FAILED) and an adapter that holds data for the profile but is not registered here
         # refuses it (ADAPTER_MISSING). Can only raise strictness. A malformed entry is dropped with a WARN.
         required: []
+      bank:
+        # RESTART_REQUIRED (Build 54). The co-op bank policy, read once at start; used only with coop.enabled.
+        # Amounts are long minor units. A bank record keeps the currency and shared capacity it was first
+        # written with: a changed currency refuses changes to banks kept in the old one (INVALID_REQUEST, reads
+        # still work, no conversion); a changed shared-capacity applies to new bank records only. The purse is
+        # not here: it stays per profile through its REQUIRED adapter (OD-4), purse<->bank transfers are refused
+        # (PURSE_TRANSFER_UNSUPPORTED). docs/awf/multiprofile/CONFIGURATION.md.
+        currency:
+          # RESTART_REQUIRED (Build 54). [a-z0-9_.-]{1,64}. Invalid = aurora / coins + WARN.
+          provider: "aurora"
+          id: "coins"
+          # RESTART_REQUIRED (Build 54). Decimal places of one minor unit, 0-9 (0 = whole coins). Invalid = 0 + WARN.
+          scale: 0
+        # RESTART_REQUIRED (Build 54). Shared bank cap in minor units, 0 = no cap. Invalid = 0 + WARN.
+        shared-capacity: 0
+        # RESTART_REQUIRED (Build 54). Personal bank cap, % of the shared capacity, 0-100 (no cap when either is 0).
+        personal-cap-percent: 20
+        # RESTART_REQUIRED (Build 54). Interest one posting credits, 0-100. The server schedules none: the owner
+        # posts it (AuroraProfiles.applyInterest, /awf multiprofile coop bank interest); every posting credits again,
+        # no sooner than interest-interval-hours after the previous one.
+        interest-percent: 10
+        # RESTART_REQUIRED (Build 54). Least hours between two interest postings of one co-op, on the store clock
+        # (the bank record remembers its last posting; a sooner posting is INVALID_REQUEST). 0 = no minimum.
+        interest-interval-hours: 24
     redis:
       fabric:
         # RESTART_REQUIRED, read early (every fabric key). Aurora Redis Fabric. Default false: no socket,
