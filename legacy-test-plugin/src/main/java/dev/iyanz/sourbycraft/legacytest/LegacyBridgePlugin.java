@@ -2,6 +2,13 @@ package dev.iyanz.sourbycraft.legacytest;
 
 import io.papermc.paper.threadedregions.scheduler.GlobalRegionScheduler;
 import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.bukkit.Bukkit;
@@ -60,27 +67,39 @@ public final class LegacyBridgePlugin extends JavaPlugin {
         // aurora.bridge.sync-route = "caller-region" the task runs on that region and may read
         // the block there.
         final org.bukkit.World world = this.getServer().getWorlds().get(0);
-        world.getChunkAtAsync(0, 0).thenAccept(chunk -> {
-            world.addPluginChunkTicket(0, 0, this);
-            AsyncChunkProbe.run(this, world);
-            scheduler.runTask(this, () -> {
-                try {
-                    final String type = world.getBlockAt(8, 0, 8).getType().name();
-                    this.getLogger().info("LEGACY_BRIDGE_REGION_SYNC_OK thread=" + Thread.currentThread().getName()
-                        + " block=" + type);
-                } catch (final RuntimeException refused) {
-                    this.getLogger().info("LEGACY_BRIDGE_REGION_SYNC_REFUSED " + refused.getClass().getSimpleName()
-                        + " thread=" + Thread.currentThread().getName());
-                    throw refused;
-                }
+        final Completion regionSync = new Completion(1);
+        world.getChunkAtAsync(0, 0).whenComplete((chunk, failure) -> {
+            if (failure != null) {
+                regionSync.fail(failure);
+                return;
+            }
+            regionSync.step(() -> {
+                world.addPluginChunkTicket(0, 0, this);
+                AsyncChunkProbe.run(this, world);
+                scheduler.runTask(this, () -> regionSync.last(() -> {
+                    try {
+                        final String type = world.getBlockAt(8, 0, 8).getType().name();
+                        this.getLogger().info("LEGACY_BRIDGE_REGION_SYNC_OK thread=" + Thread.currentThread().getName()
+                            + " block=" + type);
+                    } catch (final RuntimeException refused) {
+                        this.getLogger().info("LEGACY_BRIDGE_REGION_SYNC_REFUSED " + refused.getClass().getSimpleName()
+                            + " thread=" + Thread.currentThread().getName());
+                        throw refused;
+                    }
+                }));
             });
         });
 
+        // Every chunk-gated probe that hops through the global region (a GlobalRegionScheduler task, or a
+        // Bukkit sync task the bridge backs on it) reports when its last such hop has run, so the
+        // GlobalRegionScheduler#cancelTasks probe cannot cancel it however slowly its chunk loads.
+        final Map<String, CompletableFuture<Void>> globalHops = new LinkedHashMap<>();
+        globalHops.put("region-sync", regionSync.future());
         regionTask();
-        entityTask();
-        new ContextProbes(this).run();
-        new RelaxedProbes(this).run();
-        globalScheduler();
+        globalHops.put("entity", entityTask());
+        globalHops.put("context", new ContextProbes(this).run());
+        globalHops.put("relaxed", new RelaxedProbes(this).run());
+        globalScheduler(globalHops);
 
         // World access from a legacy "sync" task scheduled outside any region (onEnable). The
         // bridge runs it on the global region, which owns no chunks; whatever the base does is
@@ -134,41 +153,52 @@ public final class LegacyBridgePlugin extends JavaPlugin {
      * and its body never runs. The plugin cannot read the bridge's own counters, so
      * {@code LEGACY_ENTITY_RETIRED_OK} means "the body did not run within 3 s, the task reports
      * cancelled and is no longer queued"; the rejected count is visible in {@code /plugins}.
+     *
+     * <p>The returned future completes once the retired probe's global hop has run: after it, the chain lives
+     * on the entity and async schedulers only, which {@code GlobalRegionScheduler#cancelTasks} does not touch.
      */
-    private void entityTask() {
+    private CompletableFuture<Void> entityTask() {
+        final Completion done = new Completion(1);
         final org.bukkit.World world = this.getServer().getWorlds().get(0);
         final BukkitScheduler scheduler = this.getServer().getScheduler();
         final int chunkX = 5;
         final int chunkZ = 5;
-        world.getChunkAtAsync(chunkX, chunkZ).thenAccept(chunk -> {
-            world.addPluginChunkTicket(chunkX, chunkZ, this);
-            final org.bukkit.Location spot = new org.bukkit.Location(world, 88.5, 100, 88.5);
-            final org.bukkit.entity.ArmorStand stand = world.spawn(spot, org.bukkit.entity.ArmorStand.class, created -> {
-                created.setGravity(false);
-                created.setPersistent(false);
+        world.getChunkAtAsync(chunkX, chunkZ).whenComplete((chunk, failure) -> {
+            if (failure != null) {
+                done.fail(failure);
+                return;
+            }
+            done.step(() -> {
+                world.addPluginChunkTicket(chunkX, chunkZ, this);
+                final org.bukkit.Location spot = new org.bukkit.Location(world, 88.5, 100, 88.5);
+                final org.bukkit.entity.ArmorStand stand = world.spawn(spot, org.bukkit.entity.ArmorStand.class, created -> {
+                    created.setGravity(false);
+                    created.setPersistent(false);
+                });
+                Bukkit.getGlobalRegionScheduler().run(this, global -> done.step(() -> scheduler.runTask(this,
+                    dev.iyanz.sourbycraft.api.scheduler.EntityTask.of(stand, () -> done.step(() -> {
+                        final boolean owned = Bukkit.isOwnedByCurrentRegion(stand);
+                        try {
+                            final String read = stand.getType().name() + "@" + stand.getLocation().getBlockX()
+                                + "," + stand.getLocation().getBlockZ();
+                            check(owned && !Bukkit.isGlobalTickThread() && stand.isValid(), "LEGACY_ENTITY_TASK",
+                                "thread=" + Thread.currentThread().getName() + " owned=" + owned + " entity=" + read);
+                        } catch (final RuntimeException refused) {
+                            this.getLogger().severe("LEGACY_ENTITY_TASK_WRONG " + refused.getClass().getSimpleName()
+                                + " owned=" + owned + " thread=" + Thread.currentThread().getName());
+                            throw refused;
+                        }
+                        retiredEntityTask(stand, done);
+                    })))));
             });
-            Bukkit.getGlobalRegionScheduler().run(this, global -> scheduler.runTask(this,
-                dev.iyanz.sourbycraft.api.scheduler.EntityTask.of(stand, () -> {
-                    final boolean owned = Bukkit.isOwnedByCurrentRegion(stand);
-                    try {
-                        final String read = stand.getType().name() + "@" + stand.getLocation().getBlockX()
-                            + "," + stand.getLocation().getBlockZ();
-                        check(owned && !Bukkit.isGlobalTickThread() && stand.isValid(), "LEGACY_ENTITY_TASK",
-                            "thread=" + Thread.currentThread().getName() + " owned=" + owned + " entity=" + read);
-                    } catch (final RuntimeException refused) {
-                        this.getLogger().severe("LEGACY_ENTITY_TASK_WRONG " + refused.getClass().getSimpleName()
-                            + " owned=" + owned + " thread=" + Thread.currentThread().getName());
-                        throw refused;
-                    }
-                    retiredEntityTask(stand);
-                })));
         });
+        return done.future();
     }
 
-    private void retiredEntityTask(final org.bukkit.entity.Entity entity) {
+    private void retiredEntityTask(final org.bukkit.entity.Entity entity, final Completion done) {
         final BukkitScheduler scheduler = this.getServer().getScheduler();
         final java.util.concurrent.atomic.AtomicBoolean ran = new java.util.concurrent.atomic.AtomicBoolean();
-        Bukkit.getGlobalRegionScheduler().run(this, global -> {
+        Bukkit.getGlobalRegionScheduler().run(this, global -> done.last(() -> {
             final BukkitTask doomed = scheduler.runTaskLater(this,
                 dev.iyanz.sourbycraft.api.scheduler.EntityTask.of(entity, () -> {
                     ran.set(true);
@@ -180,7 +210,7 @@ public final class LegacyBridgePlugin extends JavaPlugin {
                     && !scheduler.isQueued(doomed.getTaskId()), "LEGACY_ENTITY_RETIRED",
                 "ran=" + ran.get() + " cancelled=" + doomed.isCancelled()
                     + " queued=" + scheduler.isQueued(doomed.getTaskId())), 60L);
-        });
+        }));
     }
 
     void check(final boolean ok, final String marker, final String detail) {
@@ -189,11 +219,59 @@ public final class LegacyBridgePlugin extends JavaPlugin {
     }
 
     /**
+     * Completion of a probe whose bodies are chained through schedulers: done once each of its {@code parts}
+     * terminal bodies has run, on every path, or failed as soon as a step that schedules the next body throws.
+     */
+    static final class Completion {
+        private final CompletableFuture<Void> future = new CompletableFuture<>();
+        private final AtomicInteger pending;
+
+        Completion(final int parts) {
+            this.pending = new AtomicInteger(parts);
+        }
+
+        CompletableFuture<Void> future() {
+            return this.future;
+        }
+
+        /** One terminal body ended. */
+        void arrive() {
+            if (this.pending.decrementAndGet() == 0) this.future.complete(null);
+        }
+
+        /** The chain stopped before its terminal bodies were scheduled. */
+        void fail(final Throwable failure) {
+            this.future.completeExceptionally(failure);
+        }
+
+        /** Runs a terminal body and arrives however it ends; what it throws propagates unchanged. */
+        void last(final Runnable body) {
+            try {
+                body.run();
+            } finally {
+                arrive();
+            }
+        }
+
+        /** Runs a body that schedules the next one; a throw fails the probe and propagates unchanged. */
+        void step(final Runnable body) {
+            try {
+                body.run();
+            } catch (final Throwable failure) {
+                fail(failure);
+                throw failure;
+            }
+        }
+    }
+
+    /**
      * Folia's GlobalRegionScheduler from a legacy plugin: the LightingLuminol port routes it
      * through the bridge, and it must still run on the global tick, end in the states Folia
      * documents, and cancel only what it should.
+     *
+     * @param globalHops chunk-gated probes started from onEnable, each completing once its last global hop ran
      */
-    private void globalScheduler() {
+    private void globalScheduler(final Map<String, CompletableFuture<Void>> globalHops) {
         final GlobalRegionScheduler global = Bukkit.getGlobalRegionScheduler();
 
         global.execute(this, () -> check(Bukkit.isGlobalTickThread(), "LEGACY_GLOBAL_EXECUTE",
@@ -248,8 +326,11 @@ public final class LegacyBridgePlugin extends JavaPlugin {
         // Called from a region, a global request still runs on the global tick (sync-route does
         // not apply to explicit global requests).
         final org.bukkit.World world = this.getServer().getWorlds().get(0);
-        Bukkit.getRegionScheduler().execute(this, world, 0, 0, () -> global.execute(this, () ->
-            check(Bukkit.isGlobalTickThread(), "LEGACY_GLOBAL_FROM_REGION", "thread=" + Thread.currentThread().getName())));
+        final Completion fromRegion = new Completion(1);
+        Bukkit.getRegionScheduler().execute(this, world, 0, 0, () -> fromRegion.step(() -> global.execute(this, () -> fromRegion.last(() ->
+            check(Bukkit.isGlobalTickThread(), "LEGACY_GLOBAL_FROM_REGION", "thread=" + Thread.currentThread().getName())))));
+        final Map<String, CompletableFuture<Void>> hops = new LinkedHashMap<>(globalHops);
+        hops.put("from-region", fromRegion.future());
 
         // An exception in a global repeater's body is the plugin's failure, not a violation: Folia
         // keeps the repeater, so it runs again and can still cancel itself. The bridge logs the
@@ -266,8 +347,31 @@ public final class LegacyBridgePlugin extends JavaPlugin {
             }
         }, 1L, 1L);
 
-        // GlobalRegionScheduler#cancelTasks removes this plugin's global tasks only; its async
-        // Bukkit task survives.
+        // cancelTasks cancels every pending global task of this plugin (and the Bukkit sync tasks the bridge
+        // backs on the global region), so it starts only once every chunk-gated probe's last global hop has run;
+        // the probes above are not chunk-gated and end within 40 ticks, before its cancel at +50.
+        final CompletableFuture<?>[] waits = hops.values().toArray(new CompletableFuture<?>[0]);
+        CompletableFuture.allOf(waits).orTimeout(20, TimeUnit.SECONDS).whenComplete((ignored, failure) ->
+            global.run(this, task -> cancelTasksProbe(failure, hops)));
+    }
+
+    /**
+     * GlobalRegionScheduler#cancelTasks removes this plugin's global tasks only; its async Bukkit task survives.
+     * Every offset is relative to this call. When the probes it waited for did not finish, that is logged as
+     * {@code _WRONG} by name and the probe still runs.
+     */
+    private void cancelTasksProbe(final Throwable waitFailure, final Map<String, CompletableFuture<Void>> waitedFor) {
+        if (waitFailure != null) {
+            final Throwable cause = waitFailure instanceof CompletionException && waitFailure.getCause() != null
+                ? waitFailure.getCause() : waitFailure;
+            final List<String> unfinished = new ArrayList<>();
+            waitedFor.forEach((name, probe) -> {
+                if (!probe.isDone() || probe.isCompletedExceptionally()) unfinished.add(name);
+            });
+            this.getLogger().severe("LEGACY_GLOBAL_CANCEL_TASKS_WRONG relaxed/context probes did not finish: " + cause
+                + " unfinished=" + unfinished);
+        }
+        final GlobalRegionScheduler global = Bukkit.getGlobalRegionScheduler();
         final AtomicInteger cancelledGlobalRuns = new AtomicInteger();
         global.runDelayed(this, task -> cancelledGlobalRuns.incrementAndGet(), 60L);
         global.runAtFixedRate(this, task -> cancelledGlobalRuns.incrementAndGet(), 60L, 5L);

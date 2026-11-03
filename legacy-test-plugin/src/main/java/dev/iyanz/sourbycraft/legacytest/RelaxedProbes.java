@@ -1,5 +1,6 @@
 package dev.iyanz.sourbycraft.legacytest;
 
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.bukkit.Bukkit;
@@ -37,26 +38,40 @@ final class RelaxedProbes {
         this.plugin = plugin;
     }
 
-    void run() {
+    /**
+     * Starts the probes. The returned future completes once both global-region bodies (the current-tick hop and
+     * the delayed sweep / block write / global chunk) have ended, on every path, or fails when the chain stops
+     * before scheduling them; the async teleport join is not waited for.
+     */
+    CompletableFuture<Void> run() {
+        final LegacyBridgePlugin.Completion done = new LegacyBridgePlugin.Completion(2);
         final World world = this.plugin.getServer().getWorlds().get(0);
         this.plugin.getLogger().info("LEGACY_RELAXED_MODE effective=" + effectiveMode());
-        currentTick();
+        currentTick(done);
         // The subject entity lives in a chunk a region owns; the probes reach it from elsewhere.
         final Location home = new Location(world, 9 * 16 + 8.5, 80, 9 * 16 + 8.5);
-        world.getChunkAtAsync(9, 9).thenAccept(chunk -> {
-            world.addPluginChunkTicket(9, 9, this.plugin);
-            Bukkit.getRegionScheduler().run(this.plugin, home, task -> {
-                final ArmorStand stand = (ArmorStand) world.spawnEntity(home, EntityType.ARMOR_STAND);
-                final ArmorStand mover = (ArmorStand) world.spawnEntity(home.clone().add(1, 0, 0), EntityType.ARMOR_STAND);
-                // Untargeted sync tasks from here run on the global tick (no player context).
-                Bukkit.getGlobalRegionScheduler().runDelayed(this.plugin, ignored -> {
-                    sweep(world, stand);
-                    blockWrite(world, home);
-                    globalChunk(world);
-                }, 5L);
-                this.plugin.getServer().getScheduler().runTaskAsynchronously(this.plugin, () -> teleportJoin(mover, home));
+        world.getChunkAtAsync(9, 9).whenComplete((chunk, failure) -> {
+            if (failure != null) {
+                done.fail(failure);
+                return;
+            }
+            done.step(() -> {
+                world.addPluginChunkTicket(9, 9, this.plugin);
+                Bukkit.getRegionScheduler().run(this.plugin, home, task -> done.step(() -> {
+                    final ArmorStand stand = (ArmorStand) world.spawnEntity(home, EntityType.ARMOR_STAND);
+                    final ArmorStand mover = (ArmorStand) world.spawnEntity(home.clone().add(1, 0, 0), EntityType.ARMOR_STAND);
+                    // Untargeted sync tasks from here run on the global tick (no player context).
+                    Bukkit.getGlobalRegionScheduler().runDelayed(this.plugin, ignored -> done.last(() -> {
+                        sweep(world, stand);
+                        blockWrite(world, home);
+                        globalChunk(world);
+                    }), 5L);
+                    this.plugin.getLogger().info("LEGACY_RELAXED_SCHEDULED delay=5 thread=" + Thread.currentThread().getName());
+                    this.plugin.getServer().getScheduler().runTaskAsynchronously(this.plugin, () -> teleportJoin(mover, home));
+                }));
             });
         });
+        return done.future();
     }
 
     private static String effectiveMode() {
@@ -67,10 +82,10 @@ final class RelaxedProbes {
         }
     }
 
-    private void currentTick() {
+    private void currentTick(final LegacyBridgePlugin.Completion done) {
         try {
             final int fromEnable = Bukkit.getCurrentTick();
-            Bukkit.getGlobalRegionScheduler().run(this.plugin, ignored -> {
+            Bukkit.getGlobalRegionScheduler().run(this.plugin, ignored -> done.last(() -> {
                 try {
                     final int global = Bukkit.getCurrentTick();
                     this.plugin.getServer().getScheduler().runTaskAsynchronously(this.plugin, () -> {
@@ -85,9 +100,10 @@ final class RelaxedProbes {
                 } catch (final RuntimeException refused) {
                     this.plugin.getLogger().severe("LEGACY_CURRENT_TICK_WRONG global " + refused);
                 }
-            });
+            }));
         } catch (final RuntimeException refused) {
             this.plugin.getLogger().severe("LEGACY_CURRENT_TICK_WRONG enable " + refused);
+            done.arrive(); // the global body was never scheduled
         }
     }
 
