@@ -20,6 +20,24 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
+// Build the 16 generated concurrent map implementations before compiling Metal.
+// CI still calls setup_metal.sh; incremental local builds no longer require that
+// out-of-band step. Generated files live under an ignored source directory.
+val generateMetalSources by tasks.registering(Exec::class) {
+    group = "metal"
+    description = "Generate the vendored Metal concurrent hash table sources with JDK 25"
+    workingDir = projectDir
+    commandLine("bash", "gen_sources.sh")
+
+    inputs.file("gen_sources.sh")
+    inputs.dir("templates")
+    outputs.dir(layout.projectDirectory.dir("src/main/java/ca/spottedleaf/concurrentutil/map/concurrent"))
+}
+
+tasks.named("compileJava") {
+    dependsOn(generateMetalSources)
+}
+
 tasks.jar {
     manifest {
         attributes("FMLModType" to "GAMELIBRARY")
