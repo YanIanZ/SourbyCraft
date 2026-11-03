@@ -243,18 +243,25 @@ Sequence for `apply-mode=auto` (or `/update apply`):
    `phase=ROLLED_BACK` and the updater is **held**: every `check()` returns `Outcome.HELD` without
    touching the network, and the boot log prints a framed `UPDATE ROLLED BACK` block. If `.prev`
    is missing or the copy fails: `phase=RESTORE_FAILED`, also held, with a `ROLLBACK FAILED` block.
-   **Format-2 MultiProfile store (Build 51, owner decision OD-2, `StoreDowngradeGuard`).** Before the verified
-   copy is renamed over the launch jar, the guard reads the copy's build number. When it is below 51 (or cannot be
-   read) and the configured AWF MultiProfile store is format 2 — FILE: `<aurora.awf.multiprofile.directory>/format.awfm`
-   decodes to format 2; Redis (only while MultiProfile is enabled with `repository: redis`): the `…fabric:mp:meta`
-   hash says `format` 2, read over a short connection of its own, and a Redis that cannot be read at that point counts
-   as format 2 (fail closed) — the restore is refused: `RESTORE_FAILED`, one ERROR naming the store and OD-2, jar
-   files untouched, updater held. The suspect new jar stays on the launch path; a downgrade is the manual procedure in
-   `docs/awf/multiprofile/OPERATIONS.md` (restore the pre-migration backup, then install the older jar). The same gate
-   runs in `SourbyUpdater.check` (a release whose `rNN` is below 51 is announced, never staged) and in
-   `UpdateApplier.swapInPlace` (a staged jar whose build number is below 51 or unreadable is not swapped in,
-   `ABORTED`). Builds older than 51 have no gate of their own. The unit-test constructor
-   `new UpdateRollbackGuard(dir)` uses no gate; `UpdateRollbackGuard.SERVER` uses the server's.
+   **MultiProfile store downgrade gate (Build 51, raised in Build 52; owner decision OD-2, `StoreDowngradeGuard`).**
+   The configured AWF MultiProfile store names the oldest build that may open it: none for format 1, Build 51 for
+   a format-2 store, Build 52 once it holds a co-op record (the marker's schema is then 2 and it records
+   `minimumBuild` 52: a 4-byte trailer of `<aurora.awf.multiprofile.directory>/format.awfm`, or the `minimumBuild`
+   field of the `…fabric:mp:meta` hash; the engine writes it before the first co-op record and never lowers it).
+   Before the verified copy is renamed over the launch jar, the guard reads the copy's build number. When it is
+   below the store's required build (or cannot be read while the store requires any) the restore is refused:
+   `RESTORE_FAILED`, one ERROR naming the store, the required build and OD-2, jar files untouched, updater held. The
+   FILE marker is read whenever it exists; the Redis marker (only while MultiProfile is enabled with
+   `repository: redis`) over a short connection of its own. A marker that cannot be read at that point (malformed
+   file, unreachable Redis, invalid URI) requires Build 52, the newest level this code knows (fail closed), so
+   rolling back to Build 51 is then refused too. The suspect new jar stays on the launch path; a downgrade is the
+   manual procedure in `docs/awf/multiprofile/OPERATIONS.md` (restore the pre-migration backup, which predates
+   every co-op record, then install the older jar). The same gate runs in `SourbyUpdater.check` (a release whose
+   `rNN` is below the required build is announced, never staged) and in `UpdateApplier.swapInPlace` (a staged jar
+   whose build number is below it or unreadable is not swapped in, `ABORTED`). Builds older than 51 have no gate
+   of their own; Build 51 refuses a store that requires Build 52 at startup but its own updater does not know the
+   level. The unit-test constructor `new UpdateRollbackGuard(dir)` uses no gate; `UpdateRollbackGuard.SERVER`
+   uses the server's.
 4. **Every later boot** while held prints `AUTO-UPDATER HELD` and does nothing else.
 
 The guard boot step runs even when `enabled=false` or `apply-mode=off`:

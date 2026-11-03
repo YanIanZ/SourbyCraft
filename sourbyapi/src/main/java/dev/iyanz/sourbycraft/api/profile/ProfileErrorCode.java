@@ -84,5 +84,61 @@ public enum ProfileErrorCode {
      * (invites, votes, salvage) is full. The operation was refused and nothing was written. Pending
      * operations resolve on their own or through recovery; retry afterwards, do not retry in a loop.
      */
-    CAPACITY_EXCEEDED
+    CAPACITY_EXCEEDED,
+    /**
+     * Added in Build 52. Co-op is disabled ({@code aurora.awf.multiprofile.coop.enabled} is false, the default),
+     * so every co-op operation is refused. Nothing was written.
+     */
+    COOP_DISABLED,
+    /** Added in Build 52. The player is not a member of the co-op profile (or the profile is not co-op for them). */
+    NOT_A_MEMBER,
+    /** Added in Build 52. The invitee is already a member of the profile. */
+    ALREADY_MEMBER,
+    /** Added in Build 52. The co-op already has {@code coop.max-members} members (open invites do not count, accepting does). */
+    COOP_FULL,
+    /** Added in Build 52. The invitation expired; expiry is judged at commit time against the repository clock. */
+    INVITE_EXPIRED,
+    /** Added in Build 52. No such invitation, or it is not open (accepted, declined, cancelled) or not for this player. */
+    INVITE_NOT_FOUND,
+    /** Added in Build 52. The actor's role does not allow the operation (for example a MEMBER inviting). */
+    ROLE_FORBIDDEN,
+    /**
+     * Added in Build 52. The member to remove (leave or kick) is online. Build 52 refuses it; removing an online
+     * member is enabled in Build 53. Nothing was written.
+     */
+    MEMBER_ONLINE,
+    /**
+     * Added in Build 52. Owner transfer, the owner leaving, or kicking the owner: refused in Build 52.
+     */
+    OWNER_ACTION_REFUSED,
+    /**
+     * Added in Build 52 (OD-1). The profile's bound world is held by another node; a co-op membership change
+     * that joins the profile must run on the node that holds it. Nothing was written.
+     */
+    WRONG_NODE,
+    /** Added in Build 52. No such kick vote, or it is not open. */
+    VOTE_NOT_FOUND,
+    /**
+     * Added in Build 52. Membership or roles changed since the vote opened (or since the caller read it); the vote
+     * is cancelled and a fresh vote is needed.
+     */
+    ELECTORATE_CHANGED,
+    /**
+     * Added in Build 52. A two-member co-op can remove the other member only after that member has been inactive for
+     * {@code coop.kick-vote.inactive-days}.
+     */
+    TARGET_NOT_INACTIVE,
+    /** Added in Build 52. The operation needs a co-op profile and this one is a solo profile. */
+    NOT_COOP,
+    /** Added in Build 52. The profile is already a co-op profile. */
+    ALREADY_COOP,
+    /** Added in Build 52. A kick vote is already open for this profile (one open vote per profile). */
+    VOTE_OPEN,
+    /** Added in Build 52. An open invitation for this invitee and profile exists already. */
+    INVITE_EXISTS,
+    /**
+     * Added in Build 52. Switching into a co-op profile the player does not own is not available until Build 53
+     * (member snapshots and login restore). Nothing was written.
+     */
+    COOP_SWITCH_UNAVAILABLE
 }

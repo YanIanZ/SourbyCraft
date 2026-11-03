@@ -76,8 +76,19 @@ import java.util.function.Consumer;
  * fails with {@link ProfileErrorCode#UNKNOWN_OUTCOME} and nothing is compensated. A store this build
  * refuses never gets an engine. The solo profile claim ({@code claim}/{@code release}) is kept beside
  * {@code Q} in format 2: Build 51 profiles have only their owner, and the claim still marks the node
- * that plays the profile's worlds (owner decision OD-1). Co-op membership operations (invites, votes,
- * salvage) are not reachable from this engine.</p>
+ * that plays the profile's worlds (owner decision OD-1).</p>
+ *
+ * <p><b>Co-op membership (Build 52).</b> With {@code coop.enabled} (default false) and a format-2 store, the
+ * co-op methods ({@link #convertToCoop}, {@link #invite}, {@link #acceptInvite}, {@link #declineInvite},
+ * {@link #cancelInvite}, {@link #leave}, {@link #startKickVote}, {@link #voteKick}, {@link #setCoopLabel} and the
+ * listings) run each {@link CoopMembership} plan as one intent, like the solo intents above: under {@code P}, the
+ * actor's {@code Q} and, for a kick, the removed member's {@code Q}, with store-clock deadlines. Before the first
+ * co-op record is prepared the store's feature level is raised ({@link ProfileRepository#requireStoreFeature}:
+ * schema 2, minimum build 52). Refused in Build 52 with a reason: a membership change while another node holds the
+ * profile ({@code WRONG_NODE}, OD-1), removing a membership that is the removed account's active profile
+ * ({@code MEMBER_ONLINE}), a member switching into a co-op profile it does not own ({@code COOP_SWITCH_UNAVAILABLE}),
+ * owner leave, kick and transfer ({@code OWNER_ACTION_REFUSED}). Removal writes an UNAVAILABLE salvage record;
+ * nothing is delivered. Co-op events fire on the engine's own event thread after the durable commit.</p>
  */
 public final class ProfileEngine {
 
@@ -354,6 +365,7 @@ public final class ProfileEngine {
     /** One line describing a store format marker, for logs and commands. */
     public static String describe(final StoreFormat.Marker marker) {
         return "format " + marker.format() + ", migration " + marker.migration() + ", schema " + marker.schema()
+            + (marker.legacyFormat() ? "" : ", requires Build " + marker.requiredBuild())
             + (marker.writtenBy().isEmpty() ? "" : ", written by " + marker.writtenBy())
             + (marker.writtenAtMillis() == 0L ? "" : " at " + java.time.Instant.ofEpochMilli(marker.writtenAtMillis()));
     }
@@ -415,6 +427,7 @@ public final class ProfileEngine {
                 return true;
             }
             PlayerClaim actor = null;
+            PlayerClaim affected = null;
             for (final ProfileIntent.ClaimRef ref : intent.playerClaims()) {
                 PlayerClaim claim = held.get(ref.id());
                 if (claim == null) {
@@ -426,7 +439,12 @@ public final class ProfileEngine {
                     claim = grant.claim();
                     acquired.add(claim);
                 }
-                if (actor == null) actor = claim;
+                // The intent names the actor first and, for a kick, the removed member's account second.
+                if (actor == null) {
+                    actor = claim;
+                } else if (affected == null) {
+                    affected = claim;
+                }
             }
             if (intent.profileClaim() != null) {
                 final ProfileOwnership.TransactionGrant grant = this.ownership
@@ -439,14 +457,14 @@ public final class ProfileEngine {
             }
             final CoopOperation op = new CoopOperation(intent.operationId(), intent.kind(), intent.actor(),
                 intent.requestDigest(), intent.createdAtMillis());
-            this.repository.resolveIntent(operationId, CoopWriteGuard.intent(op, transaction, actor, intent.revision(),
+            this.repository.resolveIntent(operationId, CoopWriteGuard.intent(op, transaction, actor, affected, intent.revision(),
                 intent.expectedAfter(), Set.of(operationId)));
             ProfileIntent after = this.repository.intent(operationId).orElse(intent);
             if (after.pending() && !after.committed() && after.phase() == ProfileIntent.Phase.PREPARED
                 && (!this.ownership.distributed() || after.pastDeadline(this.repository.storeClockMillis()))) {
                 // Never committed, and no other process can still be running it: abort clears its own
                 // reservations only. A committed intent always rolls forward instead.
-                this.repository.abortIntent(operationId, CoopWriteGuard.intent(op, transaction, actor, after.revision(),
+                this.repository.abortIntent(operationId, CoopWriteGuard.intent(op, transaction, actor, affected, after.revision(),
                     after.expectedAfter(), Set.of(operationId)));
                 after = this.repository.intent(operationId).orElse(after);
                 SourbyLogger.warn("AWF MultiProfile: aborted the uncommitted " + after.kind() + " intent " + operationId
@@ -717,6 +735,11 @@ public final class ProfileEngine {
         final boolean tombstone = profile.status() != ProfileStatus.DELETED;
         final boolean unlist = account.owns(profileId);
         if (!tombstone && !unlist) return false;
+        if (tombstone && profile.coop() && profile.members().size() > 1) {
+            // The delete intent changes the owner's account only; the members' accounts would keep listing a tombstone.
+            throw error(ProfileErrorCode.OWNER_ACTION_REFUSED, "co-op profile " + profileId + " still has " + (profile.members().size() - 1)
+                + " other member(s); they must leave or be kicked before the owner deletes it. Nothing was written");
+        }
         if (tombstone && profile.pendingIntent() != null) {
             throw error(ProfileErrorCode.RECOVERY_REQUIRED, "profile " + profileId + " is reserved by intent " + profile.pendingIntent());
         }
@@ -891,6 +914,11 @@ public final class ProfileEngine {
                 throw error(ProfileErrorCode.PROFILE_NOT_FOUND, "no profile " + targetId);
             }
             if (!target.get().accountId().equals(playerId)) {
+                if (target.get().coop() && target.get().member(playerId) != null) {
+                    // Build 52: only the owner plays a co-op profile; member snapshots and login restore are Build 53.
+                    throw error(ProfileErrorCode.COOP_SWITCH_UNAVAILABLE, "profile " + targetId + " is a co-op profile owned by "
+                        + target.get().accountId() + "; members other than the owner cannot switch into it before Build 53");
+                }
                 throw error(ProfileErrorCode.NOT_OWNED, "profile " + targetId + " belongs to another account");
             }
             if (target.get().status() != ProfileStatus.ACTIVE) {
@@ -1670,6 +1698,16 @@ public final class ProfileEngine {
         final PlayerAccount account = this.repository.loadAccount(playerId, this.settings.defaultSlots());
         final UUID profile = account.activeProfile();
         if (profile == null) return null;
+        if (format2()) {
+            final AuroraProfile active = this.repository.profile(profile).orElse(null);
+            if (active != null && active.coop() && !active.accountId().equals(playerId)) {
+                // Build 52 never sets a co-op profile active for a non-owner; an account that says so is not restored.
+                SourbyLogger.warn("AWF MultiProfile: the account of " + playerId + " names co-op profile " + profile + " of "
+                    + active.accountId() + " as active; member login restore is Build 53 (COOP_SWITCH_UNAVAILABLE), so its"
+                    + " worlds are not prepared and the player is not moved");
+                return null;
+            }
+        }
         final ProfileWorldBinding binding = this.repository.binding(profile).orElse(null);
         if (binding == null || binding.isEmpty()) return null;
         binding.worlds().keySet().forEach(this::touch);
@@ -2245,6 +2283,8 @@ public final class ProfileEngine {
 
     public void close() {
         this.closed = true;
+        final java.util.concurrent.ThreadPoolExecutor events = this.coopEventLane;
+        if (events != null) events.shutdown();
         this.switches.clear();
         this.runs.clear();
         this.frozen.clear();
@@ -3152,6 +3192,28 @@ public final class ProfileEngine {
         // The deadline is compared against the store's clock (Redis TIME in distributed mode), never a node's.
         final ProfileIntent intent = ProfileIntent.prepared(prepareGuard, after, List.of(), refs, List.of(),
             this.repository.storeClockMillis() + INTENT_DEADLINE_MILLIS);
+        driveIntent(op, p, q, null, prepareGuard, intent);
+    }
+
+    /**
+     * Runs one co-op membership plan ({@link CoopMembership}) exactly like {@link #runIntent}: stages its framed
+     * after-images (member heads with their member and epoch), PREPAREs under {@code P}, the actor's {@code Q} and,
+     * for a kick, the removed member's {@code Q} ({@code affected}), then COMMITs; the same UNKNOWN, abort and
+     * recovery rules apply. Before the first co-op record of the store is prepared the store's feature level is
+     * raised ({@link #requireCoopStoreLevel}), so no build that cannot read a co-op record opens the store after it.
+     */
+    private void runPlan(final CoopIntentPlan plan, final ProfileClaim p, final PlayerClaim q, final PlayerClaim affected)
+        throws IOException {
+        requireCoopStoreLevel();
+        final List<ProfileIntent.BlobRef> refs = plan.stage(this.repository);
+        final CoopWriteGuard prepareGuard = plan.prepareGuard(p, q, affected);
+        driveIntent(plan.op(), p, q, affected, prepareGuard, plan.prepared(prepareGuard, refs));
+    }
+
+    /** PREPARE then COMMIT of a staged intent; see {@link #runIntent}. Runs inside an I/O step. */
+    private void driveIntent(final CoopOperation op, final ProfileClaim p, final PlayerClaim q, final PlayerClaim affected,
+                             final CoopWriteGuard prepareGuard, final ProfileIntent intent) throws IOException {
+        final UUID id = op.operationId();
         final CommitResult prepared = this.repository.prepareIntent(intent, prepareGuard);
         ProfileIntent stored = this.repository.intent(id).orElse(null);
         if (stored == null) {
@@ -3170,7 +3232,7 @@ public final class ProfileEngine {
         if (prepared.unknown() && stored.phase() == ProfileIntent.Phase.PREPARED) {
             // The intent is durable but its reservations may be incomplete: resolve installs the rest, or finds a
             // record that moved, in which case the commit below is refused as stale and the intent aborted.
-            this.repository.resolveIntent(id, intentGuard(op, p, q, stored));
+            this.repository.resolveIntent(id, intentGuard(op, p, q, affected, stored));
             stored = this.repository.intent(id).orElse(stored);
         }
         if (!stored.pending()) {
@@ -3180,24 +3242,24 @@ public final class ProfileEngine {
         }
         final CommitResult committed;
         try {
-            committed = this.repository.commitIntent(id, intentGuard(op, p, q, stored));
+            committed = this.repository.commitIntent(id, intentGuard(op, p, q, affected, stored));
         } catch (final IOException | RuntimeException refused) {
-            abortUncommitted(op, p, q, refused);
+            abortUncommitted(op, p, q, affected, refused);
             throw refused;
         }
         if (!committed.unknown()) return;
         final ProfileIntent outcome = this.repository.intent(id).orElse(null);
         if (outcome != null && outcome.committed()) {
-            acceptCommitted(op, p, q, outcome, committed.detail());
+            acceptCommitted(op, p, q, affected, outcome, committed.detail());
             return;
         }
         if (outcome != null && outcome.phase() == ProfileIntent.Phase.PREPARED) {
             // The abort races a commit request that may still be in flight: the intent read after the abort
             // attempt decides. Committed: it landed first and counts as applied. Aborted: nothing was applied.
             // Anything else: unknown, and the operation stays unresolved for recovery.
-            final ProfileIntent decided = abortUncommitted(op, p, q, null);
+            final ProfileIntent decided = abortUncommitted(op, p, q, affected, null);
             if (decided != null && decided.committed()) {
-                acceptCommitted(op, p, q, decided, committed.detail() + "; a delayed commit landed before the abort");
+                acceptCommitted(op, p, q, affected, decided, committed.detail() + "; a delayed commit landed before the abort");
                 return;
             }
             if (decided != null && decided.phase() == ProfileIntent.Phase.ABORTED) {
@@ -3218,8 +3280,8 @@ public final class ProfileEngine {
      * confirms durability again (COOP-DESIGN §5); a COMMITTED one is rolled forward now, and a failed or UNKNOWN
      * roll-forward leaves the operation unresolved, so no later commit moves a record the roll-forward expects.
      */
-    private void acceptCommitted(final CoopOperation op, final ProfileClaim p, final PlayerClaim q, final ProfileIntent outcome,
-                                 final String detail) {
+    private void acceptCommitted(final CoopOperation op, final ProfileClaim p, final PlayerClaim q, final PlayerClaim affected,
+                                 final ProfileIntent outcome, final String detail) {
         final UUID id = op.operationId();
         if (!durable()) {
             markUnresolved(outcome, "its commit was read back but not confirmed durable");
@@ -3231,7 +3293,7 @@ public final class ProfileEngine {
             + detail + "); reading it back shows the intent is " + outcome.phase() + ", so it counts as applied");
         if (outcome.phase() == ProfileIntent.Phase.COMMITTED) {
             try {
-                final CommitResult finished = this.repository.resolveIntent(id, intentGuard(op, p, q, outcome));
+                final CommitResult finished = this.repository.resolveIntent(id, intentGuard(op, p, q, affected, outcome));
                 if (finished.unknown()) markUnresolved(outcome, finished.detail());
             } catch (final IOException | RuntimeException later) {
                 markUnresolved(outcome, "finishing it failed: " + messageOf(later));
@@ -3240,15 +3302,17 @@ public final class ProfileEngine {
     }
 
     /** The guard of a commit, abort or resolve of {@code intent}: its revision, its post-reservation vector, its own reservation. */
-    private static CoopWriteGuard intentGuard(final CoopOperation op, final ProfileClaim p, final PlayerClaim q, final ProfileIntent intent) {
-        return CoopWriteGuard.intent(op, p, q, intent.revision(), intent.expectedAfter(), Set.of(op.operationId()));
+    private static CoopWriteGuard intentGuard(final CoopOperation op, final ProfileClaim p, final PlayerClaim q,
+                                              final PlayerClaim affected, final ProfileIntent intent) {
+        return CoopWriteGuard.intent(op, p, q, affected, intent.revision(), intent.expectedAfter(), Set.of(op.operationId()));
     }
 
     /**
      * Aborts the operation's intent while it is still PREPARED (clearing only its own reservations); a committed
      * intent is left to roll forward and logged. Failures are logged: the intent then stays for recovery.
      */
-    private ProfileIntent abortUncommitted(final CoopOperation op, final ProfileClaim p, final PlayerClaim q, final Throwable cause) {
+    private ProfileIntent abortUncommitted(final CoopOperation op, final ProfileClaim p, final PlayerClaim q, final PlayerClaim affected,
+                                           final Throwable cause) {
         final UUID id = op.operationId();
         ProfileIntent intent = null;
         try {
@@ -3259,7 +3323,7 @@ public final class ProfileEngine {
                     : messageOf(cause)) + ") but its intent is committed; it rolls forward at recovery and is not aborted");
                 return intent;
             }
-            this.repository.abortIntent(id, intentGuard(op, p, q, intent));
+            this.repository.abortIntent(id, intentGuard(op, p, q, affected, intent));
             return this.repository.intent(id).orElse(intent);
         } catch (final IOException | RuntimeException failed) {
             // A refused abort (DECIDED: a delayed commit landed first) or a failed one: the phase read now decides
@@ -3408,6 +3472,843 @@ public final class ProfileEngine {
         } catch (final IOException | RuntimeException notPublished) {
             SourbyLogger.warn("AWF MultiProfile: could not publish " + type + ": " + notPublished.getMessage());
         }
+    }
+
+    // ------------------------------------------------------------------ co-op membership (Build 52)
+
+    /** Co-op events waiting for the event thread; beyond this an event is dropped with a warning (events are not a journal). */
+    private static final int COOP_EVENT_QUEUE = 256;
+    /** Expired invites or votes one operation closes before it runs (a bounded cleanup; the rest wait for the next one). */
+    private static final int COOP_CLEANUP_LIMIT = 32;
+    /** Index pages an open-invite read walks: the §9 bound of 64 open invites per profile or invitee, plus one. */
+    private static final int COOP_INVITE_PAGES = ProfileInvite.MAX_OPEN / ProfileIndexPage.LISTING_PAGE + 1;
+    private static final String MEMBER_CURSOR_PREFIX = "members:";
+
+    private final Object coopEventLock = new Object();
+    private volatile Consumer<org.bukkit.event.Event> coopEventSink = event -> {};
+    private volatile java.util.concurrent.ThreadPoolExecutor coopEventLane;
+    /** The build identity a raised store marker names as its writer. */
+    private volatile String storeWriter = "SourbyCraft";
+    /** Set once this engine raised (or found) the store's co-op feature level; it is never lowered. */
+    private volatile boolean coopStoreLevel;
+
+    /**
+     * Where the co-op events go ({@code CoopMemberJoinEvent}, {@code CoopMemberLeaveEvent}, {@code CoopInviteEvent}):
+     * the runtime passes the Bukkit plugin manager. The sink is called on the engine's own co-op event thread, never
+     * on a region, entity, global tick or Netty thread, after the operation is durably committed.
+     */
+    public void onCoopEvent(final Consumer<org.bukkit.event.Event> sink) {
+        this.coopEventSink = Objects.requireNonNull(sink, "sink");
+    }
+
+    /** The build identity written into a raised store marker ({@code writtenBy}, at most 64 characters). */
+    public void storeWriter(final String writer) {
+        if (writer != null && !writer.isBlank()) this.storeWriter = writer.length() <= 64 ? writer : writer.substring(0, 64);
+    }
+
+    /**
+     * The co-op view of a profile; empty for a missing, deleted or solo profile. Fails {@code COOP_DISABLED} while
+     * co-op is disabled and {@code MIGRATION_REQUIRED} on a format-1 store. This form is the operator's and the
+     * plugin API's (no membership check); a player-facing caller uses {@link #coopDetails(UUID, UUID)}.
+     */
+    public CompletableFuture<Optional<dev.iyanz.sourbycraft.api.profile.CoopDetails>> coopDetails(final UUID profileId) {
+        return coopDetails(null, profileId);
+    }
+
+    /**
+     * {@link #coopDetails(UUID)} as seen by {@code viewer}: a co-op profile's members and label are shown to its
+     * members only ({@code NOT_A_MEMBER} otherwise); {@code null} is the operator's unchecked view.
+     */
+    public CompletableFuture<Optional<dev.iyanz.sourbycraft.api.profile.CoopDetails>> coopDetails(final UUID viewer, final UUID profileId) {
+        return coop(() -> {
+            final Optional<AuroraProfile> found = this.repository.profile(profileId);
+            if (found.isEmpty() || found.get().status() == ProfileStatus.DELETED || !found.get().coop()) return Optional.empty();
+            requireViewer(found.get(), viewer);
+            return Optional.of(coopView(found.get()));
+        });
+    }
+
+    /** A player-facing read of a co-op profile is for its members; {@code null} is the operator's or a plugin's. */
+    private static void requireViewer(final AuroraProfile profile, final UUID viewer) {
+        if (viewer != null && profile.member(viewer) == null) {
+            throw error(ProfileErrorCode.NOT_A_MEMBER, viewer + " is not a member of co-op profile " + profile.id()
+                + "; its members, label and votes are shown to members only");
+        }
+    }
+
+    /**
+     * The one-way conversion of the actor's solo profile to co-op (COOP-DESIGN §10 slice 4). The actor must own it
+     * ({@code NOT_OWNED}); its policy type must be in {@code coop.allowed-types} ({@code TYPE_NOT_ALLOWED}); OD-1: no
+     * other node may hold the profile ({@code WRONG_NODE}). One intent under {@code P} and the actor's {@code Q}.
+     */
+    public CompletableFuture<dev.iyanz.sourbycraft.api.profile.CoopDetails> convertToCoop(final UUID actor, final UUID profileId) {
+        return coop(() -> {
+            final AuroraProfile profile = coopProfile(profileId, false);
+            if (!profile.accountId().equals(actor)) {
+                throw error(ProfileErrorCode.NOT_OWNED, actor + " is not the owner of profile " + profileId + "; only the owner"
+                    + " converts it to co-op. Nothing was written");
+            }
+            if (!this.settings.coop().allows(profile.profileType())) {
+                throw error(ProfileErrorCode.TYPE_NOT_ALLOWED, "profile " + profileId + " has policy type " + profile.profileType().id()
+                    + ", which is not in coop.allowed-types " + ProfileSettings.typeIds(this.settings.coop().allowedTypes())
+                    + ". Nothing was written");
+            }
+            requireProfileNode(profileId);
+            requireProfileReady(profile);
+            final PlayerAccount account = loadReadyAccount(actor);
+            final long storeNow = this.repository.storeClockMillis();
+            runCoopPlan(CoopMembership.convertToCoop(operation(CoopOperation.Kind.CONVERT_COOP, actor, profileId, profile.revision(),
+                account.revision()), profile, account, storeNow + INTENT_DEADLINE_MILLIS));
+            return coopView(coopProfile(profileId, true));
+        });
+    }
+
+    /**
+     * Sets ({@code label}) or clears ({@code null}) the shared display label of a co-op profile; the OWNER only. Changes
+     * the profile record only, never an account alias. An invalid label is {@code NAME_INVALID}.
+     */
+    public CompletableFuture<Void> setCoopLabel(final UUID actor, final UUID profileId, final String label) {
+        return coop(() -> {
+            if (label != null && !AuroraProfile.validDisplayLabel(label)) {
+                throw error(ProfileErrorCode.NAME_INVALID, "the display label must be 1-" + AuroraProfile.MAX_DISPLAY_LABEL
+                    + " printable characters without surrounding whitespace. Nothing was written");
+            }
+            final AuroraProfile profile = coopProfile(profileId, true);
+            requireProfileNode(profileId);
+            requireProfileReady(profile);
+            final PlayerAccount account = loadReadyAccount(actor);
+            if (Objects.equals(profile.displayLabel(), label) && profile.member(actor) != null
+                && profile.member(actor).role() == ProfileRole.OWNER) {
+                return null;
+            }
+            final long storeNow = this.repository.storeClockMillis();
+            runCoopPlan(CoopMembership.renameLabel(operation(CoopOperation.Kind.RENAME_DISPLAY, actor, profileId,
+                label == null ? "" : label, profile.revision()), profile, account, label, storeNow + INTENT_DEADLINE_MILLIS));
+            return null;
+        });
+    }
+
+    /**
+     * Invites {@code invitee} to a co-op profile (OWNER or MANAGER). Expired invites of the profile and of the invitee
+     * still in their indexes are closed first (bounded), so the §9 index bounds count open invitations only. Fires
+     * {@code CoopInviteEvent} (OPEN) after the commit.
+     */
+    public CompletableFuture<dev.iyanz.sourbycraft.api.profile.CoopInviteInfo> invite(final UUID actor, final UUID profileId,
+                                                                                    final UUID invitee) {
+        return coop(() -> {
+            if (actor.equals(invitee)) throw error(ProfileErrorCode.INVALID_REQUEST, "a member cannot invite itself. Nothing was written");
+            final AuroraProfile first = coopProfile(profileId, true);
+            requireProfileNode(profileId);
+            requireProfileReady(first);
+            final PlayerAccount account = loadReadyAccount(actor);
+            final long storeNow = this.repository.storeClockMillis();
+            final List<ProfileInvite> open = openInvites(ProfileIndexPage.Kind.INVITES_BY_PROFILE, profileId, actor, storeNow);
+            openInvites(ProfileIndexPage.Kind.INVITES_BY_INVITEE, invitee, actor, storeNow);
+            final PlayerAccount inviteeAccount = this.repository.loadAccount(invitee, this.settings.defaultSlots());
+            // Each cleanup close reserved and released M (and compared A): the profile and the clock are read again.
+            final AuroraProfile profile = readyAgain(profileId, first);
+            final long issuedAt = this.repository.storeClockMillis();
+            final CoopIntentPlan plan = CoopMembership.createInvite(operation(CoopOperation.Kind.INVITE_CREATE, actor, profileId, invitee,
+                profile.revision()), profile, account, invitee, inviteeAccount, open, coopPolicy(), issuedAt, issuedAt + INTENT_DEADLINE_MILLIS);
+            runCoopPlan(plan);
+            final ProfileInvite created = this.repository.invite(plan.result().recordId()).orElseThrow(() -> readBack("invite",
+                plan.result().recordId()));
+            final dev.iyanz.sourbycraft.api.profile.CoopInviteInfo info = inviteInfo(created, storeNow);
+            fireCoopEvent(new dev.iyanz.sourbycraft.api.profile.CoopInviteEvent(info));
+            return info;
+        });
+    }
+
+    /**
+     * The invitee accepts: one intent consumes the invite, admits a MEMBER row with a fresh epoch, creates its head and
+     * gives the account access (one profile slot) under an account-unique alias. The invite's expiry is the commit
+     * deadline (store clock): an accept that commits after it is {@code INVITE_EXPIRED}. A repeat of a committed accept
+     * of the same invite returns the same membership. OD-1: refused {@code WRONG_NODE} while another node holds the
+     * profile. Fires {@code CoopMemberJoinEvent}. The new member cannot switch into the profile before Build 53.
+     */
+    public CompletableFuture<dev.iyanz.sourbycraft.api.profile.CoopMemberInfo> acceptInvite(final UUID player, final UUID inviteId) {
+        return coop(() -> {
+            final ProfileInvite invite = inviteOf(player, inviteId);
+            final AuroraProfile profile = coopProfile(invite.profileId(), true);
+            if (invite.status() == ProfileInvite.Status.ACCEPTED) {
+                final ProfileMember row = profile.member(player);
+                if (row != null && row.epoch().equals(invite.acceptedEpoch())) return memberInfo(row);
+                throw error(ProfileErrorCode.INVITE_NOT_FOUND, "invite " + inviteId + " was accepted earlier and that membership has"
+                    + " ended; a new invitation is needed. Nothing was written");
+            }
+            requireProfileNode(profile.id());
+            requireProfileReady(profile);
+            final PlayerAccount account = loadReadyAccount(player);
+            final long storeNow = this.repository.storeClockMillis();
+            if (invite.open() && invite.expired(storeNow)) {
+                closeQuietly(invite, player, ProfileInvite.Status.EXPIRED, storeNow);
+                throw error(ProfileErrorCode.INVITE_EXPIRED, "invite " + inviteId + " expired at " + invite.expiresAtMillis()
+                    + " (store clock " + storeNow + "). Nothing was written");
+            }
+            final CoopIntentPlan plan = CoopMembership.acceptInvite(operation(CoopOperation.Kind.INVITE_ACCEPT, player, inviteId,
+                invite.revision()), profile, invite, account, coopPolicy(), undecidedVotes(profile), storeNow, storeNow + INTENT_DEADLINE_MILLIS);
+            try {
+                runCoopPlan(plan);
+            } catch (final ProfileOperationException refused) {
+                // Only the invite's own expiry is INVITE_EXPIRED: the plan's deadline is the invite's expiry exactly when
+                // it is the earlier bound (both backends compare that deadline); the intent deadline (2 min) stays TIMEOUT.
+                if (refused.code() == ProfileErrorCode.TIMEOUT && plan.deadlineMillis() == invite.expiresAtMillis()) {
+                    throw new ProfileOperationException(ProfileErrorCode.INVITE_EXPIRED, "invite " + inviteId + " expired before the accept"
+                        + " committed (judged by the store clock at commit): " + refused.getMessage(), refused);
+                }
+                throw refused;
+            }
+            final ProfileMember row = coopProfile(profile.id(), true).member(player);
+            if (row == null || !row.epoch().equals(plan.result().epoch())) {
+                throw error(ProfileErrorCode.UNKNOWN_OUTCOME, "the accept of invite " + inviteId + " committed but the membership of "
+                    + player + " does not read back with epoch " + plan.result().epoch() + "; list the members before retrying");
+            }
+            fireCoopEvent(new dev.iyanz.sourbycraft.api.profile.CoopMemberJoinEvent(profile.id(), player, role(row.role()), inviteId));
+            return memberInfo(row);
+        });
+    }
+
+    /** The invitee declines an open invitation. Fires {@code CoopInviteEvent} (DECLINED). */
+    public CompletableFuture<Void> declineInvite(final UUID player, final UUID inviteId) {
+        return coop(() -> {
+            final ProfileInvite invite = inviteOf(player, inviteId);
+            closeInvite(invite, player, ProfileInvite.Status.DECLINED);
+            return null;
+        });
+    }
+
+    /**
+     * Cancels an open invitation: the OWNER any of the profile's, a MANAGER only those it issued. Fires
+     * {@code CoopInviteEvent} (CANCELLED).
+     */
+    public CompletableFuture<Void> cancelInvite(final UUID actor, final UUID inviteId) {
+        return coop(() -> {
+            final ProfileInvite invite = this.repository.invite(inviteId).orElseThrow(() -> error(ProfileErrorCode.INVITE_NOT_FOUND,
+                "no invite " + inviteId));
+            final AuroraProfile profile = coopProfile(invite.profileId(), true);
+            final ProfileMember row = profile.member(actor);
+            if (row == null) throw error(ProfileErrorCode.NOT_A_MEMBER, actor + " is not a member of " + profile.id());
+            if (row.role() == ProfileRole.MANAGER && !invite.inviter().equals(actor)) {
+                throw error(ProfileErrorCode.ROLE_FORBIDDEN, "a MANAGER cancels only the invitations it issued; invite " + inviteId
+                    + " was issued by " + invite.inviter() + ". Nothing was written");
+            }
+            closeInvite(invite, actor, ProfileInvite.Status.REVOKED);
+            return null;
+        });
+    }
+
+    /** One page of the open invitations addressed to {@code player}, oldest first; expired ones are left out. */
+    public CompletableFuture<dev.iyanz.sourbycraft.api.profile.CoopPage<dev.iyanz.sourbycraft.api.profile.CoopInviteInfo>> invitesFor(
+        final UUID player, final String cursor) {
+        return coop(() -> {
+            final CoopMembership.Page<ProfileInvite> page = CoopMembership.invitesByInvitee(this.repository, player,
+                listingCursor(cursor, ProfileIndexPage.Kind.INVITES_BY_INVITEE, player));
+            final long now = this.repository.storeClockMillis();
+            final List<dev.iyanz.sourbycraft.api.profile.CoopInviteInfo> items = new ArrayList<>();
+            for (final ProfileInvite invite : page.items()) {
+                if (invite.open() && !invite.expired(now) && invite.invitee().equals(player)) items.add(inviteInfo(invite, now));
+            }
+            return new dev.iyanz.sourbycraft.api.profile.CoopPage<>(items, nextCursor(page));
+        });
+    }
+
+    /**
+     * One page of the open invitations of a co-op profile. {@code actor} must be its OWNER or a MANAGER;
+     * {@code null} is the operator's administrative listing (no role check).
+     */
+    public CompletableFuture<dev.iyanz.sourbycraft.api.profile.CoopPage<dev.iyanz.sourbycraft.api.profile.CoopInviteInfo>> invitesOf(
+        final UUID actor, final UUID profileId, final String cursor) {
+        return coop(() -> {
+            final AuroraProfile profile = coopProfile(profileId, true);
+            if (actor != null) {
+                final ProfileMember row = profile.member(actor);
+                if (row == null) throw error(ProfileErrorCode.NOT_A_MEMBER, actor + " is not a member of " + profileId);
+                if (!row.role().allows(ProfileRole.Permission.INVITE)) {
+                    throw error(ProfileErrorCode.ROLE_FORBIDDEN, actor + " is " + row.role() + " of " + profileId + "; the owner and"
+                        + " managers list its invitations");
+                }
+            }
+            final CoopMembership.Page<ProfileInvite> page = CoopMembership.invitesByProfile(this.repository, profileId,
+                listingCursor(cursor, ProfileIndexPage.Kind.INVITES_BY_PROFILE, profileId));
+            final long now = this.repository.storeClockMillis();
+            final List<dev.iyanz.sourbycraft.api.profile.CoopInviteInfo> items = new ArrayList<>();
+            for (final ProfileInvite invite : page.items()) {
+                if (invite.open() && !invite.expired(now) && invite.profileId().equals(profileId)) items.add(inviteInfo(invite, now));
+            }
+            return new dev.iyanz.sourbycraft.api.profile.CoopPage<>(items, nextCursor(page));
+        });
+    }
+
+    /**
+     * The player leaves a co-op profile: its row is dropped, its epoch consumed, an UNAVAILABLE salvage record written
+     * and the account loses access. Refused for the OWNER ({@code OWNER_ACTION_REFUSED}) and only while this profile is
+     * the player's <em>active</em> profile ({@code MEMBER_ONLINE}, Build 53): a player online in another profile leaves.
+     * Fires {@code CoopMemberLeaveEvent} (LEFT).
+     */
+    public CompletableFuture<Void> leave(final UUID player, final UUID profileId) {
+        return coop(() -> {
+            final AuroraProfile profile = coopProfile(profileId, true);
+            final ProfileMember row = profile.member(player);
+            if (row == null) throw error(ProfileErrorCode.NOT_A_MEMBER, player + " is not a member of " + profileId + ". Nothing was written");
+            if (row.role() == ProfileRole.OWNER) {
+                throw error(ProfileErrorCode.OWNER_ACTION_REFUSED, "the OWNER cannot leave " + profileId + "; owner transfer is not"
+                    + " available, and a sole owner deletes the profile instead. Nothing was written");
+            }
+            requireProfileNode(profileId);
+            requireProfileReady(profile);
+            final PlayerAccount account = loadReadyAccount(player);
+            requireNotActive(account, profileId, "leave");
+            final MemberStateHead head = this.repository.memberHead(profileId, player, row.epoch()).orElse(null);
+            final long storeNow = this.repository.storeClockMillis();
+            // The member's open invitations are revoked and the profile's undecided votes cancelled in the same intent;
+            // the expired-invite cleanup on the way reserved M, so the profile is read again.
+            final List<ProfileInvite> issued = openInvites(ProfileIndexPage.Kind.INVITES_BY_PROFILE, profileId, player, storeNow);
+            final AuroraProfile current = readyAgain(profileId, profile);
+            runCoopPlan(CoopMembership.leave(operation(CoopOperation.Kind.MEMBER_REMOVE, player, profileId, row.epoch(),
+                current.revision()), current, account, head, issued, undecidedVotes(current), storeNow, storeNow + INTENT_DEADLINE_MILLIS));
+            fireCoopEvent(new dev.iyanz.sourbycraft.api.profile.CoopMemberLeaveEvent(profileId, player,
+                dev.iyanz.sourbycraft.api.profile.CoopMemberLeaveEvent.Reason.LEFT, null));
+            return null;
+        });
+    }
+
+    /**
+     * Opens a kick vote against {@code target} (OWNER or MANAGER), with the starter's approval counted. Undecided votes
+     * of the profile that expired or whose electorate changed are closed first. When the starter is the whole
+     * electorate (two-member co-op, target inactive long enough) the removal runs in the same call; a removal that
+     * fails leaves the PASSED vote recorded and is retried with {@link #voteKick} ({@code approve = true}).
+     */
+    public CompletableFuture<dev.iyanz.sourbycraft.api.profile.CoopKickVoteInfo> startKickVote(final UUID actor, final UUID profileId,
+                                                                                            final UUID target) {
+        return coop(() -> {
+            final AuroraProfile first = coopProfile(profileId, true);
+            requireProfileNode(profileId);
+            requireProfileReady(first);
+            final PlayerAccount account = loadReadyAccount(actor);
+            final long storeNow = this.repository.storeClockMillis();
+            final List<KickVote> undecided = undecidedVotes(first, actor, storeNow);
+            // Each cleanup close reserved and released M: the profile is read again before the plan is built.
+            final AuroraProfile profile = readyAgain(profileId, first);
+            final ProfileMember targetRow = profile.member(target);
+            if (targetRow != null && targetRow.role() != ProfileRole.OWNER && !target.equals(actor)) {
+                requireNotActive(this.repository.loadAccount(target, this.settings.defaultSlots()), profileId, "kick");
+            }
+            final long openedAt = this.repository.storeClockMillis();
+            final CoopIntentPlan plan = CoopMembership.createVote(operation(CoopOperation.Kind.VOTE_CREATE, actor, profileId, target,
+                profile.revision()), profile, account, target, undecided, coopPolicy(), openedAt, openedAt + INTENT_DEADLINE_MILLIS);
+            runCoopPlan(plan);
+            KickVote vote = this.repository.vote(plan.result().recordId()).orElseThrow(() -> readBack("vote", plan.result().recordId()));
+            if (vote.status() == KickVote.Status.PASSED) vote = executeKick(actor, vote);
+            return voteInfo(vote, this.repository.storeClockMillis());
+        });
+    }
+
+    /**
+     * Casts {@code voter}'s ballot: approve, or decline (closes the vote DECLINED). A vote that expired is closed and
+     * refused ({@code VOTE_NOT_FOUND}); one whose electorate no longer matches the members is cancelled and refused
+     * ({@code ELECTORATE_CHANGED}). The approval that completes the electorate runs the removal in the same call;
+     * approving a PASSED vote retries its removal.
+     */
+    public CompletableFuture<dev.iyanz.sourbycraft.api.profile.CoopKickVoteInfo> voteKick(final UUID voter, final UUID voteId,
+                                                                                       final boolean approve) {
+        return coop(() -> {
+            final KickVote vote = this.repository.vote(voteId).orElseThrow(() -> error(ProfileErrorCode.VOTE_NOT_FOUND, "no vote " + voteId));
+            final AuroraProfile profile = coopProfile(vote.profileId(), true);
+            if (profile.member(voter) == null) throw error(ProfileErrorCode.NOT_A_MEMBER, voter + " is not a member of " + profile.id());
+            requireProfileNode(profile.id());
+            requireProfileReady(profile);
+            final PlayerAccount account = loadReadyAccount(voter);
+            final long storeNow = this.repository.storeClockMillis();
+            if (!vote.undecided()) throw error(ProfileErrorCode.VOTE_NOT_FOUND, "vote " + voteId + " is " + vote.status());
+            if (vote.expired(storeNow)) {
+                closeQuietly(vote, voter, KickVote.Status.EXPIRED, storeNow);
+                throw error(ProfileErrorCode.VOTE_NOT_FOUND, "vote " + voteId + " expired at " + vote.expiresAtMillis() + " (store clock "
+                    + storeNow + ") and was closed. Nothing else was written");
+            }
+            if (!vote.electorateCurrent(profile.members())) {
+                closeQuietly(vote, voter, KickVote.Status.CANCELLED, storeNow);
+                throw error(ProfileErrorCode.ELECTORATE_CHANGED, "the members of " + profile.id() + " changed since vote " + voteId
+                    + " opened; the vote was cancelled. Start a new one");
+            }
+            if (vote.status() == KickVote.Status.PASSED) {
+                if (!approve) {
+                    throw error(ProfileErrorCode.INVALID_REQUEST, "vote " + voteId + " has passed; approve it to run the removal."
+                        + " Nothing was written");
+                }
+                return voteInfo(executeKick(voter, vote), this.repository.storeClockMillis());
+            }
+            if (approve && vote.approvals().containsKey(voter)) {
+                throw error(ProfileErrorCode.INVALID_REQUEST, voter + " already approved vote " + voteId + ". Nothing was written");
+            }
+            if (approve) {
+                final java.util.Set<UUID> approvals = new java.util.HashSet<>(vote.approvals().keySet());
+                approvals.add(voter);
+                if (approvals.containsAll(vote.electorate().keySet())) {
+                    requireNotActive(this.repository.loadAccount(vote.target(), this.settings.defaultSlots()), profile.id(), "kick");
+                }
+            }
+            runCoopPlan(CoopMembership.castVote(operation(CoopOperation.Kind.VOTE_CAST, voter, voteId, approve, vote.revision()),
+                profile, vote, account, approve, storeNow, storeNow + INTENT_DEADLINE_MILLIS));
+            KickVote after = this.repository.vote(voteId).orElseThrow(() -> readBack("vote", voteId));
+            if (after.status() == KickVote.Status.PASSED) after = executeKick(voter, after);
+            return voteInfo(after, this.repository.storeClockMillis());
+        });
+    }
+
+    /** The undecided (OPEN or PASSED, unexpired) kick vote of a co-op profile, if any; the operator's and the API's form. */
+    public CompletableFuture<Optional<dev.iyanz.sourbycraft.api.profile.CoopKickVoteInfo>> openKickVote(final UUID profileId) {
+        return openKickVote(null, profileId);
+    }
+
+    /** {@link #openKickVote(UUID)} for {@code viewer}, a member of the profile ({@code NOT_A_MEMBER} otherwise; {@code null} = operator). */
+    public CompletableFuture<Optional<dev.iyanz.sourbycraft.api.profile.CoopKickVoteInfo>> openKickVote(final UUID viewer, final UUID profileId) {
+        return coop(() -> {
+            requireViewer(coopProfile(profileId, true), viewer);
+            final long now = this.repository.storeClockMillis();
+            for (final KickVote vote : CoopMembership.votesByProfile(this.repository, profileId, null).items()) {
+                if (vote.profileId().equals(profileId) && vote.undecided() && !vote.expired(now)) return Optional.of(voteInfo(vote, now));
+            }
+            return Optional.empty();
+        });
+    }
+
+    /** One page of the members of a co-op profile, owner first, in record order; the operator's and the API's form. */
+    public CompletableFuture<dev.iyanz.sourbycraft.api.profile.CoopPage<dev.iyanz.sourbycraft.api.profile.CoopMemberInfo>> members(
+        final UUID profileId, final String cursor) {
+        return members(null, profileId, cursor);
+    }
+
+    /** {@link #members(UUID, String)} for {@code viewer}, a member of the profile ({@code NOT_A_MEMBER} otherwise; {@code null} = operator). */
+    public CompletableFuture<dev.iyanz.sourbycraft.api.profile.CoopPage<dev.iyanz.sourbycraft.api.profile.CoopMemberInfo>> members(
+        final UUID viewer, final UUID profileId, final String cursor) {
+        return coop(() -> {
+            final AuroraProfile profile = coopProfile(profileId, true);
+            requireViewer(profile, viewer);
+            final int from = memberCursor(cursor, profileId);
+            final List<CoopMembership.MemberView> views = CoopMembership.members(this.repository, profile, from);
+            final List<dev.iyanz.sourbycraft.api.profile.CoopMemberInfo> items = new ArrayList<>(views.size());
+            for (final CoopMembership.MemberView view : views) items.add(memberInfo(view.member()));
+            final int next = from + views.size();
+            return new dev.iyanz.sourbycraft.api.profile.CoopPage<>(items,
+                next < profile.members().size() && !views.isEmpty() ? MEMBER_CURSOR_PREFIX + profileId + ":" + next : null);
+        });
+    }
+
+    // ---- co-op internals (every method below runs inside an I/O step)
+
+    /** The co-op gate: MultiProfile and co-op enabled, then (on the lane) a format-2 store. */
+    private <T> CompletableFuture<T> coop(final IoSupplier<T> work) {
+        if (!this.settings.enabled()) return failed(ProfileErrorCode.DISABLED, "AWF MultiProfile is disabled");
+        if (!this.settings.coopEnabled()) {
+            return failed(ProfileErrorCode.COOP_DISABLED, "co-op is disabled (" + ProfileSettings.COOP_ENABLED_KEY + ": false,"
+                + " RESTART_REQUIRED). Nothing was written");
+        }
+        return io(() -> {
+            if (!format2()) {
+                throw error(ProfileErrorCode.MIGRATION_REQUIRED, "co-op needs a format-2 profile store and this one is format 1:"
+                    + " /awf multiprofile migrate dry-run, then migration.mode: apply and restart. Nothing was written");
+            }
+            return work.get();
+        });
+    }
+
+    private CoopMembership.Policy coopPolicy() {
+        final ProfileSettings.Coop coop = this.settings.coop();
+        return new CoopMembership.Policy(coop.maxMembers(), coop.inviteExpiryMillis(), coop.kickVoteExpiryMillis(), coop.inactiveMillis());
+    }
+
+    private AuroraProfile coopProfile(final UUID profileId, final boolean requireCoop) throws IOException {
+        final AuroraProfile profile = this.repository.profile(profileId).filter(found -> found.status() != ProfileStatus.DELETED)
+            .orElseThrow(() -> error(ProfileErrorCode.PROFILE_NOT_FOUND, "no profile " + profileId));
+        if (requireCoop && !profile.coop()) {
+            throw error(ProfileErrorCode.NOT_COOP, "profile " + profileId + " is a solo profile; its owner converts it to co-op first");
+        }
+        return profile;
+    }
+
+    /**
+     * The profile read again after a cleanup intent may have moved {@code M}: still co-op, not deleted, not reserved.
+     * Returns {@code first} unchanged when its revision did not move.
+     */
+    private AuroraProfile readyAgain(final UUID profileId, final AuroraProfile first) throws IOException {
+        final AuroraProfile current = coopProfile(profileId, true);
+        if (current.revision() == first.revision()) return first;
+        requireProfileReady(current);
+        return current;
+    }
+
+    /**
+     * A commit that succeeded but whose record does not read back: the outcome is not known to the caller, never
+     * reported as a plain I/O failure (the record may well be installed).
+     */
+    private static ProfileOperationException readBack(final String what, final UUID id) {
+        return error(ProfileErrorCode.UNKNOWN_OUTCOME, "the " + what + " " + id + " committed but could not be read back; the change may"
+            + " be installed. Read the " + what + " or the members before retrying");
+    }
+
+    /** The undecided votes of a profile as stored (no cleanup); the plans that change the membership cancel them. */
+    private List<KickVote> undecidedVotes(final AuroraProfile profile) throws IOException {
+        final List<KickVote> undecided = new ArrayList<>();
+        for (final KickVote vote : CoopMembership.votesByProfile(this.repository, profile.id(), null).items()) {
+            if (vote.undecided() && vote.profileId().equals(profile.id())) undecided.add(vote);
+        }
+        return undecided;
+    }
+
+    private ProfileInvite inviteOf(final UUID invitee, final UUID inviteId) throws IOException {
+        return this.repository.invite(inviteId).filter(found -> found.invitee().equals(invitee))
+            .orElseThrow(() -> error(ProfileErrorCode.INVITE_NOT_FOUND, "no invite " + inviteId + " addressed to " + invitee));
+    }
+
+    /**
+     * OD-1: a membership change runs on the node that holds the profile's bound world, which is the node holding the
+     * profile's claim (the owner playing it); refused {@code WRONG_NODE} while another node holds it.
+     */
+    private void requireProfileNode(final UUID profileId) {
+        final OwnerClaim foreign = this.ownership.foreignHolder(profileId).join();
+        if (foreign != null) {
+            throw error(ProfileErrorCode.WRONG_NODE, "profile " + profileId + " is held by node " + foreign.node() + " (its bound world"
+                + " is played there); owner decision OD-1: co-op membership changes run on that node, or while nobody plays the"
+                + " profile. Nothing was written");
+        }
+    }
+
+    private static void requireProfileReady(final AuroraProfile profile) {
+        if (profile.pendingIntent() != null) {
+            throw error(ProfileErrorCode.RECOVERY_REQUIRED, "profile " + profile.id() + " is reserved by intent " + profile.pendingIntent()
+                + "; it is resolved at the next start or the owner's next login. Nothing was written");
+        }
+    }
+
+    private PlayerAccount loadReadyAccount(final UUID accountId) throws IOException {
+        final PlayerAccount account = this.repository.loadAccount(accountId, this.settings.defaultSlots());
+        requireAccountReady(account);
+        return account;
+    }
+
+    private void requireAccountReady(final PlayerAccount account) {
+        final UUID accountId = account.playerId();
+        requireNoUnresolvedIntent(accountId);
+        if (this.switches.containsKey(accountId)) {
+            throw error(ProfileErrorCode.SWITCH_IN_PROGRESS, "a profile switch is running for " + accountId + ". Nothing was written");
+        }
+        if (account.pendingIntent() != null) {
+            throw error(ProfileErrorCode.RECOVERY_REQUIRED, "the account " + accountId + " is reserved by intent " + account.pendingIntent()
+                + ". Nothing was written");
+        }
+    }
+
+    /**
+     * Build 52's online rule: removing a membership that is the account's <em>active</em> profile needs the gated
+     * capture of Build 53 ({@code MEMBER_ONLINE}). A player online in another profile is not refused.
+     */
+    private static void requireNotActive(final PlayerAccount account, final UUID profileId, final String what) {
+        if (profileId.equals(account.activeProfile())) {
+            throw error(ProfileErrorCode.MEMBER_ONLINE, account.playerId() + " has co-op profile " + profileId + " active; a " + what
+                + " of the active membership needs the gated capture of Build 53. It is allowed once " + account.playerId()
+                + " switched to another profile (being online elsewhere does not block it). Nothing was written");
+        }
+    }
+
+    /**
+     * Runs a plan under its claims: the actor's {@code Q} (its session on this node, else a short claim), for a kick
+     * the removed member's {@code Q} ({@link CoopIntentPlan#affectedAccount()}), then {@code P}; every claim taken here
+     * is released afterwards. Accounts the plan rewrites are re-read before the claims go, so an admitted session's
+     * capture ticket follows the commit.
+     */
+    private void runCoopPlan(final CoopIntentPlan plan) throws IOException {
+        requireNoUnresolvedIntent(plan.op().actor());
+        if (plan.affectedAccount() != null) requireNoUnresolvedIntent(plan.affectedAccount());
+        final List<PlayerClaim> acquired = new ArrayList<>(2);
+        ProfileClaim transaction = null;
+        try {
+            final PlayerClaim q = actorClaim(plan.op().actor(), acquired);
+            PlayerClaim affected = null;
+            if (plan.affectedAccount() != null) {
+                try {
+                    affected = actorClaim(plan.affectedAccount(), acquired);
+                } catch (final ProfileOperationException busy) {
+                    if (busy.code() != ProfileErrorCode.OWNERSHIP_CONFLICT) throw busy;
+                    throw new ProfileOperationException(ProfileErrorCode.OWNERSHIP_CONFLICT, "the member to remove, "
+                        + plan.affectedAccount() + ", has a session on another node: " + busy.getMessage() + ". Run the removal on"
+                        + " that node or while the member is offline", busy);
+                }
+            }
+            transaction = transactionClaim(plan.profileId());
+            runPlan(plan, transaction, q, affected);
+            for (final CoopIntentPlan.Image image : plan.images()) {
+                if (image.recordType() == ProfileRecords.TYPE_ACCOUNT) refreshAccount(image.id());
+            }
+        } finally {
+            if (transaction != null) releaseTransactionClaim(transaction);
+            releasePlayerClaims(acquired);
+        }
+    }
+
+    private void refreshAccount(final UUID accountId) {
+        try {
+            accountCommitted(this.repository.loadAccount(accountId, this.settings.defaultSlots()));
+        } catch (final IOException | RuntimeException unreadable) {
+            SourbyLogger.warn("AWF MultiProfile: the account " + accountId + " could not be re-read after a co-op commit ("
+                + messageOf(unreadable) + "); its next save may be refused as stale and is then retried by the player");
+        }
+    }
+
+    /**
+     * Raises the store's feature level before the first co-op record is prepared (minimumBuild 52, schema 2), durably,
+     * so no build that cannot read a co-op record opens the store afterwards; a failure refuses the operation.
+     */
+    private void requireCoopStoreLevel() throws IOException {
+        if (this.coopStoreLevel) return;
+        final StoreFormat.Marker raised = this.repository.requireStoreFeature(StoreFormat.COOP_SCHEMA, StoreFormat.COOP_MINIMUM_BUILD,
+            this.storeWriter);
+        if (!raised.covers(StoreFormat.COOP_SCHEMA, StoreFormat.COOP_MINIMUM_BUILD)) {
+            throw error(ProfileErrorCode.STORE_FORMAT_REFUSED, "the store marker was not raised to Build " + StoreFormat.COOP_MINIMUM_BUILD
+                + " (" + describe(raised) + "); no co-op record is written");
+        }
+        this.coopStoreLevel = true;
+        final StoreStatus status = this.storeStatus;
+        if (status != null) {
+            this.storeStatus = new StoreStatus(raised, status.gate(), status.reason(), status.migration(), status.unresolvedIntents());
+        }
+    }
+
+    /** Closes {@code invite} as {@code next} by {@code actor} and fires the invite event. */
+    private void closeInvite(final ProfileInvite invite, final UUID actor, final ProfileInvite.Status next) throws IOException {
+        final AuroraProfile profile = coopProfile(invite.profileId(), true);
+        if (!invite.open()) throw error(ProfileErrorCode.INVITE_NOT_FOUND, "invite " + invite.id() + " is " + invite.status());
+        final PlayerAccount account = loadReadyAccount(actor);
+        final long storeNow = this.repository.storeClockMillis();
+        runCoopPlan(CoopMembership.closeInvite(operation(CoopOperation.Kind.INVITE_REVOKE, actor, invite.id(), next, invite.revision()),
+            profile, invite, account, next, storeNow, storeNow + INTENT_DEADLINE_MILLIS));
+        final ProfileInvite closed = this.repository.invite(invite.id()).orElseThrow(() -> readBack("invite", invite.id()));
+        fireCoopEvent(new dev.iyanz.sourbycraft.api.profile.CoopInviteEvent(inviteInfo(closed, storeNow)));
+    }
+
+    /** A cleanup close (an expired invite): best effort, never an event; a failure is logged and retried by a later cleanup. */
+    private void closeQuietly(final ProfileInvite invite, final UUID actor, final ProfileInvite.Status next, final long storeNow) {
+        try {
+            final AuroraProfile profile = this.repository.profile(invite.profileId()).orElse(null);
+            if (profile == null) return;
+            final PlayerAccount account = this.repository.loadAccount(actor, this.settings.defaultSlots());
+            runCoopPlan(CoopMembership.closeInvite(operation(CoopOperation.Kind.INVITE_REVOKE, actor, invite.id(), next, invite.revision()),
+                profile, invite, account, next, storeNow, storeNow + INTENT_DEADLINE_MILLIS));
+        } catch (final IOException | RuntimeException failed) {
+            SourbyLogger.warn("AWF MultiProfile: closing invite " + invite.id() + " as " + next + " failed (" + messageOf(failed)
+                + "); it stays indexed until a later cleanup");
+        }
+    }
+
+    /** A cleanup close of a vote (expired, or its electorate changed): best effort, logged on failure. */
+    private void closeQuietly(final KickVote vote, final UUID actor, final KickVote.Status next, final long storeNow) {
+        try {
+            final AuroraProfile profile = this.repository.profile(vote.profileId()).orElse(null);
+            if (profile == null) return;
+            final PlayerAccount account = this.repository.loadAccount(actor, this.settings.defaultSlots());
+            runCoopPlan(CoopMembership.cancelVote(operation(CoopOperation.Kind.VOTE_CANCEL, actor, vote.id(), next, vote.revision()),
+                profile, vote, account, next, storeNow, storeNow + INTENT_DEADLINE_MILLIS));
+        } catch (final IOException | RuntimeException failed) {
+            SourbyLogger.warn("AWF MultiProfile: closing vote " + vote.id() + " as " + next + " failed (" + messageOf(failed)
+                + "); it stays indexed until a later cleanup");
+        }
+    }
+
+    /**
+     * The open, unexpired invites of an index (a profile's or an invitee's), reading every page up to the §9 bound;
+     * up to {@link #COOP_CLEANUP_LIMIT} expired ones still indexed are closed as EXPIRED by {@code actor} on the way.
+     */
+    private List<ProfileInvite> openInvites(final ProfileIndexPage.Kind kind, final UUID resource, final UUID actor, final long storeNow)
+        throws IOException {
+        final List<ProfileInvite> open = new ArrayList<>();
+        final List<ProfileInvite> expired = new ArrayList<>();
+        ProfileIndexPage.Cursor cursor = null;
+        for (int pages = 0; pages < COOP_INVITE_PAGES; pages++) {
+            final CoopMembership.Page<ProfileInvite> page = kind == ProfileIndexPage.Kind.INVITES_BY_PROFILE
+                ? CoopMembership.invitesByProfile(this.repository, resource, cursor)
+                : CoopMembership.invitesByInvitee(this.repository, resource, cursor);
+            for (final ProfileInvite invite : page.items()) {
+                if (!invite.open()) continue;
+                if (invite.expired(storeNow)) {
+                    expired.add(invite);
+                } else {
+                    open.add(invite);
+                }
+            }
+            if (page.next() == null || page.items().size() < ProfileIndexPage.LISTING_PAGE) break;
+            cursor = page.next();
+        }
+        for (int i = 0; i < expired.size() && i < COOP_CLEANUP_LIMIT; i++) {
+            closeQuietly(expired.get(i), actor, ProfileInvite.Status.EXPIRED, storeNow);
+        }
+        return open;
+    }
+
+    /**
+     * The undecided votes of a profile after closing those that expired (EXPIRED) or whose electorate no longer
+     * matches the members (CANCELLED), by {@code actor}.
+     */
+    private List<KickVote> undecidedVotes(final AuroraProfile profile, final UUID actor, final long storeNow) throws IOException {
+        final List<KickVote> undecided = new ArrayList<>();
+        for (final KickVote vote : CoopMembership.votesByProfile(this.repository, profile.id(), null).items()) {
+            if (!vote.undecided() || !vote.profileId().equals(profile.id())) continue;
+            if (vote.expired(storeNow)) {
+                closeQuietly(vote, actor, KickVote.Status.EXPIRED, storeNow);
+            } else if (!vote.electorateCurrent(profile.members())) {
+                closeQuietly(vote, actor, KickVote.Status.CANCELLED, storeNow);
+            } else {
+                undecided.add(vote);
+            }
+        }
+        // A close that failed leaves its vote undecided in the store; the plan's index bound refuses then.
+        return undecided;
+    }
+
+    /**
+     * Runs the removal of a PASSED vote by {@code actor} (an eligible voter): one intent under {@code P}, the actor's
+     * {@code Q} and the target's {@code Q}. Fires {@code CoopMemberLeaveEvent} (KICKED) after the commit. A failure keeps
+     * the PASSED vote and says how to retry.
+     */
+    private KickVote executeKick(final UUID actor, final KickVote passed) throws IOException {
+        final AuroraProfile first = coopProfile(passed.profileId(), true);
+        final KickVote vote = this.repository.vote(passed.id()).orElse(passed);
+        try {
+            final PlayerAccount targetAccount = this.repository.loadAccount(vote.target(), this.settings.defaultSlots());
+            requireAccountReady(targetAccount);
+            requireNotActive(targetAccount, first.id(), "kick");
+            final long storeNow = this.repository.storeClockMillis();
+            // The target's open invitations are revoked in the same intent; the cleanup on the way may have moved M.
+            final List<ProfileInvite> issued = openInvites(ProfileIndexPage.Kind.INVITES_BY_PROFILE, first.id(), actor, storeNow);
+            final AuroraProfile profile = readyAgain(first.id(), first);
+            final ProfileMember target = profile.member(vote.target());
+            final MemberStateHead head = target == null ? null
+                : this.repository.memberHead(profile.id(), target.playerId(), target.epoch()).orElse(null);
+            runCoopPlan(CoopMembership.kick(operation(CoopOperation.Kind.MEMBER_REMOVE, actor, vote.id(), vote.target(),
+                profile.revision()), profile, vote, targetAccount, head, issued, coopPolicy(), storeNow, storeNow + INTENT_DEADLINE_MILLIS));
+        } catch (final ProfileOperationException failed) {
+            final String outcome = failed.code() == ProfileErrorCode.UNKNOWN_OUTCOME ? "its outcome is unknown; list the members before"
+                + " retrying" : "it was not committed; approve the vote again to retry";
+            throw new ProfileOperationException(failed.code(), "kick vote " + vote.id() + " passed and is recorded, but the removal of "
+                + vote.target() + " did not complete (" + failed.getMessage() + "); " + outcome, failed);
+        }
+        fireCoopEvent(new dev.iyanz.sourbycraft.api.profile.CoopMemberLeaveEvent(first.id(), vote.target(),
+            dev.iyanz.sourbycraft.api.profile.CoopMemberLeaveEvent.Reason.KICKED, vote.id()));
+        return this.repository.vote(vote.id()).orElse(vote);
+    }
+
+    /** Hands a co-op event to the event thread; dropped with a warning when the engine is closed or the queue is full. */
+    private void fireCoopEvent(final org.bukkit.event.Event event) {
+        if (this.closed) return;
+        try {
+            coopEventLane().execute(() -> {
+                try {
+                    this.coopEventSink.accept(event);
+                } catch (final RuntimeException failed) {
+                    SourbyLogger.warn("AWF MultiProfile: a handler of " + event.getEventName() + " failed: " + failed.getMessage());
+                }
+            });
+        } catch (final RejectedExecutionException full) {
+            SourbyLogger.warn("AWF MultiProfile: " + event.getEventName() + " was dropped (the co-op event queue of "
+                + COOP_EVENT_QUEUE + " is full or closed); the store is the source of truth");
+        }
+    }
+
+    private java.util.concurrent.ThreadPoolExecutor coopEventLane() {
+        java.util.concurrent.ThreadPoolExecutor lane = this.coopEventLane;
+        if (lane != null) return lane;
+        synchronized (this.coopEventLock) {
+            if (this.coopEventLane == null) {
+                final java.util.concurrent.ThreadPoolExecutor created = new java.util.concurrent.ThreadPoolExecutor(1, 1, 30L,
+                    TimeUnit.SECONDS, new java.util.concurrent.ArrayBlockingQueue<>(COOP_EVENT_QUEUE), task -> {
+                        final Thread thread = new Thread(task, "SourbyCraft-AWF-coop-events");
+                        thread.setDaemon(true);
+                        return thread;
+                    });
+                created.allowCoreThreadTimeOut(true);
+                this.coopEventLane = created;
+            }
+            return this.coopEventLane;
+        }
+    }
+
+    private static ProfileIndexPage.Cursor listingCursor(final String text, final ProfileIndexPage.Kind kind, final UUID resource) {
+        if (text == null) return null;
+        final ProfileIndexPage.Cursor cursor;
+        try {
+            cursor = ProfileIndexPage.Cursor.decode(text);
+        } catch (final IOException malformed) {
+            throw error(ProfileErrorCode.INVALID_REQUEST, malformed.getMessage() + "; restart the listing with a null cursor");
+        }
+        if (cursor.kind() != kind || !cursor.resource().equals(resource)) {
+            throw error(ProfileErrorCode.INVALID_REQUEST, "the cursor belongs to another listing; restart with a null cursor");
+        }
+        return cursor;
+    }
+
+    private static String nextCursor(final CoopMembership.Page<?> page) {
+        return page.next() == null || page.items().size() < ProfileIndexPage.LISTING_PAGE ? null : page.next().encode();
+    }
+
+    private static int memberCursor(final String text, final UUID profileId) {
+        if (text == null) return 0;
+        final String prefix = MEMBER_CURSOR_PREFIX + profileId + ":";
+        if (!text.startsWith(prefix)) {
+            throw error(ProfileErrorCode.INVALID_REQUEST, "the cursor belongs to another listing; restart with a null cursor");
+        }
+        try {
+            final int from = Integer.parseInt(text.substring(prefix.length()));
+            if (from < 0 || from > AuroraProfile.MAX_MEMBERS) throw new NumberFormatException("out of range");
+            return from;
+        } catch (final NumberFormatException malformed) {
+            throw error(ProfileErrorCode.INVALID_REQUEST, "malformed member cursor; restart the listing with a null cursor");
+        }
+    }
+
+    private dev.iyanz.sourbycraft.api.profile.CoopDetails coopView(final AuroraProfile profile) {
+        final List<dev.iyanz.sourbycraft.api.profile.CoopMemberInfo> members = new ArrayList<>(profile.members().size());
+        for (final ProfileMember member : profile.members()) members.add(memberInfo(member));
+        return new dev.iyanz.sourbycraft.api.profile.CoopDetails(profile.id(), profile.displayLabel() == null ? "" : profile.displayLabel(),
+            members, this.settings.coop().maxMembers());
+    }
+
+    private static dev.iyanz.sourbycraft.api.profile.CoopRole role(final ProfileRole role) {
+        return switch (role) {
+            case OWNER -> dev.iyanz.sourbycraft.api.profile.CoopRole.OWNER;
+            case MANAGER -> dev.iyanz.sourbycraft.api.profile.CoopRole.MANAGER;
+            case MEMBER -> dev.iyanz.sourbycraft.api.profile.CoopRole.MEMBER;
+        };
+    }
+
+    private static dev.iyanz.sourbycraft.api.profile.CoopMemberInfo memberInfo(final ProfileMember member) {
+        return new dev.iyanz.sourbycraft.api.profile.CoopMemberInfo(member.playerId(), role(member.role()), member.joinedAtMillis(),
+            member.lastSeenAtMillis());
+    }
+
+    private static dev.iyanz.sourbycraft.api.profile.CoopInviteInfo inviteInfo(final ProfileInvite invite, final long now) {
+        final dev.iyanz.sourbycraft.api.profile.CoopInviteState state = switch (invite.status()) {
+            case OPEN -> invite.expired(now) ? dev.iyanz.sourbycraft.api.profile.CoopInviteState.EXPIRED
+                : dev.iyanz.sourbycraft.api.profile.CoopInviteState.OPEN;
+            case ACCEPTED -> dev.iyanz.sourbycraft.api.profile.CoopInviteState.ACCEPTED;
+            case DECLINED -> dev.iyanz.sourbycraft.api.profile.CoopInviteState.DECLINED;
+            case REVOKED -> dev.iyanz.sourbycraft.api.profile.CoopInviteState.CANCELLED;
+            case EXPIRED -> dev.iyanz.sourbycraft.api.profile.CoopInviteState.EXPIRED;
+        };
+        return new dev.iyanz.sourbycraft.api.profile.CoopInviteInfo(invite.id(), invite.profileId(), invite.inviter(), invite.invitee(),
+            invite.createdAtMillis(), invite.expiresAtMillis(), state);
+    }
+
+    private static dev.iyanz.sourbycraft.api.profile.CoopKickVoteInfo voteInfo(final KickVote vote, final long now) {
+        final boolean lapsed = vote.undecided() && vote.expired(now);
+        final dev.iyanz.sourbycraft.api.profile.CoopKickVoteState state = lapsed ? dev.iyanz.sourbycraft.api.profile.CoopKickVoteState.EXPIRED
+            : switch (vote.status()) {
+                case OPEN -> dev.iyanz.sourbycraft.api.profile.CoopKickVoteState.OPEN;
+                case PASSED -> dev.iyanz.sourbycraft.api.profile.CoopKickVoteState.PASSED;
+                case EXECUTED -> dev.iyanz.sourbycraft.api.profile.CoopKickVoteState.EXECUTED;
+                case DECLINED -> dev.iyanz.sourbycraft.api.profile.CoopKickVoteState.DECLINED;
+                case CANCELLED -> dev.iyanz.sourbycraft.api.profile.CoopKickVoteState.CANCELLED;
+                case EXPIRED -> dev.iyanz.sourbycraft.api.profile.CoopKickVoteState.EXPIRED;
+            };
+        return new dev.iyanz.sourbycraft.api.profile.CoopKickVoteInfo(vote.id(), vote.profileId(), vote.target(), vote.approvals().size(),
+            vote.electorate().size(), vote.createdAtMillis(), vote.expiresAtMillis(), state);
     }
 
     // ------------------------------------------------------------------ helpers

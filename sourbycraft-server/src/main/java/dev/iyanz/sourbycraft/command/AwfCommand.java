@@ -52,7 +52,8 @@ import static net.kyori.adventure.text.Component.text;
  * <p>Permissions: {@code sourbycraft.command.awf} for the command. Delete, import, export, convert,
  * clone, set, template delete and unload nosave also check {@code sourbycraft.command.awf.admin},
  * which the command node implies unless that node is explicitly set (see {@link #admin}).
- * {@code multiprofile} and {@code redis} have their own nodes. Once shutdown has begun (or startup
+ * {@code multiprofile} and {@code redis} have their own nodes; {@code multiprofile coop} changes (Build 52, see
+ * {@link CoopCommand#admin}) also check {@code sourbycraft.command.awf.admin}. Once shutdown has begun (or startup
  * failed, see {@link dev.iyanz.sourbycraft.core.AuroraRuntime#stopping()}) the command starts no new
  * work.</p>
  */
@@ -573,6 +574,7 @@ public class AwfCommand extends Command {
         }
         final String action = args.length > 1 ? args[1].toLowerCase(Locale.ROOT) : "status";
         switch (action) {
+            case "coop" -> CoopCommand.admin(s, engine, args, this.reply, admin(s));
             case "status" -> {
                 final dev.iyanz.sourbycraft.awf.multiprofile.ProfileSettings settings = engine.settings();
                 s.sendMessage(UiPanel.header("AWF MultiProfile"));
@@ -979,7 +981,8 @@ public class AwfCommand extends Command {
                 + " [type=<type>] [name=<name>]|switch <player> <profile-uuid>|bind <profile> <world> [template]|"
                 + "unbind <profile>|inspect|info <profile>|lock <profile>|unlock <profile>|slots <player> <n>|"
                 + "recover <transition>|owner <profile>|reclaim <profile> <epoch>|migrate-repository confirm|format|"
-                + "migrate <dry-run|apply>>", SourbyCraftColors.WARNING));
+                + "migrate <dry-run|apply>|coop <convert|invite|accept|decline|cancel|leave|kick|vote|members|invites|info|label> ...>",
+                SourbyCraftColors.WARNING));
         }
     }
 
@@ -1002,7 +1005,7 @@ public class AwfCommand extends Command {
             case CLAIM_LOST -> " (the session or transaction claim is gone; the player must rejoin)";
             case UNKNOWN_OUTCOME -> " (the store did not confirm the write; check the record before retrying)";
             case CAPACITY_EXCEEDED -> " (a store bound is reached: pending operations, receipts or an index; retry later)";
-            default -> "";
+            default -> CoopCommand.hint(operation.code());
         };
         s.sendMessage(text("Failed (" + operation.code() + "): " + operation.getMessage() + hint, SourbyCraftColors.DANGER));
     }

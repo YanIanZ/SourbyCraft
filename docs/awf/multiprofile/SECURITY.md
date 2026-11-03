@@ -64,6 +64,57 @@ failover to an asynchronous replica can lose acknowledged writes and move epochs
 their existing per-world lease, and none for the file repository across servers: its revision check is
 process-local.
 
+## Co-op membership (Build 52)
+
+Build 52 code written and compiled by an agent; not tested by the owner. Off by default.
+
+- **Authority is checked against the records the commit compares.** Owner, manager and member permissions, the
+  invitee identity of an accept or decline, the inviter's continued membership, the vote electorate and the
+  size cap are checked in Java (`CoopMembership`) against the profile, account, invite and vote records the
+  operation read, and the operation's version vector names each of those records at the revision it read;
+  the repository compares that vector atomically at prepare and at commit (file: under the commit lock;
+  Redis: in the script) and refuses `STALE_STATE` when any of them moved. Every membership plan reserves the
+  profile's metadata record, so two membership changes of one profile cannot interleave between prepare and
+  commit. What the store itself enforces, independent of the caller: member rows change only under a profile
+  claim and inside an intent; an account gains or loses access to a co-op profile only inside an intent, and a
+  co-op profile becomes an account's active profile only for its owner in Build 52 (`COOP_SWITCH_UNAVAILABLE`);
+  a co-op record is refused on a store whose marker was not raised to schema 2 / Build 52. A plugin must still
+  decide which player may ask for what: the API takes the acting account id as an argument and does not
+  authenticate it. `/coop` acts only as the sender itself (permission `sourbycraft.coop.use`, default true),
+  shows a co-op's members and votes to its members only, and is registered only while co-op is enabled: at boot as
+  `/sourbycraft:coop`, and the bare `/coop` only after the plugins enabled and only when none of them holds it (an
+  INFO names the holder otherwise); `/awf multiprofile coop` acts on behalf of any
+  named player and every change through it needs `sourbycraft.command.awf.admin`.
+- **Invitations and votes are bounded.** Open invitations per profile and per invitee, open votes and
+  pending operations are store bounds; reaching one is `CAPACITY_EXCEEDED` before anything is written. An
+  invitation expires `coop.invite-expiry-minutes` after issue and expiry is judged at commit against the
+  repository clock, so a stale accept cannot succeed and a backwards clock does not revive one: Redis `TIME`
+  with a Redis repository; with the file repository a clock that never runs backwards within the process and
+  whose high-water mark is persisted (`clock.awfc`, written ahead of the clock by 30 s and exactly at a clean
+  close) so a restart with the system clock set back resumes from the mark, not from the system clock.
+- **No privilege from membership yet.** A member added in Build 52 cannot switch into the profile (Build
+  53), so membership grants no world, inventory or bank access through MultiProfile in this build.
+- **Removal cannot be replayed.** A leave or kick consumes the membership epoch durably; a rejoin is a new
+  epoch with an empty personal state, so a removed member cannot restore an old membership, and a retried
+  removal does not create a second salvage entry. The salvage entry is unavailable to delivery.
+- **Owner protection.** The owner cannot leave, be kicked or transfer ownership. An accept or a removal
+  cancels the profile's undecided vote in the same intent, and a removal revokes the open invitations the
+  removed member issued (at most 16 per removal; an invitation of a member no longer present at the epoch
+  that issued it is refused at accept in any case), so a vote cannot be executed against a changed electorate
+  and a removed manager's invitations admit nobody. A kick holds the removed account's session claim; a
+  session on another node is never taken over for it (`OWNERSHIP_CONFLICT`).
+- **Names.** The shared label is owner-set, bounded text and is not used for uniqueness or authorisation;
+  members' aliases are separate and are never derived from it.
+- **Events** are asynchronous, carry ids only (no inventory data) and are fired after the commit on the
+  service's own event thread (a bounded queue of 256; a full queue drops the event with a warning, it never
+  blocks the storage lane); a handler runs outside region, entity, global tick and Netty threads and must not
+  touch world or player state directly.
+- **Downgrade.** The first co-op record raises the store to minimum build 52 before it is written, so Build 51
+  refuses the store instead of reading co-op records as corrupt, and the auto-updater refuses a jar below 52.
+- **Unchanged limits.** Co-op does not widen the distributed boundary: the Redis repository fences each
+  commit as described above, and OD-1 refuses joining a co-op profile on a node that does not hold its
+  bound world rather than claiming a multi-writer world.
+
 ## Residual risks
 
 - A malicious plugin with access to the storage lane or the fabric can call the fabric directly; like

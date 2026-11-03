@@ -18,8 +18,19 @@ import java.util.Objects;
  *
  * <p>Both repositories read the marker before any other record and check it on <b>every</b> write
  * (FILE under the commit lock, Redis inside each write script) so a concurrent migration or a newer
- * binary cannot interleave with an older writer. The marker is written only by the migration tool,
- * through {@link ProfileRepository#writeStoreFormat}, under the exclusive migration lock.</p>
+ * binary cannot interleave with an older writer. The marker is written by the migration tool, through
+ * {@link ProfileRepository#writeStoreFormat}, under the exclusive migration lock, and raised online by
+ * exactly one other path: {@link ProfileRepository#requireStoreFeature}.</p>
+ *
+ * <p><b>Store feature level (Build 52).</b> Before the first co-op record (a co-op or labelled profile, an
+ * invite, vote or salvage record, a member head of a non-owner) is prepared, the engine raises the marker to
+ * payload schema {@link #COOP_SCHEMA} and {@code minimumBuild} {@link #COOP_MINIMUM_BUILD}, durably, and
+ * never lowers either. A store without co-op records keeps the Build 51 marker byte for byte, so Build 51 still
+ * opens it. Build 51 refuses a raised store at startup: its gate refuses a schema above 1 (FILE and Redis) and
+ * its FILE decoder refuses the marker file's {@code minimumBuild} trailer as malformed (it accepts no trailing
+ * bytes); in Redis the {@code minimumBuild} hash field is ignored by Build 51 and the schema refuses. The
+ * auto-updater ({@code StoreDowngradeGuard}) refuses to install or restore a build below
+ * {@link Marker#requiredBuild()}.</p>
  */
 public final class StoreFormat {
 
@@ -27,8 +38,24 @@ public final class StoreFormat {
     public static final int LEGACY = 1;
     /** Co-op records; the format this build writes. */
     public static final int CURRENT = 2;
-    /** The payload schema version this build writes inside format-2 records. */
+    /**
+     * The marker schema the migration and a fresh format-2 store write (the Build 51 schema). Records of the
+     * Build 51 shapes keep it; see {@link #COOP_SCHEMA}.
+     */
     public static final int SCHEMA = 1;
+    /** The marker schema of a store that holds co-op records (payload schema 2); Build 51 refuses it. */
+    public static final int COOP_SCHEMA = 2;
+    /** The highest marker schema this build reads and writes under. */
+    public static final int MAX_SCHEMA = COOP_SCHEMA;
+    /** The first build that reads a format-2 store. */
+    public static final int FIRST_FORMAT_2_BUILD = 51;
+    /** The {@code minimumBuild} a store gets with its first co-op record. */
+    public static final int COOP_MINIMUM_BUILD = 52;
+    /**
+     * The highest {@code minimumBuild} this code reads; a store that requires a newer build is refused. It is the
+     * store feature level of this source tree, raised with the code that needs it, not with every release.
+     */
+    public static final int READS_UP_TO_BUILD = 52;
     /** Marker file in the FILE repository root. */
     public static final String FILE_NAME = "format.awfm";
     /** Redis {@code meta} hash fields. */
@@ -36,6 +63,8 @@ public final class StoreFormat {
     public static final String REDIS_MIGRATION_FIELD = "migrationState";
     public static final String REDIS_SCHEMA_FIELD = "schema";
     public static final String REDIS_WRITTEN_BY_FIELD = "writtenBy";
+    /** Redis {@code meta} hash field of the store's minimum build (absent = none recorded); Build 51 ignores it. */
+    public static final String REDIS_MINIMUM_BUILD_FIELD = "minimumBuild";
 
     private static final int MAGIC = 0x41574646; // "AWFF"
     private static final int MAX_WRITTEN_BY = 64;
@@ -50,8 +79,11 @@ public final class StoreFormat {
      * @param schema payload schema the store's format-2 records were written with ({@code 0} for format 1)
      * @param writtenAtMillis when the marker was written ({@code 0} for an implicit legacy marker)
      * @param writtenBy the build that wrote it, at most 64 characters
+     * @param minimumBuild the oldest build that may open the store, as recorded ({@code 0} = none recorded; see
+     *     {@link #requiredBuild()} for the effective value)
      */
-    public record Marker(int format, MigrationState migration, int schema, long writtenAtMillis, String writtenBy) {
+    public record Marker(int format, MigrationState migration, int schema, long writtenAtMillis, String writtenBy,
+                         int minimumBuild) {
 
         public Marker {
             Objects.requireNonNull(migration, "migration");
@@ -60,6 +92,36 @@ public final class StoreFormat {
             if (schema < 0) throw new IllegalArgumentException("schema " + schema);
             if (writtenAtMillis < 0) throw new IllegalArgumentException("writtenAtMillis");
             if (writtenBy.length() > MAX_WRITTEN_BY) throw new IllegalArgumentException("writtenBy too long");
+            if (minimumBuild < 0) throw new IllegalArgumentException("minimumBuild " + minimumBuild);
+        }
+
+        /** The Build 51 shape: no minimum build recorded. */
+        public Marker(final int format, final MigrationState migration, final int schema, final long writtenAtMillis,
+                      final String writtenBy) {
+            this(format, migration, schema, writtenAtMillis, writtenBy, 0);
+        }
+
+        /**
+         * The oldest build that may open this store: {@code 0} for format 1, else the larger of the recorded
+         * {@link #minimumBuild} and what the schema implies (51 for schema 1, 52 for {@link #COOP_SCHEMA}).
+         */
+        public int requiredBuild() {
+            if (this.format == LEGACY) return 0;
+            final int implied = this.schema >= COOP_SCHEMA ? COOP_MINIMUM_BUILD : FIRST_FORMAT_2_BUILD;
+            return Math.max(implied, this.minimumBuild);
+        }
+
+        /** Whether this marker already records at least {@code schema} and {@code minimumBuild}. */
+        public boolean covers(final int schema, final int minimumBuild) {
+            return this.schema >= schema && this.minimumBuild >= minimumBuild;
+        }
+
+        /** This marker raised to at least {@code schema} and {@code minimumBuild}; never lowers either. */
+        public Marker raised(final int schema, final int minimumBuild, final long writtenAtMillis, final String writtenBy) {
+            final String writer = writtenBy == null ? this.writtenBy
+                : writtenBy.length() <= MAX_WRITTEN_BY ? writtenBy : writtenBy.substring(0, MAX_WRITTEN_BY);
+            return new Marker(this.format, this.migration, Math.max(this.schema, schema), writtenAtMillis, writer,
+                Math.max(this.minimumBuild, minimumBuild));
         }
 
         /** A store without a marker: PR #62 format 1. */
@@ -147,21 +209,32 @@ public final class StoreFormat {
                 + marker.writtenBy() + " and did not finish; nothing is written until it is re-run offline or the backup is"
                 + " restored");
         }
-        if (marker.schema() > SCHEMA) {
+        if (marker.schema() > MAX_SCHEMA) {
             return new Decision(Gate.REFUSED, "the profile store's format-2 records use schema " + marker.schema()
-                + "; this build writes schema " + SCHEMA + " and refuses a newer one rather than round-trip it lossily");
+                + "; this build reads up to schema " + MAX_SCHEMA + " and refuses a newer one rather than round-trip it lossily");
+        }
+        if (marker.minimumBuild() > READS_UP_TO_BUILD) {
+            return new Decision(Gate.REFUSED, "the profile store requires Build " + marker.minimumBuild() + " or newer (written by "
+                + marker.writtenBy() + "); this build reads stores up to Build " + READS_UP_TO_BUILD + ". Nothing was written");
         }
         return new Decision(Gate.FORMAT_2, "format 2, ready");
     }
 
     // ------------------------------------------------------------------ marker bytes (FILE)
 
-    /** The marker file's bytes: magic, format, migration tag, schema, time and the writer. */
+    /**
+     * The marker file's bytes: magic, format, migration tag, schema, time and the writer, then, only when a
+     * {@code minimumBuild} is recorded, a 4-byte trailer holding it. Without one the bytes are exactly the
+     * Build 51 layout. Build 51's decoder accepts no trailer and refuses such a file as malformed, which is the
+     * intended fail-closed outcome for a store holding co-op records.
+     */
     public static byte[] encode(final Marker marker) {
         final byte[] writer = marker.writtenBy().getBytes(StandardCharsets.UTF_8);
-        final ByteBuffer buffer = ByteBuffer.allocate(4 + 4 + 4 + 4 + 8 + 4 + writer.length);
+        final int trailer = marker.minimumBuild() > 0 ? 4 : 0;
+        final ByteBuffer buffer = ByteBuffer.allocate(4 + 4 + 4 + 4 + 8 + 4 + writer.length + trailer);
         buffer.putInt(MAGIC).putInt(marker.format()).putInt(marker.migration().tag()).putInt(marker.schema())
             .putLong(marker.writtenAtMillis()).putInt(writer.length).put(writer);
+        if (trailer > 0) buffer.putInt(marker.minimumBuild());
         return buffer.array();
     }
 
@@ -170,7 +243,7 @@ public final class StoreFormat {
      * build), never read as "legacy".
      */
     public static Marker decode(final byte[] bytes, final String where) throws IOException {
-        if (bytes.length < 28 || bytes.length > 28 + 4 * MAX_WRITTEN_BY) throw new IOException("store format marker " + where + " is malformed");
+        if (bytes.length < 28 || bytes.length > 28 + 4 * MAX_WRITTEN_BY + 4) throw new IOException("store format marker " + where + " is malformed");
         final ByteBuffer buffer = ByteBuffer.wrap(bytes);
         if (buffer.getInt() != MAGIC) throw new IOException("store format marker " + where + " has no AWFF magic");
         final int format = buffer.getInt();
@@ -178,10 +251,18 @@ public final class StoreFormat {
         final int schema = buffer.getInt();
         final long writtenAt = buffer.getLong();
         final int length = buffer.getInt();
-        if (length < 0 || length != buffer.remaining()) throw new IOException("store format marker " + where + " is malformed");
+        if (length < 0 || (length != buffer.remaining() && length + 4 != buffer.remaining())) {
+            throw new IOException("store format marker " + where + " is malformed");
+        }
         final String writer = new String(bytes, 28, length, StandardCharsets.UTF_8);
+        int minimumBuild = 0;
+        if (buffer.remaining() == length + 4) {
+            buffer.position(buffer.position() + length);
+            minimumBuild = buffer.getInt();
+            if (minimumBuild <= 0) throw new IOException("store format marker " + where + " has an invalid minimum build " + minimumBuild);
+        }
         try {
-            return new Marker(format, migration, schema, writtenAt, writer);
+            return new Marker(format, migration, schema, writtenAt, writer, minimumBuild);
         } catch (final IllegalArgumentException invalid) {
             throw new IOException("store format marker " + where + " is invalid: " + invalid.getMessage());
         }

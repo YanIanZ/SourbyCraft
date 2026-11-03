@@ -6,6 +6,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import org.bukkit.plugin.Plugin;
 import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.Nullable;
 
 /**
  * AWF MultiProfile: durable, isolated player profiles backed by Aurora World Fabric worlds.
@@ -20,10 +21,25 @@ import org.jspecify.annotations.NullMarked;
  * rejected while another switch for the same player is running, and it is recoverable: an incomplete
  * transition is recorded and can be finished with an operator command or at the player's next join.</p>
  *
- * <p>Co-op profiles (several players sharing a profile) are <b>not available</b> in this API; they are
- * planned for a later build. Build 51 adds the profile's immutable name and policy type
- * ({@link ProfileDetails}, {@link ProfileType}), which are stored but not yet used to restrict any
- * gameplay.</p>
+ * <p>Build 51 adds the profile's immutable name and policy type ({@link ProfileDetails},
+ * {@link ProfileType}), which are stored but not yet used to restrict any gameplay.</p>
+ *
+ * <p><b>Co-op (Build 52).</b> The co-op methods at the end of this interface manage membership of a
+ * profile shared by several accounts: convert a solo profile, invite, accept, decline, cancel, leave,
+ * vote-kick, list and a shared label. They are {@code default} methods that fail with
+ * {@link UnsupportedOperationException} on an implementation that does not provide them. They are refused
+ * with {@link ProfileErrorCode#COOP_DISABLED} unless {@code aurora.awf.multiprofile.coop.enabled} is true
+ * (default false), and with {@link ProfileErrorCode#MIGRATION_REQUIRED} on a store still in format 1. What
+ * Build 52 does <b>not</b> do: a member cannot yet {@linkplain #switchProfile switch into} a co-op profile
+ * they do not own ({@link ProfileErrorCode#COOP_SWITCH_UNAVAILABLE}, Build 53); a member whose
+ * <i>active</i> profile is the co-op profile cannot be removed ({@link ProfileErrorCode#MEMBER_ONLINE}, Build 53;
+ * a member online in another profile can); ownership cannot be transferred;
+ * the owner cannot leave or be kicked ({@link ProfileErrorCode#OWNER_ACTION_REFUSED}); a removed member's
+ * state is recorded for salvage but nothing is delivered (Build 54). Every membership change is a
+ * recoverable intent: a failed or {@link ProfileErrorCode#UNKNOWN_OUTCOME} call must be re-read, not
+ * blindly repeated. The {@code actor} and {@code player} arguments identify who asks; like the other
+ * mutators, the plugin must authorise player requests itself, and the service checks the actor's role at
+ * commit.</p>
  *
  * <p>The service is optional: plugins must handle {@code isEnabled() == false} and a missing service
  * registration, which is what a server without MultiProfile looks like.</p>
@@ -126,4 +142,147 @@ public interface AuroraProfiles {
     void registerProfileStateAdapter(Plugin plugin, ProfileStateAdapter adapter);
 
     void unregisterProfileStateAdapter(Plugin plugin, String adapterId);
+
+    // ---- Co-op membership (Build 52) ----
+
+    /**
+     * The co-op view of a profile: label, members and the configured size cap. Completes with an empty optional
+     * when the profile does not exist or is a solo profile. Fails with {@link ProfileErrorCode#COOP_DISABLED}
+     * when co-op is disabled. Build 52.
+     */
+    default CompletableFuture<Optional<CoopDetails>> getCoopDetails(UUID profileId) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op unavailable"));
+    }
+
+    /**
+     * Converts the actor's solo profile to co-op (one way: a co-op profile never becomes solo again). The actor
+     * must be the profile's owner. Refused with {@link ProfileErrorCode#TYPE_NOT_ALLOWED} when the profile's
+     * {@linkplain ProfileType policy type} is not in {@code coop.allowed-types},
+     * {@link ProfileErrorCode#ALREADY_COOP}, {@link ProfileErrorCode#PROFILE_LOCKED} or
+     * {@link ProfileErrorCode#NOT_OWNED}. Build 52.
+     */
+    default CompletableFuture<CoopDetails> convertToCoop(UUID actorId, UUID profileId) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op unavailable"));
+    }
+
+    /**
+     * Invites an account to a co-op profile. The actor must be the owner or a manager. Fails with
+     * {@link ProfileErrorCode#ROLE_FORBIDDEN}, {@link ProfileErrorCode#ALREADY_MEMBER},
+     * {@link ProfileErrorCode#INVITE_EXISTS}, {@link ProfileErrorCode#COOP_FULL},
+     * {@link ProfileErrorCode#NOT_COOP}, {@link ProfileErrorCode#CAPACITY_EXCEEDED} (open-invite bounds) or
+     * {@link ProfileErrorCode#INVALID_REQUEST} (inviting oneself). The invitation expires
+     * {@code coop.invite-expiry-minutes} after issue. Fires {@link CoopInviteEvent} after the commit. Build 52.
+     */
+    default CompletableFuture<CoopInviteInfo> invite(UUID actorId, UUID profileId, UUID inviteeId) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op unavailable"));
+    }
+
+    /**
+     * Accepts an invitation addressed to {@code playerId}, which makes the player a {@link CoopRole#MEMBER}.
+     * One commit consumes the invitation, creates the membership and gives the account access; a repeat with
+     * the same invitation after it committed returns the same membership. Fails with
+     * {@link ProfileErrorCode#INVITE_NOT_FOUND}, {@link ProfileErrorCode#INVITE_EXPIRED} (judged at commit),
+     * {@link ProfileErrorCode#COOP_FULL}, {@link ProfileErrorCode#SLOT_LIMIT} (a co-op membership uses one of
+     * the account's profile slots), {@link ProfileErrorCode#WRONG_NODE} (OD-1: the node does not hold the
+     * profile's bound world). Fires {@link CoopMemberJoinEvent}.
+     * Build 52 does not let the new member switch into the profile; that is Build 53.
+     */
+    default CompletableFuture<CoopMemberInfo> acceptInvite(UUID playerId, UUID inviteId) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op unavailable"));
+    }
+
+    /** Declines an invitation addressed to {@code playerId}. Fails with {@link ProfileErrorCode#INVITE_NOT_FOUND}. Build 52. */
+    default CompletableFuture<Void> declineInvite(UUID playerId, UUID inviteId) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op unavailable"));
+    }
+
+    /**
+     * Cancels an open invitation. The owner may cancel any invitation of the profile, a manager only those it
+     * issued. Fails with {@link ProfileErrorCode#INVITE_NOT_FOUND} or {@link ProfileErrorCode#ROLE_FORBIDDEN}.
+     * Build 52.
+     */
+    default CompletableFuture<Void> cancelInvite(UUID actorId, UUID inviteId) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op unavailable"));
+    }
+
+    /**
+     * Open invitations addressed to the player, oldest first, one {@linkplain CoopPage page} at a time (pass a
+     * {@code null} cursor for the first). Expired invitations are not listed. Build 52.
+     */
+    default CompletableFuture<CoopPage<CoopInviteInfo>> listInvitesFor(UUID playerId, @Nullable String cursor) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op unavailable"));
+    }
+
+    /**
+     * Open invitations of a co-op profile, oldest first. The actor must be the owner or a manager. Build 52.
+     */
+    default CompletableFuture<CoopPage<CoopInviteInfo>> listInvites(UUID actorId, UUID profileId,
+                                                                    @Nullable String cursor) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op unavailable"));
+    }
+
+    /**
+     * The player leaves a co-op profile. The owner cannot leave
+     * ({@link ProfileErrorCode#OWNER_ACTION_REFUSED}); in Build 52 a player whose <i>active</i> profile is this
+     * co-op profile cannot leave ({@link ProfileErrorCode#MEMBER_ONLINE}, enabled in Build 53). A player who is
+     * online but active in another profile, or offline, can. Committing the leave consumes the membership epoch durably, frees the account's
+     * slot and records the member's personal state as an unavailable-to-delivery salvage entry. Fires
+     * {@link CoopMemberLeaveEvent} with {@link CoopMemberLeaveEvent.Reason#LEFT}. Build 52.
+     */
+    default CompletableFuture<Void> leave(UUID playerId, UUID profileId) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op unavailable"));
+    }
+
+    /**
+     * Opens a kick vote against a member. The actor must be the owner or a manager and may not be the target; the
+     * target may not be the owner ({@link ProfileErrorCode#OWNER_ACTION_REFUSED}) and, in Build 52, may not have
+     * this co-op profile as its active profile ({@link ProfileErrorCode#MEMBER_ONLINE}; a target online in another
+     * profile can be kicked). One vote can be open per profile
+     * ({@link ProfileErrorCode#VOTE_OPEN}); in a two-member co-op the target must have been inactive for
+     * {@code coop.kick-vote.inactive-days} ({@link ProfileErrorCode#TARGET_NOT_INACTIVE}). The starter's
+     * approval is counted. If that already makes the vote unanimous (the owner started it against the only
+     * other member) the removal commits in the same call; if that removal fails the call fails, the vote stays
+     * {@link CoopKickVoteState#PASSED} and {@link #voteKick} with {@code true} retries it. Build 52.
+     */
+    default CompletableFuture<CoopKickVoteInfo> startKickVote(UUID actorId, UUID profileId, UUID targetId) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op unavailable"));
+    }
+
+    /**
+     * Casts a vote in an open kick vote: {@code true} approves, {@code false} declines and closes the vote
+     * ({@link CoopKickVoteState#DECLINED}). The voter must be in the vote's frozen electorate; a membership or
+     * role change since the vote opened cancels it ({@link ProfileErrorCode#ELECTORATE_CHANGED}). Fails with
+     * {@link ProfileErrorCode#VOTE_NOT_FOUND} (also for an expired vote, which is closed),
+     * {@link ProfileErrorCode#NOT_A_MEMBER} or {@link ProfileErrorCode#MEMBER_ONLINE} (the approval would remove
+     * a target whose active profile is this one). When the last eligible voter approves, the removal commits in
+     * the same call and {@link CoopMemberLeaveEvent} fires with {@link CoopMemberLeaveEvent.Reason#KICKED};
+     * approving a {@link CoopKickVoteState#PASSED} vote retries a removal that failed.
+     * Build 52.
+     */
+    default CompletableFuture<CoopKickVoteInfo> voteKick(UUID voterId, UUID voteId, boolean approve) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op unavailable"));
+    }
+
+    /** The open kick vote of a profile, if any (an expired vote is not open). Build 52. */
+    default CompletableFuture<Optional<CoopKickVoteInfo>> getOpenKickVote(UUID profileId) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op unavailable"));
+    }
+
+    /**
+     * The members of a co-op profile, the owner first and then by join time, one {@linkplain CoopPage page} at a
+     * time. Build 52.
+     */
+    default CompletableFuture<CoopPage<CoopMemberInfo>> listMembers(UUID profileId, @Nullable String cursor) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op unavailable"));
+    }
+
+    /**
+     * Sets the shared display label of a co-op profile (1 to 32 characters, not required to be unique). Only the
+     * owner may set it. It is separate from the profile's immutable name and from each member's persisted alias:
+     * it changes neither. Fails with {@link ProfileErrorCode#ROLE_FORBIDDEN} or
+     * {@link ProfileErrorCode#NAME_INVALID}. Build 52.
+     */
+    default CompletableFuture<Void> setCoopLabel(UUID actorId, UUID profileId, String label) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op unavailable"));
+    }
 }

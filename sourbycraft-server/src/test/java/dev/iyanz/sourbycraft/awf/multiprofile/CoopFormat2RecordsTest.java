@@ -29,7 +29,9 @@ import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Owner cases of COOP-DESIGN §10 slice 3 about the format-2 record layout: golden bytes, schema refusal and the
- * OD-2 downgrade gate.
+ * OD-2 downgrade gate, updated for the Build 52 store feature level: a profile record of payload schema 2 (co-op
+ * kind, display label) and a store marker of schema 2 with {@code minimumBuild} 52 are read; a higher schema or a
+ * higher {@code minimumBuild} is refused. Solo records keep their Build 51 bytes exactly.
  *
  * <p>The golden payloads below were written by hand from the field order documented in COOP-DESIGN §4 and the
  * {@code *2} codecs (schema u16, big-endian numbers, UUIDs as two longs, presence bytes, int counts, int-length
@@ -81,6 +83,15 @@ class CoopFormat2RecordsTest {
         + "00" + "00000003" + "010203";
     private static final String SNAPSHOT_SHA = "ea8aa0bf84d92788de0e07b8b5d094a3a4ee64b2df5f70af240f7fdf04d16648";
 
+    /** Build 52 co-op profile (payload schema 2): the schema-1 fields, then the kind tag (2 = COOP) and the optional label. */
+    private static final String COOP_PROFILE_PAYLOAD = "0002" + "00000000000000000000000000000002" + "0000000000000004"
+        + "00000000000000000000000000000001" + "00000008" + "736b79626c6f636b" + "01" + "00000005" + "4170706c65"
+        + "00000000000003e8" + "01" + "00000000" + "00000002"
+        + "00000000000000000000000000000001" + "00000000000000000000000000000003" + "01" + "00000000000003e8" + "00000000000007d0"
+        + "00000000000000000000000000000004" + "00000000000000000000000000000005" + "03" + "0000000000000bb8" + "0000000000000fa0"
+        + "0000000000000000" + "00" + "02" + "01" + "00000004" + "5465616d";
+    private static final String COOP_PROFILE_SHA = "2144b53fa8b1dde5caa262894d97d045adca46930395b0a41b393b5373556173";
+
     private static String frame(final int type, final long revision, final String payload, final String sha) {
         return "41574652" + "02" + String.format("%02x", type) + String.format("%016x", revision)
             + String.format("%08x", payload.length() / 2) + payload + sha;
@@ -95,6 +106,12 @@ class CoopFormat2RecordsTest {
     private static AuroraProfile goldenProfile() {
         return new AuroraProfile(u(2), u(1), "skyblock", IRONMAN, "Apple", Map.of("k", "v"), 1000L, 4L, ProfileStatus.ACTIVE,
             List.of(new ProfileMember(u(1), u(3), ProfileRole.OWNER, 1000L, 2000L)), 0L, null);
+    }
+
+    private static AuroraProfile goldenCoopProfile() {
+        return new AuroraProfile(u(2), u(1), "skyblock", CLASSIC, "Apple", Map.of(), 1000L, 4L, ProfileStatus.ACTIVE,
+            List.of(new ProfileMember(u(1), u(3), ProfileRole.OWNER, 1000L, 2000L),
+                new ProfileMember(u(4), u(5), ProfileRole.MEMBER, 3000L, 4000L)), 0L, null, ProfileKind.COOP, "Team");
     }
 
     private static MemberStateHead goldenHead() {
@@ -214,6 +231,45 @@ class CoopFormat2RecordsTest {
         assertEquals("41574646" + "00000002" + "00000003" + "00000001" + "0000000000001000" + "00000003" + "623531",
             HEX.formatHex(StoreFormat.encode(marker)));
         assertEquals(marker, StoreFormat.decode(StoreFormat.encode(marker), "marker"));
+
+        // Build 52: a co-op profile is payload schema 2 (kind tag and label appended); a solo profile without a label
+        // stays schema 1, byte for byte the Build 51 layout above.
+        assertEquals(COOP_PROFILE_PAYLOAD, HEX.formatHex(ProfileRecords.profilePayload2(goldenCoopProfile())), "co-op profile layout");
+        assertEquals(frame(2, 4L, COOP_PROFILE_PAYLOAD, COOP_PROFILE_SHA), HEX.formatHex(ProfileRecords.frame2(
+            ProfileRecords.TYPE_PROFILE, 4L, ProfileRecords.profilePayload2(goldenCoopProfile()), "golden")));
+        assertEquals(goldenCoopProfile(), ProfileRecords.profile2(unframe(frame(2, 4L, COOP_PROFILE_PAYLOAD, COOP_PROFILE_SHA),
+            ProfileRecords.TYPE_PROFILE), u(2), "golden"));
+        assertFalse(ProfileRecords.needsProfileSchema2(goldenProfile()), "a plain solo profile must stay schema 1");
+        assertTrue(ProfileRecords.needsProfileSchema2(goldenCoopProfile()));
+        assertEquals(1, ProfileKind.SOLO.tag());
+        assertEquals(2, ProfileKind.COOP.tag());
+        assertEquals(3, ProfileSalvage.State.UNAVAILABLE.tag());
+        assertEquals(28, CoopOperation.Kind.CONVERT_COOP.tag());
+        // A labelled solo profile also needs schema 2 and round-trips.
+        final AuroraProfile labelled = goldenProfile().withDisplayLabel("Mine").atRevision(4L);
+        final AuroraProfile labelledBack = ProfileRecords.profile2(ProfileRecords.unframe(ProfileRecords.frame2(ProfileRecords.TYPE_PROFILE,
+            4L, ProfileRecords.profilePayload2(labelled), "l"), ProfileRecords.FORMAT_2, ProfileRecords.TYPE_PROFILE, "l"), u(2), "l");
+        assertEquals(labelled, labelledBack);
+        assertEquals(2, ProfileRecords.profilePayload2(labelled)[1], "a labelled profile is schema 2");
+
+        // The Build 52 marker: the Build 51 layout plus a 4-byte minimumBuild trailer; without one the bytes are Build 51's.
+        final StoreFormat.Marker raised = new StoreFormat.Marker(2, StoreFormat.MigrationState.READY, 2, 4096L, "b52", 52);
+        assertEquals("41574646" + "00000002" + "00000003" + "00000002" + "0000000000001000" + "00000003" + "623532" + "00000034",
+            HEX.formatHex(StoreFormat.encode(raised)));
+        assertEquals(raised, StoreFormat.decode(StoreFormat.encode(raised), "marker"));
+        assertEquals(52, raised.requiredBuild());
+        assertEquals(51, marker.requiredBuild());
+        assertEquals(0, StoreFormat.Marker.legacy().requiredBuild());
+        assertEquals(52, new StoreFormat.Marker(2, StoreFormat.MigrationState.READY, 2, 1L, "x").requiredBuild(),
+            "schema 2 implies Build 52 even without a recorded minimum");
+        assertEquals(raised, marker.raised(2, 52, 4096L, "b52"));
+        assertEquals(raised, raised.raised(1, 51, 4096L, "b52"), "raising never lowers schema or minimumBuild");
+        assertTrue(raised.covers(StoreFormat.COOP_SCHEMA, StoreFormat.COOP_MINIMUM_BUILD));
+        assertFalse(marker.covers(StoreFormat.COOP_SCHEMA, StoreFormat.COOP_MINIMUM_BUILD));
+        // A zero or negative minimumBuild trailer is malformed, never read as "none".
+        final byte[] zeroTrailer = HEX.parseHex("41574646" + "00000002" + "00000003" + "00000002" + "0000000000001000" + "00000003"
+            + "623532" + "00000000");
+        assertThrows(IOException.class, () -> StoreFormat.decode(zeroTrailer, "marker"));
     }
 
     private static ProfileRecords.Frame unframe(final String hex, final byte type) throws IOException {
@@ -235,7 +291,7 @@ class CoopFormat2RecordsTest {
 
     @Test
     void CoopUnknownSchemaRefusesWrite() throws Exception {
-        // Record level: a payload of schema 2 is refused, not skipped or truncated.
+        // Record level: an account payload of schema 2 is refused, not skipped or truncated (only type 2 has a schema 2).
         final byte[] payload = ProfileRecords.accountPayload2(goldenAccount());
         payload[0] = 0;
         payload[1] = 2;
@@ -254,8 +310,38 @@ class CoopFormat2RecordsTest {
         assertThrows(IOException.class, () -> ProfileRecords.account2(ProfileRecords.unframe(wrongRevision, ProfileRecords.FORMAT_2,
             ProfileRecords.TYPE_ACCOUNT, "r"), u(1), "r"), "the header revision must equal the payload revision");
 
-        // Store level: a marker with a newer schema or format refuses the store; nothing is written.
-        assertEquals(StoreFormat.Gate.REFUSED, StoreFormat.gate(new StoreFormat.Marker(2, StoreFormat.MigrationState.READY, 2, 1L, "x")).gate());
+        // A profile payload of schema 3 is refused; schema 2 is read (Build 52).
+        final byte[] profile3 = HEX.parseHex(COOP_PROFILE_PAYLOAD);
+        profile3[1] = 3;
+        final IOException newerProfile = assertThrows(IOException.class, () -> ProfileRecords.profile2(ProfileRecords.unframe(
+            ProfileRecords.frame2(ProfileRecords.TYPE_PROFILE, 4L, profile3, "p3"), ProfileRecords.FORMAT_2, ProfileRecords.TYPE_PROFILE,
+            "p3"), u(2), "p3"));
+        assertTrue(newerProfile.getMessage().contains("schema"), newerProfile.getMessage());
+        final byte[] profile0 = HEX.parseHex(PROFILE_PAYLOAD);
+        profile0[1] = 0;
+        assertThrows(IOException.class, () -> ProfileRecords.profile2(ProfileRecords.unframe(ProfileRecords.frame2(
+            ProfileRecords.TYPE_PROFILE, 4L, profile0, "p0"), ProfileRecords.FORMAT_2, ProfileRecords.TYPE_PROFILE, "p0"), u(2), "p0"));
+        // A schema-2 profile without its kind tag (the Build 51 field list under a schema-2 header) is truncated: refused.
+        final byte[] short2 = HEX.parseHex("0002" + PROFILE_PAYLOAD.substring(4));
+        assertThrows(IOException.class, () -> ProfileRecords.profile2(ProfileRecords.unframe(ProfileRecords.frame2(
+            ProfileRecords.TYPE_PROFILE, 4L, short2, "s2"), ProfileRecords.FORMAT_2, ProfileRecords.TYPE_PROFILE, "s2"), u(2), "s2"));
+        // An unknown kind tag is refused.
+        final byte[] badKind = HEX.parseHex(COOP_PROFILE_PAYLOAD.substring(0, COOP_PROFILE_PAYLOAD.length() - 20) + "09"
+            + COOP_PROFILE_PAYLOAD.substring(COOP_PROFILE_PAYLOAD.length() - 18));
+        assertThrows(IOException.class, () -> ProfileRecords.profile2(ProfileRecords.unframe(ProfileRecords.frame2(
+            ProfileRecords.TYPE_PROFILE, 4L, badKind, "k"), ProfileRecords.FORMAT_2, ProfileRecords.TYPE_PROFILE, "k"), u(2), "k"));
+
+        // Store level (Build 52 contract): schema 2 and minimumBuild 52 are read; a newer schema, format or minimumBuild
+        // refuses the store; nothing is written.
+        assertEquals(StoreFormat.Gate.FORMAT_2, StoreFormat.gate(new StoreFormat.Marker(2, StoreFormat.MigrationState.READY, 2, 1L, "x")).gate());
+        assertEquals(StoreFormat.Gate.FORMAT_2, StoreFormat.gate(new StoreFormat.Marker(2, StoreFormat.MigrationState.READY, 2, 1L, "x",
+            StoreFormat.COOP_MINIMUM_BUILD)).gate());
+        assertEquals(StoreFormat.Gate.FORMAT_2, StoreFormat.gate(new StoreFormat.Marker(2, StoreFormat.MigrationState.READY, 1, 1L, "x",
+            StoreFormat.READS_UP_TO_BUILD)).gate());
+        assertEquals(StoreFormat.Gate.REFUSED, StoreFormat.gate(new StoreFormat.Marker(2, StoreFormat.MigrationState.READY,
+            StoreFormat.MAX_SCHEMA + 1, 1L, "x")).gate());
+        assertEquals(StoreFormat.Gate.REFUSED, StoreFormat.gate(new StoreFormat.Marker(2, StoreFormat.MigrationState.READY, 2, 1L, "x",
+            StoreFormat.READS_UP_TO_BUILD + 1)).gate());
         assertEquals(StoreFormat.Gate.REFUSED, StoreFormat.gate(new StoreFormat.Marker(3, StoreFormat.MigrationState.READY, 1, 1L, "x")).gate());
         assertEquals(StoreFormat.Gate.REFUSED, StoreFormat.gate(StoreFormat.Marker.migrating("x")).gate());
         assertEquals(StoreFormat.Gate.LEGACY, StoreFormat.gate(StoreFormat.Marker.legacy()).gate());
@@ -267,8 +353,28 @@ class CoopFormat2RecordsTest {
             final PlayerClaim q = store.q(player);
             profile = CoopFixtures.create(store.repository, q, "Lime", CLASSIC);
         }
+        // A store raised by Build 52 (schema 2, minimumBuild 52) is opened and read by this build.
+        Files.write(this.directory.resolve(StoreFormat.FILE_NAME), StoreFormat.encode(new StoreFormat.Marker(2,
+            StoreFormat.MigrationState.READY, StoreFormat.COOP_SCHEMA, 1L, "Build 52", StoreFormat.COOP_MINIMUM_BUILD)));
+        try (CoopFixtures.FileStore store = CoopFixtures.FileStore.open(this.directory)) {
+            assertTrue(store.repository.storeFormat().readyFormat2());
+            assertEquals(StoreFormat.COOP_MINIMUM_BUILD, store.repository.storeFormat().requiredBuild());
+            assertEquals(profile.id(), store.repository.profile(profile.id()).orElseThrow().id());
+            assertEquals(List.of(profile.id()), store.repository.loadAccount(player, SLOTS).profileIds());
+        }
+        // A store that requires a newer build (minimumBuild 53) is refused like a newer schema.
+        Files.write(this.directory.resolve(StoreFormat.FILE_NAME), StoreFormat.encode(new StoreFormat.Marker(2,
+            StoreFormat.MigrationState.READY, StoreFormat.COOP_SCHEMA, 1L, "a newer build", StoreFormat.READS_UP_TO_BUILD + 1)));
+        final Map<String, String> beforeMinimum = tree(this.directory);
+        try (CoopFixtures.FileStore store = CoopFixtures.FileStore.open(this.directory)) {
+            refusedWith(ProfileErrorCode.STORE_FORMAT_REFUSED, () -> store.repository.loadAccount(player, SLOTS));
+            refusedWith(ProfileErrorCode.STORE_FORMAT_REFUSED, () -> store.repository.requireStoreFeature(StoreFormat.COOP_SCHEMA,
+                StoreFormat.COOP_MINIMUM_BUILD, CoopFixtures.BUILD));
+        }
+        assertEquals(beforeMinimum, tree(this.directory), "a store that requires a newer build was written to");
+
         Files.write(this.directory.resolve(StoreFormat.FILE_NAME), StoreFormat.encode(
-            new StoreFormat.Marker(2, StoreFormat.MigrationState.READY, 2, 1L, "a newer build")));
+            new StoreFormat.Marker(2, StoreFormat.MigrationState.READY, StoreFormat.MAX_SCHEMA + 1, 1L, "a newer build")));
         final Map<String, String> before = tree(this.directory);
         try (CoopFixtures.FileStore store = CoopFixtures.FileStore.open(this.directory)) {
             final PlayerClaim q = store.q(player);

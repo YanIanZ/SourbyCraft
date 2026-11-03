@@ -47,6 +47,16 @@ import java.util.UUID;
  * must equal the revision repeated in the payload. The {@code *2} methods are the format-2 codecs; the
  * unsuffixed ones are format 1.</p>
  *
+ * <p><b>Payload schema 2 (Build 52, type 2 only).</b> A co-op profile ({@link ProfileKind#COOP}) or a profile
+ * with a display label is written with payload schema {@value #SCHEMA_PROFILE_COOP}: the schema-1 fields in
+ * the same order, then the kind tag and the optional label. A solo profile without a label is still written
+ * with schema 1, byte for byte as Build 51 wrote it, so Build 51 fixtures and stores are unchanged. Build 51
+ * refuses a schema-2 profile record ({@code "uses payload schema 2; this build reads schema 1"}) and so
+ * refuses every operation on that profile instead of treating a co-op profile as the owner's solo one; it
+ * cannot write beside it because every one of its profile writes first reads the record. Other types keep
+ * schema 1; the new enum tags Build 52 adds (salvage state UNAVAILABLE, operation kinds 28 and 29) are
+ * likewise refused by Build 51 as unknown tags.</p>
+ *
  * <p>{@code where} names the record in error messages: a file path, or a Redis key and field.</p>
  */
 final class ProfileRecords {
@@ -56,6 +66,8 @@ final class ProfileRecords {
     static final int FORMAT = StoreFormat.LEGACY;
     static final int FORMAT_2 = StoreFormat.CURRENT;
     static final int SCHEMA = StoreFormat.SCHEMA;
+    /** Payload schema of a type-2 record that carries a kind and display label (co-op profiles). */
+    static final int SCHEMA_PROFILE_COOP = 2;
 
     static final byte TYPE_ACCOUNT = 1;
     static final byte TYPE_PROFILE = 2;
@@ -452,10 +464,29 @@ final class ProfileRecords {
 
     // ------------------------------------------------------------------ type 2: profile metadata
 
+    /**
+     * Whether an after-image is a co-op record, which only a store raised to {@link StoreFormat#COOP_SCHEMA} and
+     * {@link StoreFormat#COOP_MINIMUM_BUILD} may hold: a schema-2 profile, or an invite, vote or salvage record (Build 51
+     * never writes those and cannot act on them). Both repositories refuse to prepare such an image on a lower store.
+     */
+    static boolean needsCoopStore(final byte recordType, final Object decoded) {
+        return switch (recordType) {
+            case TYPE_INVITE, TYPE_VOTE, TYPE_SALVAGE -> true;
+            case TYPE_PROFILE -> decoded instanceof AuroraProfile profile && needsProfileSchema2(profile);
+            default -> false;
+        };
+    }
+
+    /** Whether a profile needs payload schema 2 (co-op kind or a display label); a plain solo profile stays schema 1. */
+    static boolean needsProfileSchema2(final AuroraProfile profile) {
+        return profile.kind() != ProfileKind.SOLO || profile.displayLabel() != null;
+    }
+
     static byte[] profilePayload2(final AuroraProfile profile) throws IOException {
+        final boolean schema2 = needsProfileSchema2(profile);
         final ByteArrayOutputStream buffer = new ByteArrayOutputStream(512);
         try (DataOutputStream out = new DataOutputStream(buffer)) {
-            out.writeShort(SCHEMA);
+            out.writeShort(schema2 ? SCHEMA_PROFILE_COOP : SCHEMA);
             uuid(out, profile.id());
             out.writeLong(profile.revision());
             uuid(out, profile.accountId());
@@ -479,13 +510,18 @@ final class ProfileRecords {
             }
             out.writeLong(profile.bindingRevision());
             optionalUuid(out, profile.pendingIntent());
+            if (schema2) {
+                out.writeByte(profile.kind().tag());
+                optionalText(out, profile.displayLabel(), AuroraProfile.MAX_DISPLAY_LABEL);
+            }
         }
         return buffer.toByteArray();
     }
 
     static AuroraProfile profile2(final Frame frame, final UUID expected, final String where) throws IOException {
         require2(frame, where);
-        try (DataInputStream in = open(frame, where)) {
+        final int schema = schemaOf(frame, where, SCHEMA_PROFILE_COOP);
+        try (DataInputStream in = open(frame, where, schema)) {
             final UUID id = uuid(in);
             final long revision = revision(in, frame, where);
             final UUID account = uuid(in);
@@ -510,10 +546,16 @@ final class ProfileRecords {
             }
             final long bindingRevision = in.readLong();
             final UUID pending = optionalUuid(in);
+            ProfileKind kind = ProfileKind.SOLO;
+            String label = null;
+            if (schema >= SCHEMA_PROFILE_COOP) {
+                kind = ProfileKind.fromTag(in.readUnsignedByte(), where);
+                label = optionalText(in, AuroraProfile.MAX_DISPLAY_LABEL);
+            }
             end(in, where);
             if (!id.equals(expected)) throw new IOException("profile record " + where + " holds " + id);
             return new AuroraProfile(id, account, type, policy, name, values, created, revision, status, members, bindingRevision,
-                pending);
+                pending, kind, label);
         } catch (final IllegalArgumentException invalid) {
             throw new IOException("profile record " + where + " is invalid: " + invalid.getMessage(), invalid);
         }
@@ -1254,13 +1296,32 @@ final class ProfileRecords {
 
     /** Opens a format-2 payload and checks its schema; a newer schema is refused, not skipped. */
     private static DataInputStream open(final Frame frame, final String where) throws IOException {
+        return open(frame, where, SCHEMA);
+    }
+
+    /**
+     * Opens a format-2 payload whose schema the caller already read with {@link #schemaOf}; the schema is
+     * consumed again so the stream is positioned after it.
+     */
+    private static DataInputStream open(final Frame frame, final String where, final int expectedSchema) throws IOException {
         final DataInputStream in = new DataInputStream(new ByteArrayInputStream(frame.payload()));
         final int schema = in.readUnsignedShort();
-        if (schema != SCHEMA) {
-            throw new IOException("record " + where + " uses payload schema " + schema + "; this build reads schema " + SCHEMA
+        if (schema != expectedSchema) {
+            throw new IOException("record " + where + " uses payload schema " + schema + "; this build reads schema " + expectedSchema
                 + " and refuses a newer one rather than round-trip it lossily");
         }
         return in;
+    }
+
+    /** The payload schema of a frame, {@code 1..maxSchema}; a newer one is refused, not skipped. */
+    private static int schemaOf(final Frame frame, final String where, final int maxSchema) throws IOException {
+        if (frame.payload().length < 2) throw new IOException("record " + where + " is truncated before its schema");
+        final int schema = ((frame.payload()[0] & 0xFF) << 8) | (frame.payload()[1] & 0xFF);
+        if (schema < SCHEMA || schema > maxSchema) {
+            throw new IOException("record " + where + " uses payload schema " + schema + "; this build reads schema " + SCHEMA
+                + (maxSchema > SCHEMA ? ".." + maxSchema : "") + " and refuses a newer one rather than round-trip it lossily");
+        }
+        return schema;
     }
 
     /** Reads the payload's revision and checks it against the frame header. */

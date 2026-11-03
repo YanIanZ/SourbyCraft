@@ -63,6 +63,7 @@ public final class SourbyCraftCommands {
         OURS.put("aurora", new SourbyCraftCommand("aurora"));
 
         for (Command command : OURS.values()) claim(commandMap, command);
+        registerCoop(commandMap);
 
         try {
             Bukkit.getPluginManager().registerEvents(
@@ -75,7 +76,80 @@ public final class SourbyCraftCommands {
         registered = true;
         org.slf4j.LoggerFactory.getLogger("SourbyCraft").info(
             "Registered " + OURS.size() + " SourbyCraft commands (bare names; /minecraft:<name> or "
-            + "/paper:<name> still reach the built-ins). Native /spark is provided by the server integration.");
+            + "/paper:<name> still reach the built-ins). Native /spark is provided by the server integration."
+            + " /coop: " + (dev.iyanz.sourbycraft.awf.multiprofile.ProfileRuntime.settingsOrDisable().coopEnabled()
+                ? "/sourbycraft:coop now; the bare name is claimed after the plugins enable when no plugin holds it."
+                : "not registered (co-op disabled)."));
+    }
+
+    /**
+     * {@code /coop} exists only while co-op is enabled ({@code aurora.awf.multiprofile.coop.enabled}, RESTART_REQUIRED;
+     * the runtime started in an earlier boot stage): with co-op off (the default) nothing is registered and the server
+     * behaves as Build 51, so a plugin's {@code /coop} (a skyblock plugin's, say) is untouched. With co-op on, this
+     * boot stage (which runs before plugins are enabled) registers {@code /sourbycraft:coop} only; the bare name is
+     * claimed at {@code ServerLoadEvent(STARTUP)}, after every plugin enabled and registered its commands, and only
+     * when no plugin holds it; otherwise an INFO names the holder and {@code /sourbycraft:coop} stays the way in. The
+     * operator form {@code /awf multiprofile coop} is part of {@code /awf} either way.
+     */
+    private static void registerCoop(CommandMap commandMap) {
+        if (!dev.iyanz.sourbycraft.awf.multiprofile.ProfileRuntime.settingsOrDisable().coopEnabled()) return;
+        final CoopCommand coop = new CoopCommand("coop");
+        final Map<String, Command> known = commandMap.getKnownCommands();
+        // The namespaced entry only: commandMap.register() would take the free bare name now, ahead of the plugins.
+        known.put("sourbycraft:coop", coop);
+        coop.register(commandMap);
+        registerDefaultTrue(CoopCommand.PERMISSION, "Use /coop (AWF MultiProfile co-op)");
+        try {
+            Bukkit.getPluginManager().registerEvents(new org.bukkit.event.Listener() {
+                @org.bukkit.event.EventHandler
+                public void onServerLoad(org.bukkit.event.server.ServerLoadEvent event) {
+                    if (event.getType() != org.bukkit.event.server.ServerLoadEvent.LoadType.STARTUP) return;
+                    claimBareCoop(commandMap, coop);
+                }
+            }, MinecraftInternalPlugin.INSTANCE);
+        } catch (Throwable t) {
+            org.slf4j.LoggerFactory.getLogger("SourbyCraft").warn("/coop stays /sourbycraft:coop: the server-load listener was not registered", t);
+        }
+    }
+
+    /** After the plugins enabled: the bare {@code /coop} when it is free, else an INFO naming the holder. */
+    static void claimBareCoop(CommandMap commandMap, CoopCommand coop) {
+        final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger("SourbyCraft");
+        final Map<String, Command> known = commandMap.getKnownCommands();
+        final Command holder = known.get("coop");
+        if (holder != null && holder != coop) {
+            log.info("/coop is held by " + describe(holder) + "; SourbyCraft co-op is reachable as /sourbycraft:coop (and /awf multiprofile coop)");
+            return;
+        }
+        known.put("coop", coop);
+        known.putIfAbsent("sourbycraft:coop", coop);
+        OURS.put("coop", coop);
+        try {
+            // The Brigadier tree the clients see is rebuilt from the command map (no player is online at STARTUP).
+            ((org.bukkit.craftbukkit.CraftServer) Bukkit.getServer()).syncCommands();
+        } catch (RuntimeException failed) {
+            log.warn("/coop was registered but the client command tree was not resynced", failed);
+        }
+        log.info("Registered /coop (AWF MultiProfile co-op; the bare name was free after the plugins enabled)");
+    }
+
+    private static String describe(Command command) {
+        if (command instanceof org.bukkit.command.PluginIdentifiableCommand plugin && plugin.getPlugin() != null) {
+            return "plugin " + plugin.getPlugin().getName() + " (" + command.getClass().getName() + ")";
+        }
+        return command.getClass().getName();
+    }
+
+    /** Registers a permission every player has unless a permissions plugin removes it. */
+    private static void registerDefaultTrue(String node, String description) {
+        try {
+            if (Bukkit.getPluginManager().getPermission(node) == null) {
+                Bukkit.getPluginManager().addPermission(new org.bukkit.permissions.Permission(node, description,
+                    org.bukkit.permissions.PermissionDefault.TRUE));
+            }
+        } catch (RuntimeException failed) {
+            org.slf4j.LoggerFactory.getLogger("SourbyCraft").warn("Registering permission " + node + " failed", failed);
+        }
     }
 
     /** Claim the bare name and aliases, preserving upstream namespaced commands. */
