@@ -35,7 +35,8 @@ import org.junit.jupiter.api.io.TempDir;
  * node that holds the co-op plays it ({@code WRONG_NODE} elsewhere, no routing). {@link RedisFabric} is one per
  * process by design, so the test runs one fabric and gives each node its own {@link SessionFabric} with its own
  * incarnation on it ({@link FabricTestNodes#sessionsAs}): to {@code foreignHolder} and the claim scripts the two nodes
- * are two processes, each with its own repository, claim providers, player port and engine. Each test starts its own
+ * are two processes, each with its own repository (opened on that node's session fabric, so its write scripts compare
+ * the node's own {@code node/incarnation/owner}), claim providers, player port and engine. Each test starts its own
  * {@code redis-server} ({@link RedisTestServer}); without the binary it is skipped, and with
  * {@code SOURBY_REQUIRE_REDIS=1} (CI) it fails instead.
  */
@@ -84,8 +85,10 @@ class CoopMemberPlayRedisTest {
             this.id = id;
             final RedisFabric shared = CoopMemberPlayRedisTest.this.fabric;
             this.sessions = FabricTestNodes.sessionsAs(shared, "test-" + id + "-" + UUID.randomUUID());
-            this.repository = RedisProfileRepository.open(shared, new ProfileSettings.Repository(ProfileSettings.Backend.REDIS,
-                true, false), CoopMemberPlayRedisTest.this.directory.resolve("no-file-store-" + id));
+            // The repository presents its writes' claims as this node's incarnation, as one process's repository and
+            // ownership share fabric.sessions(); on the fabric's own sessions every write of this node would be fenced.
+            this.repository = RedisProfileRepository.open(shared, this.sessions, new ProfileSettings.Repository(
+                ProfileSettings.Backend.REDIS, true, false), CoopMemberPlayRedisTest.this.directory.resolve("no-file-store-" + id));
             this.repository.attachDefaultSlots(CoopFixtures.SLOTS);
             if (writeMarker) this.repository.writeStoreFormat(StoreFormat.Marker.ready(CoopFixtures.BUILD));
             this.profiles = new RedisProfileOwnership(this.sessions, id, 1_000);
