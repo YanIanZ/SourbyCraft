@@ -416,7 +416,7 @@ class CoopMembershipEngineTest {
             assertEquals(1, salvage.size());
             assertEquals(ProfileSalvage.State.UNAVAILABLE, salvage.getFirst().state());
             assertEquals(oldEpoch, salvage.getFirst().removedEpoch());
-            assertNull(salvage.getFirst().sourceSnapshotId(), "nothing was published in the consumed stream");
+            assertEquals(ProfileSalvage.NIL, salvage.getFirst().sourceSnapshotId(), "nothing was published in the consumed stream (NIL by contract)");
 
             // A writer that still holds the old membership's view cannot publish into the consumed stream.
             final var before = tree(store());
