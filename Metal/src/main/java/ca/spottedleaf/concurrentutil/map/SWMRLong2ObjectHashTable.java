@@ -257,7 +257,9 @@ public class SWMRLong2ObjectHashTable<V> {
 
         for (int i = 0, len = table.length; i < len; ++i) {
             for (TableEntry<V> curr = getAtIndexOpaque(table, i); curr != null; curr = curr.getNextOpaque()) {
-                hash += curr.hashCode();
+                // Equal maps must have equal hashes; TableEntry inherits Object.hashCode().
+                // Hash by the logical key/value instead of table-entry identity.
+                hash += Long.hashCode(curr.key) ^ curr.getValueAcquire().hashCode();
             }
         }
 
