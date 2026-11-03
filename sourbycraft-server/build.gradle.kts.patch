@@ -82,7 +82,7 @@
 +    // the vendored library. Exactly one provider must be on the server classpath.
 +    when (val metalProvider = rootProject.providers.gradleProperty("metalProvider").getOrElse("upstream")) {
 +        "upstream" -> implementation("ca.spottedleaf:leafpile:1.2.0")
-+        // LeafPile 1.2.4 split the original monolith into published modules.
++        // LeafPile split the original monolith; the pinned modular candidate is 1.3.2.
 +        // Candidate only: owner must verify the exact classes and shaded jar.
 +        "modular" -> {
 +            implementation(platform("ca.spottedleaf.leafpile:bom:${rootProject.providers.gradleProperty("metalModularVersion").get()}"))
