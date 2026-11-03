@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Metal is VENDORED into the repo (the upstream LuminolMC/Metal submodule
-# was removed after the org's repos went offline). The dependency-settings patch is
-# already applied in the vendored source. This just (re)generates Metal sources.
-set -e
-cd Metal
-sh gen_sources.sh
-cd ..
+# Metal is vendored under Metal/. Upstream LuminolMC/Metal is unavailable.
+# SourbyCraft keeps the generation step explicit for CI and patch workflows;
+# Metal:compileJava also depends on it for incremental local builds.
+set -euo pipefail
+
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+exec bash "$repo_root/Metal/gen_sources.sh"
