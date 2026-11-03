@@ -71,7 +71,7 @@
  configurations.named(log4jPlugins.compileClasspathConfigurationName) {
      extendsFrom(configurations.compileClasspath.get())
  }
-@@ -109,12 +_,30 @@
+@@ -109,12 +_,31 @@
  }
  
  dependencies {
