@@ -37,7 +37,7 @@ As of the 2026-11-03 investigation, upstream [LeafPile v1.3.2](https://github.co
 
 ## Compatibility with Aurora Territory Sharding
 
-Metal remains **single-JVM, in-memory concurrency infrastructure**. It cannot enforce cross-server world ownership, replace Redis/SQL, or make remote chunks safe to tick. Any territory/writer fencing is enforced at the authoritative storage/commit protocol, not by swapping hash-map implementations. See [ARF/AIE RFC](../proposals/aurora-identity-territory-v3/README.md) for the partitioned-world research plan.
+Metal remains **single-JVM, in-memory concurrency infrastructure**. It cannot enforce cross-server world ownership, replace Redis/SQL, or make remote chunks safe to tick. Any territory/writer fencing is enforced at the authoritative storage/commit protocol, not by swapping hash-map implementations. See the [ARF/AIE companion documentation PR #63](https://github.com/YanIanZ/SourbyCraft/pull/63) for the separately proposed partitioned-world research plan (not part of this Metal PR).
 
 ## Governance
 
