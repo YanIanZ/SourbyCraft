@@ -9,23 +9,26 @@ import java.util.Optional;
  * <p>This is not {@link ProfileInfo#type()}, the free consumer namespace (for example
  * {@code skyblock}). The two are independent: a profile has both.</p>
  *
- * <p><b>What Build 51 does with it:</b> the type is validated against the server's
+ * <p><b>What the server does with it:</b> the type is validated against the server's
  * {@code aurora.awf.multiprofile.types.allowed} list when the profile is created, stored in the
- * profile record (store format 2) and returned by {@link ProfileDetails#profileType()}. <b>Nothing
- * else.</b> No rule is enforced for any type in this build: an {@link #IRONMAN}, {@link #STRANDED}
- * or {@link #BINGO} profile behaves exactly like a {@link #CLASSIC} one, and the restrictions
- * described on each constant are the intended policy of a later build, not a guarantee. A consumer
- * that needs a restriction today must enforce it itself.</p>
+ * profile record (store format 2) and returned by {@link ProfileDetails#profileType()}. Since Build 54
+ * its rules come from the {@link ProfileTypeRegistry}: each constant is the id of a built-in
+ * {@link ProfileTypeDefinition} (which a plugin may replace), and the server checks the actions it owns
+ * (bank, co-op, salvage; see the {@link ProfileTypeRegistry} constants) against it. The trading, auction
+ * house and bazaar restrictions on the constants below are rules of the built-in definitions that a
+ * consumer enforces with {@link ProfileTypeRegistry#allows}; the server has no such action of its own.
+ * A plugin-registered type is stored as {@link #CLASSIC} with its id in
+ * {@link ProfileTypeRegistry#TYPE_METADATA_KEY}; use {@link ProfileDetails#typeId()} for the effective id.</p>
  */
 public enum ProfileType {
 
-    /** The default type. No restriction is intended. */
+    /** The default type. Built-in rules: none denied. */
     CLASSIC("classic"),
-    /** Intended policy: no trading, auction house or bazaar. Not enforced by Build 51. */
+    /** Built-in rules: {@code trade}, {@code auction} and {@code bazaar} denied (enforced by the consumer). */
     IRONMAN("ironman"),
-    /** Intended policy: no trading, auction house or bazaar, and a single island. Not enforced by Build 51. */
+    /** Built-in rules: {@code trade}, {@code auction} and {@code bazaar} denied (enforced by the consumer); a single island is the consumer's policy. */
     STRANDED("stranded"),
-    /** Intended policy: a seasonal profile, archived read-only at the end of its event. Not enforced by Build 51. */
+    /** A seasonal profile. Built-in rules: none denied. Archiving at the end of the event is planned (Build 55), not implemented. */
     BINGO("bingo");
 
     private final String id;

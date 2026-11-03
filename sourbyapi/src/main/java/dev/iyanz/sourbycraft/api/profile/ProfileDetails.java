@@ -34,6 +34,14 @@ public record ProfileDetails(ProfileInfo info, String name, ProfileType profileT
         return this.info.id();
     }
 
+    /**
+     * Added in Build 54. The profile's type id ({@link ProfileTypeRegistry#typeId}): a registered type's id, else
+     * {@code profileType().id()}.
+     */
+    public String typeId() {
+        return ProfileTypeRegistry.typeId(this.profileType, this.info.metadata());
+    }
+
     /** The owning account; same as {@code info().accountId()}. */
     public UUID accountId() {
         return this.info.accountId();

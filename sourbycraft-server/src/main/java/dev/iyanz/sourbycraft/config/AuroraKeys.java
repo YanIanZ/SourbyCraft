@@ -264,9 +264,11 @@ public final class AuroraKeys {
         restart("aurora.awf.multiprofile.types.allowed", List.of("classic", "ironman", "stranded", "bingo"),
             "Policy types (classic, ironman, stranded, bingo) a profile may be created with; a list or a comma-separated "
                 + "string. A request naming another type is refused (TYPE_NOT_ALLOWED). Not the free consumer namespace "
-                + "(ProfileRequest.type), which this list does not restrict. Build 51 stores and returns the type only: "
-                + "no ironman, stranded or bingo rule is enforced yet, so list only classic if you do not want profiles "
-                + "that look restricted but are not. An unknown or empty list is ignored with a WARN."),
+                + "(ProfileRequest.type), which this list does not restrict, and not a plugin-registered type (Build 54, "
+                + "creatable per its definition). Since Build 54 each type's rules come from the profile type registry "
+                + "(docs/awf/multiprofile/PROFILE-TYPES.md): the engine enforces the actions it owns (bank, co-op, salvage); "
+                + "trade, auction and bazaar rules are for the consumer plugin to enforce. An unknown or empty list is "
+                + "ignored with a WARN."),
         restart("aurora.awf.multiprofile.types.default", "classic",
             "The policy type of a profile created without one. Must be in types.allowed; if it is not, the first allowed "
                 + "type is used and a WARN names this key."),
@@ -294,7 +296,8 @@ public final class AuroraKeys {
                 + "with MIGRATION_REQUIRED (see migration.mode). Member play also needs authoritative login (login.authoritative "
                 + "auto, which co-op enables, or true) and the node that holds the co-op's bound world (WRONG_NODE elsewhere; no "
                 + "cross-node routing). Does not "
-                + "transfer ownership and does not deliver salvage (Build 54). Conversion is one way."),
+                + "transfer ownership. Build 54 adds the shared and personal bank, collections and salvage delivery "
+                + "(bank.* keys). Conversion is one way."),
         restart("aurora.awf.multiprofile.coop.max-members", 5,
             "Members of one co-op, owner included. 2 to 8. Applies to new invitations and accepts; a co-op already "
                 + "above a lowered cap keeps its members. An invalid value is ignored with a WARN (5)."),
@@ -311,9 +314,10 @@ public final class AuroraKeys {
         restart("aurora.awf.multiprofile.coop.allowed-types", List.of("classic"),
             "Policy types (classic, ironman, stranded, bingo) whose solo profile may be converted to co-op; a list or a "
                 + "comma-separated string. Checked at conversion only. A profile of another type is refused "
-                + "(TYPE_NOT_ALLOWED). Build 51 enforces no rule for ironman, stranded or bingo, so widening this list "
-                + "gives those types co-op without any of their intended restrictions. An unknown or empty list is "
-                + "ignored with a WARN."),
+                + "(TYPE_NOT_ALLOWED). Since Build 54 the conversion must also be allowed by the type's registry definition "
+                + "(coop.convert, coopAllowed; ACTION_FORBIDDEN_BY_TYPE otherwise). The engine does not enforce trade, auction "
+                + "or bazaar rules, so widening this list gives those types co-op with only the engine-owned rules applied. "
+                + "An unknown or empty list is ignored with a WARN."),
         restart("aurora.awf.multiprofile.shutdown.capture-deadline-ms", 10000,
             "Build 53. At shutdown MultiProfile captures and saves the online players before the server removes them, "
                 + "then closes. This is how long shutdown waits for those captures and saves, 1000 to 60000 ms. "
@@ -336,7 +340,45 @@ public final class AuroraKeys {
                 + "before a switch target becomes active, their apply is verified, a failure refuses the switch "
                 + "(ADAPTER_REQUIRED_FAILED), and an id that holds data for the profile but is not registered on this "
                 + "node refuses it (ADAPTER_MISSING). It can only raise strictness; an adapter that declares REQUIRED "
-                + "stays REQUIRED when not listed. A malformed entry is dropped with a WARN; the well-formed entries stay."));
+                + "stays REQUIRED when not listed. A malformed entry is dropped with a WARN; the well-formed entries stay."),
+        restart("aurora.awf.multiprofile.types.registry.allow-override-builtins", true,
+            "Build 54. Whether a plugin may register its own definition for a built-in profile type id (classic, "
+                + "ironman, stranded, bingo) through the ProfileTypeRegistry, replacing the built-in rules. false = such a "
+                + "registration is refused (TYPE_NOT_ALLOWED) and a stored override is ignored with a WARN, so the built-in "
+                + "definition applies. Registered types with other ids are unaffected. An invalid value is ignored with a "
+                + "WARN (true)."),
+        restart("aurora.awf.multiprofile.types.unknown-type-policy", "deny",
+            "Build 54. deny | allow. What a profile whose type has no known definition (not built in, not registered by "
+                + "a plugin on this server, no readable stored definition) may do. deny (default, fail-safe) = every "
+                + "action is refused, the engine's bank, co-op and salvage actions included (ACTION_FORBIDDEN_BY_TYPE), "
+                + "with one WARN naming the type, until its plugin registers it. allow = every action is allowed, as for "
+                + "classic, which lifts whatever the lost definition denied. An invalid value is ignored with a WARN (deny)."),
+        restart("aurora.awf.multiprofile.bank.currency.provider", "aurora",
+            "Build 54. Provider id of the co-op bank currency, [a-z0-9_.-]{1,64}. A bank record keeps the currency it was first "
+                + "written with; once a record exists, a different configured currency refuses that bank's changes "
+                + "(INVALID_REQUEST) until the setting names the stored currency again. The server moves no purse money "
+                + "(owner decision OD-4). Invalid = aurora + WARN."),
+        restart("aurora.awf.multiprofile.bank.currency.id", "coins",
+            "Build 54. Currency id of the co-op bank, [a-z0-9_.-]{1,64}; same rules as bank.currency.provider. Invalid = coins + WARN."),
+        restart("aurora.awf.multiprofile.bank.currency.scale", 0,
+            "Build 54. Decimal places of one minor unit, 0-9 (0 = whole coins). Amounts in the API are long minor units; "
+                + "/coop bank parses decimals at this scale. Invalid = 0 + WARN."),
+        restart("aurora.awf.multiprofile.bank.shared-capacity", 0,
+            "Build 54. Cap of the shared bank in minor units, 0 = no cap (still bounded by the long range). Applies to bank "
+                + "records created after start; an existing record keeps the capacity it was created with. A deposit past the "
+                + "cap is refused (INVALID_REQUEST). Invalid = 0 + WARN."),
+        restart("aurora.awf.multiprofile.bank.personal-cap-percent", 20,
+            "Build 54. Cap of each member's personal bank as a percentage of the record's shared capacity, 0-100 (Hypixel "
+                + "parity 20). 0, or a shared capacity of 0, means no personal cap. Invalid = 20 + WARN."),
+        restart("aurora.awf.multiprofile.bank.interest-percent", 10,
+            "Build 54. Interest one interest posting credits, 0-100 (Hypixel parity 10), to the shared balance and every "
+                + "personal bank, each capped at its capacity. The server schedules no interest: the owner posts it "
+                + "(/awf multiprofile coop bank interest, or a plugin through AuroraProfiles.applyInterest), and every posting "
+                + "credits again, no sooner than bank.interest-interval-hours after the previous one. 0 = no interest. Invalid = 10 + WARN."),
+        restart("aurora.awf.multiprofile.bank.interest-interval-hours", 24,
+            "Build 54. Least number of hours between two interest postings of one co-op, judged on the store clock (the "
+                + "record remembers its last posting); a sooner posting is refused (INVALID_REQUEST, naming the wait). 0 = no "
+                + "minimum, at most 8784. Invalid = 24 + WARN."));
 
     // [aurora.awf.redis.fabric] — Aurora Redis Fabric (docs/awf/multiprofile/REDIS-FABRIC.md)
     public static final List<ConfigKey> AWF_REDIS_FABRIC_KEYS = List.of(

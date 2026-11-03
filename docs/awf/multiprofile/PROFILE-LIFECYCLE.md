@@ -81,7 +81,8 @@ could not switch into the profile in Build 52 (`COOP_SWITCH_UNAVAILABLE`); Build
 
 **Leaving and removal.** A member leaves; or a kick vote removes a member. Both are one recoverable intent
 that consumes the membership epoch, releases the account's slot and records the member's personal state as a
-salvage entry that is unavailable to delivery. Build 52 delivers nothing (salvage delivery is Build 54); a
+salvage entry that is unavailable to delivery. Build 52 and 53 deliver nothing; Build 54 delivers on a claim
+([salvage](#salvage-exactly-once-od-3)); a
 removed member's rejoin is a new membership with a fresh epoch and an empty personal state, never the old
 epoch. A member whose **active** profile is the co-op was refused in Build 52 (`MEMBER_ONLINE`); Build 53
 captures and switches them out first, then removes them, see
@@ -229,7 +230,7 @@ state, so an adoption triggered by their ordering changes nothing.
 
 1. The server takes the player's session claim and gates the player.
 2. It captures the player through the same ticketed capture as a quit, and saves it as the member's last snapshot
-   in this membership epoch (the snapshot salvage will read in Build 54).
+   in this membership epoch (the snapshot a Build 54 salvage claim reads).
 3. It switches the player out: to the account's next profile, or to a fresh solo profile when the account has no
    other one. The switch is the ordinary switch, with its journal, rollback and adapter rules.
 4. Only after the switch committed does the removal commit: the membership epoch is consumed, the slot is freed,
@@ -261,12 +262,149 @@ orders it). In Build 52 the service was closed first and these players got no qu
 - Shutdown then continues; the deadline does not extend the existing storage drain budget in
   [OPERATIONS.md](OPERATIONS.md#shutdown).
 
-## Remaining after Build 53
+## Co-op bank, collections and salvage (Build 54)
 
-Build 54: salvage delivery (OD-3), shared and personal bank, collections, bank transfers, purse (OD-4). Build 55:
-audit log, switch guard and cooldown, ironman/stranded/bingo rules at the action boundary, API parity fields and
-events, per-account I/O ordering, `/perf` metrics. Owner transfer is in no scheduled build. A removed member's
-state is recorded for salvage in Build 53 but nothing is delivered.
+Build 54 code written; compiled by an agent; not tested by the owner (no unit, integration or boot result is claimed
+here). Design: [COOP-DESIGN.md](COOP-DESIGN.md) §5, §7, §8, §9; API: [API.md](API.md#co-op-bank-collections-and-salvage-build-54);
+policy keys: [CONFIGURATION.md](CONFIGURATION.md#build-54-co-op-bank-policy). Co-op stays off by default.
+
+### The shared record
+
+A co-op profile's bank lives in one shared-state record `S` (format-2 record type 6, the Build 51 shape): the shared
+balance and capacity, one personal balance per membership (`member, epoch`), the collections with their per-member
+contribution ledger, pending transfer reservations, and the fixed currency. Money is signed-`long` minor units;
+every amount is decided in Java before anything is written (positive amounts, available balance, caps, no `long`
+overflow; refusals are `INVALID_REQUEST`). The record is created by the first committed bank change with the
+configured currency and shared capacity and keeps both; the percentages of the policy apply at each operation.
+
+### Who can change it
+
+Every change is checked in this order, and nothing is written when one fails: co-op enabled, format-2 store, a co-op
+profile not deleted; the type allows the action (`bank.deposit`, `bank.withdraw`, `bank.personal`, `bank.transfer`,
+`collections.contribute`; `ACTION_FORBIDDEN_BY_TYPE`); no other node holds the profile's bound world (`WRONG_NODE`);
+the profile is not reserved; the actor is a member **with this co-op active** (`NOT_A_MEMBER`, `STALE_STATE`); the
+stored currency equals the configured one; `S` carries no pending reservation (`RECOVERY_REQUIRED`). Withdrawing from
+the shared bank, and moving shared money to a personal bank, needs the OWNER or a MANAGER (`ROLE_FORBIDDEN`); interest
+needs the OWNER. Members change only their own personal bank. A transfer also needs `bank.personal` and the direction's
+shared rule (`bank.withdraw` out of, `bank.deposit` into the shared bank); interest credits personal banks only while
+`bank.personal` is allowed and only for current memberships (a removed membership's frozen money earns nothing). Before
+any change, the balances and contributions of memberships no longer current are folded into the record's archived
+totals (`archivedPersonal`, per-collection `archivedContributions`; COOP-DESIGN §8: frozen, redistribution out of
+scope) in the same after-image, so the per-member maps are bounded by the current members; the removal intent itself
+does not touch `S` (the compaction is lazy, at the next bank change).
+
+### Commits
+
+- **Deposit, withdraw, personal postings, contributions, interest** are one direct guarded commit of `S`
+  (`SHARED_MUTATE`): the repository compares the profile claim, the actor's claim, the account and profile revisions,
+  `S` and the actor's active profile in the same atomic step as it installs the after-image. A concurrent change makes
+  it `STALE_STATE`; the caller re-reads. An UNKNOWN outcome is settled from the receipt or the stored record and is
+  never retried or compensated (`UNKNOWN_OUTCOME` when it cannot be established).
+- **Transfer** (shared↔personal of the actor) is one recoverable intent (`BANK_TRANSFER`, COOP-DESIGN §5): PREPARE
+  reserves `S`, the account and the profile; the one after-image of `S` carries both postings; COMMIT installs it and
+  releases the reservations. A crash before the COMMITTED marker leaves reservations that recovery aborts (nothing
+  moved); after it, recovery rolls forward. There is never a half-moved amount.
+- **Receipts are permanent** for these kinds and for salvage delivery (`CoopOperation.Kind.permanent()`): FILE keeps
+  them in the resource's `permanent/` receipt directory, Redis in separate `preceipts:`/`prdigest:` hashes; they are
+  never pruned. A resource holding 1,000,000 of them refuses the next financial or delivery operation with
+  `CAPACITY_EXCEEDED` before any write; archival is an offline owner policy, not implemented in Build 54.
+- **Events** (`ProfileBankTransactionEvent`) fire on the co-op event thread after the durable commit only.
+- **Replay.** A call without an operation id mints a fresh one: repeating it is a second posting. With the caller's
+  own operation id (the API overloads) the id is bound to the request digest (no revision in it), and the engine looks
+  the id up **before any validation** (`ProfileEngine.replayedBank`: the permanent receipt on the profile, for a
+  transfer also the stored intent). Same request, committed: answered from the store (`REPLAYED`: the record as it is
+  now, nothing posted, no event, no after-image staged), even when the balance moved, the cap was reached or the
+  interest interval has not elapsed since. Same request, aborted: `IO_FAILURE` (nothing applied; a new id for a new
+  attempt). Same request, undecided intent: `RECOVERY_REQUIRED`. Another request under the id: `INVALID_REQUEST`. A
+  decided id whose actor is no longer a member: `INVALID_REQUEST` (the digest names the membership epoch, so the retry
+  cannot be matched). Only an unknown id is validated and run. After
+  `UNKNOWN_OUTCOME` (the exception names the operation) read the bank back or query `bankReceipt`. Interest is posted
+  only when the OWNER calls it, no sooner than `bank.interest-interval-hours` after the previous posting on the store
+  clock (the record keeps `lastInterestAtMillis`); the server has no interest schedule.
+
+### Purse (OD-4)
+
+The purse stays per profile through a REQUIRED state adapter and is never part of `S`. The engine has no transactional
+purse provider, so a transfer that names the purse is refused with `PURSE_TRANSFER_UNSUPPORTED` before anything is
+written. A deposit or withdrawal is a ledger credit or debit; the consumer plugin that holds the purse moves the coins on
+its side (purse debit then `deposit`; `withdraw` then purse credit) and owns the ordering and compensation of those two
+steps. `/coop bank` offers balances and the shared↔personal transfer only; it mints no coins.
+
+### Salvage exactly once (OD-3)
+
+A removal (leave, executed kick vote) consumes the member's stream (head `CONSUMED`) and records a salvage entry that
+pins the exact last snapshot of that stream. A claim (`claimSalvage`, `/coop salvage claim`) by a member:
+
+1. On the I/O lane: the record is not DELIVERED; the type allows `salvage.claim`; the profile is on this node; the
+   claimant is a member with the co-op **active** and an admitted online session here (`PLAYER_OFFLINE`), and no
+   switch, login restore or other delivery runs for them (`SWITCH_IN_PROGRESS`). The items are extracted from the
+   pinned source snapshot (or from the remainder blob of an earlier partial claim), verified by checksum and revision; a
+   missing or mismatched blob fails closed (`STALE_STATE`), nothing substituted. The claimant takes a **delivery hold**
+   (`ProfileEngine.deliveries`) and is frozen: from here until the apply succeeded, every save path treats them like a
+   player mid-switch (`switchInProgress`, `saveCaptured` → `SWITCH_IN_PROGRESS`): the lockstep autosave, a quit, the
+   shutdown capture and `save()` write nothing, and no switch is admitted. A claim refused before the commit releases
+   the hold.
+2. Their state is captured on the entity thread with the capture ticket minted in step 1, bounded by
+   `switching.timeout-ms` as a switch's steps are: a capture that does not finish in time fails the claim (`TIMEOUT`),
+   nothing is written and the freeze and the hold are released. A rejoin of the claimant (`admitSession`) clears a
+   freeze and hold its previous session's claim left; that claim then fails `CLAIM_LOST` (its ticket names the old
+   session) and removes only its own entries.
+3. On the I/O lane: ticket, session, account and membership are compared again; the items are placed into free
+   inventory slots (36), then free ender-chest slots (27), one stack per free slot, in extraction order (inventory,
+   armour, off-hand, ender chest). The destination snapshot (and, when not everything fits, a remainder snapshot in the
+   consumed source stream) is staged as an immutable blob; one intent then installs the claimant's head at the
+   destination, the salvage record's after-image (DELIVERED, or AVAILABLE naming the remainder) and the permanent
+   receipt. With no free slot at all the claim is refused (`CAPACITY_EXCEEDED`) and nothing changes; after every such
+   refusal, and before the staging, the store is raised to minimum build 54.
+4. The committed state replaces the claimant's isolated state on the entity thread. If that fails, the delivery stays
+   committed: the delivery hold stays until the session ends and the player's saves are refused (they are
+   disconnected), so the quit writes nothing, no pre-delivery capture overwrites the head, the session marker stays
+   open and the next authoritative login restores the committed head with the items. On success the hold ends (a quit
+   during the run releases the session claim then).
+
+Consequences: the source is consumed before any delivery; items are never dropped into the world and never granted
+outside the claimant's committed head; a crash before COMMITTED leaves the record claimable; a crash after it rolls
+forward and the head already names the destination (no duplicate); a delivered record refuses a second claim
+(`INVALID_REQUEST`) and its receipt names the destination snapshot. XP, bank, purse and adapter data are never salvage.
+
+### Store level
+
+The first salvage delivery about to be written raises the store to minimum build 54 (`StoreFormat.SALVAGE_MINIMUM_BUILD`):
+Build 53 cannot decode a DELIVERED record without a payload or an AVAILABLE record whose payload is a remainder, and
+could overwrite the claimant's new head from older state. The first profile of a plugin-registered type or with a
+type-pool name raises it too, and so does the registration of a built-in override that denies an action
+([PROFILE-TYPES.md](PROFILE-TYPES.md)); on a format-1 Redis store these two are refused (`MIGRATION_REQUIRED`) or
+logged instead, because a Build 51 node opens such a store without honouring the minimum build. A shared bank record
+keeps the Build 51 shape until it first carries a Build 54 trailing section (archived totals after a removed
+membership's money was folded, or the interest timestamp); that change raises the store to 54 first, because a Build
+51-53 decoder refuses the trailing bytes. Plain deposits, withdrawals and transfers on a record without that section
+do not raise it.
+
+### Known gaps (Build 54)
+
+- A removed membership's personal-bank balance is not paid out or moved: the next bank change folds it (and the
+  membership's contributions) into the record's archived totals, frozen, shown to nobody through the API. The
+  compaction is lazy (the removal intent does not touch `S`), so between a removal and the next bank change the old
+  epoch still counts toward the per-member bounds.
+- Transfers and salvage deliveries reserve the profile's metadata `M` (as every co-op intent does), so a switch, invite
+  or vote of the same profile running at the same moment may see `STALE_STATE` and must be retried.
+- A refused PREPARE leaves the staged destination/remainder blobs of a delivery in the store until the pin sweep; the
+  salvage apply replaces the claimant's whole isolated state with the committed capture (inventory and ender chest
+  included) rather than only the placed stacks.
+- A legacy profile whose free-form metadata already held `aurora:type` resolves to that type id; the key is not marked
+  as written by Build 54.
+- FILE permanent receipts: the first operation on a resource lists its `permanent/` directory (up to 1,000,000 files)
+  on the I/O lane and caches the count for the run.
+- A bank record's shared capacity cannot be changed after creation (no bank-upgrade API).
+- No offline archival of permanent receipts exists yet; the 1,000,000 bound is the only limit.
+- Distributed (Redis) deployments: bank changes and claims run on the node that holds the profile (OD-1); there is no
+  cross-node routing.
+
+## Remaining after Build 54
+
+Build 55: audit log, switch guard and cooldown, the SSB-AuroraProfiles consumer port (type rules for `trade`,
+`auction`, `bazaar`, `island-bank` enforced by the consumer), API parity fields, per-account I/O ordering, `/perf`
+metrics. Owner transfer is in no scheduled build.
 
 ## Snapshot revisions
 

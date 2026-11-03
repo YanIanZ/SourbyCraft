@@ -61,6 +61,14 @@ public final class CuteNames {
         .toList();
 
     private static final Set<String> POOL_KEYS = new HashSet<>();
+    /**
+     * Keys of names from profile-type pools ({@code ProfileNaming.POOL}, Build 54) that {@link #valid} also accepts.
+     * Only ever grows during a process: {@link ProfileTypes} adds every pool it loads or registers, so a stored
+     * profile named from a pool stays readable when its type is later replaced.
+     */
+    private static final Set<String> TYPE_POOL_KEYS = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    /** Longest name a type pool may contribute; checked again here so a pool can never exceed {@link #MAX_LENGTH}. */
+    static final int MAX_TYPE_POOL_ENTRY = 24;
 
     static {
         for (final String name : NAMES) POOL_KEYS.add(key(name));
@@ -108,8 +116,65 @@ public final class CuteNames {
     public static boolean valid(final String name) {
         if (name == null || name.isEmpty() || name.length() > MAX_LENGTH) return false;
         final String base = name.replaceFirst(" [1-9]\\d{0,2}$", "");
+        // A type pool entry may contain inner spaces ("Red Ember"); the server pool has none.
+        if (TYPE_POOL_KEYS.contains(key(base))) return true;
         if (base.equals(name) && name.contains(" ")) return false;
         return POOL_KEYS.contains(key(base));
+    }
+
+    /**
+     * Build 54: admits the entries of a profile type's own pool to {@link #valid}. Entries must already be valid
+     * {@code ProfileNaming} entries (letters, single inner spaces, {@code '} or {@code -}, at most
+     * {@value #MAX_TYPE_POOL_ENTRY} characters); a malformed entry is refused and nothing is admitted.
+     */
+    static void admitTypePool(final java.util.Collection<String> pool) {
+        for (final String entry : pool) {
+            if (!dev.iyanz.sourbycraft.api.profile.ProfileNaming.validEntry(entry) || entry.length() > MAX_TYPE_POOL_ENTRY) {
+                throw new IllegalArgumentException("type pool entry: " + entry);
+            }
+        }
+        for (final String entry : pool) TYPE_POOL_KEYS.add(key(entry));
+    }
+
+    /**
+     * Build 54: whether {@code name} is a canonical name from {@code pool}: an entry (ignoring case) optionally
+     * followed by one space and a number 1-999 without a leading zero.
+     */
+    public static boolean validIn(final String name, final List<String> pool) {
+        if (name == null || name.isEmpty() || name.length() > MAX_LENGTH) return false;
+        final String base = name.replaceFirst(" [1-9]\\d{0,2}$", "");
+        for (final String entry : pool) {
+            if (key(entry).equals(key(base))) return true;
+        }
+        return false;
+    }
+
+    /** Build 54: the pool spelling of a name {@link #validIn} accepts, with its suffix as given. */
+    public static String normalizeIn(final String name, final List<String> pool) {
+        if (!validIn(name, pool)) throw new IllegalArgumentException("not a name of this pool: " + name);
+        final String base = name.replaceFirst(" [1-9]\\d{0,2}$", "");
+        for (final String entry : pool) {
+            if (key(entry).equals(key(base))) return entry + name.substring(base.length());
+        }
+        return name;
+    }
+
+    /**
+     * Build 54: {@link #generate(Set)} over another pool: a random free entry, else the first entry with the smallest
+     * free numeric suffix. The result is also {@link #valid} once the pool was {@linkplain #admitTypePool admitted}.
+     */
+    public static String generate(final Set<String> takenKeys, final List<String> pool) {
+        Objects.requireNonNull(takenKeys, "takenKeys");
+        if (pool.isEmpty()) throw new IllegalArgumentException("empty name pool");
+        final List<String> free = pool.stream().filter(name -> !takenKeys.contains(key(name))).toList();
+        if (!free.isEmpty()) return free.get(ThreadLocalRandom.current().nextInt(free.size()));
+        for (int suffix = 2; suffix <= MAX_SUFFIX; suffix++) {
+            for (final String name : pool) {
+                final String candidate = name + " " + suffix;
+                if (candidate.length() <= MAX_LENGTH && !takenKeys.contains(key(candidate))) return candidate;
+            }
+        }
+        throw new IllegalStateException("no free profile name for " + takenKeys.size() + " taken names");
     }
 
     /**

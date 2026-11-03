@@ -58,10 +58,22 @@ public final class AuroraWorldRegistry {
      *     while one of them is missing, instead of opening an empty store in its place. {@code null}
      *     until first recorded, which is also how entries written before Build 50 read: those load
      *     as before until their stores are recorded at their next load
+     * @param deleteOnUnload {@code TRUE} for a disposable instance made by
+     *     {@link dev.iyanz.sourbycraft.api.world.AuroraWorlds#createInstance}, deleted once it is unloaded (Build 54);
+     *     {@code null} otherwise, so every other entry is written exactly as before (Gson leaves nulls out) and a
+     *     build before 54, which ignores the unknown field, reads such an instance as an ordinary one
      */
     public record Entry(String name, String environment, Long seed, String generator, String worldType,
                         String template, boolean autoload,
-                        dev.iyanz.sourbycraft.api.world.WorldProperties properties, List<String> knownStores) {
+                        dev.iyanz.sourbycraft.api.world.WorldProperties properties, List<String> knownStores,
+                        Boolean deleteOnUnload) {
+
+        /** An entry that is not a disposable instance. */
+        public Entry(final String name, final String environment, final Long seed, final String generator,
+                     final String worldType, final String template, final boolean autoload,
+                     final dev.iyanz.sourbycraft.api.world.WorldProperties properties, final List<String> knownStores) {
+            this(name, environment, seed, generator, worldType, template, autoload, properties, knownStores, null);
+        }
 
         /** An entry without properties. */
         public Entry(final String name, final String environment, final Long seed, final String generator,
@@ -83,17 +95,28 @@ public final class AuroraWorldRegistry {
 
         public Entry withAutoload(final boolean value) {
             return new Entry(this.name, this.environment, this.seed, this.generator, this.worldType, this.template, value,
-                this.properties, this.knownStores);
+                this.properties, this.knownStores, this.deleteOnUnload);
         }
 
         public Entry withProperties(final dev.iyanz.sourbycraft.api.world.WorldProperties value) {
             return new Entry(this.name, this.environment, this.seed, this.generator, this.worldType, this.template,
-                this.autoload, value, this.knownStores);
+                this.autoload, value, this.knownStores, this.deleteOnUnload);
         }
 
         public Entry withKnownStores(final List<String> value) {
             return new Entry(this.name, this.environment, this.seed, this.generator, this.worldType, this.template,
-                this.autoload, this.properties, value);
+                this.autoload, this.properties, value, this.deleteOnUnload);
+        }
+
+        /** This entry as a disposable instance (Build 54): deleted once it is unloaded. */
+        public Entry asDeletedOnUnload() {
+            return new Entry(this.name, this.environment, this.seed, this.generator, this.worldType, this.template,
+                false, this.properties, this.knownStores, Boolean.TRUE);
+        }
+
+        /** Whether this is a disposable instance, deleted once it is unloaded. */
+        public boolean deletedOnUnload() {
+            return Boolean.TRUE.equals(this.deleteOnUnload);
         }
 
         /**

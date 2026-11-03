@@ -68,6 +68,21 @@ public final class ProfileConfig {
             SourbyLogger.info("AWF MultiProfile: adapters forced to REQUIRED by " + ProfileSettings.ADAPTERS_REQUIRED_KEY
                 + ": " + String.join(", ", settings.adapters().required()));
         }
+        if (settings.enabled() && settings.typeRegistry().unknownTypePolicy() == ProfileSettings.UnknownTypePolicy.ALLOW) {
+            SourbyLogger.warn("AWF MultiProfile: " + ProfileSettings.TYPES_UNKNOWN_POLICY_KEY + " is allow. A profile whose"
+                + " type has no known definition (its plugin never registered it here and no stored definition exists)"
+                + " is allowed every action, the bank and co-op included, so a lost definition lifts that type's"
+                + " restrictions. deny (the default) refuses those actions instead.");
+        }
+        if (settings.coopEnabled()) {
+            final ProfileSettings.Bank bank = settings.bank();
+            SourbyLogger.info("AWF MultiProfile: co-op bank policy " + bank.currencyProvider() + ":" + bank.currencyId() + " (scale "
+                + bank.currencyScale() + "), shared capacity " + (bank.sharedCapacity() == 0 ? "none" : Long.toString(bank.sharedCapacity()))
+                + ", personal cap " + bank.personalCapPercent() + " %" + (bank.sharedCapacity() == 0 && bank.personalCapPercent() > 0
+                    ? " of the shared capacity (none, so personal banks are uncapped)" : " of the shared capacity")
+                + ", interest " + bank.interestPercent() + " % per posting (RESTART_REQUIRED; currency and capacity apply to bank records"
+                + " created from now on)");
+        }
         return settings;
     }
 
@@ -103,6 +118,21 @@ public final class ProfileConfig {
             case ProfileSettings.ADAPTERS_REQUIRED_KEY -> "AWF MultiProfile forces only the well-formed adapter ids to REQUIRED ("
                 + (settings.adapters().required().isEmpty() ? "none" : String.join(", ", settings.adapters().required()))
                 + "); each id is [a-z0-9_.:-]{1,64}, at most " + ProfileSettings.Adapters.MAX_REQUIRED;
+            case ProfileSettings.TYPES_OVERRIDE_BUILTINS_KEY -> "AWF MultiProfile "
+                + (settings.typeRegistry().allowOverrideBuiltins() ? "lets" : "does not let")
+                + " plugins override the built-in profile types";
+            case ProfileSettings.TYPES_UNKNOWN_POLICY_KEY -> "AWF MultiProfile uses unknown-type-policy "
+                + settings.typeRegistry().unknownTypePolicy().id() + " (deny or allow)";
+            case ProfileSettings.BANK_CURRENCY_PROVIDER_KEY, ProfileSettings.BANK_CURRENCY_ID_KEY -> "AWF MultiProfile keeps new bank records in "
+                + settings.bank().currencyProvider() + ":" + settings.bank().currencyId() + " (each is [a-z0-9_.-]{1,64})";
+            case ProfileSettings.BANK_CURRENCY_SCALE_KEY -> "AWF MultiProfile uses bank currency scale " + settings.bank().currencyScale()
+                + " (allowed 0-" + ProfileSettings.Bank.MAX_SCALE + ")";
+            case ProfileSettings.BANK_SHARED_CAPACITY_KEY -> "AWF MultiProfile gives new shared banks capacity "
+                + settings.bank().sharedCapacity() + " (a whole number of minor units, 0 = no cap)";
+            case ProfileSettings.BANK_PERSONAL_CAP_KEY -> "AWF MultiProfile caps personal banks at " + settings.bank().personalCapPercent()
+                + " % of the shared capacity (allowed 0-100)";
+            case ProfileSettings.BANK_INTEREST_KEY -> "AWF MultiProfile credits " + settings.bank().interestPercent()
+                + " % interest per interest posting (allowed 0-100)";
             default -> "AWF MultiProfile uses its default";
         };
     }

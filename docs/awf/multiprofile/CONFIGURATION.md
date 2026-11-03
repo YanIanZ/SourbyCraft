@@ -50,7 +50,7 @@ membership and its keys are Build 52 (next section); nothing in this table enabl
 
 | Key | Default | Meaning |
 |---|---|---|
-| `types.allowed` | `[classic, ironman, stranded, bingo]` | policy types a create request may name (a list, or a comma-separated string). Another type is refused with `TYPE_NOT_ALLOWED`. It does not restrict the free consumer namespace (`ProfileRequest.type`). The type is stored and returned only; no ironman, stranded or bingo rule is enforced before Build 55, so list only `classic` if profiles that look restricted but are not are unwanted. An unknown name or an empty list: WARN, the default list is used |
+| `types.allowed` | `[classic, ironman, stranded, bingo]` | policy types a create request may name (a list, or a comma-separated string). Another type is refused with `TYPE_NOT_ALLOWED`. It does not restrict the free consumer namespace (`ProfileRequest.type`). Since Build 54 the type's rules come from the profile type registry ([PROFILE-TYPES.md](PROFILE-TYPES.md)): the engine enforces its own actions (bank, co-op, salvage); `trade`/`auction`/`bazaar` are for the consumer to enforce. A plugin-registered type is not subject to this list. An unknown name or an empty list: WARN, the default list is used |
 | `types.default` | `classic` | the type of a profile created without one; must be in `types.allowed`. If it is not, the first allowed type is used and a WARN names this key |
 | `names.policy` | `cute` | `cute` is the only policy: the server assigns a fruit or vegetable name from its pool at creation; unique per account (ignoring case), immutable, numeric suffix only when the pool is exhausted for the account. A request may ask for a specific pool name (`NAME_INVALID` for other text, `NAME_TAKEN` for a used one) |
 | `migration.mode` | `off` | what happens to a store written before Build 51 (record format 1) at startup. `off`: nothing, the store stays format 1. `dry-run`: reads the store and reports what a migration would do, writes nothing. `apply`: copies the store to `migration.backup-dir`, then converts it to format 2 (one way, see below). Quote the value: YAML reads an unquoted `off` as `false`, which is accepted as `off`. `apply` without a valid `backup-dir` falls back to `off` with a WARN. Ignored while `enabled: false` (nothing is touched) |
@@ -74,11 +74,12 @@ runs, so a change needs a restart (`/sourbycraft reload` does not apply it). Co-
 | `coop.invite-expiry-minutes` | `5` | invitation lifetime, `1` to `1440` minutes, judged at commit time against the repository clock. Outside the range: WARN, `5` |
 | `coop.kick-vote.expiry-minutes` | `10` | kick-vote lifetime, `1` to `1440` minutes. Outside the range: WARN, `10` |
 | `coop.kick-vote.inactive-days` | `35` | in a two-member co-op, days the other member must have been inactive before a kick vote may start against them (`TARGET_NOT_INACTIVE` until then); `1` to `3650`. Build 52 records a member's last activity at join time and on membership changes, not from gameplay. Outside the range: WARN, `35` |
-| `coop.allowed-types` | `[classic]` | policy types whose solo profile may be converted to co-op (a list, or a comma-separated string); checked at conversion only, so narrowing it later does not touch existing co-ops. A profile of another type: `TYPE_NOT_ALLOWED`. Build 51 enforces no ironman, stranded or bingo rule, so adding them gives those types co-op without any of their intended restrictions. An unknown name or an empty list: WARN, `[classic]` |
+| `coop.allowed-types` | `[classic]` | policy types whose solo profile may be converted to co-op (a list, or a comma-separated string); checked at conversion only, so narrowing it later does not touch existing co-ops. A profile of another type: `TYPE_NOT_ALLOWED`. Since Build 54 the conversion also needs the type's registry rule `coop.convert` and `coopAllowed` (`ACTION_FORBIDDEN_BY_TYPE`); the server does not enforce `trade`, `auction` or `bazaar`, so adding a type gives it co-op with only the engine-owned rules applied. An unknown name or an empty list: WARN, `[classic]` |
 
 Not configurable in Build 52 (unchanged in Build 53): the per-account membership limit (it is the account's profile slot limit,
 `default-slots`/`max-slots`), the size of a page (fixed, at most 32), the number of open invitations and
-votes (store bounds, `CAPACITY_EXCEEDED`), and the salvage window (salvage delivery is Build 54).
+votes (store bounds, `CAPACITY_EXCEEDED`), and the salvage window (Build 54 delivers salvage on a claim and has no
+expiry window).
 
 ### Build 53: authoritative login, shutdown capture, adapters
 
@@ -96,6 +97,40 @@ Build 53 code written; not tested by the owner. All three keys are **RESTART_REQ
 Not changed by Build 53: the `coop.*` keys keep their Build 52 meaning, with `coop.enabled` now also allowing member
 play. `isolation.*` still decides which categories are captured; a disabled category stays in vanilla
 playerdata, and authoritative login does not restore it.
+
+### Build 54: profile type registry
+
+Build 54 code written; compiled by an agent; not tested by the owner. Both keys are **RESTART_REQUIRED**. Accessor:
+`ProfileSettings.typeRegistry()`. Details, built-in defaults and persistence: [PROFILE-TYPES.md](PROFILE-TYPES.md).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `types.registry.allow-override-builtins` | `true` | whether a plugin may register its own definition for `classic`, `ironman`, `stranded` or `bingo`. `false`: such a registration is refused (`TYPE_NOT_ALLOWED`) and a stored override is ignored with a WARN. Not a boolean: WARN, `true` |
+| `types.unknown-type-policy` | `deny` | a profile whose type has no known definition (not built in, never registered here, no readable stored copy). `deny`: every action refused, bank/co-op/salvage included (`ACTION_FORBIDDEN_BY_TYPE`), one WARN per type. `allow`: every action allowed as for `classic` (a WARN at every start). Not `deny`/`allow`: WARN, `deny` |
+
+### Build 54: co-op bank policy
+
+Build 54 code written; compiled by an agent; not tested by the owner. All six keys are **RESTART_REQUIRED**: the
+runtime reads them once at start and hands the engine one `ProfileBank.Policy` (`ProfileSettings.bank().policy()`)
+before any operation; `/sourbycraft reload` does not apply them. They matter only with `coop.enabled: true`; then one
+INFO at start prints the policy in force. Bank semantics: [PROFILE-LIFECYCLE.md](PROFILE-LIFECYCLE.md#co-op-bank-collections-and-salvage-build-54).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `bank.currency.provider` | `aurora` | provider id of the bank currency, `[a-z0-9_.-]{1,64}`. Otherwise: WARN, `aurora` |
+| `bank.currency.id` | `coins` | currency id, `[a-z0-9_.-]{1,64}`. Otherwise: WARN, `coins` |
+| `bank.currency.scale` | `0` | decimal places of one minor unit, `0` to `9` (`0` = whole coins). API amounts are `long` minor units; `/coop bank` parses decimals at this scale. Otherwise: WARN, `0` |
+| `bank.shared-capacity` | `0` | cap of the shared bank in minor units, `0` = no cap (still bounded by the `long` range). A deposit past it is refused (`INVALID_REQUEST`). Not a whole number `>= 0`: WARN, `0` |
+| `bank.personal-cap-percent` | `20` | each member's personal-bank cap as a percentage of the record's shared capacity, `0` to `100` (Hypixel parity 20). With `0`, or with no shared capacity, personal banks are uncapped. Outside the range: WARN, `20` |
+| `bank.interest-percent` | `10` | what one interest posting credits, `0` to `100` (parity 10), to the shared balance and every personal bank, each capped. The server schedules no interest; the OWNER posts it (`AuroraProfiles.applyInterest`, `/awf multiprofile coop bank interest`), and every posting credits again. Outside the range: WARN, `10` |
+| `bank.interest-interval-hours` | `24` | least number of hours between two interest postings of one co-op, on the store clock (the bank record remembers its last posting; a sooner posting is `INVALID_REQUEST` naming the wait). `0` = no minimum; at most `8784`. Outside the range: WARN, `24` |
+
+What a change does to existing banks: a bank record keeps the **currency** and **shared capacity** it was first
+written with. A changed `bank.currency.*` refuses changes to every bank record kept in the old currency
+(`INVALID_REQUEST`, reads still work) until the setting names that currency again, so a caller's minor units are never
+read at another scale; there is no conversion. A changed `bank.shared-capacity` applies to new bank records only; the
+percentages apply to every record at once. The purse is not configured here: it stays per profile through its
+REQUIRED state adapter (owner decision OD-4), and the server has no purse provider.
 
 ## `aurora.awf.redis.fabric.*`
 

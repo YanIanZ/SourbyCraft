@@ -283,6 +283,11 @@ public final class FileProfileRepository implements ProfileRepository, ProfileMi
         }
     }
 
+    /** The profile type definitions kept beside this store ({@code <root>/types}; Build 54). */
+    public ProfileTypesStore typesStore() {
+        return ProfileTypesStore.file(this.root.resolve("types"));
+    }
+
     public Path root() {
         return this.root;
     }
@@ -1082,6 +1087,33 @@ public final class FileProfileRepository implements ProfileRepository, ProfileMi
         return List.copyOf(pins);
     }
 
+    /**
+     * Build 54: writes a member snapshot into its stream as an immutable blob ({@code <revision>-<id>.awfp}) without
+     * touching the head, the indexes or any revision; staging the same snapshot twice is a no-op, another snapshot under
+     * the same id fails. A ready format-2 store is required. The blob is named by the head after-image of a delivery
+     * intent and pinned by it; until that commits it is an unreferenced file the stream's pruning may remove.
+     */
+    @Override
+    public synchronized void stageMemberSnapshot(final ProfileSnapshot snapshot) throws IOException {
+        if (format2Read() != Access.READY) {
+            throw new ProfileOperationException(ProfileErrorCode.STORE_FORMAT_REFUSED, "member snapshots are staged in a ready format-2"
+                + " store only; nothing was written");
+        }
+        if (!snapshot.member()) throw invalid("a staged member snapshot names member and epoch");
+        requireTransactional();
+        final Path directory = streamDirectory(snapshot.profileId(), snapshot.memberId(), snapshot.membershipEpoch());
+        final Path file = directory.resolve(snapshot.revision() + "-" + snapshot.snapshotId() + ".awfp");
+        final Optional<ProfileSnapshot> existing = memberSnapshot(snapshot.profileId(), snapshot.memberId(), snapshot.membershipEpoch(),
+            snapshot.snapshotId());
+        if (existing.isPresent()) {
+            if (existing.get().revision() == snapshot.revision() && existing.get().checksum().equals(snapshot.checksum())) return;
+            throw new IOException("member stream " + directory + " already holds snapshot " + snapshot.snapshotId() + " with other content");
+        }
+        FileProfileIo.ensureDirectory(directory, this.root);
+        blob(file, ProfileRecords.frame2(ProfileRecords.TYPE_MEMBER_SNAPSHOT, snapshot.revision(),
+            ProfileRecords.memberSnapshotPayload2(snapshot), file.toString()));
+    }
+
     // ------------------------------------------------------------------ shared state
 
     @Override
@@ -1158,6 +1190,9 @@ public final class FileProfileRepository implements ProfileRepository, ProfileMi
         }
         final ProfileIntent stored = intentOrNull(id);
         if (stored != null) {
+            // A terminal intent's staging went with it (cleanupAfterTerminal): what a retry of its id staged again is never
+            // installed, so it is removed here instead of staying under staging/ until the age-bounded sweep at open.
+            if (!stored.pending()) discardStaging(id);
             if (!stored.sameRequest(op.requestDigest())) throw invalid("operation id " + id + " was already used for another request");
             return CommitResult.replayed(id, receiptOf(stored), "operation " + id + " is already prepared (" + stored.phase() + ")");
         }
@@ -1188,6 +1223,7 @@ public final class FileProfileRepository implements ProfileRepository, ProfileMi
             }
             verifyAfterImages(intent, steps);
             checkCapacity(intent);
+            requirePermanentReceiptRoom(intent);
             validateLive(guard);
         } catch (final IOException | RuntimeException refused) {
             // Nothing durable names this operation yet (no intent, no staged intent): its staged after-images
@@ -1286,6 +1322,7 @@ public final class FileProfileRepository implements ProfileRepository, ProfileMi
             }
         }
         verifyAfterImages(intent, steps);
+        requirePermanentReceiptRoom(intent);
         validateLive(guard);
         final ProfileIntent committed = intent.at(ProfileIntent.Phase.COMMITTED, "committed");
         try {
@@ -1804,6 +1841,7 @@ public final class FileProfileRepository implements ProfileRepository, ProfileMi
                                  final String what) throws IOException {
         final UUID op = guard.operation().operationId();
         final byte[] frame = ProfileRecords.frame2(type, revision, payload, file.toString());
+        if (!migration && guard.operation().kind().permanent()) requirePermanentReceiptRoom(receiptResource);
         FileProfileIo.ensureDirectory(file.getParent(), this.root);
         try {
             durable(file, frame);
@@ -1860,16 +1898,70 @@ public final class FileProfileRepository implements ProfileRepository, ProfileMi
         final ProfileReceipt receipt = new ProfileReceipt(op.operationId(), op.requestDigest(), op.kind(), outcome, result,
             System.currentTimeMillis());
         final ProfileReceipt.Page page = new ProfileReceipt.Page(resource, 0, 0L, List.of(receipt));
-        final Path file = receiptFile(resource, op.operationId());
+        final boolean permanent = op.kind().permanent();
+        final Path file = receiptFile(resource, op.operationId(), permanent);
         FileProfileIo.ensureDirectory(file.getParent(), this.root);
         durable(file, ProfileRecords.frame2(ProfileRecords.TYPE_PAGE, 0L, ProfileRecords.receiptPagePayload2(page), file.toString()));
-        pruneReceipts(file.getParent(), file);
+        if (permanent) {
+            this.permanentReceipts.computeIfPresent(resource, (ignored, count) -> count + 1L);
+        } else {
+            pruneReceipts(file.getParent(), file);
+        }
         return receipt;
     }
 
+    /** Permanent receipts counted per resource (Build 54); filled from the directory on first use, then kept by writes. */
+    private final Map<UUID, Long> permanentReceipts = new HashMap<>();
+
+    /** The number of permanent receipts of a resource (one bounded directory listing per resource and process). */
+    private long permanentReceiptCount(final UUID resource) throws IOException {
+        final Long cached = this.permanentReceipts.get(resource);
+        if (cached != null) return cached;
+        final Path directory = this.receipts.resolve(resource.toString()).resolve(PERMANENT_RECEIPTS);
+        long count = 0L;
+        if (Files.isDirectory(directory)) {
+            try (java.nio.file.DirectoryStream<Path> found = Files.newDirectoryStream(directory, "*.awfp")) {
+                for (final Path ignored : found) {
+                    count++;
+                    if (count > ProfileReceipt.Page.MAX_RECEIPTS_PER_RESOURCE) break;
+                }
+            }
+        }
+        this.permanentReceipts.put(resource, count);
+        return count;
+    }
+
     /**
-     * Keeps at most {@link ProfileReceipt#RETAINED_PER_RESOURCE} receipt files per resource (COOP-DESIGN §9 bounds):
-     * the oldest by modification time are deleted, never the one just written. A dropped receipt can no longer
+     * COOP-DESIGN §9: a resource holding {@link ProfileReceipt.Page#MAX_RECEIPTS_PER_RESOURCE} permanent receipts refuses the
+     * next financial or delivery operation ({@code CAPACITY_EXCEEDED}) before anything is written; archival is an offline
+     * owner policy, never silent deletion.
+     */
+    private void requirePermanentReceiptRoom(final UUID resource) throws IOException {
+        if (permanentReceiptCount(resource) >= ProfileReceipt.Page.MAX_RECEIPTS_PER_RESOURCE) {
+            throw busy("the bound of " + ProfileReceipt.Page.MAX_RECEIPTS_PER_RESOURCE + " permanent receipts of " + resource
+                + " is reached; financial and delivery operations on it are refused pending an offline archival");
+        }
+    }
+
+    /** {@link #requirePermanentReceiptRoom(UUID)} for every resource an intent of a permanent kind leaves a receipt on. */
+    private void requirePermanentReceiptRoom(final ProfileIntent intent) throws IOException {
+        if (!intent.kind().permanent()) return;
+        for (final UUID resource : receiptResources(intent)) requirePermanentReceiptRoom(resource);
+    }
+
+    private static Set<UUID> receiptResources(final ProfileIntent intent) {
+        final Set<UUID> resources = new LinkedHashSet<>();
+        resources.add(intent.actor());
+        for (final Expected entry : intent.expectedAfter()) {
+            if (entry.domain() == Domain.ACCOUNT || entry.domain() == Domain.METADATA) resources.add(entry.resource());
+        }
+        return resources;
+    }
+
+    /**
+     * Keeps at most {@link ProfileReceipt#RETAINED_PER_RESOURCE} receipt files of the retained kinds per resource (COOP-DESIGN
+     * §9 bounds): the oldest by modification time are deleted, never the one just written. Permanent receipts live in the
+     * {@value #PERMANENT_RECEIPTS} subdirectory, which this glob does not enter; they are never pruned. A dropped receipt can no longer
      * replay or refuse its operation id. Best effort: a failure is logged and retried at the next receipt.
      */
     private void pruneReceipts(final Path directory, final Path keep) {
@@ -1900,13 +1992,8 @@ public final class FileProfileRepository implements ProfileRepository, ProfileMi
     /** Receipts of an intent on its actor, accounts and profiles; returns the actor's. */
     private ProfileReceipt writeReceipts(final ProfileIntent intent, final ProfileReceipt.Outcome outcome) throws IOException {
         final CoopOperation op = operationOf(intent);
-        final Set<UUID> resources = new LinkedHashSet<>();
-        resources.add(intent.actor());
-        for (final Expected entry : intent.expectedAfter()) {
-            if (entry.domain() == Domain.ACCOUNT || entry.domain() == Domain.METADATA) resources.add(entry.resource());
-        }
         ProfileReceipt actor = null;
-        for (final UUID resource : resources) {
+        for (final UUID resource : receiptResources(intent)) {
             final ProfileReceipt receipt = writeReceipt(resource, op, outcome, new byte[0]);
             if (actor == null) actor = receipt;
         }
@@ -2819,7 +2906,8 @@ public final class FileProfileRepository implements ProfileRepository, ProfileMi
 
     private ProfileReceipt receiptOrNull(final UUID resource, final UUID operationId) throws IOException {
         final Access access = access();
-        final Path file = receiptFile(resource, operationId);
+        Path file = receiptFile(resource, operationId, false);
+        if (!Files.isRegularFile(file)) file = receiptFile(resource, operationId, true);
         if (!Files.isRegularFile(file)) return null;
         final ProfileReceipt.Page page = ProfileRecords.receiptPage2(read(file, ProfileRecords.TYPE_PAGE, access), resource,
             file.toString());
@@ -2879,9 +2967,13 @@ public final class FileProfileRepository implements ProfileRepository, ProfileMi
         return this.intents.resolve(operationId + ".awfp");
     }
 
-    private Path receiptFile(final UUID resource, final UUID operationId) {
-        return this.receipts.resolve(resource.toString()).resolve(operationId + ".awfp");
+    /** Receipts of the retained kinds sit in the resource directory; permanent ones (Build 54) in its {@value #PERMANENT_RECEIPTS}. */
+    private Path receiptFile(final UUID resource, final UUID operationId, final boolean permanent) {
+        final Path directory = this.receipts.resolve(resource.toString());
+        return (permanent ? directory.resolve(PERMANENT_RECEIPTS) : directory).resolve(operationId + ".awfp");
     }
+
+    static final String PERMANENT_RECEIPTS = "permanent";
 
     private Path stagingDirectory(final UUID operationId) {
         return this.staging.resolve(operationId.toString());

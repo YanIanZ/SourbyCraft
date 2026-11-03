@@ -802,6 +802,17 @@ final class ProfileRecords {
                 out.writeLong(entry.getValue());
             }
             optionalUuid(out, shared.pendingIntent());
+            if (shared.extended()) {
+                // Build 54 trailing section (review P2-4, P3-22): written only once the store's minimum build is 54, because
+                // the Build 51-53 decoder refuses trailing bytes. Absent = all zero.
+                out.writeLong(shared.archivedPersonal());
+                out.writeInt(shared.archivedContributions().size());
+                for (final Map.Entry<String, Long> entry : shared.archivedContributions().entrySet()) {
+                    text(out, entry.getKey());
+                    out.writeLong(entry.getValue());
+                }
+                out.writeLong(shared.lastInterestAtMillis());
+            }
         }
         return buffer.toByteArray();
     }
@@ -850,10 +861,24 @@ final class ProfileRecords {
                 if (reserved.put(operation, in.readLong()) != null) throw new IOException("shared record " + where + " repeats reservation " + operation);
             }
             final UUID pending = optionalUuid(in);
+            long archivedPersonal = 0L;
+            final Map<String, Long> archivedContributions = new LinkedHashMap<>();
+            long lastInterestAt = 0L;
+            if (in.available() > 0) {
+                archivedPersonal = in.readLong();
+                final int archivedCount = bounded(in.readInt(), ProfileSharedState.MAX_COLLECTIONS, "archived contribution totals");
+                for (int i = 0; i < archivedCount; i++) {
+                    final String collection = text(in, ProfileSharedState.MAX_COLLECTION_ID);
+                    if (archivedContributions.put(collection, in.readLong()) != null) {
+                        throw new IOException("shared record " + where + " repeats archived ledger " + collection);
+                    }
+                }
+                lastInterestAt = in.readLong();
+            }
             end(in, where);
             if (!profile.equals(expected)) throw new IOException("shared record " + where + " holds " + profile);
             return new ProfileSharedState(profile, revision, currency, sharedBalance, capacity, personal, collections, contributions,
-                reserved, pending);
+                reserved, pending, archivedPersonal, archivedContributions, lastInterestAt);
         } catch (final IllegalArgumentException invalid) {
             throw new IOException("shared record " + where + " is invalid: " + invalid.getMessage(), invalid);
         }

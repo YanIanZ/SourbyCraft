@@ -162,5 +162,24 @@ public enum ProfileErrorCode {
      * profile (the store is unreadable or the head is damaged). The join is refused with this reason rather than
      * loading vanilla player data. Nothing was written.
      */
-    HEAD_UNREADABLE
+    HEAD_UNREADABLE,
+    /**
+     * Added in Build 54. The profile's type ({@link ProfileTypeDefinition}) denies the action (for example
+     * {@code bank.deposit} on an Ironman profile), or the profile's type has no known definition on this server
+     * and the action is engine-owned (fail-safe: see {@code types.unknown-type-policy}). The message names the
+     * type and the action. Nothing was written.
+     */
+    ACTION_FORBIDDEN_BY_TYPE,
+    /**
+     * Added in Build 54. The requested profile type id is not registered ({@link ProfileTypeRegistry}) and is not
+     * a built-in type. Nothing was written.
+     */
+    TYPE_UNKNOWN,
+    /**
+     * Added in Build 54 (owner decision OD-4). A transfer named the purse. The purse stays per profile through its
+     * REQUIRED state adapter and the server has no transactional purse provider, so a purse&lt;-&gt;bank transfer is
+     * refused. The consumer plugin that holds the purse moves that money on its side and credits or debits the bank
+     * ledger through {@link AuroraProfiles#deposit} / {@link AuroraProfiles#withdraw}. Nothing was written.
+     */
+    PURSE_TRANSFER_UNSUPPORTED
 }

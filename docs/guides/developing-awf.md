@@ -5,7 +5,16 @@ server service. These creation modes use the existing file/Redis storage impleme
 
 ## Getting the service
 
-Depend on SourbyCraft's `sourbyapi` artifact and obtain the service after it is registered:
+Depend on SourbyCraft's `sourbyapi` artifact (`compileOnly`; see *Getting started* in
+[sourbyapi/README.md](../../sourbyapi/README.md)) and obtain the service. Since Build 54 through `SourbyAPI`,
+which throws `FeatureUnavailableException` naming the cause when the service is missing (or use
+`SourbyAPI.findWorlds()` for an `Optional`):
+
+```java
+AuroraWorlds worlds = SourbyAPI.worlds();
+```
+
+The services manager still works as before:
 
 ```java
 AuroraWorlds worlds = Bukkit.getServicesManager().load(AuroraWorlds.class);
@@ -63,7 +72,52 @@ A clone inherits the template's seed, environment, world type and generator. Onl
 chunks belong to the instance; readers can share the frozen template. Several plugins can
 create different instances concurrently. Both creation modes are persistent: `autoload(false)`
 does not discard data on unload. For a disposable match, explicitly unload and delete its
-instance when finished. A template cannot be deleted while registered instances refer to it.
+instance when finished, or (Build 54) create it with `createInstance` (next section). A template cannot be
+deleted while registered instances refer to it.
+
+## Disposable instances (Build 54)
+
+Code written; compiled by an agent; not tested by the owner.
+
+```java
+worlds.createInstance("island_base", "arena_match_42")
+    .thenAccept(world -> startMatch(world));
+// ... after the match, with every player moved out:
+worlds.unload("arena_match_42", false);   // also deletes the instance
+```
+
+`createInstance(template, name)` is `createFromTemplate(template, name, false)` plus one flag on the world's
+registry entry (`"deleteOnUnload": true` in `sourbycraft_config/aurora-worlds.json`). Once the world is unloaded it
+is deleted: its folder, its own AWF stores and its entry; the template is never touched.
+
+- Through `unload`: nothing is saved, whatever the `save` argument says (the world's storages discard), and the
+  deletion runs inside the same operation after the engine reports the unload done. The future completes with the
+  unload's result; a deletion that cannot run yet (a storage still closing) is left to the sweep below.
+- The sweep: once a second, from the end of startup on and not while the server stops, the service deletes every
+  such world that is unloaded, has no AWF storage open and no operation in progress. That covers a world unloaded
+  some other way (another plugin's `Bukkit.unloadWorldAsync`) and, after the next startup, one the server stopped
+  or crashed with. A world that is busy is retried; a failure is logged once and retried.
+- `load` refuses such a world, and `setAutoload(name, true)` refuses it; autoload never loads one. A crashed
+  instance's name is free only once the sweep has deleted it, shortly after startup completes, so a plugin that
+  reuses names on enable should be ready for "already exists" then.
+- A server running a build before 54 ignores the flag and keeps such a world as an ordinary instance.
+
+## Inspecting worlds (Build 54)
+
+Code written; compiled by an agent; not tested by the owner.
+
+- `listWorlds()` returns an `AwfWorldSummary` per managed world: name, loaded, autoload, template, backend
+  (`FILE`, `REDIS` or `OTHER`, with its name), the server's persistence mode and whether it is a disposable
+  instance. It reads nothing from storage and may be called on any thread.
+- `info(name)` completes, off the calling thread, with an `AwfWorldInfo`: that summary plus the store format
+  (`awf-generations` on FILE, else the backend's name), the bytes of the world's own stores on FILE (empty when they
+  hold more than 200 000 files, or on another backend), the uncommitted chunks of its open storages, how many
+  storages are open, and the last commit time: on FILE the modification time of the newest store's
+  `generations-root/CURRENT` (so periodic commits count), elsewhere the last durable `save` through the service
+  since startup. It completes with empty for a name the service does not manage.
+- `listTemplates()` is `templates()` read off the calling thread.
+- `isAwfWorld(world)` is true for a world managed through the service and for one whose own dimension folder has
+  an AWF storage open (a world listed in `aurora.awf.worlds`).
 
 ## Coordinating plugins
 

@@ -205,4 +205,82 @@ public interface AuroraWorlds {
 
     /** Deletes a template. Fails while any world is an instance of it. */
     CompletableFuture<Void> deleteTemplate(String template);
+
+    // ------------------------------------------------------------------ Build 54 additions
+
+    /**
+     * Added in Build 54. Every world managed through this API, loaded or not, in registration order,
+     * with what the server knows of it without touching storage, from any thread. (Called before the
+     * server's first world has loaded, it reads the AWF settings once, as {@link #storage()} does.)
+     *
+     * <p>The default implementation (an implementation compiled before Build 54) throws
+     * {@link UnsupportedOperationException}.</p>
+     */
+    default java.util.List<AwfWorldSummary> listWorlds() {
+        throw new UnsupportedOperationException("listWorlds needs SourbyCraft Build 54 or later");
+    }
+
+    /**
+     * Added in Build 54. A managed world's storage state: backend, store format and size, uncommitted
+     * chunks and the time of its last commit ({@link AwfWorldInfo}). Gathered off the calling thread
+     * (the FILE backend's size and commit time are read from disk), so it never blocks a region,
+     * entity or global-tick thread; do not join the future there. Completes with empty when no world
+     * of that name is managed through this API.
+     *
+     * <p>The default implementation completes exceptionally with {@link UnsupportedOperationException}.</p>
+     */
+    default CompletableFuture<Optional<AwfWorldInfo>> info(final String name) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("info needs SourbyCraft Build 54 or later"));
+    }
+
+    /**
+     * Added in Build 54. {@link #templates()} read off the calling thread: {@code templates()} lists the
+     * {@code awf-templates/} folder on the caller's thread, the server's implementation does not. This
+     * default (for other implementations) calls {@code templates()} on the calling thread and returns the
+     * result as a completed future; it never uses the common pool.
+     */
+    default CompletableFuture<Set<String>> listTemplates() {
+        try {
+            return CompletableFuture.completedFuture(templates());
+        } catch (final RuntimeException failed) {
+            return CompletableFuture.failedFuture(failed);
+        }
+    }
+
+    /**
+     * Added in Build 54. Whether the world's chunks are stored through Aurora World Fabric: a world
+     * managed through this API, or one listed in {@code aurora.awf.worlds} whose storages are attached.
+     * No I/O, any thread. The default implementation answers {@link #exists}{@code (world.getName())}.
+     */
+    default boolean isAwfWorld(final World world) {
+        return exists(world.getName());
+    }
+
+    /**
+     * Added in Build 54. Creates and loads a disposable copy-on-write instance of a template: as
+     * {@link #createFromTemplate(String, String, boolean)} without autoload, and deleted (its folder,
+     * its own AWF stores and its entry; never the template) once it is unloaded.
+     *
+     * <ul>
+     *   <li>An unload through {@link #unload} deletes it within the same operation, after the engine
+     *       reports the unload done; the {@code save} flag is ignored, nothing is saved, and the
+     *       returned result is the unload's. When that deletion cannot run yet (a storage still
+     *       closing), or the world was unloaded some other way, the service deletes it within about a
+     *       second of it being unloaded with no storage open and no operation on it.</li>
+     *   <li>If the server stops or crashes while it is loaded, it is deleted after the next startup.</li>
+     *   <li>It cannot be {@linkplain #load loaded} again once unloaded. A {@link #cloneWorld} of it
+     *       (possible only in the moment between its unload and its deletion) is an ordinary
+     *       persistent world.</li>
+     * </ul>
+     *
+     * <p>A server running a build before 54 reads such a world as an ordinary persistent instance
+     * (the flag is an extra field of its {@code aurora-worlds.json} entry that older builds ignore)
+     * and never deletes it.</p>
+     *
+     * <p>The default implementation completes exceptionally with {@link UnsupportedOperationException}.</p>
+     */
+    default CompletableFuture<World> createInstance(final String template, final String name) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException(
+            "createInstance needs SourbyCraft Build 54 or later"));
+    }
 }

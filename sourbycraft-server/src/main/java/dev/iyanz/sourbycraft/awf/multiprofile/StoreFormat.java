@@ -41,6 +41,21 @@ import java.util.Objects;
  * record, which Build 52 carries forward as an unknown adapter blob) has the Build 52 shape and Build 52 reads it with
  * the same meaning. Session markers ({@link SessionMarker}) are stored beside the records, under a type Build 52
  * never reads, and are not part of the level. A store without a non-owner member switch keeps the Build 52 marker.</p>
+ *
+ * <p><b>Build 54</b> raises {@link #READS_UP_TO_BUILD} to 54 with the feature level 54, reached two ways
+ * ({@link #SALVAGE_MINIMUM_BUILD}, {@link #REGISTERED_TYPE_MINIMUM_BUILD}): the first salvage delivery intent raises the
+ * store to minimum build 54. A delivery writes a salvage record in a shape
+ * Build 53 refuses to decode (a DELIVERED record whose source published nothing carries no item payload, and an
+ * AVAILABLE record whose payload blob is a remainder snapshot in the consumed source stream), and installs a destination
+ * head whose snapshot a Build 53 node would overwrite from an older in-memory state without knowing the salvage was
+ * consumed into it. The first profile record of a plugin-registered type (metadata {@code aurora:type}) or named from a
+ * type's own pool raises it as well ({@link #REGISTERED_TYPE_MINIMUM_BUILD}): Build 53 refuses a name outside the server
+ * pool and would read the registered type as plain classic, lifting the type's denies. Plain bank records (shared
+ * state, {@code SHARED_MUTATE} and {@code BANK_TRANSFER} intents) keep the Build 51 shapes and do not raise the level,
+ * but an extended shared record (archived balances of removed members or a stored interest time, review P2-4) does, and
+ * so does the registration of a built-in type override that denies an action (review P3-8): Build 53 would lose the
+ * archive or lift the deny. Bank receipts are permanent (kept apart from the pruned receipts, where Build 53 does not
+ * look), which matters only for replaying a Build 54 bank operation, which Build 53 cannot issue.</p>
  */
 public final class StoreFormat {
 
@@ -65,9 +80,16 @@ public final class StoreFormat {
      * The highest {@code minimumBuild} this code reads; a store that requires a newer build is refused. It is the
      * store feature level of this source tree, raised with the code that needs it, not with every release.
      */
-    public static final int READS_UP_TO_BUILD = 53;
+    public static final int READS_UP_TO_BUILD = 54;
     /** The {@code minimumBuild} a store gets with its first non-owner member switch journal (Build 53). */
     public static final int MEMBER_PLAY_MINIMUM_BUILD = 53;
+    /** The {@code minimumBuild} a store gets with its first salvage delivery intent (Build 54, OD-3). */
+    public static final int SALVAGE_MINIMUM_BUILD = 54;
+    /**
+     * The {@code minimumBuild} a store gets with its first profile record of a plugin-registered type or named from a type's
+     * own pool (Build 54): Build 53 refuses such a name and would read a registered type as plain classic.
+     */
+    public static final int REGISTERED_TYPE_MINIMUM_BUILD = 54;
     /** Marker file in the FILE repository root. */
     public static final String FILE_NAME = "format.awfm";
     /** Redis {@code meta} hash fields. */

@@ -24,7 +24,7 @@ import java.util.Set;
 public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int maxSlots, Switching switching,
                               ProfileIsolation isolation, Worlds worlds, Coordination coordination, String directory,
                               Repository repository, Types types, Names names, Migration migration, Coop coop,
-                              Shutdown shutdown, Login login, Adapters adapters) {
+                              Shutdown shutdown, Login login, Adapters adapters, TypeRegistry typeRegistry, Bank bank) {
 
     public enum Mode {
         STANDALONE,
@@ -398,6 +398,97 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         }
     }
 
+    /** What a profile whose type has no known definition is allowed (Build 54). */
+    public enum UnknownTypePolicy {
+        /** Every action is refused (ACTION_FORBIDDEN_BY_TYPE); the default. */
+        DENY,
+        /** Every action is allowed, as for a classic profile. */
+        ALLOW;
+
+        public static UnknownTypePolicy parse(final Object value) {
+            if (value instanceof Boolean) throw new IllegalArgumentException("unknown-type-policy is deny or allow");
+            try {
+                return valueOf(String.valueOf(value).strip().toUpperCase(Locale.ROOT));
+            } catch (final IllegalArgumentException invalid) {
+                throw new IllegalArgumentException("unknown-type-policy is deny or allow, not " + value);
+            }
+        }
+
+        public String id() {
+            return name().toLowerCase(Locale.ROOT);
+        }
+    }
+
+    /**
+     * The profile type registry (Build 54, {@link ProfileTypes}).
+     *
+     * @param allowOverrideBuiltins whether a plugin may register its own definition for a built-in type id
+     *     ({@code classic}, {@code ironman}, {@code stranded}, {@code bingo}); with {@code false} such a registration
+     *     is refused and a stored override is ignored with a WARN
+     * @param unknownTypePolicy what a profile of a type with no known definition is allowed
+     */
+    public record TypeRegistry(boolean allowOverrideBuiltins, UnknownTypePolicy unknownTypePolicy) {
+        public TypeRegistry {
+            Objects.requireNonNull(unknownTypePolicy, "unknownTypePolicy");
+        }
+    }
+
+    /**
+     * The co-op bank policy (Build 54, COOP-DESIGN §8; RESTART_REQUIRED). {@link #policy()} is what the engine uses.
+     *
+     * @param currencyProvider provider id of the bank currency, {@code [a-z0-9_.-]{1,64}}
+     * @param currencyId currency id, {@code [a-z0-9_.-]{1,64}}
+     * @param currencyScale decimal places of one minor unit, 0-9 (0 = whole coins)
+     * @param sharedCapacity cap of a new shared bank record in minor units, {@code 0} = no cap
+     * @param personalCapPercent personal subaccount cap as a percentage of the shared record's capacity, 0-100
+     * @param interestPercent interest an interest posting credits, 0-100
+     * @param interestIntervalHours the least number of hours between two interest postings of one profile on the store
+     *     clock (review P3-22), 0 = no minimum, at most {@link #MAX_INTEREST_INTERVAL_HOURS}
+     */
+    public record Bank(String currencyProvider, String currencyId, int currencyScale, long sharedCapacity, int personalCapPercent,
+                       int interestPercent, int interestIntervalHours) {
+
+        public static final int MAX_SCALE = 9;
+        /** One year. */
+        public static final int MAX_INTEREST_INTERVAL_HOURS = 24 * 366;
+        public static final int DEFAULT_INTEREST_INTERVAL_HOURS = 24;
+
+        /** A bank policy with the default interest interval (24 hours). */
+        public Bank(final String currencyProvider, final String currencyId, final int currencyScale, final long sharedCapacity,
+                    final int personalCapPercent, final int interestPercent) {
+            this(currencyProvider, currencyId, currencyScale, sharedCapacity, personalCapPercent, interestPercent, DEFAULT_INTEREST_INTERVAL_HOURS);
+        }
+
+        public Bank {
+            if (interestIntervalHours < 0 || interestIntervalHours > MAX_INTEREST_INTERVAL_HOURS) {
+                throw new IllegalArgumentException("interest interval hours " + interestIntervalHours);
+            }
+            policyOf(currencyProvider, currencyId, currencyScale, sharedCapacity, personalCapPercent, interestPercent, interestIntervalHours);
+        }
+
+        /** The engine's policy value. */
+        public ProfileBank.Policy policy() {
+            return policyOf(this.currencyProvider, this.currencyId, this.currencyScale, this.sharedCapacity, this.personalCapPercent,
+                this.interestPercent, this.interestIntervalHours);
+        }
+
+        private static ProfileBank.Policy policyOf(final String provider, final String id, final int scale, final long capacity,
+                                                   final int personalCap, final int interest, final int intervalHours) {
+            return new ProfileBank.Policy(new ProfileSharedState.Currency(provider, id, scale), capacity, personalCap, interest,
+                intervalHours * 60L * 60L * 1000L);
+        }
+
+        static Bank of(final ProfileBank.Policy policy) {
+            return new Bank(policy.currency().providerId(), policy.currency().currencyId(), policy.currency().scale(),
+                policy.sharedCapacity(), policy.personalCapPercent(), policy.interestPercent(),
+                (int) (policy.interestIntervalMillis() / (60L * 60L * 1000L)));
+        }
+
+        static boolean validCurrencyText(final Object value) {
+            return value instanceof String text && text.matches("[a-z0-9_.-]{1,64}");
+        }
+    }
+
     /** The record format of stores written before Build 51. */
     public static final int LEGACY_STORE_FORMAT = 1;
     /** The record format Build 51 writes. A store in this format is refused by older builds. */
@@ -417,6 +508,15 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
     public static final String SHUTDOWN_CAPTURE_DEADLINE_KEY = "aurora.awf.multiprofile.shutdown.capture-deadline-ms";
     public static final String LOGIN_AUTHORITATIVE_KEY = "aurora.awf.multiprofile.login.authoritative";
     public static final String ADAPTERS_REQUIRED_KEY = "aurora.awf.multiprofile.adapters.required";
+    public static final String TYPES_OVERRIDE_BUILTINS_KEY = "aurora.awf.multiprofile.types.registry.allow-override-builtins";
+    public static final String TYPES_UNKNOWN_POLICY_KEY = "aurora.awf.multiprofile.types.unknown-type-policy";
+    public static final String BANK_CURRENCY_PROVIDER_KEY = "aurora.awf.multiprofile.bank.currency.provider";
+    public static final String BANK_CURRENCY_ID_KEY = "aurora.awf.multiprofile.bank.currency.id";
+    public static final String BANK_CURRENCY_SCALE_KEY = "aurora.awf.multiprofile.bank.currency.scale";
+    public static final String BANK_SHARED_CAPACITY_KEY = "aurora.awf.multiprofile.bank.shared-capacity";
+    public static final String BANK_PERSONAL_CAP_KEY = "aurora.awf.multiprofile.bank.personal-cap-percent";
+    public static final String BANK_INTEREST_KEY = "aurora.awf.multiprofile.bank.interest-percent";
+    public static final String BANK_INTEREST_INTERVAL_KEY = "aurora.awf.multiprofile.bank.interest-interval-hours";
 
     public static final String ENABLED_KEY = "aurora.awf.multiprofile.enabled";
     public static final String MODE_KEY = "aurora.awf.multiprofile.mode";
@@ -445,7 +545,10 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         REPOSITORY_KEY, REDIS_REQUIRE_AOF_KEY, REDIS_WAIT_FOR_AOF_KEY,
         TYPES_ALLOWED_KEY, TYPES_DEFAULT_KEY, NAMES_POLICY_KEY, MIGRATION_MODE_KEY, MIGRATION_BACKUP_DIR_KEY,
         COOP_ENABLED_KEY, COOP_MAX_MEMBERS_KEY, COOP_INVITE_EXPIRY_KEY, COOP_VOTE_EXPIRY_KEY, COOP_INACTIVE_DAYS_KEY,
-        COOP_ALLOWED_TYPES_KEY, SHUTDOWN_CAPTURE_DEADLINE_KEY, LOGIN_AUTHORITATIVE_KEY, ADAPTERS_REQUIRED_KEY);
+        COOP_ALLOWED_TYPES_KEY, SHUTDOWN_CAPTURE_DEADLINE_KEY, LOGIN_AUTHORITATIVE_KEY, ADAPTERS_REQUIRED_KEY,
+        TYPES_OVERRIDE_BUILTINS_KEY, TYPES_UNKNOWN_POLICY_KEY,
+        BANK_CURRENCY_PROVIDER_KEY, BANK_CURRENCY_ID_KEY, BANK_CURRENCY_SCALE_KEY, BANK_SHARED_CAPACITY_KEY, BANK_PERSONAL_CAP_KEY,
+        BANK_INTEREST_KEY, BANK_INTEREST_INTERVAL_KEY);
 
     /** The file repository; a server that sets no repository key keeps the behaviour of earlier builds. */
     public static final Repository DEFAULT_REPOSITORY = new Repository(Backend.FILE, true, true);
@@ -469,11 +572,16 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
     public static final Login DEFAULT_LOGIN = new Login(Authoritative.AUTO);
     /** No adapter is forced to REQUIRED by configuration. */
     public static final Adapters DEFAULT_ADAPTERS = new Adapters(Set.of());
+    /** Built-in types may be overridden by a plugin; an unknown type is denied every action. */
+    public static final TypeRegistry DEFAULT_TYPE_REGISTRY = new TypeRegistry(true, UnknownTypePolicy.DENY);
+    /** Hypixel parity ({@link ProfileBank.Policy#DEFAULT}): aurora:coins at scale 0, no shared cap, personal 20 %, interest 10 %. */
+    public static final Bank DEFAULT_BANK = Bank.of(ProfileBank.Policy.DEFAULT);
 
     public static final ProfileSettings DEFAULT = new ProfileSettings(false, Mode.STANDALONE, 3, 8,
         new Switching(true, 15_000, true), ProfileIsolation.ALL, new Worlds(300),
         new Coordination(Provider.LOCAL, true, true), DIRECTORY_DEFAULT, DEFAULT_REPOSITORY,
-        DEFAULT_TYPES, DEFAULT_NAMES, DEFAULT_MIGRATION, DEFAULT_COOP, DEFAULT_SHUTDOWN, DEFAULT_LOGIN, DEFAULT_ADAPTERS);
+        DEFAULT_TYPES, DEFAULT_NAMES, DEFAULT_MIGRATION, DEFAULT_COOP, DEFAULT_SHUTDOWN, DEFAULT_LOGIN, DEFAULT_ADAPTERS,
+        DEFAULT_TYPE_REGISTRY, DEFAULT_BANK);
 
     /** Settings with {@link #DEFAULT_REPOSITORY} and the Build 51 defaults. */
     public ProfileSettings(final boolean enabled, final Mode mode, final int defaultSlots, final int maxSlots,
@@ -509,6 +617,26 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
             repository, types, names, migration, coop, DEFAULT_SHUTDOWN, DEFAULT_LOGIN, DEFAULT_ADAPTERS);
     }
 
+    /** Settings with the Build 54 type-registry default ({@link #DEFAULT_TYPE_REGISTRY}). */
+    public ProfileSettings(final boolean enabled, final Mode mode, final int defaultSlots, final int maxSlots,
+                           final Switching switching, final ProfileIsolation isolation, final Worlds worlds,
+                           final Coordination coordination, final String directory, final Repository repository,
+                           final Types types, final Names names, final Migration migration, final Coop coop,
+                           final Shutdown shutdown, final Login login, final Adapters adapters) {
+        this(enabled, mode, defaultSlots, maxSlots, switching, isolation, worlds, coordination, directory,
+            repository, types, names, migration, coop, shutdown, login, adapters, DEFAULT_TYPE_REGISTRY);
+    }
+
+    /** Settings with the Build 54 bank default ({@link #DEFAULT_BANK}). */
+    public ProfileSettings(final boolean enabled, final Mode mode, final int defaultSlots, final int maxSlots,
+                           final Switching switching, final ProfileIsolation isolation, final Worlds worlds,
+                           final Coordination coordination, final String directory, final Repository repository,
+                           final Types types, final Names names, final Migration migration, final Coop coop,
+                           final Shutdown shutdown, final Login login, final Adapters adapters, final TypeRegistry typeRegistry) {
+        this(enabled, mode, defaultSlots, maxSlots, switching, isolation, worlds, coordination, directory,
+            repository, types, names, migration, coop, shutdown, login, adapters, typeRegistry, DEFAULT_BANK);
+    }
+
     public ProfileSettings {
         Objects.requireNonNull(mode, "mode");
         Objects.requireNonNull(switching, "switching");
@@ -523,6 +651,8 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         Objects.requireNonNull(shutdown, "shutdown");
         Objects.requireNonNull(login, "login");
         Objects.requireNonNull(adapters, "adapters");
+        Objects.requireNonNull(typeRegistry, "typeRegistry");
+        Objects.requireNonNull(bank, "bank");
         if (defaultSlots < 1 || maxSlots < 1 || defaultSlots > maxSlots || maxSlots > PlayerAccount.MAX_SLOTS) {
             throw new IllegalArgumentException("default-slots and max-slots must satisfy 1 <= default <= max <= "
                 + PlayerAccount.MAX_SLOTS);
@@ -679,8 +809,66 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
             }
         }
         final Adapters adapters = adapters(values, invalid);
+        UnknownTypePolicy unknownTypePolicy = DEFAULT_TYPE_REGISTRY.unknownTypePolicy();
+        if (values.get(TYPES_UNKNOWN_POLICY_KEY) != null) {
+            try {
+                unknownTypePolicy = UnknownTypePolicy.parse(values.get(TYPES_UNKNOWN_POLICY_KEY));
+            } catch (final IllegalArgumentException bad) {
+                invalid.add(TYPES_UNKNOWN_POLICY_KEY);
+            }
+        }
+        final TypeRegistry typeRegistry = new TypeRegistry(
+            flag(values, TYPES_OVERRIDE_BUILTINS_KEY, DEFAULT_TYPE_REGISTRY.allowOverrideBuiltins(), invalid), unknownTypePolicy);
+        final Bank bank = bank(values, invalid);
         return new Parsed(new ProfileSettings(enabled, mode, defaultSlots, maxSlots, switching, isolation, worlds,
-            coordination, directory, repository, types, names, migration, coop, shutdown, login, adapters), invalid);
+            coordination, directory, repository, types, names, migration, coop, shutdown, login, adapters, typeRegistry, bank),
+            invalid);
+    }
+
+    /** The bank policy; each unusable key falls back to its own default and is reported. */
+    private static Bank bank(final Map<String, Object> values, final List<String> invalid) {
+        String provider = DEFAULT_BANK.currencyProvider();
+        if (values.get(BANK_CURRENCY_PROVIDER_KEY) != null) {
+            if (Bank.validCurrencyText(values.get(BANK_CURRENCY_PROVIDER_KEY))) {
+                provider = (String) values.get(BANK_CURRENCY_PROVIDER_KEY);
+            } else {
+                invalid.add(BANK_CURRENCY_PROVIDER_KEY);
+            }
+        }
+        String currency = DEFAULT_BANK.currencyId();
+        if (values.get(BANK_CURRENCY_ID_KEY) != null) {
+            if (Bank.validCurrencyText(values.get(BANK_CURRENCY_ID_KEY))) {
+                currency = (String) values.get(BANK_CURRENCY_ID_KEY);
+            } else {
+                invalid.add(BANK_CURRENCY_ID_KEY);
+            }
+        }
+        final int scale = whole(values, BANK_CURRENCY_SCALE_KEY, DEFAULT_BANK.currencyScale(), 0, Bank.MAX_SCALE, invalid);
+        long capacity = DEFAULT_BANK.sharedCapacity();
+        final Object rawCapacity = values.get(BANK_SHARED_CAPACITY_KEY);
+        if (rawCapacity != null) {
+            final long parsed = wholeLong(rawCapacity);
+            if (parsed >= 0) {
+                capacity = parsed;
+            } else {
+                invalid.add(BANK_SHARED_CAPACITY_KEY);
+            }
+        }
+        final int personal = whole(values, BANK_PERSONAL_CAP_KEY, DEFAULT_BANK.personalCapPercent(), 0, ProfileBank.Policy.MAX_PERCENT, invalid);
+        final int interest = whole(values, BANK_INTEREST_KEY, DEFAULT_BANK.interestPercent(), 0, ProfileBank.Policy.MAX_PERCENT, invalid);
+        final int interval = whole(values, BANK_INTEREST_INTERVAL_KEY, DEFAULT_BANK.interestIntervalHours(), 0, Bank.MAX_INTEREST_INTERVAL_HOURS,
+            invalid);
+        return new Bank(provider, currency, scale, capacity, personal, interest, interval);
+    }
+
+    /** A non-negative whole number up to {@link Long#MAX_VALUE}, or {@code -1} when the value is not one. */
+    private static long wholeLong(final Object value) {
+        if (value instanceof Integer || value instanceof Long || value instanceof Short || value instanceof Byte) {
+            final long whole = ((Number) value).longValue();
+            return whole >= 0 ? whole : -1L;
+        }
+        if (value instanceof java.math.BigInteger big) return big.signum() >= 0 && big.bitLength() < Long.SIZE ? big.longValue() : -1L;
+        return -1L;
     }
 
     /**
@@ -876,6 +1064,17 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         values.put(SHUTDOWN_CAPTURE_DEADLINE_KEY, DEFAULT.shutdown().captureDeadlineMillis());
         values.put(LOGIN_AUTHORITATIVE_KEY, DEFAULT.login().authoritative().id());
         values.put(ADAPTERS_REQUIRED_KEY, List.copyOf(DEFAULT.adapters().required()));
+        values.put(TYPES_OVERRIDE_BUILTINS_KEY, DEFAULT.typeRegistry().allowOverrideBuiltins());
+        values.put(TYPES_UNKNOWN_POLICY_KEY, DEFAULT.typeRegistry().unknownTypePolicy().id());
+        values.put(BANK_CURRENCY_PROVIDER_KEY, DEFAULT.bank().currencyProvider());
+        values.put(BANK_CURRENCY_ID_KEY, DEFAULT.bank().currencyId());
+        values.put(BANK_CURRENCY_SCALE_KEY, DEFAULT.bank().currencyScale());
+        // As the YAML reader returns it: an int when it fits (the default 0), so it equals the AuroraKeys row.
+        final long capacity = DEFAULT.bank().sharedCapacity();
+        values.put(BANK_SHARED_CAPACITY_KEY, capacity <= Integer.MAX_VALUE ? (Object) (int) capacity : (Object) capacity);
+        values.put(BANK_PERSONAL_CAP_KEY, DEFAULT.bank().personalCapPercent());
+        values.put(BANK_INTEREST_KEY, DEFAULT.bank().interestPercent());
+        values.put(BANK_INTEREST_INTERVAL_KEY, DEFAULT.bank().interestIntervalHours());
         return values;
     }
 

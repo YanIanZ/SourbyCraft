@@ -37,15 +37,30 @@ import java.util.UUID;
  * @param contributions collection id to (member key to contributed amount)
  * @param reserved transfer operation id to reserved amount (shared bank)
  * @param pendingIntent operation holding a reservation on this record, or {@code null}
+ * @param archivedPersonal Build 54 (review P2-4): the personal balances of removed memberships, folded into one frozen
+ *     total by {@link #compacted} (COOP-DESIGN §8: removal freezes the subaccount; redistribution is out of scope). Never
+ *     credited, debited or paid interest; keeps the personal map bounded by the current members
+ * @param archivedContributions Build 54: per collection, the contributions of removed memberships folded into one total
+ * @param lastInterestAtMillis Build 54 (review P3-22): store clock of the last interest posting, {@code 0} = never
  */
 public record ProfileSharedState(UUID profileId, long revision, Currency currency, long sharedBalance, long sharedCapacity,
                                  Map<MemberKey, Long> personalBalances, Map<String, Long> collections,
                                  Map<String, Map<MemberKey, Long>> contributions, Map<UUID, Long> reserved,
-                                 UUID pendingIntent) {
+                                 UUID pendingIntent, long archivedPersonal, Map<String, Long> archivedContributions,
+                                 long lastInterestAtMillis) {
 
     public static final int MAX_COLLECTIONS = 256;
     public static final int MAX_COLLECTION_ID = 64;
     public static final int MAX_RESERVATIONS = 64;
+
+    /** The Build 51-53 shape: no archived totals and no interest timestamp. */
+    public ProfileSharedState(final UUID profileId, final long revision, final Currency currency, final long sharedBalance,
+                              final long sharedCapacity, final Map<MemberKey, Long> personalBalances, final Map<String, Long> collections,
+                              final Map<String, Map<MemberKey, Long>> contributions, final Map<UUID, Long> reserved,
+                              final UUID pendingIntent) {
+        this(profileId, revision, currency, sharedBalance, sharedCapacity, personalBalances, collections, contributions, reserved,
+            pendingIntent, 0L, Map.of(), 0L);
+    }
 
     public ProfileSharedState {
         Objects.requireNonNull(profileId, "profileId");
@@ -84,6 +99,67 @@ public record ProfileSharedState(UUID profileId, long revision, Currency currenc
             totalReserved = Math.addExact(totalReserved, amount);
         }
         if (totalReserved > sharedBalance) throw new IllegalArgumentException("reserved more than the shared balance");
+        if (archivedPersonal < 0) throw new IllegalArgumentException("archived personal " + archivedPersonal);
+        archivedContributions = unmodifiable(archivedContributions);
+        if (archivedContributions.size() > MAX_COLLECTIONS) throw new IllegalArgumentException("too many archived contribution totals");
+        for (final Map.Entry<String, Long> entry : archivedContributions.entrySet()) {
+            if (!validCollection(entry.getKey())) throw new IllegalArgumentException("collection id " + entry.getKey());
+            if (entry.getValue() < 0) throw new IllegalArgumentException("archived contribution " + entry.getValue());
+        }
+        if (lastInterestAtMillis < 0) throw new IllegalArgumentException("last interest at " + lastInterestAtMillis);
+    }
+
+    /**
+     * Whether the record carries a Build 54 trailing section (archived totals or an interest timestamp): such a record
+     * is written only after the store's minimum build was raised to 54, because a Build 51-53 decoder refuses it.
+     */
+    public boolean extended() {
+        return this.archivedPersonal != 0L || !this.archivedContributions.isEmpty() || this.lastInterestAtMillis != 0L;
+    }
+
+    /**
+     * Folds the personal balances and contributions of memberships that are not in {@code current} into the archived
+     * totals (review P2-4), so a co-op that has seen many memberships keeps its per-member maps bounded by the current
+     * members; the same record (identity) when nothing is folded. The revision is unchanged: the caller commits the
+     * compaction together with its own mutation.
+     */
+    public ProfileSharedState compacted(final java.util.Set<MemberKey> current) {
+        Objects.requireNonNull(current, "current");
+        boolean changed = false;
+        long archived = this.archivedPersonal;
+        final Map<MemberKey, Long> balances = new LinkedHashMap<>();
+        for (final Map.Entry<MemberKey, Long> entry : this.personalBalances.entrySet()) {
+            if (current.contains(entry.getKey())) {
+                balances.put(entry.getKey(), entry.getValue());
+            } else {
+                archived = add(archived, entry.getValue());
+                changed = true;
+            }
+        }
+        final Map<String, Long> archivedLedger = new LinkedHashMap<>(this.archivedContributions);
+        final Map<String, Map<MemberKey, Long>> ledger = new LinkedHashMap<>();
+        for (final Map.Entry<String, Map<MemberKey, Long>> entry : this.contributions.entrySet()) {
+            final Map<MemberKey, Long> perMember = new LinkedHashMap<>();
+            for (final Map.Entry<MemberKey, Long> contribution : entry.getValue().entrySet()) {
+                if (current.contains(contribution.getKey())) {
+                    perMember.put(contribution.getKey(), contribution.getValue());
+                } else {
+                    archivedLedger.merge(entry.getKey(), contribution.getValue(), ProfileSharedState::add);
+                    changed = true;
+                }
+            }
+            if (!perMember.isEmpty()) ledger.put(entry.getKey(), perMember);
+        }
+        if (!changed) return this;
+        return new ProfileSharedState(this.profileId, this.revision, this.currency, this.sharedBalance, this.sharedCapacity, balances,
+            this.collections, ledger, this.reserved, this.pendingIntent, archived, archivedLedger, this.lastInterestAtMillis);
+    }
+
+    /** The same record with the interest timestamp set (an interest after-image; review P3-22). */
+    public ProfileSharedState withLastInterestAt(final long storeClockMillis) {
+        return new ProfileSharedState(this.profileId, this.revision, this.currency, this.sharedBalance, this.sharedCapacity,
+            this.personalBalances, this.collections, this.contributions, this.reserved, this.pendingIntent, this.archivedPersonal,
+            this.archivedContributions, Math.max(0L, storeClockMillis));
     }
 
     /** A new profile's shared state: revision 0, zero balances. */
@@ -91,7 +167,8 @@ public record ProfileSharedState(UUID profileId, long revision, Currency currenc
         return new ProfileSharedState(profileId, 0L, currency, 0L, sharedCapacity, Map.of(), Map.of(), Map.of(), Map.of(), null);
     }
 
-    private static boolean validCollection(final String id) {
+    /** Whether a collection id is well formed: {@code [a-z0-9_:.-]{1,64}}. */
+    public static boolean validCollection(final String id) {
         return id != null && id.matches("[a-z0-9_:.-]{1," + MAX_COLLECTION_ID + "}");
     }
 
@@ -206,13 +283,14 @@ public record ProfileSharedState(UUID profileId, long revision, Currency currenc
     public ProfileSharedState withPendingIntent(final UUID operationId) {
         return new ProfileSharedState(this.profileId, CoopWriteGuard.next(this.revision, "shared state of " + this.profileId),
             this.currency, this.sharedBalance, this.sharedCapacity, this.personalBalances, this.collections,
-            this.contributions, this.reserved, operationId);
+            this.contributions, this.reserved, operationId, this.archivedPersonal, this.archivedContributions, this.lastInterestAtMillis);
     }
 
     /** The same record at an explicit revision (decoders and after-images only). */
     public ProfileSharedState atRevision(final long revision) {
         return new ProfileSharedState(this.profileId, revision, this.currency, this.sharedBalance, this.sharedCapacity,
-            this.personalBalances, this.collections, this.contributions, this.reserved, this.pendingIntent);
+            this.personalBalances, this.collections, this.contributions, this.reserved, this.pendingIntent, this.archivedPersonal,
+            this.archivedContributions, this.lastInterestAtMillis);
     }
 
     private ProfileSharedState copy(final long sharedBalance, final Map<MemberKey, Long> personalBalances,
@@ -220,7 +298,7 @@ public record ProfileSharedState(UUID profileId, long revision, Currency currenc
                                     final Map<UUID, Long> reserved) {
         return new ProfileSharedState(this.profileId, CoopWriteGuard.next(this.revision, "shared state of " + this.profileId),
             this.currency, sharedBalance, this.sharedCapacity, personalBalances, collections, contributions, reserved,
-            this.pendingIntent);
+            this.pendingIntent, this.archivedPersonal, this.archivedContributions, this.lastInterestAtMillis);
     }
 
     private static void positive(final long amount) {

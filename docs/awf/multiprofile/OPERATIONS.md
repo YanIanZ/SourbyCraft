@@ -182,8 +182,9 @@ in Build 52; Build 53 captures and switches the member out first, see
 What Build 53 still refuses on purpose: owner transfer, the owner leaving and kicking the owner, and deleting a
 co-op profile that still has other members (`OWNER_ACTION_REFUSED`); a membership change while another node
 holds the profile's claim, i.e. plays its bound world (`WRONG_NODE`, OD-1); removing a member whose session is on
-another node (`OWNERSHIP_CONFLICT` or `MEMBER_ONLINE`). A removed member's state is recorded for salvage but
-nothing is delivered (Build 54).
+another node (`OWNERSHIP_CONFLICT` or `MEMBER_ONLINE`). A removed member's state is recorded for salvage; Build 53
+delivers nothing, Build 54 delivers it on a claim (`/coop salvage claim`, `AuroraProfiles.claimSalvage`; the first
+claim raises the store to minimum build 54, see [PROFILE-LIFECYCLE.md](PROFILE-LIFECYCLE.md#salvage-exactly-once-od-3)).
 
 **Build 53 settings.** `login.authoritative`, `shutdown.capture-deadline-ms` and `adapters.required` are
 RESTART_REQUIRED ([CONFIGURATION.md](CONFIGURATION.md#build-53-authoritative-login-shutdown-capture-adapters)). They
@@ -191,6 +192,15 @@ apply to every profile, not only co-op. They are read at startup; none of them c
 login writes per-account session markers (`sessions/<uuid>.awfp` in the file repository, `<fabric prefix>mp:session:<uuid>` keys in Redis) outside the
 store format; a non-owner member's first switch into a co-op raises the store to minimum build 53 (Build 52 then refuses
 it, like Build 51 refuses a co-op store).
+
+**Build 54 store level.** The first salvage claim, and the first profile created of a plugin-registered type or with
+a name from a type's own pool, raise the store to minimum build 54; Build 53 then refuses it at startup (rollback =
+restore a backup taken before). So does the registration of a built-in type override that denies an action, and the
+first bank change that writes a Build 54 trailing section into a shared record (the archived totals after a removed
+membership's money is folded, or an interest posting's timestamp). Plain bank changes and transfers on a record
+without that section, and profile type definitions themselves (`types/` directory, Redis `mp:types`), do not raise it. Bank and salvage receipts are permanent (never pruned; FILE `receipts/<resource>/permanent/`,
+Redis `preceipts:` hashes); a resource with 1,000,000 of them refuses further financial and delivery operations
+(`CAPACITY_EXCEEDED`). The bank policy keys are in [CONFIGURATION.md](CONFIGURATION.md#build-54-co-op-bank-policy).
 
 ### Commands (Build 52)
 

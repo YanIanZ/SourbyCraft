@@ -17,6 +17,7 @@ import java.util.OptionalLong;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
+import dev.iyanz.sourbycraft.util.SourbyLogger;
 
 /**
  * The two offline profile-store migrations: the one-way copy of a format-1 {@link FileProfileRepository}
@@ -115,6 +116,18 @@ final class ProfileRepositoryMigration {
         if (accountIds.isEmpty() && profileIds.isEmpty()) {
             throw new IOException("the file repository " + file.root() + " holds no account and no profile; nothing to migrate");
         }
+        // Review P2-3 and the Build 54 verification: the stored profile type definitions travel with the profiles that name
+        // them (leaving them behind would make those types unknown on the Redis node, denied, or, for a built-in override,
+        // lift its denies). They are read and checked before the import begins, so an unreadable definition refuses the
+        // import before any account or profile reaches Redis.
+        final Map<String, ProfileTypesStore.Stored> types = file.typesStore().load(ProfileTypes.MAX_TYPES + ProfileTypes.BUILTINS.size());
+        for (final Map.Entry<String, ProfileTypesStore.Stored> type : types.entrySet()) {
+            if (type.getValue().definition() == null) {
+                throw new IOException("the stored profile type '" + type.getKey() + "' in " + file.typesStore().describe() + " is unreadable ("
+                    + type.getValue().unreadable() + "); restore or remove it before the import, so no definition is lost on the way."
+                    + " The import was not started and nothing was written to Redis");
+            }
+        }
         redis.beginImport();
         int archives = 0;
         for (final UUID playerId : accountIds) {
@@ -147,6 +160,13 @@ final class ProfileRepositoryMigration {
         }
         final List<ProfileTransition> journals = file.transitions();
         for (final ProfileTransition journal : journals) redis.importTransition(journal);
+        // The definitions checked before beginImport (all readable).
+        for (final Map.Entry<String, ProfileTypesStore.Stored> type : types.entrySet()) {
+            redis.typesStore().save(type.getKey(), ProfileTypesStore.encode(type.getValue().definition(), type.getValue().owner()));
+        }
+        if (!types.isEmpty()) {
+            SourbyLogger.info("AWF MultiProfile: copied " + types.size() + " stored profile type definition(s) into " + redis.typesStore().describe());
+        }
         final List<String> skipped = new ArrayList<>(file.quarantinedJournals());
         verify(file, redis, accountIds, profileIds, journals);
         final Report report = new Report(accountIds.size(), profiles, bindings, snapshots, archives, journals.size(), skipped);

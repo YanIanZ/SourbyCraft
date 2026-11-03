@@ -43,18 +43,113 @@ would against upstream Paper and may also use the SourbyCraft services below.
 
 | Package | Contents | Documentation |
 | --- | --- | --- |
-| `dev.iyanz.sourbycraft.api` | `Unsupported` (marks upstream API members the region-threaded server does not support) | *Breaking change in Build 48* below |
+| `dev.iyanz.sourbycraft.api` | `Unsupported` (marks upstream API members the region-threaded server does not support); since Build 54 `SourbyAPI` (the one entry point to every service below), `SourbyBuild`, `FeatureUnavailableException` | *Getting started* below; *Breaking change in Build 48* below |
 | `dev.iyanz.sourbycraft.api.event`, `.event.world` | Region-threading async events (teleport, portal, respawn, player save, end credits, world unload) | *Breaking change in Build 48* below |
 | `dev.iyanz.sourbycraft.api.region` | `RegionThreadingTickManager`, `RegionTickData`, `WorldRegionizer` | *Breaking change in Build 48* below |
 | `dev.iyanz.sourbycraft.api.simd` | `SIMDChecker`, `SIMDDetection`, `VectorMapPalette` | *Breaking change in Build 48* below |
 | `dev.iyanz.sourbycraft.api.metrics` | `SourbyMetrics` and its immutable snapshots: the read-only metrics service | *Consuming it* below |
-| `dev.iyanz.sourbycraft.api.world` | `AuroraWorlds` (Aurora World Fabric worlds and templates at runtime), `WorldRequest`, `WorldProperties`, `UnloadResult`, `WorldOperationBusyException`; also `WorldUnloadResult` from the former Canvas API | [developing-awf.md](../docs/guides/developing-awf.md), [aurora-world-fabric.md](../docs/architecture/aurora-world-fabric.md) |
+| `dev.iyanz.sourbycraft.api.world` | `AuroraWorlds` (Aurora World Fabric worlds and templates at runtime), `WorldRequest`, `WorldProperties`, `UnloadResult`, `WorldOperationBusyException`; since Build 54 `AwfWorldSummary`, `AwfWorldInfo`, `AwfBackendKind`, `AwfPersistenceMode`; also `WorldUnloadResult` from the former Canvas API | [developing-awf.md](../docs/guides/developing-awf.md), [aurora-world-fabric.md](../docs/architecture/aurora-world-fabric.md) |
 | `dev.iyanz.sourbycraft.api.profile` | `AuroraProfiles` (AWF MultiProfile: durable player profiles), its requests, results, error codes, `ProfileStateAdapter`, since Build 51 `ProfileDetails` and `ProfileType`, since Build 52 the `Coop*` types, three async `Coop*Event`s and the co-op methods, and since Build 53 the adapter contract (`ProfileAdapterDescriptor`, `ProfileDataCriticality`, `ProfileDataScope`) | [MultiProfile API](../docs/awf/multiprofile/API.md) |
+| `dev.iyanz.sourbycraft.api.profile` (co-op bank and salvage, Build 54) | `AuroraProfiles` bank, collections and salvage methods, `ProfileBankInfo`, `ProfileCurrency`, `ProfileBankAccount`, `ProfileCollectionInfo`, `ProfileSalvageInfo`, `SalvageDeliveryResult`, `ProfileBankTransactionEvent`, `ProfileSalvageDeliveredEvent` | [MultiProfile API](../docs/awf/multiprofile/API.md#co-op-bank-collections-and-salvage-build-54) |
+| `dev.iyanz.sourbycraft.api.profile` (profile types, Build 54) | `ProfileTypeRegistry` (a Bukkit service, registered only while MultiProfile runs; also `AuroraProfiles.typeRegistry()` and `SourbyAPI.profileTypes()`), `ProfileTypeDefinition`, `ProfileRule`, `ProfileRuleSet`, `ProfileNaming`, `ProfileTypeSource` | [PROFILE-TYPES.md](../docs/awf/multiprofile/PROFILE-TYPES.md) |
 | `dev.iyanz.sourbycraft.api.scheduler` | `RegionTask`, `EntityTask`: markers that name the owning chunk or entity of a sync Bukkit scheduler callback for the Aurora Bridge | [aurora-plugin-bridge.md](../docs/architecture/aurora-plugin-bridge.md) |
 
-`AuroraWorlds` and `AuroraProfiles` are obtained from Bukkit's `ServicesManager`; both are
-optional (a server without the feature has no registration, and `AuroraProfiles.isEnabled()` can
-be false).
+`AuroraWorlds` and `AuroraProfiles` are obtained from Bukkit's `ServicesManager` (since Build 54 also
+through `SourbyAPI`, below); both are optional (a server without the feature has no registration, and
+`AuroraProfiles.isEnabled()` can be false).
+
+## Getting started
+
+Since Build 54 a plugin reaches every SourbyCraft service through one class,
+`dev.iyanz.sourbycraft.api.SourbyAPI`.
+
+**Dependency.** Compile against `sourbyapi` and do not shade it: the server provides it at runtime.
+
+```kotlin
+dependencies {
+    // From Build 55: the sourbyapi jar attached to the SourbyCraft GitHub release (the release step that
+    // attaches it is Build 55 work; Build 54 and earlier attach no such jar).
+    compileOnly(files("libs/sourbyapi.jar"))
+    // Until then: build it from this repository with ./gradlew :sourbyapi:publishToMavenLocal
+    // (needs the private toolchain, see "Artifact coordinates") and use
+    // compileOnly("dev.iyanz.sourbycraft:sourbyapi:26.2-REL") with mavenLocal().
+}
+```
+
+**`plugin.yml`.** Declare `folia-supported: true` (and `api-version: '26.2'`) once the plugin does its
+world, entity and player work through the region and entity schedulers; such a plugin runs natively. A plugin
+without the key is a legacy plugin: it is enabled only through the Aurora Bridge (`aurora.bridge.mode`, off by
+default, RESTART_REQUIRED), which routes its scheduler tasks but not its direct world access
+([aurora-plugin-bridge.md](../docs/architecture/aurora-plugin-bridge.md)).
+
+**Example.**
+
+```java
+public final class IslandPlugin extends JavaPlugin {
+    @Override
+    public void onEnable() {
+        if (!SourbyAPI.isSourbyCraft()) return;                       // plain Paper: nothing to do
+        getLogger().info("on " + SourbyAPI.build().buildNumber());      // e.g. "on 54"
+        AuroraWorlds worlds = SourbyAPI.worlds();                     // throws FeatureUnavailableException if absent
+        worlds.createInstance("island_base", "isle_demo")             // deleted again once unloaded
+            .thenAccept(world -> getLogger().info("ready: " + world.getName()));
+        SourbyAPI.findProfiles().ifPresent(profiles ->                // empty while MultiProfile is off
+            getLogger().info("MultiProfile is on"));
+    }
+}
+```
+
+| Accessor | Returns | Unavailable when |
+| --- | --- | --- |
+| `isSourbyCraft()` | whether the server's brand is `sourbycraft:sourbycraft` | — |
+| `build()` / `findBuild()` | `SourbyBuild` (build number and label, codename, API version, Minecraft version, commit), from the jar's `META-INF/sourbycraft-build.properties` | not SourbyCraft |
+| `worlds()` / `findWorlds()` | `AuroraWorlds` | the service did not start (an unreadable `sourbycraft_config/aurora-worlds.json` stops it) |
+| `profiles()` / `findProfiles()` | `AuroraProfiles`, only while `isEnabled()` | `aurora.awf.multiprofile.enabled` is false (the default) or its start failed |
+| `profileTypes()` / `findProfileTypes()` | `ProfileTypeRegistry` ([PROFILE-TYPES.md](../docs/awf/multiprofile/PROFILE-TYPES.md)) | MultiProfile is not running (`aurora.awf.multiprofile.enabled`) |
+| `metrics()` / `findMetrics()` | `SourbyMetrics` | the metrics service did not start |
+
+The throwing form raises `FeatureUnavailableException` (unchecked), whose message and `configKey()` name the
+setting that enables the feature where one does. On a server that is not SourbyCraft every `find…` method returns
+empty. The accessors may be called from any thread; lookups go to Bukkit's thread-safe `ServicesManager` and are
+cached until a service is registered or unregistered. A service's own methods keep their own thread rules (for
+`AuroraWorlds`: never join its futures on a region, entity or global-tick thread).
+
+The developer guide and an example plugin are Build 55 work; until then see
+[developing-awf.md](../docs/guides/developing-awf.md) and the
+[MultiProfile API](../docs/awf/multiprofile/API.md).
+
+### API changes in Build 54
+
+Code written; compiled by an agent; not tested by the owner. Binary and source compatible: no existing signature
+changed or was removed; the additions to `AuroraWorlds` are `default` methods.
+
+- New in `dev.iyanz.sourbycraft.api`: `SourbyAPI`, `SourbyBuild`, `FeatureUnavailableException`. `SourbyAPI`
+  also has `bindServiceEvents(Plugin)`, marked `@ApiStatus.Internal`: the server calls it once at startup.
+- New in `api.world`: `AwfWorldSummary`, `AwfWorldInfo`, `AwfBackendKind`, `AwfPersistenceMode`. New `AuroraWorlds`
+  methods: `listWorlds()` (no storage access), `info(name)` (asynchronous: backend, store format, size on the FILE
+  backend, uncommitted chunks, last commit time), `listTemplates()` (asynchronous `templates()`),
+  `isAwfWorld(World)`, `createInstance(template, name)` (a template instance deleted once it is unloaded; see its
+  javadoc). On an implementation compiled before Build 54, `listWorlds`, `info` and `createInstance` fail with
+  `UnsupportedOperationException`.
+- A `createInstance` world is stored in `sourbycraft_config/aurora-worlds.json` with `"deleteOnUnload": true`; every
+  other entry is written exactly as before. A build before 54 ignores the field and keeps such a world as an
+  ordinary instance.
+- `api.profile` gains the profile type registry: `ProfileTypeRegistry`, `ProfileTypeDefinition`, `ProfileRule`,
+  `ProfileRuleSet`, `ProfileNaming`, `ProfileTypeSource`; see
+  [PROFILE-TYPES.md](../docs/awf/multiprofile/PROFILE-TYPES.md) and the
+  [MultiProfile API](../docs/awf/multiprofile/API.md).
+- `api.profile` gains the co-op bank, collections and salvage (all `default` methods on `AuroraProfiles`, failing
+  with `UnsupportedOperationException` on an older implementation; they need `coop.enabled: true`):
+  `bank(viewer, profile)`, `deposit`, `withdraw`, `depositPersonal`, `withdrawPersonal`,
+  `transfer(actor, profile, ProfileBankAccount from, ProfileBankAccount to, amount)`, `applyInterest`,
+  `collections(viewer, profile)`, `contribute(actor, profile, collection, amount)`, `salvage(viewer, profile, cursor)`
+  and `claimSalvage(claimant, salvageId)`. New records `ProfileBankInfo`, `ProfileCurrency`, `ProfileCollectionInfo`
+  (with `Contribution`), `ProfileSalvageInfo`, `SalvageDeliveryResult`; enum `ProfileBankAccount` (`SHARED`,
+  `PERSONAL`; the purse is not an account, owner decision OD-4); asynchronous events `ProfileBankTransactionEvent`
+  and `ProfileSalvageDeliveredEvent` (fired after the durable commit). Amounts are `long` minor units. The
+  type-registry action ids gain `collections.contribute`. `ProfileErrorCode` appends `ACTION_FORBIDDEN_BY_TYPE`,
+  `TYPE_UNKNOWN` and `PURSE_TRANSFER_UNSUPPORTED`. See
+  [MultiProfile API](../docs/awf/multiprofile/API.md#co-op-bank-collections-and-salvage-build-54).
 
 ### API changes in Build 53
 
@@ -302,6 +397,9 @@ api-version: '26.2'
   *Breaking change in Build 48*).
 - `src/main/java/dev/iyanz/sourbycraft/api/metrics/` — SourbyCraft's public read-only metrics API.
 - `src/main/java/dev/iyanz/sourbycraft/api/world/` — `AuroraWorlds` and its types.
-- `src/main/java/dev/iyanz/sourbycraft/api/profile/` — `AuroraProfiles` (AWF MultiProfile) and its types.
+- `src/main/java/dev/iyanz/sourbycraft/api/profile/` — `AuroraProfiles` (AWF MultiProfile) and its types, including
+  the Build 54 profile type registry.
+- `src/main/java/dev/iyanz/sourbycraft/api/SourbyAPI.java`, `SourbyBuild.java`, `FeatureUnavailableException.java` —
+  the Build 54 entry point.
 - `src/main/java/dev/iyanz/sourbycraft/api/scheduler/` — `RegionTask` and `EntityTask`.
 - `src/test/` — API contract tests.

@@ -14,7 +14,7 @@ import org.jspecify.annotations.Nullable;
  * durable, asynchronously (never on a region, entity or global tick thread), by the node that committed it,
  * not cancellable, and lost if the node stops between the commit and the firing. At the time of the event the
  * membership epoch is consumed and the member's state is recorded for salvage; nothing has been delivered
- * (salvage delivery is Build 54).</p>
+ * yet (since Build 54 a member delivers it with {@link AuroraProfiles#claimSalvage}).</p>
  *
  * <p>Build 53: a member who is online with the co-op as their active profile is captured and switched out to their
  * next profile (or a fresh solo profile) first; the removal and this event follow. The {@link Reason} is still
