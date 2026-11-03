@@ -11,7 +11,7 @@ SourbyCraft server's existing `ca.spottedleaf:leafpile:1.2.0` dependency remains
 ## What this upgrade changes
 
 - Corrects `SWMRLong2ObjectHashTable.equals` **and `hashCode`**: different map instances with equal logical entries compare equal and have matching hashes; unequal entries compare unequal. Upstream v1.3.2 still hashes table-entry object identities, so this is an explicit SourbyCraft source-owned correctness delta requiring review.
-- Adds JUnit 6 regression cases for negative keys, same/different values and symmetry.
+- Adds JUnit 6 regression cases for negative keys, same/different values, symmetry and equal-hash contract; existing post-merge build CI includes `:Metal:test`.
 - Compiles the code generator into a temporary directory with Java 25, leaving `templates/` free of generated `.class` files.
 - Generates sources using absolute script-root paths, not the invoking shell's working directory.
 - Only replaces generated Java source when contents differ, and attempts an atomic same-directory move to avoid incomplete output after interruption.
