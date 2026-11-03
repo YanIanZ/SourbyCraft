@@ -566,7 +566,7 @@ Pass needs all of: the rebuild job of the publishing run is green and its summar
 that value equals the published asset's; `gh attestation verify` succeeds and names this repository and the tag
 commit. Record the run id, both hashes and the verify output. A red or missing `rebuild` job, a missing
 attestation, or a hash that differs from the asset is a FAIL. A later green re-run does not erase the failing run:
-record both. Optional local redo (private toolchain, Temurin 25.0.4+1):
+record both. Optional local redo (private toolchain, the Temurin build the tag's `build.yml` pins):
 `export SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)` on the tag commit, `./gradlew applyAllPatches`, then
 `./gradlew slimServerJar -PsourbyBuild=49 -PsourbyChannel=REL`, and compare `build/libs/SourbyCraft-slim.jar`.
 

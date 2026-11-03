@@ -117,11 +117,12 @@ jobs:
       # The exact Temurin build, not "25": the major alone floats with the runner image, and the
       # provenance Jdk string (vendor + runtime version) and the deflate output depend on it. The
       # rebuild job pins the same value; bump both together (scripts/test_reproducible_build.py
-      # fails when they differ). 25.0.4+1 is what the 2026-10-21 runs resolved.
-      - name: Setup Java 25 (Temurin 25.0.4+1)
+      # fails when they differ). It must be a version Adoptium lists (api.adoptium.net release_versions):
+      # 25.0.4+1 was only the runner image's preinstalled JDK and stopped resolving on 2026-11-03.
+      - name: Setup Java 25 (Temurin 25.0.5+8)
         uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6 (v6.1.0)
         with:
-          java-version: 25.0.4+1
+          java-version: 25.0.5+8
           distribution: temurin
 
       - name: Set git identity (paperweight applies patches as commits)
@@ -1059,10 +1060,10 @@ jobs:
         uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6 (v6.4.0)
 
       # Must equal the build job's pin (scripts/test_reproducible_build.py).
-      - name: Setup Java 25 (Temurin 25.0.4+1)
+      - name: Setup Java 25 (Temurin 25.0.5+8)
         uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6 (v6.1.0)
         with:
-          java-version: 25.0.4+1
+          java-version: 25.0.5+8
           distribution: temurin
 
       - name: Set git identity (paperweight applies patches as commits)

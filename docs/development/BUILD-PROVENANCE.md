@@ -152,7 +152,7 @@ repository; `gh attestation verify` on a published jar (below) is the check an o
   (the build job's `--licences` check is in the workflow of every release tag from `v26.2-r49` on).
 - The `build` job pins `SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)` for every later step (so `buildTimestamp`
   in `sourbycraft-build.properties` and the server manifest `Build-Time` also derive from the commit, not
-  `now()`), and pins the exact Temurin build (`java-version: 25.0.4+1`) instead of the floating `25`. Bump the
+  `now()`), and pins the exact Temurin build (`java-version: 25.0.5+8`; 25.0.4+1 until 2026-11-03, when it stopped resolving) instead of the floating `25`. Bump the
   pin in the `build` and `rebuild` jobs together; `scripts/test_reproducible_build.py` fails when they differ
   or when the pin becomes a bare major. The provenance `Jdk` string (vendor + runtime version) and the deflate
   output depend on that exact build.
@@ -201,7 +201,7 @@ python3 scripts/sbom.py verify <jar> SourbyCraft-26.2-REL.cdx.json
 
 The rebuild comparison is in the `Rebuild slim jar and compare` job of the run that published the release
 (job summary lists both hashes). To redo it yourself you need the private toolchain (`PRIVATE-TOOLCHAIN.md`):
-check out the tag commit, `export SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)`, use Temurin 25.0.4+1, then
+check out the tag commit, `export SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)`, use the Temurin build the tag's `build.yml` pins (25.0.5+8 from Build 51), then
 `./gradlew applyAllPatches` and `./gradlew slimServerJar -PsourbyBuild=<N> -PsourbyChannel=REL`, and compare
 `build/libs/SourbyCraft-slim.jar` with the published asset.
 
