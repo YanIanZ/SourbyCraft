@@ -85,7 +85,7 @@
 +        // LeafPile 1.2.4 split the original monolith into published modules.
 +        // Candidate only: owner must verify the exact classes and shaded jar.
 +        "modular" -> {
-+            implementation(platform("ca.spottedleaf.leafpile:bom:1.2.4"))
++            implementation(platform("ca.spottedleaf.leafpile:bom:${rootProject.providers.gradleProperty("metalModularVersion").get()}"))
 +            implementation("ca.spottedleaf.leafpile:common")
 +            implementation("ca.spottedleaf.leafpile:concurrentutil")
 +            implementation("ca.spottedleaf.leafpile:converter")
