@@ -6,7 +6,7 @@
 
 The repository vendors an older, monolithic snapshot related to LuminolMC/Metal and LeafPile. Its namespaces include `ca.spottedleaf.concurrentutil`, `ca.spottedleaf.common`, `ca.spottedleaf.ioutil` and other utility packages. The tracked generator produces 16 specialized concurrent hash-table source files.
 
-SourbyCraft server's existing `ca.spottedleaf:leafpile:1.2.0` dependency remains the **default**. Current upstream [Tuinity/LeafPile](https://github.com/Tuinity/LeafPile) uses independently published modules. This PR adds a **candidate build-time** `-PmetalProvider=modular` using LeafPile BOM **1.2.4** plus the modules needed to replace the old monolith; it is not yet production-qualified. A source-level rebase of the vendored `Metal/` tree to modern LeafPile is a separate change, not accomplished here.
+SourbyCraft server's existing `ca.spottedleaf:leafpile:1.2.0` dependency remains the **default**. Current upstream [Tuinity/LeafPile](https://github.com/Tuinity/LeafPile) uses independently published modules. This PR adds a **candidate build-time** `-PmetalProvider=modular` using LeafPile BOM **1.3.2** (version pinned by `metalModularVersion` in root `gradle.properties`) plus the modules needed to replace the old monolith; it is not yet production-qualified. A source-level rebase of the vendored `Metal/` tree to modern LeafPile is a separate change, not accomplished here.
 
 ## What this upgrade changes
 
@@ -16,7 +16,7 @@ SourbyCraft server's existing `ca.spottedleaf:leafpile:1.2.0` dependency remains
 - Generates sources using absolute script-root paths, not the invoking shell's working directory.
 - Only replaces generated Java source when contents differ, and attempts an atomic same-directory move to avoid incomplete output after interruption.
 - Registers the generator as `:Metal:generateMetalSources`, a dependency of `:Metal:compileJava`.
-- Adds **opt-in** `-PmetalProvider=vendored` to select `project(":Metal")`, or `-PmetalProvider=modular` to use the published **LeafPile 1.2.4 modular BOM**. Without this property, the existing production `leafpile:1.2.0` runtime dependency remains unchanged.
+- Adds **opt-in** `-PmetalProvider=vendored` to select `project(":Metal")`, or `-PmetalProvider=modular` to use the published **LeafPile 1.3.2 modular BOM**. Without this property, the existing production `leafpile:1.2.0` runtime dependency remains unchanged.
 
 ## Commands for owner verification
 
@@ -65,7 +65,7 @@ Leave `metalProvider` absent or explicitly use `-PmetalProvider=upstream` to res
 
 ## Upgrade backlog
 
-- Compare vendored classes with LeafPile 1.2.4 modular source and maintain a provenance/diff ledger, including behavior/ABI changes and GPL-3.0 attribution.
+- Compare vendored classes with LeafPile 1.3.2 modular source and maintain a provenance/diff ledger, including behavior/ABI changes and GPL-3.0 attribution.
 - Assess whether to replace all vendored code with selected versioned modules or continue a source-owned fork; never silently mix overlapping package classes.
 - Verify generator reproducibility, JUnit/concurrency stress fixtures and shaded-jar service/resource metadata.
 - Qualify production provider change only at an owner-approved exact build SHA, after the current Build 50 readiness gate.
