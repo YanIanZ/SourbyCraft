@@ -1,5 +1,6 @@
 package dev.iyanz.sourbycraft.awf.multiprofile;
 
+import dev.iyanz.sourbycraft.api.profile.ProfileDetails;
 import dev.iyanz.sourbycraft.api.profile.ProfileErrorCode;
 import dev.iyanz.sourbycraft.api.profile.ProfileInfo;
 import dev.iyanz.sourbycraft.api.profile.ProfileOperationException;
@@ -7,6 +8,10 @@ import dev.iyanz.sourbycraft.api.profile.ProfileOwner;
 import dev.iyanz.sourbycraft.api.profile.ProfileRequest;
 import dev.iyanz.sourbycraft.api.profile.ProfileSwitchResult;
 import dev.iyanz.sourbycraft.api.profile.ProfileWorldRef;
+import dev.iyanz.sourbycraft.awf.multiprofile.CoopWriteGuard.Expected;
+import dev.iyanz.sourbycraft.awf.multiprofile.CoopWriteGuard.PlayerClaim;
+import dev.iyanz.sourbycraft.awf.multiprofile.CoopWriteGuard.ProfileClaim;
+import dev.iyanz.sourbycraft.awf.multiprofile.ProfileRepository.CommitResult;
 import dev.iyanz.sourbycraft.awf.redis.fabric.ClaimResult;
 import dev.iyanz.sourbycraft.awf.redis.fabric.EventFabric;
 import dev.iyanz.sourbycraft.awf.redis.fabric.FabricEvent;
@@ -20,6 +25,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalLong;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -31,6 +38,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 /**
  * The AWF MultiProfile engine: durable profiles, fenced ownership, a recoverable switch protocol and
@@ -54,6 +62,22 @@ import java.util.concurrent.atomic.AtomicReference;
  * repository ({@link RedisProfileRepository}) refuses it atomically when that claim no longer holds
  * the profile; with a remote repository a commit whose reply is lost is settled from the account,
  * behind a fresh claim, before anything is rolled back.</p>
+ *
+ * <p><b>Store format (Build 51).</b> {@link #open} reads the store's format marker on the I/O lane
+ * before any player is admitted and decides the paths ({@link StoreFormat#gate}): a format-1 store
+ * keeps the PR #62 paths above unchanged; a format-2 store sends every mutation through the guarded
+ * format-2 methods ({@link ProfileRepository#commitAccount}, {@link ProfileRepository#commitProfile},
+ * {@link ProfileRepository#commitBinding}, {@link ProfileRepository#publishMemberSnapshot}) with
+ * {@link CoopWriteGuard} expected revisions, under the player's session claim {@code Q}
+ * ({@link PlayerSessionOwnership}) and, for profile metadata, a short transaction claim {@code P}
+ * ({@link ProfileOwnership#claimTransaction}). Snapshot freshness is then the member head
+ * ({@link MemberStateHead}), never the profile revision. A {@link CommitResult.Status#UNKNOWN} outcome is
+ * settled by reading the receipt or the record back; when that does not establish it the operation
+ * fails with {@link ProfileErrorCode#UNKNOWN_OUTCOME} and nothing is compensated. A store this build
+ * refuses never gets an engine. The solo profile claim ({@code claim}/{@code release}) is kept beside
+ * {@code Q} in format 2: Build 51 profiles have only their owner, and the claim still marks the node
+ * that plays the profile's worlds (owner decision OD-1). Co-op membership operations (invites, votes,
+ * salvage) are not reachable from this engine.</p>
  */
 public final class ProfileEngine {
 
@@ -85,13 +109,47 @@ public final class ProfileEngine {
     private volatile IdleSweep lastIdleSweep;
     private volatile boolean closed;
 
+    /** Most pending-intent index pages {@link #open} reads; more refuses startup rather than scan without end. */
+    private static final int MAX_INTENT_PAGES = 256;
+    /** Lease of a process-local player session claim when the caller supplies no provider. */
+    private static final int LOCAL_SESSION_LEASE_SECONDS = 60;
+    static final String ROLLBACK_RULE = "Owner decision OD-2: a format-2 store is never downgraded in place and no exporter"
+        + " exists; the only way back is restoring the complete pre-migration backup into an isolated store";
+
+    /** The player session claims {@code Q} (format 2). */
+    private final PlayerSessionOwnership playerSessions;
+    /** The admitted format-2 session of each player online on this node. */
+    private final ConcurrentHashMap<UUID, PlayerSession> sessions = new ConcurrentHashMap<>();
+    /** Players whose session claim was confirmed lost; frozen until they quit. */
+    private final java.util.Set<UUID> lostSessions = ConcurrentHashMap.newKeySet();
+    /** Pending intents {@link #open} could not resolve, by every player they name. */
+    private final ConcurrentHashMap<UUID, java.util.Set<UUID>> unresolvedIntents = new ConcurrentHashMap<>();
+    /** Pending intents {@link #open} could not attribute to a player (a corrupt index); refuses every format-2 mutation. */
+    private final java.util.Set<UUID> unattributedIntents = ConcurrentHashMap.newKeySet();
+    private volatile Consumer<UUID> sessionLostHandler = player -> {};
+    /** What {@link #open} decided; {@code null} until it ran, which keeps the format-1 paths. */
+    private volatile StoreStatus storeStatus;
+
     public ProfileEngine(final ProfileSettings settings, final ProfileRepository repository,
                          final ProfileOwnership ownership, final PlayerStatePort players,
                          final ProfileWorldPort worlds, final String nodeId, final Executor io,
                          final FabricMetrics metrics, final EventFabric events) {
+        this(settings, repository, ownership, PlayerSessionOwnership.local(nodeId, LOCAL_SESSION_LEASE_SECONDS), players,
+            worlds, nodeId, io, metrics, events);
+    }
+
+    /**
+     * @param playerSessions the player session claims {@code Q} a format-2 store is written under; the engine
+     *     closes it on {@link #close}
+     */
+    public ProfileEngine(final ProfileSettings settings, final ProfileRepository repository,
+                         final ProfileOwnership ownership, final PlayerSessionOwnership playerSessions,
+                         final PlayerStatePort players, final ProfileWorldPort worlds, final String nodeId,
+                         final Executor io, final FabricMetrics metrics, final EventFabric events) {
         this.settings = Objects.requireNonNull(settings, "settings");
         this.repository = Objects.requireNonNull(repository, "repository");
         this.ownership = Objects.requireNonNull(ownership, "ownership");
+        this.playerSessions = Objects.requireNonNull(playerSessions, "playerSessions");
         this.players = Objects.requireNonNull(players, "players");
         this.worlds = Objects.requireNonNull(worlds, "worlds");
         this.nodeId = Objects.requireNonNull(nodeId, "nodeId");
@@ -112,6 +170,11 @@ public final class ProfileEngine {
         return this.repository;
     }
 
+    /** The player session claims {@code Q}. */
+    public PlayerSessionOwnership playerSessions() {
+        return this.playerSessions;
+    }
+
     public String nodeId() {
         return this.nodeId;
     }
@@ -120,58 +183,490 @@ public final class ProfileEngine {
         return this.settings.enabled() && this.settings.switching().enabled();
     }
 
+    // ------------------------------------------------------------------ store format (Build 51)
+
+    /**
+     * What {@link #open} found and decided.
+     *
+     * @param marker the store's format marker
+     * @param gate the decision ({@link StoreFormat#gate}); never {@code REFUSED}, a refused store has no engine
+     * @param reason the gate's explanation
+     * @param migration what the startup migration did (off, the dry-run report, the applied summary)
+     * @param unresolvedIntents pending intents left for recovery; their players' format-2 mutations are refused
+     */
+    public record StoreStatus(StoreFormat.Marker marker, StoreFormat.Gate gate, String reason, String migration,
+                              List<UUID> unresolvedIntents) {
+
+        public StoreStatus {
+            unresolvedIntents = List.copyOf(unresolvedIntents);
+        }
+    }
+
+    /**
+     * The format-1 to format-2 migration, supplied by the runtime ({@link ProfileRepositoryMigration}).
+     * Offline only: {@link #open} runs it before any player is admitted.
+     */
+    public interface StoreMigration {
+        /**
+         * Reads the format-1 store and reports what a migration does ({@code apply == false}: writes nothing), or
+         * backs it up and migrates it ({@code apply == true}). Throws when the migration did not complete; the
+         * store is then not reported as format 2.
+         */
+        MigrationResult run(ProfileRepository repository, boolean apply) throws IOException;
+    }
+
+    /** @param applied whether the store was migrated @param summary the operator-facing report */
+    public record MigrationResult(boolean applied, String summary) {
+
+        public MigrationResult {
+            Objects.requireNonNull(summary, "summary");
+        }
+    }
+
+    /**
+     * Reads the store format on the I/O lane and decides the paths before any player is admitted; call
+     * once, before the service and listeners are registered. A refused store ({@link StoreFormat.Gate#REFUSED})
+     * fails with {@link ProfileErrorCode#STORE_FORMAT_REFUSED} naming the format and the OD-2 rollback rule.
+     * A format-1 store is migrated per {@code migration.mode}: {@code off} leaves it (format-1 paths),
+     * {@code dry-run} logs the report and writes nothing, {@code apply} migrates it and then requires the store
+     * to read back as format 2, failing the start otherwise. A store whose marker says a migration is in
+     * progress (a crash mid-migration) is refused unless {@code apply} resumes it (the migration requires its
+     * complete verified backup); {@code dry-run} reports it and still refuses. On a format-2 store every pending intent is
+     * resolved ({@link ProfileRepository#resolveIntent}); one that cannot be resolved stays pending and its
+     * players' format-2 mutations are refused with {@link ProfileErrorCode#RECOVERY_REQUIRED}.
+     */
+    public CompletableFuture<StoreStatus> open(final StoreMigration migration) {
+        Objects.requireNonNull(migration, "migration");
+        return io(() -> {
+            StoreFormat.Marker marker = this.repository.storeFormat();
+            StoreFormat.Decision decision = StoreFormat.gate(marker);
+            // A migration this build started and that did not finish is refused like any other REFUSED marker,
+            // except that migration.mode: apply resumes it (the migration verifies the backup first) and dry-run
+            // reports it; the store is never used while the marker says IN_PROGRESS.
+            final boolean interrupted = marker.format() == StoreFormat.CURRENT
+                && marker.migration() == StoreFormat.MigrationState.IN_PROGRESS;
+            if (decision.gate() == StoreFormat.Gate.REFUSED && !interrupted) throw refusedStore(marker, decision);
+            final ProfileSettings.MigrationMode mode = this.settings.migration().mode();
+            String migrated;
+            if (decision.gate() == StoreFormat.Gate.LEGACY || interrupted) {
+                switch (mode) {
+                    case OFF -> {
+                        if (interrupted) {
+                            throw new ProfileOperationException(ProfileErrorCode.STORE_FORMAT_REFUSED, "AWF MultiProfile refuses"
+                                + " the profile store (STORE_FORMAT_REFUSED): " + decision.reason() + ". Marker: " + describe(marker)
+                                + ". Set migration.mode: apply (with migration.backup-dir holding the backup it wrote) to resume"
+                                + " the migration offline, or restore that backup. " + ROLLBACK_RULE
+                                + ". Nothing was written and MultiProfile did not start");
+                        }
+                        migrated = "off: the store stays format 1 (no stored profile names or types; co-op needs format 2)";
+                    }
+                    case DRY_RUN -> {
+                        // A dry-run writes nothing, so its failure leaves the store as it was and does not
+                        // stop the start of a format-1 store; it is reported instead.
+                        String summary;
+                        try {
+                            summary = "dry-run, nothing written: " + migration.run(this.repository, false).summary();
+                            SourbyLogger.info("AWF MultiProfile: format-2 migration " + summary);
+                        } catch (final IOException | RuntimeException failed) {
+                            summary = "dry-run failed, nothing written: " + failed.getMessage();
+                            SourbyLogger.error("AWF MultiProfile: the format-2 migration dry-run of "
+                                + this.repository.describe() + " failed: " + failed.getMessage()
+                                + "; the store was not changed");
+                        }
+                        if (interrupted) {
+                            throw new ProfileOperationException(ProfileErrorCode.STORE_FORMAT_REFUSED, "AWF MultiProfile refuses"
+                                + " the profile store (STORE_FORMAT_REFUSED): " + decision.reason() + ". Marker: " + describe(marker)
+                                + ". Dry-run report: " + summary + ". Set migration.mode: apply to resume it offline, or restore the"
+                                + " backup. Nothing was written and MultiProfile did not start");
+                        }
+                        migrated = summary;
+                    }
+                    case APPLY -> {
+                        final MigrationResult result;
+                        try {
+                            result = migration.run(this.repository, true);
+                        } catch (final IOException | RuntimeException failed) {
+                            throw new ProfileOperationException(ProfileErrorCode.MIGRATION_REQUIRED, "the format-2 migration"
+                                + " (migration.mode: apply) failed: " + failed.getMessage() + ". MultiProfile did not start"
+                                + " and no player was admitted; fix the cause and restart, or restore the backup in "
+                                + this.settings.migration().backupDir(), failed);
+                        }
+                        marker = this.repository.storeFormat();
+                        decision = StoreFormat.gate(marker);
+                        if (!result.applied() || decision.gate() != StoreFormat.Gate.FORMAT_2) {
+                            throw new ProfileOperationException(ProfileErrorCode.MIGRATION_REQUIRED, "the format-2 migration"
+                                + " reported " + (result.applied() ? "success" : "nothing applied") + " but the store reads"
+                                + " as " + describe(marker) + " (" + decision.reason() + "); MultiProfile did not start");
+                        }
+                        migrated = "applied: " + result.summary();
+                        SourbyLogger.info("AWF MultiProfile: migrated " + this.repository.describe() + " to format 2: "
+                            + result.summary());
+                    }
+                    default -> throw new IllegalStateException("migration mode " + mode);
+                }
+            } else {
+                migrated = mode == ProfileSettings.MigrationMode.OFF ? "not needed (format 2)"
+                    : "ignored: the store is already format 2 (migration.mode " + mode.id() + ")";
+            }
+            // Recorded before intent recovery: recovery uses the format-2 paths.
+            this.storeStatus = new StoreStatus(marker, decision.gate(), decision.reason(), migrated, List.of());
+            final List<UUID> unresolved = decision.gate() == StoreFormat.Gate.FORMAT_2 ? resolveIntentsAtStartup() : List.of();
+            this.storeStatus = new StoreStatus(marker, decision.gate(), decision.reason(), migrated, unresolved);
+            return this.storeStatus;
+        });
+    }
+
+    /** What {@link #open} decided, or {@code null} before it ran. */
+    public StoreStatus storeStatus() {
+        final StoreStatus status = this.storeStatus;
+        if (status == null) return null;
+        final List<UUID> unresolved = new ArrayList<>(this.unattributedIntents);
+        this.unresolvedIntents.values().forEach(ids -> ids.forEach(id -> {
+            if (!unresolved.contains(id)) unresolved.add(id);
+        }));
+        return new StoreStatus(status.marker(), status.gate(), status.reason(), status.migration(), unresolved);
+    }
+
+    /** Whether the store is format 2 and the format-2 paths are used. */
+    public boolean format2() {
+        final StoreStatus status = this.storeStatus;
+        return status != null && status.gate() == StoreFormat.Gate.FORMAT_2;
+    }
+
+    /**
+     * Runs the migration's read-only report against the open store now ({@code /awf multiprofile migrate
+     * dry-run}); writes nothing. A store that is already format 2 reports that instead.
+     */
+    public CompletableFuture<String> migrationDryRun(final StoreMigration migration) {
+        if (!this.settings.enabled()) return failed(ProfileErrorCode.DISABLED, "AWF MultiProfile is disabled");
+        return io(() -> {
+            if (format2()) return "the store is already format 2; there is nothing to migrate";
+            return migration.run(this.repository, false).summary();
+        });
+    }
+
+    private static ProfileOperationException refusedStore(final StoreFormat.Marker marker, final StoreFormat.Decision decision) {
+        return new ProfileOperationException(ProfileErrorCode.STORE_FORMAT_REFUSED, "AWF MultiProfile refuses the profile"
+            + " store (STORE_FORMAT_REFUSED): " + decision.reason() + ". Marker: " + describe(marker) + ". " + ROLLBACK_RULE
+            + ". Nothing was written and MultiProfile did not start");
+    }
+
+    /** One line describing a store format marker, for logs and commands. */
+    public static String describe(final StoreFormat.Marker marker) {
+        return "format " + marker.format() + ", migration " + marker.migration() + ", schema " + marker.schema()
+            + (marker.writtenBy().isEmpty() ? "" : ", written by " + marker.writtenBy())
+            + (marker.writtenAtMillis() == 0L ? "" : " at " + java.time.Instant.ofEpochMilli(marker.writtenAtMillis()));
+    }
+
+    /**
+     * Resolves every pending intent of the global index before admission; returns the ones left pending.
+     * Runs inside the {@link #open} step. A PREPARED intent nobody can still be running (standalone, or past its
+     * deadline) is aborted, which clears only its own reservations; a committed one rolls forward; an
+     * unresolved outcome stays for recovery.
+     */
+    private List<UUID> resolveIntentsAtStartup() throws IOException {
+        final List<UUID> ids = new ArrayList<>();
+        ProfileIndexPage.Cursor cursor = null;
+        for (int pages = 0; ; pages++) {
+            if (pages == MAX_INTENT_PAGES) {
+                throw error(ProfileErrorCode.RECOVERY_REQUIRED, "more than " + MAX_INTENT_PAGES * ProfileIndexPage.LISTING_PAGE
+                    + " pending intents; refusing to start without resolving them (offline recovery needed)");
+            }
+            final ProfileIndexPage page = this.repository.index(ProfileIndexPage.Kind.PENDING_INTENTS,
+                ProfileIndexPage.GLOBAL, null, null, cursor);
+            for (final ProfileIndexPage.Entry entry : page.entries()) ids.add(entry.id());
+            cursor = page.cursorAfterLast();
+            if (cursor == null || page.entries().size() < ProfileIndexPage.LISTING_PAGE) break;
+        }
+        final List<UUID> unresolved = new ArrayList<>();
+        for (final UUID id : ids) {
+            if (!resolveIntent(id, Map.of())) unresolved.add(id);
+        }
+        if (!ids.isEmpty()) {
+            SourbyLogger.info("AWF MultiProfile: " + ids.size() + " pending intent(s) at startup, " + (ids.size() - unresolved.size())
+                + " resolved" + (unresolved.isEmpty() ? "" : "; " + unresolved.size() + " left pending, their players'"
+                    + " profile changes are refused until recovery: " + unresolved));
+        }
+        return unresolved;
+    }
+
+    /**
+     * Resolves one intent under the claims it names: the player claims in {@code held} are used as they are
+     * (the player's own session at login), others are claimed briefly; a claim another live session holds
+     * leaves the intent pending. Returns whether the intent is terminal afterwards; records it as unresolved
+     * otherwise. Runs inside an I/O step.
+     */
+    private boolean resolveIntent(final UUID operationId, final Map<UUID, PlayerClaim> held) {
+        final List<PlayerClaim> acquired = new ArrayList<>(2);
+        ProfileClaim transaction = null;
+        ProfileIntent intent = null;
+        try {
+            final Optional<ProfileIntent> found = this.repository.intent(operationId);
+            if (found.isEmpty()) {
+                // The pending index names an intent that is not stored: the index is corrupt; fail closed.
+                SourbyLogger.error("AWF MultiProfile: the pending-intent index names " + operationId + ", which is not"
+                    + " stored; every format-2 profile change is refused until an offline index rebuild");
+                this.unattributedIntents.add(operationId);
+                return false;
+            }
+            intent = found.get();
+            if (!intent.pending()) {
+                forgetUnresolved(intent);
+                return true;
+            }
+            PlayerClaim actor = null;
+            for (final ProfileIntent.ClaimRef ref : intent.playerClaims()) {
+                PlayerClaim claim = held.get(ref.id());
+                if (claim == null) {
+                    final PlayerSessionOwnership.Grant grant = this.playerSessions.claim(ref.id(), UUID.randomUUID()).join();
+                    if (!grant.granted()) {
+                        markUnresolved(intent, "the session claim of " + ref.id() + " is " + grant.reason());
+                        return false;
+                    }
+                    claim = grant.claim();
+                    acquired.add(claim);
+                }
+                if (actor == null) actor = claim;
+            }
+            if (intent.profileClaim() != null) {
+                final ProfileOwnership.TransactionGrant grant = this.ownership
+                    .claimTransaction(intent.profileClaim().id(), UUID.randomUUID()).join();
+                if (!grant.granted()) {
+                    markUnresolved(intent, "the transaction claim of " + intent.profileClaim().id() + " is " + grant.reason());
+                    return false;
+                }
+                transaction = grant.claim();
+            }
+            final CoopOperation op = new CoopOperation(intent.operationId(), intent.kind(), intent.actor(),
+                intent.requestDigest(), intent.createdAtMillis());
+            this.repository.resolveIntent(operationId, CoopWriteGuard.intent(op, transaction, actor, intent.revision(),
+                intent.expectedAfter(), Set.of(operationId)));
+            ProfileIntent after = this.repository.intent(operationId).orElse(intent);
+            if (after.pending() && !after.committed() && after.phase() == ProfileIntent.Phase.PREPARED
+                && (!this.ownership.distributed() || after.pastDeadline(this.repository.storeClockMillis()))) {
+                // Never committed, and no other process can still be running it: abort clears its own
+                // reservations only. A committed intent always rolls forward instead.
+                this.repository.abortIntent(operationId, CoopWriteGuard.intent(op, transaction, actor, after.revision(),
+                    after.expectedAfter(), Set.of(operationId)));
+                after = this.repository.intent(operationId).orElse(after);
+                SourbyLogger.warn("AWF MultiProfile: aborted the uncommitted " + after.kind() + " intent " + operationId
+                    + " left by an earlier process; its reservations were cleared");
+            }
+            if (!after.pending()) {
+                forgetUnresolved(after);
+                return true;
+            }
+            markUnresolved(after, "it is " + after.phase());
+            return false;
+        } catch (final IOException | RuntimeException failed) {
+            if (intent != null) {
+                markUnresolved(intent, messageOf(failed));
+            } else {
+                SourbyLogger.error("AWF MultiProfile: intent " + operationId + " could not be read (" + messageOf(failed)
+                    + "); every format-2 profile change is refused until it is recovered");
+                this.unattributedIntents.add(operationId);
+            }
+            return false;
+        } finally {
+            if (transaction != null) releaseTransactionClaim(transaction);
+            releasePlayerClaims(acquired);
+        }
+    }
+
+    private void markUnresolved(final ProfileIntent intent, final String why) {
+        final java.util.Set<UUID> players = new java.util.LinkedHashSet<>();
+        players.add(intent.actor());
+        for (final ProfileIntent.ClaimRef ref : intent.playerClaims()) players.add(ref.id());
+        for (final UUID player : players) {
+            this.unresolvedIntents.computeIfAbsent(player, ignored -> ConcurrentHashMap.newKeySet()).add(intent.operationId());
+        }
+        SourbyLogger.warn("AWF MultiProfile: " + intent.kind() + " intent " + intent.operationId() + " stays pending (" + why
+            + "); profile changes of " + players + " are refused until it is resolved");
+    }
+
+    private void forgetUnresolved(final ProfileIntent intent) {
+        this.unresolvedIntents.values().forEach(ids -> ids.remove(intent.operationId()));
+        this.unresolvedIntents.values().removeIf(java.util.Set::isEmpty);
+    }
+
+    /** Refuses a format-2 mutation of an account that a pending intent still names (or any, for a corrupt index). */
+    private void requireNoUnresolvedIntent(final UUID accountId) {
+        if (!this.unattributedIntents.isEmpty()) {
+            throw error(ProfileErrorCode.RECOVERY_REQUIRED, "the pending-intent index is unreadable or names a missing intent ("
+                + this.unattributedIntents + "); format-2 profile changes are refused until an offline recovery");
+        }
+        final java.util.Set<UUID> pending = this.unresolvedIntents.get(accountId);
+        if (pending != null && !pending.isEmpty()) {
+            throw error(ProfileErrorCode.RECOVERY_REQUIRED, "intent(s) " + pending + " of " + accountId + " are unresolved;"
+                + " the player's next login retries them, or see /awf multiprofile format");
+        }
+    }
+
+    // ------------------------------------------------------------------ profiles
+
     /** Profiles of an account, in account order. */
     public CompletableFuture<List<ProfileInfo>> list(final UUID accountId) {
+        return listDetails(accountId).thenApply(details -> details.stream().map(ProfileDetails::info).toList());
+    }
+
+    /** Profiles of an account with their name and policy type, in account order. */
+    public CompletableFuture<List<ProfileDetails>> listDetails(final UUID accountId) {
         if (!this.settings.enabled()) return failed(ProfileErrorCode.DISABLED, "AWF MultiProfile is disabled");
         return io(() -> {
             final PlayerAccount account = this.repository.loadAccount(accountId, this.settings.defaultSlots());
-            final List<ProfileInfo> infos = new ArrayList<>();
-            for (final AuroraProfile profile : this.repository.profiles(accountId)) {
+            final List<ProfileDetails> details = new ArrayList<>();
+            final List<AuroraProfile> profiles = this.repository.profiles(accountId);
+            final Map<UUID, String> legacyNames = ProfileRepositoryMigration.legacyNames(profiles);
+            for (final AuroraProfile profile : profiles) {
                 if (profile.status() == ProfileStatus.DELETED) continue;
-                infos.add(info(profile, account.activeProfile()));
+                details.add(details(profile, account.activeProfile(), legacyNames));
             }
-            return List.copyOf(infos);
+            return List.copyOf(details);
         });
     }
 
     public CompletableFuture<Optional<ProfileInfo>> get(final UUID profileId) {
+        return getDetails(profileId).thenApply(found -> found.map(ProfileDetails::info));
+    }
+
+    /** One profile with its name and policy type. */
+    public CompletableFuture<Optional<ProfileDetails>> getDetails(final UUID profileId) {
         if (!this.settings.enabled()) return failed(ProfileErrorCode.DISABLED, "AWF MultiProfile is disabled");
-        return io(() -> describe(profileId));
+        return io(() -> describeDetails(profileId));
     }
 
     public CompletableFuture<Optional<ProfileInfo>> active(final UUID accountId) {
         return list(accountId).thenApply(infos -> infos.stream().filter(ProfileInfo::active).findFirst());
     }
 
-    /** Creates a profile. Slot limit and account revision are checked in one serialised I/O step. */
+    /** Creates a profile; see {@link #createDetailed}. */
     public CompletableFuture<ProfileInfo> create(final ProfileRequest request) {
+        return createDetailed(request).thenApply(ProfileDetails::info);
+    }
+
+    /**
+     * Creates a profile. Slot limit and account revision are checked in one serialised I/O step.
+     *
+     * <p>The policy type is the request's, else {@code types.default}; one outside {@code types.allowed} is
+     * {@link ProfileErrorCode#TYPE_NOT_ALLOWED}. The name ({@code names.policy: cute}) is server-assigned from
+     * the {@link CuteNames} pool and unique in the account ignoring case; a requested name must be a pool
+     * name (optionally with a numeric suffix), else {@link ProfileErrorCode#NAME_INVALID}, and one the account
+     * already uses is {@link ProfileErrorCode#NAME_TAKEN}. Both are stored with the profile and never change.
+     * A format-1 store stores neither: there a request naming a name or a type other than {@code classic}
+     * (including a {@code types.default} other than classic) is refused with
+     * {@link ProfileErrorCode#MIGRATION_REQUIRED}, and the profile reads back with its id-derived name.</p>
+     *
+     * <p>Format 2: one intent under the account's session claim {@code Q} (COOP-DESIGN §5): the staged
+     * after-images are the new profile record ({@code M} absent, revision 0; the store checks the name is free in
+     * the account at prepare and at commit) and the account with the slot and its alias ({@code A} + 2 after the
+     * reservation); PREPARE reserves the account, COMMIT installs both. An interruption leaves a PREPARED or
+     * COMMITTED intent that startup or the player's next login resolves (abort clears the reservation, commit
+     * rolls forward); never a profile record no account lists.</p>
+     */
+    public CompletableFuture<ProfileDetails> createDetailed(final ProfileRequest request) {
         if (!this.settings.enabled()) return failed(ProfileErrorCode.DISABLED, "AWF MultiProfile is disabled");
         return io(() -> {
             if (this.switches.containsKey(request.accountId())) {
                 throw error(ProfileErrorCode.SWITCH_IN_PROGRESS, "account transition in progress");
             }
-            final AuroraProfile profile;
-            try {
-                profile = new AuroraProfile(UUID.randomUUID(), request.accountId(), request.type(),
-                    request.metadata(), System.currentTimeMillis(), 0L, ProfileStatus.ACTIVE);
-            } catch (final IllegalArgumentException invalid) {
-                // A bad type or metadata is the caller's mistake, not a server fault.
-                throw error(ProfileErrorCode.INVALID_REQUEST, invalid.getMessage());
+            final dev.iyanz.sourbycraft.api.profile.ProfileType type = request.profileType() != null
+                ? request.profileType() : this.settings.types().defaultType();
+            if (!this.settings.types().allows(type)) {
+                throw error(ProfileErrorCode.TYPE_NOT_ALLOWED, "profile type " + type.id() + " is not in types.allowed "
+                    + ProfileSettings.typeIds(this.settings.types().allowed()));
             }
             final PlayerAccount account = this.repository.loadAccount(request.accountId(), this.settings.defaultSlots());
             if (account.full() || account.profileIds().size() >= this.settings.maxSlots()) {
                 throw error(ProfileErrorCode.SLOT_LIMIT, "the account already owns " + account.profileIds().size()
                     + " of " + account.slotLimit() + " profiles");
             }
-            this.repository.saveProfile(profile, ProfileWriteGuard.of(null, ProfileWriteGuard.ABSENT));
-            this.repository.saveAccount(account.withProfile(profile.id()),
-                ProfileWriteGuard.of(null, account.revision()));
-            // Published inside the step: a callback attached after the future completed would run the
-            // blocking publish on the caller's thread, which may be a region thread.
-            publish(FabricEventType.PROFILE_CREATED, Map.of("profile", profile.id().toString(),
-                "account", profile.accountId().toString(), "type", profile.type()));
-            return info(profile, null);
+            return format2() ? createFormat2(request, type, account) : createFormat1(request, type, account);
         });
+    }
+
+    private ProfileDetails createFormat1(final ProfileRequest request, final dev.iyanz.sourbycraft.api.profile.ProfileType type,
+                                         final PlayerAccount account) throws IOException {
+        if (request.name() != null || type != dev.iyanz.sourbycraft.api.profile.ProfileType.CLASSIC) {
+            throw error(ProfileErrorCode.MIGRATION_REQUIRED, "the profile store is format 1, which stores no profile name"
+                + " and no type besides classic; " + (request.name() != null ? "a requested name" : "type " + type.id())
+                + " cannot be kept. Migrate the store to format 2 (migration.mode: apply) first. Nothing was written");
+        }
+        final AuroraProfile profile;
+        try {
+            profile = new AuroraProfile(UUID.randomUUID(), request.accountId(), request.type(),
+                request.metadata(), System.currentTimeMillis(), 0L, ProfileStatus.ACTIVE);
+        } catch (final IllegalArgumentException invalid) {
+            // A bad type or metadata is the caller's mistake, not a server fault.
+            throw error(ProfileErrorCode.INVALID_REQUEST, invalid.getMessage());
+        }
+        this.repository.saveProfile(profile, ProfileWriteGuard.of(null, ProfileWriteGuard.ABSENT));
+        this.repository.saveAccount(account.withProfile(profile.id()),
+            ProfileWriteGuard.of(null, account.revision()));
+        // Published inside the step: a callback attached after the future completed would run the
+        // blocking publish on the caller's thread, which may be a region thread.
+        publish(FabricEventType.PROFILE_CREATED, Map.of("profile", profile.id().toString(),
+            "account", profile.accountId().toString(), "type", profile.type()));
+        return details(profile, null);
+    }
+
+    private ProfileDetails createFormat2(final ProfileRequest request, final dev.iyanz.sourbycraft.api.profile.ProfileType type,
+                                         final PlayerAccount account) throws IOException {
+        final UUID accountId = request.accountId();
+        requireNoUnresolvedIntent(accountId);
+        if (account.pendingIntent() != null) {
+            throw error(ProfileErrorCode.RECOVERY_REQUIRED, "the account is reserved by intent " + account.pendingIntent());
+        }
+        final java.util.Set<String> taken = new java.util.HashSet<>();
+        for (final AuroraProfile existing : this.repository.profiles(accountId)) taken.add(CuteNames.key(existing.name()));
+        final String name;
+        if (request.name() != null) {
+            final String requested = request.name().strip();
+            if (!CuteNames.valid(requested)) {
+                throw error(ProfileErrorCode.NAME_INVALID, "'" + request.name() + "' is not a profile name: names.policy cute"
+                    + " accepts a name from the server's fruit and vegetable pool, optionally followed by a space and a"
+                    + " number 1-999");
+            }
+            name = CuteNames.normalize(requested);
+            if (taken.contains(CuteNames.key(name))) {
+                throw error(ProfileErrorCode.NAME_TAKEN, "the account already has a profile named " + name
+                    + " (names are compared ignoring case)");
+            }
+        } else {
+            try {
+                name = CuteNames.generate(taken);
+            } catch (final IllegalStateException exhausted) {
+                throw error(ProfileErrorCode.NAME_TAKEN, "no free profile name is left for this account");
+            }
+        }
+        final AuroraProfile profile;
+        try {
+            profile = AuroraProfile.create(accountId, request.type(), type, name, request.metadata(), System.currentTimeMillis());
+        } catch (final IllegalArgumentException invalid) {
+            throw error(ProfileErrorCode.INVALID_REQUEST, invalid.getMessage());
+        }
+        final String alias = CuteNames.allocateAlias(CuteNames.alias(name), account.takenAliases());
+        // After-images carry the revisions COMMIT installs: the account after its reservation (A + 1) advances once
+        // more (A + 2); the new profile record starts at 0.
+        final long accountRevision = account.revision();
+        final PlayerAccount after = account.withProfile(profile.id(), alias)
+            .atRevision(CoopWriteGuard.next(CoopWriteGuard.next(accountRevision, "account " + accountId), "account " + accountId));
+        final List<PlayerClaim> acquired = new ArrayList<>(1);
+        try {
+            final PlayerClaim q = actorClaim(accountId, acquired);
+            final CoopOperation op = operation(CoopOperation.Kind.CREATE_PROFILE, accountId, profile.id(), name, type,
+                request.type(), alias, accountRevision);
+            runIntent(op, null, q,
+                List.of(Expected.account(accountId, accountRevision), Expected.metadata(profile.id(), CoopWriteGuard.ABSENT)),
+                List.of(Expected.account(accountId, accountRevision + 1L), Expected.metadata(profile.id(), CoopWriteGuard.ABSENT)),
+                List.of(new AfterImage(ProfileRecords.TYPE_PROFILE, profile.id(), 0L, ProfileRecords.profilePayload2(profile)),
+                    new AfterImage(ProfileRecords.TYPE_ACCOUNT, accountId, after.revision(), ProfileRecords.accountPayload2(after))));
+            accountCommitted(after);
+        } finally {
+            releasePlayerClaims(acquired);
+        }
+        publish(FabricEventType.PROFILE_CREATED, Map.of("profile", profile.id().toString(),
+            "account", profile.accountId().toString(), "type", profile.type(), "profile-type", type.id(), "name", name));
+        return details(profile, after.activeProfile());
     }
 
     /** Tombstones a profile; its AWF worlds are left alone (a consumer may own them). */
@@ -193,6 +688,7 @@ public final class ProfileEngine {
             if (profileId.equals(account.activeProfile())) {
                 throw error(ProfileErrorCode.PROFILE_LOCKED, "the active profile cannot be deleted; switch away first");
             }
+            if (format2()) return deleteFormat2(profile, account);
             final OwnerClaim admin = adminClaim(profileId);
             try {
                 this.repository.saveProfile(profile.withStatus(ProfileStatus.DELETED),
@@ -204,6 +700,62 @@ public final class ProfileEngine {
                 releaseAdminClaim(admin);
             }
         });
+    }
+
+    /**
+     * Format-2 tombstone as one intent under {@code P} (the profile's transaction claim) and the account's
+     * {@code Q}: PREPARE reserves the metadata record and the account, COMMIT installs the DELETED record
+     * ({@code M} + 2) and the account without the slot and its alias ({@code A} + 2). An interruption is recovered
+     * by the intent protocol (abort or roll forward), never finished by a second, separately guarded step. A
+     * profile already DELETED that the account still lists gets the account step only. Member snapshots and the
+     * binding are kept as records; nothing touches AWF world data.
+     */
+    private boolean deleteFormat2(final AuroraProfile profile, final PlayerAccount account) throws IOException {
+        final UUID accountId = profile.accountId();
+        final UUID profileId = profile.id();
+        requireNoUnresolvedIntent(accountId);
+        final boolean tombstone = profile.status() != ProfileStatus.DELETED;
+        final boolean unlist = account.owns(profileId);
+        if (!tombstone && !unlist) return false;
+        if (tombstone && profile.pendingIntent() != null) {
+            throw error(ProfileErrorCode.RECOVERY_REQUIRED, "profile " + profileId + " is reserved by intent " + profile.pendingIntent());
+        }
+        if (unlist && account.pendingIntent() != null) {
+            throw error(ProfileErrorCode.RECOVERY_REQUIRED, "the account is reserved by intent " + account.pendingIntent());
+        }
+        final List<Expected> before = new ArrayList<>(2);
+        final List<Expected> after = new ArrayList<>(2);
+        final List<AfterImage> images = new ArrayList<>(2);
+        if (tombstone) {
+            final long m = profile.revision();
+            final AuroraProfile deleted = profile.withStatus(ProfileStatus.DELETED)
+                .atRevision(CoopWriteGuard.next(CoopWriteGuard.next(m, "profile " + profileId), "profile " + profileId));
+            before.add(Expected.metadata(profileId, m));
+            after.add(Expected.metadata(profileId, m + 1L));
+            images.add(new AfterImage(ProfileRecords.TYPE_PROFILE, profileId, deleted.revision(), ProfileRecords.profilePayload2(deleted)));
+        }
+        PlayerAccount unlisted = null;
+        if (unlist) {
+            final long a = account.revision();
+            unlisted = account.withoutProfile(profileId)
+                .atRevision(CoopWriteGuard.next(CoopWriteGuard.next(a, "account " + accountId), "account " + accountId));
+            before.add(Expected.account(accountId, a));
+            after.add(Expected.account(accountId, a + 1L));
+            images.add(new AfterImage(ProfileRecords.TYPE_ACCOUNT, accountId, unlisted.revision(), ProfileRecords.accountPayload2(unlisted)));
+        }
+        final List<PlayerClaim> acquired = new ArrayList<>(1);
+        ProfileClaim transaction = null;
+        try {
+            final PlayerClaim q = actorClaim(accountId, acquired);
+            if (tombstone) transaction = transactionClaim(profileId);
+            runIntent(operation(CoopOperation.Kind.DELETE_PROFILE, accountId, profileId, profile.revision(), account.revision()),
+                transaction, q, before, after, images);
+            if (unlisted != null) accountCommitted(unlisted);
+            return true;
+        } finally {
+            if (transaction != null) releaseTransactionClaim(transaction);
+            releasePlayerClaims(acquired);
+        }
     }
 
     /**
@@ -261,7 +813,26 @@ public final class ProfileEngine {
                 throw error(ProfileErrorCode.PROFILE_LOCKED, "the active profile cannot be locked; switch away first");
             }
             final ProfileStatus next = locked ? ProfileStatus.LOCKED : ProfileStatus.ACTIVE;
-            if (profile.status() != next) {
+            if (profile.status() != next && format2()) {
+                // Format 2: a hold is a metadata mutation (M advances); freshness lives on the member heads.
+                requireNoUnresolvedIntent(profile.accountId());
+                if (profile.pendingIntent() != null) {
+                    throw error(ProfileErrorCode.RECOVERY_REQUIRED, "profile " + profileId + " is reserved by intent "
+                        + profile.pendingIntent());
+                }
+                final List<PlayerClaim> acquired = new ArrayList<>(1);
+                ProfileClaim transaction = null;
+                try {
+                    final PlayerClaim q = actorClaim(profile.accountId(), acquired);
+                    transaction = transactionClaim(profileId);
+                    commitProfile(profile.withStatus(next), CoopWriteGuard.metadata(operation(CoopOperation.Kind.SET_STATUS,
+                        profile.accountId(), profileId, next, profile.revision()), transaction, q, account.revision(),
+                        profile.revision()));
+                } finally {
+                    if (transaction != null) releaseTransactionClaim(transaction);
+                    releasePlayerClaims(acquired);
+                }
+            } else if (profile.status() != next) {
                 final OwnerClaim admin = adminClaim(profileId);
                 try {
                     this.repository.saveProfile(profile.withHold(next), ProfileWriteGuard.of(admin, profile.revision()));
@@ -285,7 +856,19 @@ public final class ProfileEngine {
         }
         return io(() -> {
             final PlayerAccount account = this.repository.loadAccount(accountId, this.settings.defaultSlots());
-            this.repository.saveAccount(account.withSlotLimit(slots), ProfileWriteGuard.of(null, account.revision()));
+            if (!format2()) {
+                this.repository.saveAccount(account.withSlotLimit(slots), ProfileWriteGuard.of(null, account.revision()));
+                return slots;
+            }
+            requireNoUnresolvedIntent(accountId);
+            final List<PlayerClaim> acquired = new ArrayList<>(1);
+            try {
+                final PlayerClaim q = actorClaim(accountId, acquired);
+                commitAccount(account.withSlotLimit(slots), accountGuard(operation(CoopOperation.Kind.ACCOUNT_LIMIT, accountId,
+                    "slot-limit", slots, account.revision()), q, account.revision(), null));
+            } finally {
+                releasePlayerClaims(acquired);
+            }
             return slots;
         });
     }
@@ -321,7 +904,8 @@ public final class ProfileEngine {
                     + " nothing to switch");
             }
             requireNoPendingJournal(playerId);
-            return begin(new SwitchStart(account, target.get()), targetId, began);
+            return begin(new SwitchStart(account, target.get(), format2() ? switchAdmission(account, target.get()) : null),
+                targetId, began);
         }).thenCompose(result -> result)
             .exceptionally(failed -> failure(codeOf(failed), messageOf(failed), null, began));
     }
@@ -329,15 +913,21 @@ public final class ProfileEngine {
     private CompletableFuture<ProfileSwitchResult> begin(final SwitchStart start, final UUID targetId, final long began) {
         final UUID playerId = start.account().playerId();
         final long deadline = System.currentTimeMillis() + this.settings.switching().timeoutMillis();
-        final ProfileTransition journal = ProfileTransition.started(playerId, start.account().activeProfile(),
+        final ProfileTransition started = ProfileTransition.started(playerId, start.account().activeProfile(),
             targetId, deadline, 0L);
+        final SwitchCoop coop = start.coop();
+        final ProfileTransition journal = coop == null ? started : started.withCoop(new ProfileTransition.Coop(
+            coop.operation().operationId(), coop.operation().requestDigest(), 0L, coop.claim().fence(),
+            truncateIncarnation(coop.claim().incarnation()), coop.sessionGeneration(), coop.fromEpoch(), coop.toEpoch(),
+            coop.accountRevision(), Math.max(0L, coop.fromMetadata()), coop.toMetadata(), Math.max(0L, coop.fromHead()),
+            Math.max(0L, coop.toHead()), 0L, null));
         if (this.switches.putIfAbsent(playerId, journal.transitionId()) != null) {
             if (this.metrics != null) this.metrics.profileFailure();
             return CompletableFuture.completedFuture(failure(ProfileErrorCode.SWITCH_IN_PROGRESS,
                 "another profile switch is already running for this player", null, began));
         }
         final UUID ownerToken = UUID.randomUUID();
-        final SwitchRun run = new SwitchRun(journal, start.account(), start.target(), ownerToken, began);
+        final SwitchRun run = new SwitchRun(journal, start.account(), start.target(), ownerToken, began, coop);
         this.runs.add(run);
         return run.execute().whenComplete((result, failed) -> {
             this.runs.remove(run);
@@ -355,10 +945,18 @@ public final class ProfileEngine {
         if (this.releaseOnSwitchEnd.remove(playerId)) {
             // The player quit while the run was going on; the claim it left behind belongs to nobody now.
             this.releaseSession(playerId);
+            if (this.sessions.containsKey(playerId)) this.releasePlayerSession(playerId, null);
         }
     }
 
-    /** Captures and saves the current state of a profile whose owner is online on this node. */
+    /**
+     * Captures and saves the current state of a profile whose owner is online on this node.
+     *
+     * <p>Format 2: the capture ticket (the session claim {@code Q}, session generation, {@code A}, active
+     * profile and membership epoch) is read before the capture and compared after it; the snapshot is published
+     * into the member stream under {@link CoopWriteGuard#memberSave}, so the store refuses it when any of
+     * {@code A}, {@code M} or {@code R} moved.</p>
+     */
     public CompletableFuture<Void> save(final UUID profileId) {
         if (!this.settings.enabled()) return failed(ProfileErrorCode.DISABLED, "AWF MultiProfile is disabled");
         return io(() -> {
@@ -373,7 +971,22 @@ public final class ProfileEngine {
                 throw error(ProfileErrorCode.PROFILE_LOCKED, "only the active profile can be saved");
             }
             requireNoPendingJournal(profile.accountId());
-            return new SaveStart(profile, account.revision(), writeAuthority(profile));
+            if (format2()) {
+                requireNoUnresolvedIntent(profile.accountId());
+                final PlayerSession session = this.sessions.get(profile.accountId());
+                if (session == null) {
+                    throw error(ProfileErrorCode.OWNERSHIP_CONFLICT, "the player has no admitted session on this node;"
+                        + " the snapshot was not written");
+                }
+                requireLive(profile.accountId(), session);
+                if (account.activeEpoch() == null || !profile.hasMember(profile.accountId(), account.activeEpoch())) {
+                    throw error(ProfileErrorCode.STALE_STATE, "the account's membership epoch is not a current membership"
+                        + " of " + profileId + "; the snapshot was not written");
+                }
+                return new SaveStart(profile, account.revision(), null, new CaptureTicket(profile.accountId(),
+                    session.claim(), account.sessionGeneration(), account.revision(), profileId, account.activeEpoch()));
+            }
+            return new SaveStart(profile, account.revision(), writeAuthority(profile), null);
         }).thenCompose(start -> this.players.capture(start.profile().accountId(), this.settings.isolation())
             .thenCompose(state -> io(() -> {
                 final AuroraProfile profile = start.profile();
@@ -382,6 +995,13 @@ public final class ProfileEngine {
                 if (this.switches.containsKey(profile.accountId())) {
                     throw error(ProfileErrorCode.SWITCH_IN_PROGRESS, "a profile switch started while the state"
                         + " was captured; the snapshot was not written");
+                }
+                if (start.ticket() != null) {
+                    final long began = System.nanoTime();
+                    publishCaptured(start.ticket(), state);
+                    if (this.metrics != null) this.metrics.snapshot(System.nanoTime() - began);
+                    publish(FabricEventType.PROFILE_SAVE_COMPLETED, Map.of("profile", profileId.toString()));
+                    return null;
                 }
                 final PlayerAccount current = this.repository.loadAccount(profile.accountId(),
                     this.settings.defaultSlots());
@@ -401,7 +1021,107 @@ public final class ProfileEngine {
             })));
     }
 
-    private record SaveStart(AuroraProfile profile, long accountRevision, OwnerClaim claim) {}
+    private record SaveStart(AuroraProfile profile, long accountRevision, OwnerClaim claim, CaptureTicket ticket) {}
+
+    /**
+     * What a format-2 capture is attributed to, recorded <em>before</em> the capture: the session claim
+     * {@code Q}, the session generation, {@code A}, the active profile and the membership epoch. A write of the
+     * captured state compares all of them, so a capture that outlived its session, a rejoin, or a switch away and
+     * back (which moves {@code A}) is refused instead of being stored under whichever profile is active later.
+     *
+     * @param profileId the active profile at ticket time, or {@code null} when the account had none
+     */
+    public record CaptureTicket(UUID playerId, PlayerClaim claim, long sessionGeneration, long accountRevision,
+                                UUID profileId, UUID epoch) {}
+
+    /**
+     * The capture ticket of a player's admitted session on this node, from the session record (no I/O): the
+     * quit listener takes it before it captures. {@code null} on a format-1 store or without an admitted session.
+     */
+    public CaptureTicket captureTicket(final UUID playerId) {
+        if (!format2()) return null;
+        final PlayerSession session = this.sessions.get(playerId);
+        if (session == null) return null;
+        return new CaptureTicket(playerId, session.claim(), session.sessionGeneration(), session.accountRevision(),
+            session.activeProfile(), session.activeEpoch());
+    }
+
+    /**
+     * Publishes a format-2 capture into the member stream named by its ticket, after comparing the ticket with
+     * the current session and account. Runs inside an I/O step.
+     */
+    private ProfileSnapshot publishCaptured(final CaptureTicket ticket, final ProfileState state) throws IOException {
+        final UUID accountId = ticket.playerId();
+        final PlayerSession session = this.sessions.get(accountId);
+        if (session == null || !session.claim().equals(ticket.claim())) {
+            throw error(ProfileErrorCode.CLAIM_LOST, "the player session that captured this state is no longer the"
+                + " admitted one; the snapshot was not written");
+        }
+        requireLive(accountId, session);
+        requireNoUnresolvedIntent(accountId);
+        final PlayerAccount account = this.repository.loadAccount(accountId, this.settings.defaultSlots());
+        if (!ticket.profileId().equals(account.activeProfile()) || !ticket.epoch().equals(account.activeEpoch())
+            || account.sessionGeneration() != ticket.sessionGeneration() || account.revision() != ticket.accountRevision()) {
+            throw error(ProfileErrorCode.STALE_STATE, "the account changed while the state was captured (revision "
+                + ticket.accountRevision() + " -> " + account.revision() + ", session " + ticket.sessionGeneration() + " -> "
+                + account.sessionGeneration() + "); the snapshot was not written");
+        }
+        final AuroraProfile profile = this.repository.profile(ticket.profileId())
+            .orElseThrow(() -> error(ProfileErrorCode.PROFILE_NOT_FOUND, "no profile " + ticket.profileId()));
+        if (profile.status() != ProfileStatus.ACTIVE) {
+            throw error(ProfileErrorCode.PROFILE_LOCKED, "profile " + profile.id() + " is " + profile.status());
+        }
+        if (!profile.hasMember(accountId, ticket.epoch())) {
+            throw error(ProfileErrorCode.STALE_STATE, "membership " + ticket.epoch() + " of " + accountId + " in "
+                + profile.id() + " is not current; the snapshot was not written");
+        }
+        return publishMemberState(profile, accountId, ticket.epoch(), state, ticket.claim(), ticket.accountRevision());
+    }
+
+    /**
+     * Publishes {@code state} as the next snapshot of the stream {@code (profile, member, epoch)} under
+     * {@link CoopWriteGuard#memberSave}: {@code Q(member)}, expected {@code A}, {@code M} (compared, not advanced)
+     * and the head's {@code R} ({@link CoopWriteGuard#ABSENT} initialises the stream). The state keeps the
+     * adapter entries of the head's snapshot no adapter of this boot accounts for. Runs inside an I/O step.
+     */
+    private ProfileSnapshot publishMemberState(final AuroraProfile profile, final UUID member, final UUID epoch,
+                                               final ProfileState state, final PlayerClaim q, final long expectedAccount)
+        throws IOException {
+        final Optional<MemberStateHead> head = this.repository.memberHead(profile.id(), member, epoch);
+        if (head.isPresent() && head.get().state() == MemberStateHead.State.CONSUMED) {
+            throw error(ProfileErrorCode.STALE_STATE, "member stream " + head.get().describe() + " was consumed; it is never"
+                + " written again");
+        }
+        if (head.isPresent() && head.get().pendingIntent() != null) {
+            throw error(ProfileErrorCode.RECOVERY_REQUIRED, "member stream " + head.get().describe()
+                + " is reserved by intent " + head.get().pendingIntent());
+        }
+        final MemberStateHead base = head.orElseGet(() -> MemberStateHead.uninitialized(profile.id(), member, epoch));
+        final long expectedHead = head.isPresent() ? head.get().revision() : CoopWriteGuard.ABSENT;
+        final CoopOperation op = operation(CoopOperation.Kind.SAVE_MEMBER, member, profile.id(), epoch, expectedHead);
+        final ProfileState carried = withCarriedAdapters(state, () -> head.isPresent() ? exactHeadSnapshot(head.get())
+            : Optional.empty(), profile.id());
+        final byte[] encoded = encode(profile.id(), carried);
+        final ProfileSnapshot snapshot = ProfileSnapshot.forMember(profile.id(), member, epoch,
+            CoopWriteGuard.next(base.revision(), "member head " + base.describe()), encoded, op.operationId());
+        final MemberStateHead next = base.published(snapshot);
+        final CommitResult result = this.repository.publishMemberSnapshot(next, snapshot, SNAPSHOTS_KEPT,
+            CoopWriteGuard.memberSave(op, q, profile.id(), epoch, expectedAccount, profile.revision(), expectedHead));
+        if (result.unknown()) {
+            settle("the snapshot of " + next.describe(), result, () -> receipted(profile.id(), op)
+                || next.equals(this.repository.memberHead(profile.id(), member, epoch).orElse(null)));
+        }
+        return snapshot;
+    }
+
+    /**
+     * Writes a state the caller captured on the player's owning thread as a snapshot of the account's
+     * active profile; see {@link #saveCaptured(UUID, ProfileState, CaptureTicket)}. On a format-2 store a capture
+     * without a ticket is refused ({@link ProfileErrorCode#CLAIM_LOST}): it cannot be attributed.
+     */
+    public CompletableFuture<Boolean> saveCaptured(final UUID accountId, final ProfileState state) {
+        return saveCaptured(accountId, state, null);
+    }
 
     /**
      * Writes a state the caller captured on the player's owning thread as a snapshot of the account's
@@ -410,15 +1130,29 @@ public final class ProfileEngine {
      * active profile or the engine was already closed when called (shutdown closes it before the server
      * removes players); an engine closing while the step waits fails it instead. Otherwise the checks
      * of {@link #save} apply: no running switch, no pending journal, and the session claim must still
-     * be valid.
+     * be valid. On a format-2 store {@code ticket} ({@link #captureTicket}, taken before the capture) decides
+     * the stream and is compared with the current session and account.
      */
-    public CompletableFuture<Boolean> saveCaptured(final UUID accountId, final ProfileState state) {
+    public CompletableFuture<Boolean> saveCaptured(final UUID accountId, final ProfileState state, final CaptureTicket ticket) {
         Objects.requireNonNull(state, "state");
         if (!this.settings.enabled() || this.closed) return CompletableFuture.completedFuture(false);
         return io(() -> {
             if (this.switches.containsKey(accountId)) {
                 throw error(ProfileErrorCode.SWITCH_IN_PROGRESS, "a profile switch is running for " + accountId
                     + "; its capture is the authoritative save");
+            }
+            if (format2()) {
+                if (ticket == null || !ticket.playerId().equals(accountId)) {
+                    throw error(ProfileErrorCode.CLAIM_LOST, "no capture ticket of an admitted session of " + accountId
+                        + "; the captured state cannot be attributed and was not written");
+                }
+                if (ticket.profileId() == null) return false;
+                requireNoPendingJournal(accountId);
+                final long began = System.nanoTime();
+                final ProfileSnapshot written = publishCaptured(ticket, state);
+                if (this.metrics != null) this.metrics.snapshot(System.nanoTime() - began);
+                publish(FabricEventType.PROFILE_SAVE_COMPLETED, Map.of("profile", written.profileId().toString()));
+                return true;
             }
             final PlayerAccount account = this.repository.loadAccount(accountId, this.settings.defaultSlots());
             if (account.activeProfile() == null) return false;
@@ -491,6 +1225,32 @@ public final class ProfileEngine {
             final Map<String, ProfileWorldRole> roles = new java.util.LinkedHashMap<>();
             request.worlds().forEach((world, role) -> roles.put(world, ProfileWorldRole.valueOf(role.name())));
             final ProfileWorldBinding binding = new ProfileWorldBinding(profile.id(), roles, request.template());
+            if (format2()) {
+                // Format 2: P on the profile, Q of the account, expected A, M and the binding's own revision.
+                requireNoUnresolvedIntent(profile.accountId());
+                final List<PlayerClaim> acquired = new ArrayList<>(1);
+                ProfileClaim transaction = null;
+                try {
+                    final PlayerClaim q = actorClaim(profile.accountId(), acquired);
+                    transaction = transactionClaim(profile.id());
+                    final OptionalLong stored = this.repository.bindingRevision(profile.id());
+                    final long expected = stored.isPresent() ? stored.getAsLong() : CoopWriteGuard.ABSENT;
+                    final long next = stored.isPresent() ? CoopWriteGuard.next(expected, "binding of " + profile.id()) : 0L;
+                    final CoopOperation op = operation(CoopOperation.Kind.BIND_WORLD, profile.accountId(), profile.id(),
+                        roles.toString(), request.template(), expected);
+                    final CommitResult result = this.repository.commitBinding(binding, next, CoopWriteGuard.binding(op,
+                        transaction, q, account.revision(), profile.revision(), expected));
+                    if (result.unknown()) {
+                        settle("the binding of " + profile.id(), result, () -> receipted(profile.id(), op)
+                            || (binding.equals(this.repository.binding(profile.id()).orElse(null))
+                                && this.repository.bindingRevision(profile.id()).orElse(-2L) == next));
+                    }
+                } finally {
+                    if (transaction != null) releaseTransactionClaim(transaction);
+                    releasePlayerClaims(acquired);
+                }
+                return null;
+            }
             final OwnerClaim admin = adminClaim(profile.id());
             try {
                 this.repository.saveBinding(binding, ProfileWriteGuard.claimed(admin));
@@ -602,6 +1362,7 @@ public final class ProfileEngine {
         // then never saw the request. Whoever removes the entry first releases, exactly once.
         if (!this.switches.containsKey(playerId) && this.releaseOnSwitchEnd.remove(playerId)) {
             this.releaseSession(playerId);
+            if (this.sessions.containsKey(playerId)) this.releasePlayerSession(playerId, null);
         }
     }
 
@@ -609,6 +1370,259 @@ public final class ProfileEngine {
     public void keepSessionAfterSwitch(final UUID playerId) {
         this.releaseOnSwitchEnd.remove(playerId);
     }
+
+    // ------------------------------------------------------------------ player sessions Q (format 2)
+
+    /**
+     * One admitted format-2 player session: its claim {@code Q} and what the account said at admission or
+     * after this node's last commit of it (the {@link CaptureTicket} source).
+     */
+    private record PlayerSession(PlayerClaim claim, long sessionGeneration, long accountRevision, UUID activeProfile,
+                                 UUID activeEpoch) {
+
+        PlayerSession with(final PlayerAccount account) {
+            return new PlayerSession(this.claim, account.sessionGeneration(), account.revision(), account.activeProfile(),
+                account.activeEpoch());
+        }
+    }
+
+    /**
+     * The outcome of {@link #admitSession}: admitted, or refused with the holder's node when another session holds
+     * {@code Q}, or not admitted with reason {@link #OFFLINE} (and no holder) when the player left during admission
+     * and the claim was released again.
+     */
+    public record Admission(boolean admitted, String holderNode, String reason) {}
+
+    /** {@link Admission#reason()} of a join whose player left before the admission finished. */
+    public static final String OFFLINE = "the player left during admission";
+
+    /**
+     * Admits a joining player on a format-2 store, before any capture, restore or recovery: acquires the
+     * player's session claim {@code Q} (strict: another live session of the player, on any node or this one,
+     * refuses), then advances the account's session generation and {@code A} under it, and retries the
+     * player's unresolved intents. A previous session of the player on this node whose quit has not released it
+     * yet is released first (its quit save ran before this step: the I/O lane is FIFO). Completes
+     * {@code admitted == false} when another session holds {@code Q}; fails on any other error, releasing
+     * {@code Q} again. A format-1 store admits without a claim.
+     */
+    public CompletableFuture<Admission> admitSession(final UUID playerId) {
+        if (!this.settings.enabled()) {
+            return CompletableFuture.failedFuture(error(ProfileErrorCode.DISABLED, "AWF MultiProfile is disabled"));
+        }
+        if (!format2()) return CompletableFuture.completedFuture(new Admission(true, null, "format 1"));
+        return io(() -> {
+            if (this.switches.containsKey(playerId)) {
+                // A switch of the previous session still runs under its claim; it must end before a new session.
+                throw error(ProfileErrorCode.SWITCH_IN_PROGRESS, "a profile switch of the player's previous session is"
+                    + " still running; rejoin once it ended");
+            }
+            final PlayerSession previous = this.sessions.remove(playerId);
+            if (previous != null) releaseQuietly(previous.claim());
+            this.lostSessions.remove(playerId);
+            final PlayerSessionOwnership.Grant grant = this.playerSessions.claim(playerId, UUID.randomUUID()).join();
+            if (!grant.granted()) {
+                if ("exhausted".equals(grant.reason())) {
+                    throw error(ProfileErrorCode.COUNTER_EXHAUSTED, "the session fence counter of " + playerId
+                        + " is exhausted; the store needs an offline migration");
+                }
+                return new Admission(false, grant.holder() == null ? "another node" : grant.holder().node(), grant.reason());
+            }
+            final PlayerClaim claim = grant.claim();
+            try {
+                PlayerAccount account = this.repository.loadAccount(playerId, this.settings.defaultSlots());
+                this.sessions.put(playerId, new PlayerSession(claim, account.sessionGeneration(), account.revision(),
+                    account.activeProfile(), account.activeEpoch()));
+                // The player's pending intents first, under the fresh Q: an account still carrying a reservation
+                // would refuse the login commit below (a direct commit never touches a reservation). Not only the
+                // ones this process remembers: the account's own reservation and the store's per-player index name
+                // intents left by another process, a lost prepare reply or a failed abort.
+                final java.util.Set<UUID> pending = new java.util.LinkedHashSet<>();
+                final java.util.Set<UUID> remembered = this.unresolvedIntents.get(playerId);
+                if (remembered != null) pending.addAll(remembered);
+                if (account.pendingIntent() != null) pending.add(account.pendingIntent());
+                pending.addAll(indexedIntents(playerId));
+                if (!pending.isEmpty()) {
+                    final List<UUID> unresolved = new ArrayList<>();
+                    for (final UUID intent : pending) {
+                        if (!resolveIntent(intent, Map.of(playerId, claim))) unresolved.add(intent);
+                    }
+                    if (!unresolved.isEmpty()) {
+                        // Admitting now would commit LOGIN over a record a later roll-forward expects unchanged,
+                        // which would leave that intent RECOVERY_REQUIRED for good.
+                        throw error(ProfileErrorCode.RECOVERY_REQUIRED, "intent(s) " + unresolved + " of " + playerId
+                            + " are still unresolved (another process may hold their claims, or recovery failed); the join is"
+                            + " refused until they are resolved at a later join or the next start");
+                    }
+                    account = this.repository.loadAccount(playerId, this.settings.defaultSlots());
+                    this.sessions.put(playerId, new PlayerSession(claim, account.sessionGeneration(), account.revision(),
+                        account.activeProfile(), account.activeEpoch()));
+                }
+                final CoopOperation op = operation(CoopOperation.Kind.LOGIN, playerId, "session", claim.fence(),
+                    account.sessionGeneration());
+                commitAccount(account.nextSession(), accountGuard(op, claim, account.revision(), null));
+                if (!this.players.online(playerId)) {
+                    // The player quit while the admission ran; their quit found no session to release, so Q is
+                    // released here instead of lingering until its lease lapses.
+                    final PlayerSession admitted = this.sessions.get(playerId);
+                    if (admitted != null && admitted.claim().equals(claim)) this.sessions.remove(playerId, admitted);
+                    releaseQuietly(claim);
+                    return new Admission(false, null, OFFLINE);
+                }
+                return new Admission(true, this.nodeId, "admitted");
+            } catch (final IOException | RuntimeException failed) {
+                this.sessions.remove(playerId);
+                releaseQuietly(claim);
+                throw failed;
+            }
+        });
+    }
+
+    /** The operations the store's per-player intent index names for {@code playerId} (bounded pages). */
+    private List<UUID> indexedIntents(final UUID playerId) throws IOException {
+        final List<UUID> ids = new ArrayList<>();
+        ProfileIndexPage.Cursor cursor = null;
+        for (int pages = 0; ; pages++) {
+            if (pages == MAX_INTENT_PAGES) {
+                throw error(ProfileErrorCode.RECOVERY_REQUIRED, "more than " + MAX_INTENT_PAGES * ProfileIndexPage.LISTING_PAGE
+                    + " pending intents are indexed for " + playerId + "; the join is refused until an offline recovery");
+            }
+            final ProfileIndexPage page = this.repository.index(ProfileIndexPage.Kind.INTENTS_BY_PLAYER, playerId, null, null, cursor);
+            for (final ProfileIndexPage.Entry entry : page.entries()) ids.add(entry.id());
+            cursor = page.cursorAfterLast();
+            if (cursor == null || page.entries().size() < ProfileIndexPage.LISTING_PAGE) break;
+        }
+        return ids;
+    }
+
+    /** The session claim {@code Q} of a player's admitted session on this node, or {@code null}. */
+    public PlayerClaim playerSessionClaim(final UUID playerId) {
+        final PlayerSession session = this.sessions.get(playerId);
+        return session == null ? null : session.claim();
+    }
+
+    /**
+     * Ends a player's format-2 session on this node: releases exactly {@code expected} ({@code null}: whatever
+     * session is recorded), so a quit that runs after the player joined again never releases the new session.
+     * Also clears a recorded claim loss. Runs on the I/O lane, after the quit save queued before it.
+     */
+    public CompletableFuture<Boolean> releasePlayerSession(final UUID playerId, final PlayerClaim expected) {
+        return io(() -> {
+            final PlayerSession session = this.sessions.get(playerId);
+            if (session == null || (expected != null && !session.claim().equals(expected))) {
+                if (expected == null || session == null) this.lostSessions.remove(playerId);
+                return false;
+            }
+            if (!this.sessions.remove(playerId, session)) return false;
+            this.lostSessions.remove(playerId);
+            return this.playerSessions.release(session.claim()).join();
+        });
+    }
+
+    /**
+     * Called with the player id when a session claim is confirmed lost (renewal or validation answered "not
+     * held"). The runtime disconnects the player through its entity scheduler; the engine has already frozen
+     * them and refuses their captures and mutations. Called on an I/O worker.
+     */
+    public void onSessionLost(final Consumer<UUID> handler) {
+        this.sessionLostHandler = Objects.requireNonNull(handler, "handler");
+    }
+
+    /** Validates an admitted session's claim; a confirmed loss freezes the player and refuses with {@link ProfileErrorCode#CLAIM_LOST}. */
+    private void requireLive(final UUID playerId, final PlayerSession session) {
+        final boolean live;
+        try {
+            live = this.playerSessions.validate(session.claim()).join();
+        } catch (final RuntimeException uncertain) {
+            // A timeout is not proof of expiry: refuse the mutation, keep the session.
+            throw error(ProfileErrorCode.OWNERSHIP_CONFLICT, "the player session claim of " + playerId + " could not be"
+                + " validated (" + messageOf(uncertain) + "); nothing was written");
+        }
+        if (!live) {
+            sessionLost(playerId, session, "validation found it no longer held");
+            throw error(ProfileErrorCode.CLAIM_LOST, "the player session claim of " + playerId + " is no longer held;"
+                + " nothing was written and the player is frozen until they rejoin");
+        }
+    }
+
+    private void sessionLost(final UUID playerId, final PlayerSession session, final String why) {
+        // Matched by claim: the record's account fields change with this node's own commits.
+        final PlayerSession current = this.sessions.get(playerId);
+        if (current == null || !current.claim().equals(session.claim()) || !this.sessions.remove(playerId, current)) return;
+        this.lostSessions.add(playerId);
+        SourbyLogger.error("AWF MultiProfile: the session claim of " + playerId + " (fence " + session.claim().fence()
+            + ") was lost: " + why + ". The player is frozen, their captures and profile changes are refused, and they"
+            + " are disconnected; the claim is not taken again for this session");
+        try {
+            this.sessionLostHandler.accept(playerId);
+        } catch (final RuntimeException failed) {
+            SourbyLogger.warn("AWF MultiProfile: disconnecting " + playerId + " after a lost session claim failed: "
+                + failed.getMessage());
+        }
+    }
+
+    /**
+     * The {@code Q} a format-2 mutation of {@code accountId} is made under: the player's admitted session on this
+     * node (validated), else a short administrative claim of its own, added to {@code acquired} for the caller to
+     * release. A live session of the player elsewhere refuses ({@link ProfileErrorCode#OWNERSHIP_CONFLICT}).
+     */
+    private PlayerClaim actorClaim(final UUID accountId, final List<PlayerClaim> acquired) {
+        final PlayerSession session = this.sessions.get(accountId);
+        if (session != null) {
+            requireLive(accountId, session);
+            return session.claim();
+        }
+        if (this.lostSessions.contains(accountId)) {
+            throw error(ProfileErrorCode.CLAIM_LOST, "the session claim of " + accountId + " was lost on this node; nothing"
+                + " is written for the account until the player rejoins or quits");
+        }
+        final PlayerSessionOwnership.Grant grant = this.playerSessions.claim(accountId, UUID.randomUUID()).join();
+        if (!grant.granted()) {
+            if ("exhausted".equals(grant.reason())) {
+                throw error(ProfileErrorCode.COUNTER_EXHAUSTED, "the session fence counter of " + accountId
+                    + " is exhausted; the store needs an offline migration");
+            }
+            throw error(ProfileErrorCode.OWNERSHIP_CONFLICT, "the account " + accountId + " is in use by a session on "
+                + (grant.holder() == null ? "another node" : grant.holder().node()) + "; nothing was written");
+        }
+        acquired.add(grant.claim());
+        return grant.claim();
+    }
+
+    private void releasePlayerClaims(final List<PlayerClaim> acquired) {
+        for (final PlayerClaim claim : acquired) releaseQuietly(claim);
+        acquired.clear();
+    }
+
+    private void releaseQuietly(final PlayerClaim claim) {
+        try {
+            this.playerSessions.release(claim).join();
+        } catch (final RuntimeException failed) {
+            SourbyLogger.warn("AWF MultiProfile: releasing the session claim of " + claim.playerId() + " failed ("
+                + messageOf(failed) + "); it expires on its own");
+        }
+    }
+
+    /** {@code P}: the short exclusive transaction claim of a profile; refused while another live token holds it. */
+    private ProfileClaim transactionClaim(final UUID profileId) {
+        final ProfileOwnership.TransactionGrant grant = this.ownership.claimTransaction(profileId, UUID.randomUUID()).join();
+        if (grant.granted()) return grant.claim();
+        if ("exhausted".equals(grant.reason())) {
+            throw error(ProfileErrorCode.COUNTER_EXHAUSTED, "the transaction fence counter of " + profileId
+                + " is exhausted; the store needs an offline migration");
+        }
+        throw error(ProfileErrorCode.OWNERSHIP_CONFLICT, "profile " + profileId + " is in a transaction on "
+            + (grant.holder() == null ? "another node" : grant.holder().node()) + "; nothing was written");
+    }
+
+    private void releaseTransactionClaim(final ProfileClaim claim) {
+        try {
+            this.ownership.releaseTransaction(claim).join();
+        } catch (final RuntimeException failed) {
+            SourbyLogger.warn("AWF MultiProfile: releasing the transaction claim on " + claim.profileId() + " failed ("
+                + messageOf(failed) + "); it expires on its own");
+        }
+    }
+
 
     /**
      * Makes the active profile's bound worlds ready for a player who just joined, and returns the
@@ -665,7 +1679,11 @@ public final class ProfileEngine {
         if (!placedOutside || !this.settings.isolation().location() || pendingJournal(playerId)) {
             return new JoinTarget(profile, binding, null, null);
         }
-        final ProfileState.Location last = this.repository.latestSnapshot(profile)
+        // Format 2: the member head's exact snapshot, never the latest one of the profile.
+        final Optional<ProfileSnapshot> stored = format2()
+            ? (account.activeEpoch() == null ? Optional.empty() : headSnapshot(profile, playerId, account.activeEpoch()))
+            : this.repository.latestSnapshot(profile);
+        final ProfileState.Location last = stored
             .map(snapshot -> ProfileStateCodec.decode(snapshot.state()).returnPoint())
             .orElse(null);
         if (last == null) return new JoinTarget(profile, binding, null, primaryWorld(binding));
@@ -720,6 +1738,7 @@ public final class ProfileEngine {
      * the provider call fails, nothing is dropped and every claim is retried on the next heartbeat.
      */
     public CompletableFuture<Integer> renewSessions() {
+        renewPlayerSessions();
         final List<Map.Entry<UUID, OwnerClaim>> sessions = List.copyOf(this.sessionClaims.entrySet());
         final List<OwnerClaim> batch = new ArrayList<>(sessions.size() + 2 * this.runs.size());
         for (final Map.Entry<UUID, OwnerClaim> entry : sessions) batch.add(entry.getValue());
@@ -753,6 +1772,38 @@ public final class ProfileEngine {
             }
             return held;
         });
+    }
+
+    /**
+     * Renews every admitted player session claim {@code Q} in one batch. A claim the provider answers "not
+     * renewed" is a confirmed loss ({@link #onSessionLost}): it is never claimed again for that session. A
+     * failed call is uncertain: nothing is dropped, every mutation validates its claim before it commits, and
+     * the next heartbeat retries.
+     */
+    private void renewPlayerSessions() {
+        final List<Map.Entry<UUID, PlayerSession>> admitted = new ArrayList<>(this.sessions.size());
+        for (final Map.Entry<UUID, PlayerSession> entry : this.sessions.entrySet()) {
+            // A player who already left is not renewed: their quit (queued on the I/O lane) releases the claim,
+            // and otherwise it lapses; renewing it would keep a session alive for nobody.
+            if (this.players.online(entry.getKey())) admitted.add(entry);
+        }
+        if (admitted.isEmpty()) return;
+        final List<PlayerClaim> batch = new ArrayList<>(admitted.size());
+        for (final Map.Entry<UUID, PlayerSession> entry : admitted) batch.add(entry.getValue().claim());
+        this.<Void>io(() -> {
+            final List<Boolean> renewed;
+            try {
+                renewed = this.playerSessions.renewAll(batch).join();
+            } catch (final RuntimeException failed) {
+                SourbyLogger.warn("AWF MultiProfile: player session renewal failed; no session is treated as lost and every"
+                    + " claim is retried on the next heartbeat: " + messageOf(failed));
+                return null;
+            }
+            for (int i = 0; i < admitted.size() && i < renewed.size(); i++) {
+                if (!renewed.get(i)) sessionLost(admitted.get(i).getKey(), admitted.get(i).getValue(), "its renewal was refused");
+            }
+            return null;
+        }).exceptionally(failed -> null);
     }
 
     /**
@@ -806,7 +1857,7 @@ public final class ProfileEngine {
      * nor rolled back. Cheap enough for an event handler on the player's thread.
      */
     public boolean frozen(final UUID playerId) {
-        return this.frozen.contains(playerId);
+        return this.frozen.contains(playerId) || this.lostSessions.contains(playerId);
     }
 
     /** Releases every claim on the calling thread; shutdown only, after the I/O drain. */
@@ -827,6 +1878,16 @@ public final class ProfileEngine {
                 + messageOf(firstFailure) + "); " + this.sessionClaims.size() + " claim(s) expire on their own");
         }
         this.sessionClaims.clear();
+        for (final PlayerSession session : this.sessions.values()) {
+            try {
+                this.playerSessions.release(session.claim()).join();
+            } catch (final RuntimeException failed) {
+                SourbyLogger.warn("AWF MultiProfile: could not release every player session claim at shutdown ("
+                    + messageOf(failed) + "); " + this.sessions.size() + " claim(s) expire on their own");
+                break;
+            }
+        }
+        this.sessions.clear();
     }
 
     /**
@@ -1097,7 +2158,11 @@ public final class ProfileEngine {
                     this.settings.defaultSlots());
                 final UUID previous = journal.fromProfile();
                 if (previous != null && account.owns(previous) && !previous.equals(account.activeProfile())) {
-                    this.repository.saveAccount(account.withActive(previous), ProfileWriteGuard.of(claim, account.revision()));
+                    if (format2()) {
+                        restoreActiveFormat2(journal, account, previous);
+                    } else {
+                        this.repository.saveAccount(account.withActive(previous), ProfileWriteGuard.of(claim, account.revision()));
+                    }
                 }
                 this.repository.deleteTransition(journal.transitionId(), journalGuard);
                 return null;
@@ -1106,8 +2171,38 @@ public final class ProfileEngine {
                 "transition rolled back to the previous state", null, began));
     }
 
+    /**
+     * Format-2 rollback of the account pointer: the previous profile and the epoch the journal recorded, under
+     * the player's {@code Q}, expected {@code A} and the current active profile. Runs inside an I/O step.
+     */
+    private void restoreActiveFormat2(final ProfileTransition journal, final PlayerAccount account, final UUID previous)
+        throws IOException {
+        if (journal.coop() == null || journal.coop().fromEpoch() == null) {
+            throw error(ProfileErrorCode.RECOVERY_REQUIRED, "transition " + journal.transitionId() + " records no"
+                + " membership epoch of " + previous + "; refusing to guess which membership to restore");
+        }
+        final List<PlayerClaim> acquired = new ArrayList<>(1);
+        try {
+            final PlayerClaim q = actorClaim(journal.playerId(), acquired);
+            commitAccount(account.withActive(previous, journal.coop().fromEpoch()), accountGuard(operation(
+                CoopOperation.Kind.SWITCH_ACTIVE, journal.playerId(), journal.transitionId(), previous, account.revision()),
+                q, account.revision(), activeOf(account)));
+        } finally {
+            releasePlayerClaims(acquired);
+        }
+    }
+
     /** The exact rollback point a journal names; a first switch names the archived pre-profile state. */
     private Optional<ProfileSnapshot> rollbackSnapshot(final ProfileTransition journal) throws IOException {
+        if (journal.fromProfile() != null && format2()) {
+            // Format 2: the exact snapshot of the player's own stream; never a profile-wide or latest one.
+            if (journal.coop() == null || journal.coop().fromEpoch() == null) {
+                throw error(ProfileErrorCode.RECOVERY_REQUIRED, "transition " + journal.transitionId() + " records no"
+                    + " membership epoch; its rollback point cannot be looked up exactly");
+            }
+            return this.repository.memberSnapshot(journal.fromProfile(), journal.playerId(), journal.coop().fromEpoch(),
+                journal.fromSnapshotId());
+        }
         if (journal.fromProfile() != null) {
             return this.repository.snapshotById(journal.fromProfile(), journal.fromSnapshotId());
         }
@@ -1156,7 +2251,14 @@ public final class ProfileEngine {
         this.sessionClaims.clear();
         this.releaseOnSwitchEnd.clear();
         this.worldUse.clear();
+        this.sessions.clear();
+        this.lostSessions.clear();
         this.ownership.close();
+        try {
+            this.playerSessions.close();
+        } catch (final RuntimeException failed) {
+            SourbyLogger.warn("AWF MultiProfile: closing the player session claims failed: " + failed.getMessage());
+        }
         this.repository.close();
     }
 
@@ -1191,14 +2293,25 @@ public final class ProfileEngine {
         private volatile long uncertainCommit = -1L;
         /** The target's world binding as {@link #worldReady} read it; {@code null} when it has none. */
         private volatile ProfileWorldBinding targetBinding;
+        /** Format-2 admission, or {@code null} on a format-1 store. */
+        private final SwitchCoop coop;
+        /** {@code R} of the source stream after this run published its rollback point there. */
+        private volatile long fromHead;
+        /**
+         * Set when the format-2 commit's outcome is UNKNOWN and reading the account back did not settle it:
+         * compensation then never rolls back, it leaves the journal for recovery to decide from the account.
+         */
+        private volatile String unknownCommit;
 
         private SwitchRun(final ProfileTransition journal, final PlayerAccount account, final AuroraProfile target,
-                          final UUID ownerToken, final long began) {
+                          final UUID ownerToken, final long began, final SwitchCoop coop) {
             this.journal = new AtomicReference<>(journal);
             this.account = account;
             this.target = target;
             this.ownerToken = ownerToken;
             this.began = began;
+            this.coop = coop;
+            this.fromHead = coop == null ? CoopWriteGuard.ABSENT : coop.fromHead();
         }
 
         private UUID playerId() {
@@ -1315,9 +2428,23 @@ public final class ProfileEngine {
                             "the claim on the previous profile lapsed; its snapshot was not written");
                     }
                     try {
-                        final ProfileSnapshot snapshot = previous == null
-                            ? archivePreProfileState(playerId(), state, this.claim.get())
-                            : writeSnapshotFor(previous, state, held);
+                        final ProfileSnapshot snapshot;
+                        if (previous == null) {
+                            snapshot = archivePreProfileState(playerId(), state, this.claim.get());
+                        } else if (this.coop != null) {
+                            // Format 2: the rollback point is the next snapshot of the player's own stream.
+                            final AuroraProfile source = ProfileEngine.this.repository.profile(previous)
+                                .orElseThrow(() -> error(ProfileErrorCode.PROFILE_NOT_FOUND, "no profile " + previous));
+                            if (source.revision() != this.coop.fromMetadata()) {
+                                throw error(ProfileErrorCode.STALE_STATE, "profile " + previous + " changed since the switch"
+                                    + " was admitted; the rollback point was not written");
+                            }
+                            snapshot = publishMemberState(source, playerId(), this.coop.fromEpoch(), state,
+                                this.coop.claim(), this.coop.accountRevision());
+                            this.fromHead = snapshot.revision();
+                        } else {
+                            snapshot = writeSnapshotFor(previous, state, held);
+                        }
                         this.journal.set(this.journal.get().withFromSnapshot(snapshot.snapshotId()));
                     } catch (final IOException | ProfileOperationException failed) {
                         if (ProfileEngine.this.settings.switching().requireDurableSave()) throw failed;
@@ -1347,6 +2474,7 @@ public final class ProfileEngine {
             return io(() -> {
                 final AuroraProfile current = ProfileEngine.this.repository.profile(this.target.id())
                     .orElseThrow(() -> error(ProfileErrorCode.PROFILE_NOT_FOUND, "the target disappeared"));
+                if (this.coop != null) return targetStateFormat2(current);
                 final Optional<ProfileSnapshot> snapshot = ProfileEngine.this.repository.latestSnapshot(this.target.id());
                 if (snapshot.isPresent() && snapshot.get().revision() < current.revision()) {
                     throw error(ProfileErrorCode.STALE_STATE, "the stored state of " + this.target.id()
@@ -1361,6 +2489,42 @@ public final class ProfileEngine {
                             ProfileEngine.this.settings.isolation(), this.abandoned::get), "applying the target state")
                         .thenCompose(ignored -> moveToTarget(state));
                 });
+        }
+
+        /**
+         * Format 2: the target state is exactly what the player's member head names, compared with the head and
+         * with what was admitted ({@code M}, {@code R}); a stream with no published state applies an empty state,
+         * never the player's current inventory. Runs inside an I/O step.
+         */
+        private ProfileState targetStateFormat2(final AuroraProfile current) throws IOException {
+            if (current.revision() != this.coop.toMetadata()) {
+                throw error(ProfileErrorCode.STALE_STATE, "profile " + current.id() + " changed since the switch was"
+                    + " admitted (metadata revision " + this.coop.toMetadata() + " -> " + current.revision() + ")");
+            }
+            if (!current.hasMember(playerId(), this.coop.toEpoch())) {
+                throw error(ProfileErrorCode.STALE_STATE, "membership " + this.coop.toEpoch() + " of " + playerId()
+                    + " in " + current.id() + " is not current");
+            }
+            final Optional<MemberStateHead> head = ProfileEngine.this.repository.memberHead(current.id(), playerId(),
+                this.coop.toEpoch());
+            final long revision = head.map(MemberStateHead::revision).orElse(CoopWriteGuard.ABSENT);
+            if (revision != this.coop.toHead()) {
+                throw error(ProfileErrorCode.STALE_STATE, "the member head of " + playerId() + " in " + current.id()
+                    + " moved since the switch was admitted");
+            }
+            if (head.isEmpty()) return ProfileState.empty();
+            if (head.get().state() == MemberStateHead.State.CONSUMED) {
+                throw error(ProfileErrorCode.STALE_STATE, "member stream " + head.get().describe() + " was consumed; it is"
+                    + " never restored");
+            }
+            if (head.get().pendingIntent() != null) {
+                throw error(ProfileErrorCode.RECOVERY_REQUIRED, "member stream " + head.get().describe()
+                    + " is reserved by intent " + head.get().pendingIntent());
+            }
+            final Optional<ProfileSnapshot> snapshot = exactHeadSnapshot(head.get());
+            if (snapshot.isEmpty()) return ProfileState.empty();
+            this.journal.set(this.journal.get().withToSnapshot(snapshot.get().snapshotId()));
+            return ProfileStateCodec.decode(snapshot.get().state());
         }
 
         /**
@@ -1431,6 +2595,12 @@ public final class ProfileEngine {
                 }
                 final PlayerAccount current = ProfileEngine.this.repository.loadAccount(playerId(),
                     ProfileEngine.this.settings.defaultSlots());
+                if (this.coop != null) {
+                    commitFormat2(current);
+                    this.commitPoint.set(true);
+                    if (held != null) ProfileEngine.this.sessionClaims.put(playerId(), held);
+                    return null;
+                }
                 try {
                     ProfileEngine.this.repository.saveAccount(current.withActive(this.target.id()),
                         ProfileWriteGuard.of(held, current.revision()));
@@ -1447,6 +2617,54 @@ public final class ProfileEngine {
                 if (held != null) ProfileEngine.this.sessionClaims.put(playerId(), held);
                 return null;
             }));
+        }
+
+        /**
+         * The format-2 commit point: the account names the target and the player's epoch there, under
+         * {@link CoopWriteGuard#switchActive} — {@code Q}, expected {@code A}, the active profile before the switch,
+         * both profiles' {@code M} and both streams' {@code R} (the source's after this run's rollback point). A
+         * failure before publication is an exception and nothing was committed; an UNKNOWN outcome that reading the
+         * account back does not settle leaves the switch for recovery and is never rolled back.
+         */
+        private void commitFormat2(final PlayerAccount current) throws IOException {
+            final PlayerSession session = ProfileEngine.this.sessions.get(playerId());
+            if (session == null || !session.claim().equals(this.coop.claim())) {
+                throw error(ProfileErrorCode.CLAIM_LOST, "the player session the switch was admitted under ended; nothing"
+                    + " was committed");
+            }
+            requireLive(playerId(), session);
+            if (current.revision() != this.coop.accountRevision()
+                || current.sessionGeneration() != this.coop.sessionGeneration()) {
+                throw error(ProfileErrorCode.STALE_STATE, "the account changed during the switch (revision "
+                    + this.coop.accountRevision() + " -> " + current.revision() + "); nothing was committed");
+            }
+            final UUID previous = this.account.activeProfile();
+            final List<Expected> vector = new ArrayList<>(4);
+            vector.add(Expected.metadata(this.target.id(), this.coop.toMetadata()));
+            vector.add(Expected.head(this.target.id(), playerId(), this.coop.toEpoch(), this.coop.toHead()));
+            if (previous != null) {
+                vector.add(Expected.metadata(previous, this.coop.fromMetadata()));
+                vector.add(Expected.head(previous, playerId(), this.coop.fromEpoch(), this.fromHead));
+            }
+            final PlayerAccount after = current.withActive(this.target.id(), this.coop.toEpoch());
+            final CommitResult result = ProfileEngine.this.repository.commitAccount(after,
+                CoopWriteGuard.switchActive(this.coop.operation(), this.coop.claim(), current.revision(),
+                    current.activeProfile(), vector));
+            if (result.unknown()) {
+                try {
+                    settle("the switch commit of " + playerId(), result, () -> receipted(playerId(), this.coop.operation())
+                        || after.equals(ProfileEngine.this.repository.loadAccount(playerId(),
+                            ProfileEngine.this.settings.defaultSlots())));
+                } catch (final ProfileOperationException unknown) {
+                    this.unknownCommit = messageOf(unknown);
+                    throw unknown;
+                }
+            }
+            accountCommitted(after);
+            final ProfileTransition journal = this.journal.get();
+            if (journal.coop() != null) {
+                this.journal.set(journal.withCoop(journal.coop().committed(after.revision(), "committed")));
+            }
         }
 
         /** After the commit point a failure is not a rollback: the account already names the target. */
@@ -1587,6 +2805,10 @@ public final class ProfileEngine {
                 return CompletableFuture.completedFuture(null);
             }
             if (this.uncertainCommit >= 0L) return settleCommit(failed);
+            if (this.unknownCommit != null) {
+                // Format 2: never compensate an UNKNOWN commit; recovery decides from the account.
+                return leaveUnknown(failed, error(ProfileErrorCode.UNKNOWN_OUTCOME, this.unknownCommit));
+            }
             if (ProfileEngine.this.metrics != null) ProfileEngine.this.metrics.profileFailure();
             final Map<String, String> recovery = Map.of("player", playerId().toString(),
                 "transition", this.journal.get().transitionId().toString(), "reason", truncate(reason));
@@ -1700,7 +2922,68 @@ public final class ProfileEngine {
         }
     }
 
-    private record SwitchStart(PlayerAccount account, AuroraProfile target) {}
+    private record SwitchStart(PlayerAccount account, AuroraProfile target, SwitchCoop coop) {}
+
+    /**
+     * What a format-2 switch was admitted with: the player's session claim {@code Q}, the operation, both
+     * membership epochs, {@code A}, both profiles' {@code M} and both member heads' {@code R}
+     * ({@link CoopWriteGuard#ABSENT} for a stream with no head; {@code fromMetadata}/{@code fromHead} are
+     * {@code ABSENT} when there is no previous profile).
+     */
+    private record SwitchCoop(PlayerClaim claim, CoopOperation operation, UUID fromEpoch, UUID toEpoch, long accountRevision,
+                              long sessionGeneration, long fromMetadata, long toMetadata, long fromHead, long toHead) {}
+
+    /**
+     * Format-2 switch admission, inside the switch's first I/O step: the player needs an admitted session on
+     * this node and a membership row on the target; the previous profile needs the account's active epoch.
+     */
+    private SwitchCoop switchAdmission(final PlayerAccount account, final AuroraProfile target) throws IOException {
+        final UUID playerId = account.playerId();
+        final PlayerSession session = this.sessions.get(playerId);
+        if (session == null) {
+            throw error(ProfileErrorCode.PLAYER_OFFLINE, "the player has no admitted session on this node; a format-2"
+                + " switch is made under it");
+        }
+        requireLive(playerId, session);
+        requireNoUnresolvedIntent(playerId);
+        if (account.pendingIntent() != null) {
+            throw error(ProfileErrorCode.RECOVERY_REQUIRED, "the account is reserved by intent " + account.pendingIntent());
+        }
+        final ProfileMember row = target.member(playerId);
+        if (row == null) {
+            throw error(ProfileErrorCode.NOT_OWNED, "the player is not a member of profile " + target.id());
+        }
+        if (target.pendingIntent() != null) {
+            throw error(ProfileErrorCode.RECOVERY_REQUIRED, "profile " + target.id() + " is reserved by intent "
+                + target.pendingIntent());
+        }
+        final UUID from = account.activeProfile();
+        long fromMetadata = CoopWriteGuard.ABSENT;
+        long fromHead = CoopWriteGuard.ABSENT;
+        if (from != null) {
+            if (account.activeEpoch() == null) {
+                throw error(ProfileErrorCode.STALE_STATE, "the account names active profile " + from + " without a"
+                    + " membership epoch; refusing to switch");
+            }
+            final AuroraProfile previous = this.repository.profile(from)
+                .orElseThrow(() -> error(ProfileErrorCode.PROFILE_NOT_FOUND, "the active profile " + from + " is not stored"));
+            fromMetadata = previous.revision();
+            fromHead = this.repository.memberHead(from, playerId, account.activeEpoch())
+                .map(MemberStateHead::revision).orElse(CoopWriteGuard.ABSENT);
+        }
+        final long toHead = this.repository.memberHead(target.id(), playerId, row.epoch())
+            .map(MemberStateHead::revision).orElse(CoopWriteGuard.ABSENT);
+        final CoopOperation op = operation(CoopOperation.Kind.SWITCH_ACTIVE, playerId, from, target.id(),
+            account.revision(), account.sessionGeneration());
+        return new SwitchCoop(session.claim(), op, account.activeEpoch(), row.epoch(), account.revision(),
+            account.sessionGeneration(), fromMetadata, target.revision(), fromHead, toHead);
+    }
+
+    private static String truncateIncarnation(final String incarnation) {
+        final String value = incarnation == null || incarnation.isEmpty() ? "unknown" : incarnation;
+        return value.length() <= ProfileTransition.MAX_INCARNATION_CHARS ? value
+            : value.substring(0, ProfileTransition.MAX_INCARNATION_CHARS);
+    }
 
     private record Recovery(ProfileTransition journal, PlayerAccount account) {}
 
@@ -1752,6 +3035,295 @@ public final class ProfileEngine {
         return previous.adapters().isEmpty() ? state : this.players.carryAdapters(state, previous);
     }
 
+    /** {@link #withCarriedAdapters(UUID, ProfileState)} for a format-2 stream, from the head's exact snapshot. */
+    private ProfileState withCarriedAdapters(final ProfileState state, final SnapshotRead source, final UUID owner) {
+        final ProfileState previous;
+        try {
+            final Optional<ProfileSnapshot> named = source.read();
+            if (named.isEmpty()) return state;
+            previous = ProfileStateCodec.decode(named.get().state());
+        } catch (final IOException | RuntimeException unreadable) {
+            SourbyLogger.warn("AWF MultiProfile: the head snapshot of " + owner + " could not be read ("
+                + unreadable.getMessage() + "); adapter data only it held is not kept in the new snapshot");
+            return state;
+        }
+        return previous.adapters().isEmpty() ? state : this.players.carryAdapters(state, previous);
+    }
+
+    private interface SnapshotRead {
+        Optional<ProfileSnapshot> read() throws IOException;
+    }
+
+    /**
+     * The exact snapshot a member head names, checked with {@link MemberStateHead#matches}; empty for a head that
+     * is not READY. A READY head whose snapshot is missing or differs (older or newer) fails closed with
+     * {@link ProfileErrorCode#STALE_STATE}; another snapshot is never substituted.
+     */
+    private Optional<ProfileSnapshot> exactHeadSnapshot(final MemberStateHead head) throws IOException {
+        if (!head.restorable()) return Optional.empty();
+        final Optional<ProfileSnapshot> snapshot = this.repository.memberSnapshot(head.profileId(), head.memberId(),
+            head.epoch(), head.snapshotId());
+        if (snapshot.isEmpty() || !head.matches(snapshot.get())) {
+            throw error(ProfileErrorCode.STALE_STATE, "member head " + head.describe() + " names snapshot " + head.snapshotId()
+                + " at revision " + head.revision() + ", which " + (snapshot.isEmpty() ? "is not stored" : "does not match it")
+                + "; refusing to use another snapshot");
+        }
+        return snapshot;
+    }
+
+    /** The exact head snapshot of a stream, or empty when the stream has no head or is not READY. */
+    private Optional<ProfileSnapshot> headSnapshot(final UUID profileId, final UUID member, final UUID epoch) throws IOException {
+        final Optional<MemberStateHead> head = this.repository.memberHead(profileId, member, epoch);
+        return head.isEmpty() ? Optional.empty() : exactHeadSnapshot(head.get());
+    }
+
+    // ------------------------------------------------------------------ format-2 commits
+
+    private static CoopOperation operation(final CoopOperation.Kind kind, final UUID actor, final Object... request) {
+        final Object[] parts = new Object[request.length + 2];
+        parts[0] = kind;
+        parts[1] = actor;
+        System.arraycopy(request, 0, parts, 2, request.length);
+        return CoopOperation.start(kind, actor, CoopOperation.digest(parts));
+    }
+
+    /** A write of the account record only: {@code Q(account)}, expected {@code A}, optionally the active profile. */
+    private static CoopWriteGuard accountGuard(final CoopOperation op, final PlayerClaim q, final long expectedAccount,
+                                               final UUID expectedActive) {
+        return new CoopWriteGuard(op, null, q, null, List.of(Expected.account(q.playerId(), expectedAccount)),
+            expectedActive, Set.of());
+    }
+
+    /** The active-profile predicate value of an account ({@link CoopWriteGuard#NO_ACTIVE_PROFILE} for none). */
+    private static UUID activeOf(final PlayerAccount account) {
+        return account.activeProfile() == null ? CoopWriteGuard.NO_ACTIVE_PROFILE : account.activeProfile();
+    }
+
+    /** {@link ProfileRepository#commitAccount}; an UNKNOWN outcome is settled from the receipt or the stored account. */
+    private void commitAccount(final PlayerAccount after, final CoopWriteGuard guard) throws IOException {
+        final CommitResult result = this.repository.commitAccount(after, guard);
+        if (result.unknown()) {
+            settle("the account " + after.playerId(), result, () -> receipted(after.playerId(), guard.operation())
+                || after.equals(this.repository.loadAccount(after.playerId(), this.settings.defaultSlots())));
+        }
+        accountCommitted(after);
+    }
+
+    /** {@link ProfileRepository#commitProfile}; an UNKNOWN outcome is settled from the receipt or the stored record. */
+    private void commitProfile(final AuroraProfile after, final CoopWriteGuard guard) throws IOException {
+        final CommitResult result = this.repository.commitProfile(after, guard);
+        if (result.unknown()) {
+            settle("profile " + after.id(), result, () -> receipted(after.id(), guard.operation())
+                || after.equals(this.repository.profile(after.id()).orElse(null)));
+        }
+    }
+
+    /** Keeps an admitted session's capture-ticket fields in step with this node's own commits of its account. */
+    private void accountCommitted(final PlayerAccount after) {
+        this.sessions.computeIfPresent(after.playerId(), (player, session) -> session.with(after));
+    }
+
+    // ------------------------------------------------------------------ format-2 intents (PREPARE -> COMMIT)
+
+    /** How long a solo intent may stay PREPARED before another node's startup recovery aborts it (distributed mode). */
+    private static final long INTENT_DEADLINE_MILLIS = TimeUnit.MINUTES.toMillis(2);
+
+    /** One after-image an intent installs: a non-stream record encoded at the revision COMMIT writes, without a reservation. */
+    private record AfterImage(byte recordType, UUID id, long revision, byte[] payload) {}
+
+    /**
+     * Runs one solo operation as a single intent (COOP-DESIGN §5): stages the after-images, PREPAREs under the
+     * claims (installing this operation's reservations on the records {@code after} names at their pre-reservation
+     * revisions {@code before}), then COMMITs; an interrupted run is left as a PREPARED or COMMITTED intent that
+     * {@link #resolveIntent} recovers (abort clears only its reservations, a committed one rolls forward), never
+     * half-applied. A refused commit aborts the intent and rethrows the refusal. An UNKNOWN outcome is settled
+     * from the stored intent's phase (both backends keep it permanently), never by retrying or compensating:
+     * COMMITTED or FINALIZED counts as applied, PREPARED is aborted and reported as not applied. Runs inside an
+     * I/O step; {@code q} is required, {@code p} when the operation changes profile metadata.
+     */
+    private void runIntent(final CoopOperation op, final ProfileClaim p, final PlayerClaim q, final List<Expected> before,
+                           final List<Expected> after, final List<AfterImage> images) throws IOException {
+        final UUID id = op.operationId();
+        final List<ProfileIntent.BlobRef> refs = new ArrayList<>(images.size());
+        for (final AfterImage image : images) {
+            refs.add(this.repository.stageAfterImage(id, image.recordType(), image.id(), null, null, image.revision(), image.payload()));
+        }
+        final CoopWriteGuard prepareGuard = CoopWriteGuard.intent(op, p, q, CoopWriteGuard.ABSENT, before, Set.of());
+        // The deadline is compared against the store's clock (Redis TIME in distributed mode), never a node's.
+        final ProfileIntent intent = ProfileIntent.prepared(prepareGuard, after, List.of(), refs, List.of(),
+            this.repository.storeClockMillis() + INTENT_DEADLINE_MILLIS);
+        final CommitResult prepared = this.repository.prepareIntent(intent, prepareGuard);
+        ProfileIntent stored = this.repository.intent(id).orElse(null);
+        if (stored == null) {
+            if (prepared.unknown()) {
+                // The prepare's reply was lost and no intent is stored yet: the request may still reach the store
+                // and install its reservations. Nothing is applied now; should it land, the intent is PREPARED and
+                // the player's next admission (which also reads the account's reservation and the per-player index)
+                // or the next start aborts it. Until then the account's format-2 changes are refused.
+                markUnresolved(intent, "its prepare reply was lost and the intent was not stored when read back");
+                throw error(ProfileErrorCode.UNKNOWN_OUTCOME, op.kind() + " " + id + " was not prepared when read back ("
+                    + prepared.detail() + "); if the store still applies the prepare, recovery aborts it");
+            }
+            throw error(ProfileErrorCode.IO_FAILURE, op.kind() + " " + id + " was not prepared (" + prepared.detail()
+                + "); nothing was applied");
+        }
+        if (prepared.unknown() && stored.phase() == ProfileIntent.Phase.PREPARED) {
+            // The intent is durable but its reservations may be incomplete: resolve installs the rest, or finds a
+            // record that moved, in which case the commit below is refused as stale and the intent aborted.
+            this.repository.resolveIntent(id, intentGuard(op, p, q, stored));
+            stored = this.repository.intent(id).orElse(stored);
+        }
+        if (!stored.pending()) {
+            if (stored.committed()) return;
+            throw error(ProfileErrorCode.IO_FAILURE, op.kind() + " " + id + " was aborted before it committed (" + stored.outcome()
+                + "); nothing was applied");
+        }
+        final CommitResult committed;
+        try {
+            committed = this.repository.commitIntent(id, intentGuard(op, p, q, stored));
+        } catch (final IOException | RuntimeException refused) {
+            abortUncommitted(op, p, q, refused);
+            throw refused;
+        }
+        if (!committed.unknown()) return;
+        final ProfileIntent outcome = this.repository.intent(id).orElse(null);
+        if (outcome != null && outcome.committed()) {
+            acceptCommitted(op, p, q, outcome, committed.detail());
+            return;
+        }
+        if (outcome != null && outcome.phase() == ProfileIntent.Phase.PREPARED) {
+            // The abort races a commit request that may still be in flight: the intent read after the abort
+            // attempt decides. Committed: it landed first and counts as applied. Aborted: nothing was applied.
+            // Anything else: unknown, and the operation stays unresolved for recovery.
+            final ProfileIntent decided = abortUncommitted(op, p, q, null);
+            if (decided != null && decided.committed()) {
+                acceptCommitted(op, p, q, decided, committed.detail() + "; a delayed commit landed before the abort");
+                return;
+            }
+            if (decided != null && decided.phase() == ProfileIntent.Phase.ABORTED) {
+                throw error(ProfileErrorCode.IO_FAILURE, op.kind() + " " + id + " did not commit (" + committed.detail()
+                    + "); the intent was aborted and nothing was applied");
+            }
+            markUnresolved(decided != null ? decided : outcome, "its commit reply was lost and the abort did not decide it");
+            throw error(ProfileErrorCode.UNKNOWN_OUTCOME, "the store did not confirm the commit of " + op.kind() + " " + id + " ("
+                + committed.detail() + ") and aborting it did not decide it either (intent " + (decided == null ? "unreadable"
+                : decided.phase()) + "); it stays pending for recovery, neither retried nor compensated");
+        }
+        throw error(ProfileErrorCode.UNKNOWN_OUTCOME, "the store did not confirm the commit of " + op.kind() + " " + id + " ("
+            + committed.detail() + ") and reading the intent back did not establish it; it was neither retried nor compensated");
+    }
+
+    /**
+     * An intent read back as COMMITTED or FINALIZED after an unconfirmed commit counts as applied once the store
+     * confirms durability again (COOP-DESIGN §5); a COMMITTED one is rolled forward now, and a failed or UNKNOWN
+     * roll-forward leaves the operation unresolved, so no later commit moves a record the roll-forward expects.
+     */
+    private void acceptCommitted(final CoopOperation op, final ProfileClaim p, final PlayerClaim q, final ProfileIntent outcome,
+                                 final String detail) {
+        final UUID id = op.operationId();
+        if (!durable()) {
+            markUnresolved(outcome, "its commit was read back but not confirmed durable");
+            throw error(ProfileErrorCode.UNKNOWN_OUTCOME, "the store did not confirm the commit of " + op.kind() + " " + id
+                + " (" + detail + "); reading it back shows the intent is " + outcome.phase() + " but the store"
+                + " did not confirm it durable; it is neither retried nor compensated and stays pending for recovery");
+        }
+        SourbyLogger.warn("AWF MultiProfile: the store did not confirm the commit of " + op.kind() + " " + id + " ("
+            + detail + "); reading it back shows the intent is " + outcome.phase() + ", so it counts as applied");
+        if (outcome.phase() == ProfileIntent.Phase.COMMITTED) {
+            try {
+                final CommitResult finished = this.repository.resolveIntent(id, intentGuard(op, p, q, outcome));
+                if (finished.unknown()) markUnresolved(outcome, finished.detail());
+            } catch (final IOException | RuntimeException later) {
+                markUnresolved(outcome, "finishing it failed: " + messageOf(later));
+            }
+        }
+    }
+
+    /** The guard of a commit, abort or resolve of {@code intent}: its revision, its post-reservation vector, its own reservation. */
+    private static CoopWriteGuard intentGuard(final CoopOperation op, final ProfileClaim p, final PlayerClaim q, final ProfileIntent intent) {
+        return CoopWriteGuard.intent(op, p, q, intent.revision(), intent.expectedAfter(), Set.of(op.operationId()));
+    }
+
+    /**
+     * Aborts the operation's intent while it is still PREPARED (clearing only its own reservations); a committed
+     * intent is left to roll forward and logged. Failures are logged: the intent then stays for recovery.
+     */
+    private ProfileIntent abortUncommitted(final CoopOperation op, final ProfileClaim p, final PlayerClaim q, final Throwable cause) {
+        final UUID id = op.operationId();
+        ProfileIntent intent = null;
+        try {
+            intent = this.repository.intent(id).orElse(null);
+            if (intent == null || !intent.pending()) return intent;
+            if (intent.committed()) {
+                SourbyLogger.warn("AWF MultiProfile: " + op.kind() + " " + id + " reported a failure (" + (cause == null ? "unconfirmed"
+                    : messageOf(cause)) + ") but its intent is committed; it rolls forward at recovery and is not aborted");
+                return intent;
+            }
+            this.repository.abortIntent(id, intentGuard(op, p, q, intent));
+            return this.repository.intent(id).orElse(intent);
+        } catch (final IOException | RuntimeException failed) {
+            // A refused abort (DECIDED: a delayed commit landed first) or a failed one: the phase read now decides
+            // for the caller; until it is terminal the operation stays unresolved for recovery.
+            SourbyLogger.warn("AWF MultiProfile: aborting the " + op.kind() + " intent " + id + " failed (" + messageOf(failed)
+                + "); it is resolved at the player's next login or the next start");
+            try {
+                final ProfileIntent after = this.repository.intent(id).orElse(intent);
+                if (after != null && after.pending()) markUnresolved(after, "aborting it failed: " + messageOf(failed));
+                return after;
+            } catch (final IOException | RuntimeException unreadable) {
+                if (intent != null) markUnresolved(intent, "aborting it failed: " + messageOf(failed));
+                return intent;
+            }
+        }
+    }
+
+    private interface Applied {
+        boolean check() throws IOException;
+    }
+
+    /**
+     * Settles an UNKNOWN outcome by reading authority (the receipt, or the record compared with the exact
+     * after-image). Established: returns, the write counts as committed. Otherwise, including when the read
+     * itself fails: {@link ProfileErrorCode#UNKNOWN_OUTCOME}; nothing is compensated or retried.
+     */
+    private void settle(final String what, final CommitResult result, final Applied applied) {
+        boolean committed;
+        String readFailure = null;
+        try {
+            // Established from a read of the store's memory: the durability confirmation is required again (§5).
+            committed = applied.check() && durable();
+        } catch (final IOException | RuntimeException failed) {
+            committed = false;
+            readFailure = messageOf(failed);
+        }
+        if (committed) {
+            SourbyLogger.warn("AWF MultiProfile: the store did not confirm the write of " + what + " (" + result.detail()
+                + "); reading it back shows operation " + result.operationId() + " was applied");
+            return;
+        }
+        throw error(ProfileErrorCode.UNKNOWN_OUTCOME, "the store did not confirm the write of " + what + " ("
+            + result.detail() + ") and reading it back did not establish it" + (readFailure == null ? "" : " (" + readFailure + ")")
+            + "; operation " + result.operationId() + " was neither retried nor compensated");
+    }
+
+    /** {@link ProfileRepository#durable()}; a failed probe is "not durable". */
+    private boolean durable() {
+        try {
+            return this.repository.durable();
+        } catch (final IOException | RuntimeException unavailable) {
+            return false;
+        }
+    }
+
+    /** Whether the store has a receipt of {@code op} on {@code resource}; a failed lookup is "not established". */
+    private boolean receipted(final UUID resource, final CoopOperation op) {
+        try {
+            return this.repository.receipt(resource, op.operationId()).isPresent();
+        } catch (final IOException | RuntimeException unavailable) {
+            return false;
+        }
+    }
+
     /** The first world the binding gives the PRIMARY role, or {@code null}. */
     private static String primaryWorld(final ProfileWorldBinding binding) {
         if (binding == null) return null;
@@ -1787,11 +3359,33 @@ public final class ProfileEngine {
     }
 
     private Optional<ProfileInfo> describe(final UUID profileId) throws IOException {
+        return describeDetails(profileId).map(ProfileDetails::info);
+    }
+
+    private Optional<ProfileDetails> describeDetails(final UUID profileId) throws IOException {
         final Optional<AuroraProfile> profile = this.repository.profile(profileId);
         if (profile.isEmpty() || profile.get().status() == ProfileStatus.DELETED) return Optional.empty();
         final PlayerAccount account = this.repository.loadAccount(profile.get().accountId(),
             this.settings.defaultSlots());
-        return Optional.of(info(profile.get(), account.activeProfile()));
+        final Map<UUID, String> legacyNames = profile.get().legacy()
+            ? ProfileRepositoryMigration.legacyNames(this.repository.profiles(profile.get().accountId())) : Map.of();
+        return Optional.of(details(profile.get(), account.activeProfile(), legacyNames));
+    }
+
+    private ProfileDetails details(final AuroraProfile profile, final UUID activeProfile) {
+        return details(profile, activeProfile, Map.of());
+    }
+
+    /**
+     * The profile with its name and policy type. A format-1 record carries neither: it reads with the name the
+     * format-2 migration will store ({@link ProfileRepositoryMigration#legacyNames}: {@link CuteNames#fromId},
+     * suffixed when an older profile of the account derives the same name, so names are unique within the account
+     * and never change at migration) and {@code classic}. Without the account's other profiles the bare derived
+     * name is used.
+     */
+    private ProfileDetails details(final AuroraProfile profile, final UUID activeProfile, final Map<UUID, String> legacyNames) {
+        final String name = profile.legacy() ? legacyNames.getOrDefault(profile.id(), profile.name()) : profile.name();
+        return new ProfileDetails(info(profile, activeProfile), name, profile.profileType());
     }
 
     private ProfileInfo info(final AuroraProfile profile, final UUID activeProfile) {
@@ -1928,7 +3522,8 @@ public final class ProfileEngine {
         final ProfileErrorCode code = codeOf(failed);
         return switch (code) {
             case STALE_STATE, OWNERSHIP_CONFLICT, WORLD_UNAVAILABLE, PLAYER_OFFLINE, INVALID_REQUEST, STATE_TOO_LARGE,
-                 PROFILE_NOT_FOUND, NOT_OWNED, PROFILE_LOCKED, SWITCHING_DISABLED, DISABLED, TIMEOUT -> code;
+                 PROFILE_NOT_FOUND, NOT_OWNED, PROFILE_LOCKED, SWITCHING_DISABLED, DISABLED, TIMEOUT,
+                 COUNTER_EXHAUSTED, CLAIM_LOST, UNKNOWN_OUTCOME, STORE_FORMAT_REFUSED, MIGRATION_REQUIRED -> code;
             default -> ProfileErrorCode.RECOVERY_REQUIRED;
         };
     }

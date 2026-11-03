@@ -288,15 +288,34 @@ public class RedisClient implements AutoCloseable {
     }
 
     /**
+     * {@link #call} with a bulk-reply bound for this one call: a bulk string longer than
+     * {@code maxBulkBytes} fails the read with an {@link IOException} <em>before</em> it is allocated
+     * (its RESP length is checked first), and the connection is closed rather than drained, so a value
+     * that grew past the caller's record limit is never returned truncated and never read into memory.
+     * The default cap ({@link Connection#MAX_BULK}) still applies on top; this can only lower it.
+     */
+    public Object callBounded(final int maxBulkBytes, final Object... args) throws IOException {
+        final Object reply = pipelineBounded(maxBulkBytes, List.<Object[]>of(args)).getFirst();
+        if (reply instanceof RedisError error) throw new RedisError(error.getMessage());
+        return reply;
+    }
+
+    /**
      * Sends every command before reading any reply. Replies come back in order; an error reply is
      * a {@link RedisError} in the list, so one failed command does not hide the others' results.
      */
     public List<Object> pipeline(final List<Object[]> commands) throws IOException {
+        return pipelineBounded(Connection.MAX_BULK, commands);
+    }
+
+    /** {@link #pipeline} with the bulk-reply bound of {@link #callBounded} applied to every reply of the pipeline. */
+    public List<Object> pipelineBounded(final int maxBulkBytes, final List<Object[]> commands) throws IOException {
+        if (maxBulkBytes < 1) throw new IllegalArgumentException("maxBulkBytes " + maxBulkBytes);
         final Observer observer = this.observer;
         final long began = System.nanoTime();
         boolean ok = false;
         try {
-            final List<Object> replies = pipelineOnce(commands);
+            final List<Object> replies = pipelineOnce(commands, Math.min(maxBulkBytes, Connection.MAX_BULK));
             ok = true;
             return replies;
         } catch (final IOException failed) {
@@ -310,7 +329,7 @@ public class RedisClient implements AutoCloseable {
         }
     }
 
-    private List<Object> pipelineOnce(final List<Object[]> commands) throws IOException {
+    private List<Object> pipelineOnce(final List<Object[]> commands, final int maxBulkBytes) throws IOException {
         if (this.closed) throw new IOException("Redis client is closed");
         final int waitMillis = stepTimeoutMillis(false);
         try {
@@ -335,6 +354,7 @@ public class RedisClient implements AutoCloseable {
             if (this.expired) throw deadlinePassed(false, null);     // aborted before it was registered
             final int stepMillis = stepTimeoutMillis(false);
             connection.timeout(stepMillis);
+            connection.bulkLimit(maxBulkBytes);
             final WriteWatch watch = new WriteWatch(connection, TimeUnit.MILLISECONDS.toNanos(stepMillis));
             try {
                 sent = true;          // from the first byte on, Redis may receive and run the request
@@ -409,6 +429,31 @@ public class RedisClient implements AutoCloseable {
         final Object reply = evalPipeline(script, List.<Object[]>of(keysAndArgs)).getFirst();
         if (reply instanceof RedisError error) throw new RedisError(error.getMessage());
         return reply;
+    }
+
+    /**
+     * {@link #evalThen} with the bulk-reply bound of {@link #callBounded} on both replies: for a
+     * script that may return a stored record (a replayed receipt, an intent) whose size is bounded by
+     * its record type.
+     */
+    public List<Object> evalThenBounded(final int maxBulkBytes, final String script, final Object[] keysAndArgs,
+                                        final Object[] then) throws IOException {
+        List<Object> replies = pipelineBounded(maxBulkBytes, List.<Object[]>of(command("EVALSHA", sha1(script), keysAndArgs), then));
+        if (noScript(replies.getFirst())) {
+            replies = pipelineBounded(maxBulkBytes, List.<Object[]>of(command("EVAL", script, keysAndArgs), then));
+        }
+        if (replies.getFirst() instanceof RedisError error) throw new RedisError(error.getMessage());
+        return replies;
+    }
+
+    /** {@link #eval} with the bulk-reply bound of {@link #callBounded}. */
+    public Object evalBounded(final int maxBulkBytes, final String script, final Object... keysAndArgs) throws IOException {
+        List<Object> replies = pipelineBounded(maxBulkBytes, List.<Object[]>of(command("EVALSHA", sha1(script), keysAndArgs)));
+        if (noScript(replies.getFirst())) {
+            replies = pipelineBounded(maxBulkBytes, List.<Object[]>of(command("EVAL", script, keysAndArgs)));
+        }
+        if (replies.getFirst() instanceof RedisError error) throw new RedisError(error.getMessage());
+        return replies.getFirst();
     }
 
     /**
@@ -595,6 +640,8 @@ public class RedisClient implements AutoCloseable {
         /** Values and bytes of the reply being read; reset for every top-level reply. */
         private long replyElements;
         private long replyBytes;
+        /** The bulk bound of the current call ({@link RedisClient#callBounded}); {@link #MAX_BULK} by default. */
+        private int bulkLimit = MAX_BULK;
 
         Connection(final Socket socket) throws IOException {
             this.socket = socket;
@@ -649,6 +696,11 @@ public class RedisClient implements AutoCloseable {
             this.socket.setSoTimeout(millis);
         }
 
+        /** Sets the bulk-reply bound for the next call; never above {@link #MAX_BULK}. */
+        void bulkLimit(final int bytes) {
+            this.bulkLimit = Math.min(Math.max(1, bytes), MAX_BULK);
+        }
+
         Object read() throws IOException {
             this.replyElements = 0L;
             this.replyBytes = 0L;
@@ -671,7 +723,12 @@ public class RedisClient implements AutoCloseable {
                     final long length = number(line);
                     if (length == -1L) yield null;
                     if (length < 0L) throw new IOException("Redis reply framing: bulk length " + length);
-                    if (length > MAX_BULK) throw new IOException("Redis bulk reply of " + length + " bytes");
+                    if (length > this.bulkLimit) {
+                        // Checked before any allocation; the caller closes this connection, so the
+                        // oversized value is neither read nor returned truncated.
+                        throw new IOException("Redis bulk reply of " + length + " bytes exceeds the " + this.bulkLimit
+                            + "-byte bound of this read");
+                    }
                     charge(length + 2L);
                     final byte[] data = this.in.readNBytes((int) length);
                     if (data.length != length) throw new EOFException("Redis reply truncated");

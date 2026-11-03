@@ -85,9 +85,63 @@ it stays a copy to go back to; opening it does what any start of the file reposi
 unreadable journal is set aside as `transitions/*.corrupt` and not copied). There is no export from
 Redis back to files.
 
+## Format 2, migration and rollback (Build 51)
+
+Build 51 code written; not built by an agent; not tested by the owner. MultiProfile stays disabled by
+default, and co-op membership is not part of this build (Build 52).
+
+Build 51 writes the profile store in **record format 2** (file and Redis repositories), which carries
+the profile's name and policy type. A store written by Build 50 or earlier is format 1.
+
+- **One way.** Builds older than Build 51 have **no gate of their own**: they do not know the format
+  marker, read format-2 records as corrupt (the FILE backend of Build 50 sets format-2 journals aside as
+  `*.corrupt`) and write format-1 accounts beside the format-2 ones. The gate is in Build 51+ itself
+  (`update/StoreDowngradeGuard`, owner decision OD-2): while the configured store is format 2
+  (FILE: `<directory>/format.awfm` says format 2; Redis: the `mp:meta` hash says format 2, and a Redis
+  that cannot be read at that point counts as format 2, fail closed), the auto-updater refuses to copy
+  `<jar>.prev` back after a failed first boot (`RESTORE_FAILED` with the reason, the new jar stays in
+  place), refuses to stage a release whose build number is below 51, and refuses to swap in a staged jar
+  whose build number is below 51 or unreadable (ERROR naming the store and OD-2). The Redis marker is
+  checked only while MultiProfile is enabled with `repository: redis`. Mixing old and new writers on one
+  store is unsupported. There is no downgrade exporter and no in-place downgrade.
+- **Rollback = restore the backup.** Stop every server on the store, put the complete pre-migration
+  backup (`migration.backup-dir`, written before anything is converted) back into an isolated store
+  and start the older build against that. Everything written to the store after the migration is not in
+  the backup and is lost on that path. This is the deployment-tooling rule of the plan (OD-2); outside the
+  Build 51+ updater, keeping an old binary away from a format-2 store (a manual jar swap, a container
+  recreated from an older image) is the operator's responsibility, because the old build has no gate.
+- **Procedure.** (1) Stop all servers using the store. (2) Set `migration.mode: "dry-run"`, start,
+  read the report in the log, stop. (3) Set `migration.backup-dir` to a path outside `awf/profiles`
+  and `migration.mode: "apply"`, start. (4) Set `migration.mode` back to `"off"` once the store is
+  format 2; a format-2 store is not migrated again.
+- **Names and types after migration.** Each profile of a format-1 store receives a name (unique per
+  account, stable across restarts) and the policy type `classic`; the consumer namespace
+  (`ProfileInfo.type`) is unchanged.
+- While a store is still format 1 and `migration.mode` is `off`, operations that need format 2 fail
+  with `MIGRATION_REQUIRED`; an unsupported format fails with `STORE_FORMAT_REFUSED`.
+- Migration needs a free store: an unresolved transition journal of the old build is a reason to
+  refuse, not to guess. Resolve it first ([Troubleshooting](#troubleshooting)).
+- **Every writer stopped.** The migration is offline on both repositories. The file repository enforces
+  it with its exclusive directory lock. The Redis repository has **no migration lock**: before the
+  backup, and again before resuming an interrupted migration, it refuses when another process still holds
+  a live session, profile-transaction or player-session claim in the fabric (the holder's node is named);
+  a node that holds no claim at that moment is not detected, so stopping every node that uses the Redis
+  profile store is part of the procedure, not optional. Each Redis migration write re-checks atomically
+  that the store marker still says the migration is in progress.
+- **Redis backup.** With `repository: redis` the pre-migration backup is an export of every key of the
+  profile namespace into `migration.backup-dir/multiprofile-redis-format1-<utc time>-<random>/keys/`
+  (one file per key; hash, set, sorted-set and string contents, length-prefixed) with a `backup.manifest`
+  (SHA-256 and size per file, last line `complete`), written and re-read before anything is converted. A
+  resumed migration requires that complete manifest. Restoring it into an isolated Redis is the
+  operator's step with Redis tooling; this build does not load the export back.
+- A reached store bound during co-op operations (pending intents per account, profile or store; permanent
+  receipts of a resource; a full index) is `CAPACITY_EXCEEDED`: pending operations resolve through
+  recovery (`/awf multiprofile format` lists them); retry afterwards.
+
 ## Backups
 
-Back up `awf/profiles/` together with the AWF world folders, with the server stopped. Snapshots and
+Before the Build 51 format-2 migration the backup in `migration.backup-dir` is the only rollback
+(see above). Back up `awf/profiles/` together with the AWF world folders, with the server stopped. Snapshots and
 `accounts/<player>.legacy*.awfp` pre-profile archives are checksummed but not encrypted; treat them as
 player data. Restore the directory as a whole (records, snapshots and journals from the same backup):
 the switch refuses only a snapshot older than its profile record (`STALE_STATE`), so an old profile

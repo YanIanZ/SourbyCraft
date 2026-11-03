@@ -1,14 +1,17 @@
 package dev.iyanz.sourbycraft.awf.multiprofile;
 
+import java.io.IOException;
 import java.util.Locale;
 
 /**
- * A proposed gameplay rule classification, following Hypixel SkyBlock's published profile types.
- * Not wired yet into the 26.2 engine; enum descriptions express intended policy only.
+ * The rule-set classification of a profile's {@linkplain dev.iyanz.sourbycraft.api.profile.ProfileType
+ * policy type}, following Hypixel SkyBlock's published profile types.
  *
- * <p>The stored {@code type} stays a free consumer namespace ({@code classic}, {@code ironman}, a
- * plugin's own name); this enum classifies it into a known rule set. An unknown namespace maps to
- * {@link #CUSTOM} with no restrictions, without registering or enforcing rules for that type.</p>
+ * <p>What is <b>persisted</b> is the API enum {@code dev.iyanz.sourbycraft.api.profile.ProfileType}
+ * on {@link AuroraProfile#profileType()}, as a stable numeric tag ({@link #tag(dev.iyanz.sourbycraft.api.profile.ProfileType)}).
+ * This server-side enum adds the intended rule set per type and a {@link #CUSTOM} bucket for the free
+ * consumer namespace {@link AuroraProfile#type()} when no policy type is known. Build 51 enforces none
+ * of these rules; enforcement at the action boundary is planned for Build 55.</p>
  */
 public enum ProfileType {
 
@@ -20,7 +23,7 @@ public enum ProfileType {
     STRANDED(false, false, false, true, false),
     /** Seasonal profile: temporary by policy, archived rather than deleted at the end. */
     BINGO(true, true, true, true, true),
-    /** A consumer-defined type with no built-in restrictions. */
+    /** A consumer-defined namespace with no built-in restrictions; never persisted as a policy type. */
     CUSTOM(true, true, true, true, false);
 
     private final boolean trading;
@@ -38,7 +41,7 @@ public enum ProfileType {
         this.seasonal = seasonal;
     }
 
-    /** Maps a stored type name to its rule set. */
+    /** Maps a consumer namespace name to its rule set; unknown names are {@link #CUSTOM}. */
     public static ProfileType of(final String type) {
         if (type == null) return CUSTOM;
         return switch (type.toLowerCase(Locale.ROOT)) {
@@ -47,6 +50,42 @@ public enum ProfileType {
             case "stranded" -> STRANDED;
             case "bingo" -> BINGO;
             default -> CUSTOM;
+        };
+    }
+
+    /** The rule set of a persisted policy type. */
+    public static ProfileType of(final dev.iyanz.sourbycraft.api.profile.ProfileType policy) {
+        if (policy == null) return CUSTOM;
+        return switch (policy) {
+            case CLASSIC -> CLASSIC;
+            case IRONMAN -> IRONMAN;
+            case STRANDED -> STRANDED;
+            case BINGO -> BINGO;
+        };
+    }
+
+    /**
+     * The stable numeric tag a format-2 record stores for a policy type. Tags are fixed per constant
+     * and never reused; the API enum's ordinal is not stored.
+     */
+    public static int tag(final dev.iyanz.sourbycraft.api.profile.ProfileType policy) {
+        return switch (policy) {
+            case CLASSIC -> 1;
+            case IRONMAN -> 2;
+            case STRANDED -> 3;
+            case BINGO -> 4;
+        };
+    }
+
+    /** The policy type for a stored tag; an unknown tag is a corrupt or newer record and is refused. */
+    public static dev.iyanz.sourbycraft.api.profile.ProfileType fromTag(final int tag, final String where)
+        throws IOException {
+        return switch (tag) {
+            case 1 -> dev.iyanz.sourbycraft.api.profile.ProfileType.CLASSIC;
+            case 2 -> dev.iyanz.sourbycraft.api.profile.ProfileType.IRONMAN;
+            case 3 -> dev.iyanz.sourbycraft.api.profile.ProfileType.STRANDED;
+            case 4 -> dev.iyanz.sourbycraft.api.profile.ProfileType.BINGO;
+            default -> throw new IOException("profile type tag " + tag + " in " + where + " is not known to this build");
         };
     }
 
@@ -70,7 +109,7 @@ public enum ProfileType {
         return this.seasonal;
     }
 
-    /** Immutable rules for an action boundary. */
+    /** Immutable rules for an action boundary (not enforced in Build 51). */
     public ProfileRules rules() {
         return new ProfileRules(this.trading, this.auction, this.bazaar, this.coop, this.seasonal);
     }

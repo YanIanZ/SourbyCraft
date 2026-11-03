@@ -15,17 +15,30 @@ enable. A disabled feature (or one that refused to start) registers nothing.
 
 ## Value types (`dev.iyanz.sourbycraft.api.profile`)
 
-- `ProfileRequest(accountId, type, metadata)` — `type` is `[a-z0-9_-]{1,32}`; metadata at most 32
-  entries, keys 1–64 characters, values up to 512.
-- `ProfileInfo(id, accountId, type, metadata, createdAtMillis, revision, status, active, worlds)`.
+- `ProfileRequest(accountId, type, metadata, profileType, name)` — `type` is `[a-z0-9_-]{1,32}`;
+  metadata at most 32 entries, keys 1–64 characters, values up to 512. `profileType` and `name` are
+  optional (Build 51, see [Names and policy types](#names-and-policy-types-build-51)); the
+  three-argument constructor and `ProfileRequest.of(accountId, type)` of earlier builds still exist and
+  leave both to the server.
+- `ProfileInfo(id, accountId, type, metadata, createdAtMillis, revision, status, active, worlds)` —
+  unchanged in Build 51.
+- `ProfileDetails(info, name, profileType)` and the enum `ProfileType` (`CLASSIC`, `IRONMAN`,
+  `STRANDED`, `BINGO`) — Build 51.
 - `ProfileWorldRef(world, role, loaded)` — `role` is `PRIMARY`, `NETHER`, `END`, `SHARED` or `AUXILIARY`.
 - `ProfileSwitchResult(success, errorCode, message, profile, transitionId, durationMillis)`.
 - `ProfileOwner(node, epoch, expiresAtMillis, distributed)`.
 - `ProfileErrorCode` — `DISABLED`, `SWITCHING_DISABLED`, `PLAYER_OFFLINE`, `PROFILE_NOT_FOUND`,
   `NOT_OWNED`, `SLOT_LIMIT`, `PROFILE_LOCKED`, `SWITCH_IN_PROGRESS`, `STALE_STATE`,
   `OWNERSHIP_CONFLICT`, `WORLD_UNAVAILABLE`, `TIMEOUT`, `RECOVERY_REQUIRED`, `RECOVERED`, `IO_FAILURE`,
-  `INVALID_REQUEST`, `STATE_TOO_LARGE`, `INTERNAL_ERROR`. `STATE_TOO_LARGE` was added in Build 50 PR #62
-  before `INTERNAL_ERROR`; a plugin that persisted ordinals must map them again.
+  `INVALID_REQUEST`, `STATE_TOO_LARGE`, `INTERNAL_ERROR`, and, appended in Build 51 after
+  `INTERNAL_ERROR` (existing ordinals unchanged), `NAME_TAKEN`, `NAME_INVALID`, `TYPE_NOT_ALLOWED`,
+  `STORE_FORMAT_REFUSED`, `MIGRATION_REQUIRED`, `COUNTER_EXHAUSTED` (a revision or fence counter reached
+  2^53-1; offline migration needed), `CLAIM_LOST` (the session or transaction claim lapsed or was taken
+  over; nothing written), `UNKNOWN_OUTCOME` (the store did not confirm a write and reading it back did
+  not settle it; nothing retried or compensated), `CAPACITY_EXCEEDED` (a store bound is reached: pending
+  intents per account, profile or store, permanent receipts of a resource, or a full index; retry later).
+  `STATE_TOO_LARGE` was added in Build 50 PR #62 before `INTERNAL_ERROR`; a plugin that persisted ordinals
+  must map them again.
 - `ProfileOperationException` — unchecked, carries the code for methods other than `switchProfile`
   (which returns a result instead).
 
@@ -92,12 +105,53 @@ profiles.createProfile(ProfileRequest.of(player.getUniqueId(), "skyblock"))
     });
 ```
 
+## Names and policy types (Build 51)
+
+Build 51 code written; not built by an agent; not tested by the owner. Co-op membership is **not**
+available (Build 52); nothing in this API creates, lists or changes shared profiles.
+
+Every profile has two independent type-like fields. `ProfileInfo.type()` is the free consumer
+namespace (`skyblock`, a plugin's own name) that the core never interprets. The new
+`ProfileType` is the policy type (`classic`, `ironman`, `stranded`, `bingo`) chosen at creation and never
+changed. Both are stored in the profile record (store format 2, see
+[CONFIGURATION.md](CONFIGURATION.md#build-51-store-format-2-names-and-types)).
+
+```java
+profiles.createProfile(ProfileRequest.of(accountId, "skyblock", ProfileType.IRONMAN))
+    .thenCompose(created -> profiles.getProfileDetails(created.id()))
+    .thenAccept(details -> logger.info("{} ({})", details.name(), details.profileType().id()));
+```
+
+- `getProfileDetails(profileId)` and `listProfileDetails(accountId)` return `ProfileDetails`
+  (`ProfileInfo` plus `name` and `profileType`). Both are `default` methods that fail with
+  `UnsupportedOperationException` on an implementation built before Build 51; `ProfileInfo` was not
+  changed so code compiled against earlier builds keeps working.
+- The **name** is chosen once when the profile is created, never changes and is unique per account
+  (compared ignoring case). With `names.policy: cute` the server assigns a fruit or vegetable name
+  from its pool; a numeric suffix is appended only when the pool is exhausted for that account. A
+  request may name a pool name instead of a rolled one. Any other text fails with `NAME_INVALID`; a name
+  the account already uses fails with `NAME_TAKEN`. There is no rename.
+- The **policy type** must be in `types.allowed` or creation fails with `TYPE_NOT_ALLOWED`; a request
+  without one gets `types.default`.
+- **Enforcement:** Build 51 stores and returns the type. It enforces no ironman, stranded or bingo rule
+  (no trading, auction, bazaar, island or seasonal restriction): those are planned for Build 55. A
+  consumer that needs a restriction before then enforces it itself.
+- `STORE_FORMAT_REFUSED` means the store is in a record format this build does not use; nothing was
+  written. `MIGRATION_REQUIRED` means the store is still format 1 and the operation needs format 2 (an
+  operator runs the migration, see [OPERATIONS.md](OPERATIONS.md#format-2-migration-and-rollback-build-51)).
+  Both are failures of the operation, not of the player.
+- A profile that existed before the store was migrated receives its name at migration time (stable
+  across restarts) and the policy type `classic`.
+
 ## Compatibility
 
 `AuroraWorlds` keeps its exact contract. `AuroraProfiles` is a new, separate service; plugins that do
 not use profiles do not depend on Redis or on this API. The newer methods (`bindProfileWorlds`,
-`setProfileLocked`, `setProfileSlotLimit`) are `default` methods that fail with
-`UnsupportedOperationException` on other implementations.
+`setProfileLocked`, `setProfileSlotLimit`, and in Build 51 `getProfileDetails` and
+`listProfileDetails`) are `default` methods that fail with `UnsupportedOperationException` on other
+implementations. Build 51 changes no existing signature: `ProfileInfo` and the three-argument
+`ProfileRequest` constructor are as before, `ProfileRequest` gained two optional components, and
+`ProfileErrorCode` constants were only appended.
 
 ## Build 50 world-binding API (owner testing pending)
 

@@ -204,6 +204,13 @@ public final class UpdateApplier {
      */
     static SwapResult swapInPlace(final String tag, final Path stagedJar, final String expectedSha256,
                                   final Path launchJar, final UpdateRollbackGuard guard) {
+        // OD-2: a jar older than Build 51 never takes the launch path over a format-2 MultiProfile store.
+        final Optional<String> downgrade = guard.downgradeGate().refuse(UpdateRollbackGuard.buildNumberOf(stagedJar));
+        if (downgrade.isPresent()) {
+            SourbyLogger.error("auto-updater: NOT installing " + tag + ": " + downgrade.get() + " The staged jar stays at "
+                + stagedJar + " and the server is NOT restarting.");
+            return SwapResult.ABORTED;
+        }
         Path prev;
         try {
             prev = guard.keepPrevious(launchJar);

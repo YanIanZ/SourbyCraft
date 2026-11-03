@@ -34,8 +34,33 @@ public final class ProfileConfig {
         }
         final ProfileSettings.Parsed parsed = ProfileSettings.parse(values);
         for (final String key : parsed.invalidKeys()) {
-            SourbyLogger.warn("Aurora config key '" + key + "' is invalid; AWF MultiProfile uses its default");
+            SourbyLogger.warn("Aurora config key '" + key + "' is invalid; " + fallback(key, parsed.settings()));
+        }
+        final ProfileSettings.Migration migration = parsed.settings().migration();
+        if (migration.mode() != ProfileSettings.MigrationMode.OFF) {
+            SourbyLogger.warn("AWF MultiProfile: " + ProfileSettings.MIGRATION_MODE_KEY + " is " + migration.mode().id()
+                + (migration.applies()
+                    ? "; a pre-Build-51 (format 1) profile store is backed up to '" + migration.backupDir()
+                        + "' and then converted to format 2 at startup. This is one way: builds older than Build 51 refuse a format-2 store"
+                        + " (rollback = restore the backup)"
+                    : "; a pre-Build-51 (format 1) profile store is only inspected and reported, nothing is written")
+                + (parsed.settings().enabled() ? "" : " (ignored: aurora.awf.multiprofile.enabled is false)"));
         }
         return parsed.settings();
+    }
+
+    /** What the server does instead of the invalid value, for the WARN. */
+    private static String fallback(final String key, final ProfileSettings settings) {
+        return switch (key) {
+            case ProfileSettings.TYPES_ALLOWED_KEY -> "AWF MultiProfile allows "
+                + String.join(", ", ProfileSettings.typeIds(settings.types().allowed()));
+            case ProfileSettings.TYPES_DEFAULT_KEY -> "AWF MultiProfile creates '"
+                + settings.types().defaultType().id() + "' profiles by default (the default must be in "
+                + ProfileSettings.TYPES_ALLOWED_KEY + ")";
+            case ProfileSettings.MIGRATION_MODE_KEY -> "AWF MultiProfile uses migration.mode "
+                + settings.migration().mode().id() + " (apply needs a valid " + ProfileSettings.MIGRATION_BACKUP_DIR_KEY + ")";
+            case ProfileSettings.MIGRATION_BACKUP_DIR_KEY -> "AWF MultiProfile has no migration backup directory";
+            default -> "AWF MultiProfile uses its default";
+        };
     }
 }

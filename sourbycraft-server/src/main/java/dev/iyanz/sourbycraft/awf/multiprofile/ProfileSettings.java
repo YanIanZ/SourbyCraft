@@ -1,11 +1,17 @@
 package dev.iyanz.sourbycraft.awf.multiprofile;
 
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Settings of {@code aurora.awf.multiprofile.*}.
@@ -17,7 +23,7 @@ import java.util.Objects;
  */
 public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int maxSlots, Switching switching,
                               ProfileIsolation isolation, Worlds worlds, Coordination coordination, String directory,
-                              Repository repository) {
+                              Repository repository, Types types, Names names, Migration migration) {
 
     public enum Mode {
         STANDALONE,
@@ -107,6 +113,130 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         }
     }
 
+    /**
+     * Policy types a profile may be created with (Build 51). {@code allowed} and {@code defaultType} are about the
+     * {@linkplain dev.iyanz.sourbycraft.api.profile.ProfileType policy type}, not the free consumer namespace
+     * ({@code ProfileRequest.type()}), which is not restricted by this list. The type is stored and returned;
+     * its rules are not enforced in Build 51.
+     *
+     * @param allowed the types a create request may name; never empty, iteration order is the declaration order of the enum
+     * @param defaultType used when a request names none; always a member of {@code allowed}
+     */
+    public record Types(Set<dev.iyanz.sourbycraft.api.profile.ProfileType> allowed,
+                        dev.iyanz.sourbycraft.api.profile.ProfileType defaultType) {
+        public Types {
+            Objects.requireNonNull(defaultType, "defaultType");
+            Objects.requireNonNull(allowed, "allowed");
+            if (allowed.isEmpty()) {
+                throw new IllegalArgumentException("types.allowed must name at least one type");
+            }
+            allowed = Collections.unmodifiableSet(EnumSet.copyOf(allowed));
+            if (!allowed.contains(defaultType)) {
+                throw new IllegalArgumentException("types.default " + defaultType.id() + " is not in types.allowed");
+            }
+        }
+
+        /** Whether a create request may name {@code type}. */
+        public boolean allows(final dev.iyanz.sourbycraft.api.profile.ProfileType type) {
+            return this.allowed.contains(type);
+        }
+    }
+
+    /** How a profile's name is chosen. */
+    public enum NamePolicy {
+        /**
+         * The server assigns a name from the {@link CuteNames} pool when the profile is created; it is unique per
+         * account (ignoring case) and never changes. A create request may ask for a specific pool name instead
+         * of a rolled one; any other text is refused.
+         */
+        CUTE;
+
+        public static NamePolicy parse(final String text) {
+            try {
+                return valueOf(text.strip().toUpperCase(Locale.ROOT));
+            } catch (final IllegalArgumentException invalid) {
+                throw new IllegalArgumentException("names.policy must be cute, not " + text);
+            }
+        }
+
+        public String id() {
+            return name().toLowerCase(Locale.ROOT);
+        }
+    }
+
+    /** @param policy how names are chosen */
+    public record Names(NamePolicy policy) {
+        public Names {
+            Objects.requireNonNull(policy, "policy");
+        }
+    }
+
+    /** What the startup migration of a format-1 store (pre-Build-51) does. */
+    public enum MigrationMode {
+        /** Touch nothing. A format-1 store stays format 1 and profile writes that need format 2 are refused. */
+        OFF("off"),
+        /** Read the store and report what a migration would do; write nothing. */
+        DRY_RUN("dry-run"),
+        /** Back the store up to {@code migration.backup-dir}, then migrate it to format 2. One way. */
+        APPLY("apply");
+
+        private final String id;
+
+        MigrationMode(final String id) {
+            this.id = id;
+        }
+
+        public String id() {
+            return this.id;
+        }
+
+        /**
+         * Parses {@code off}, {@code dry-run} (or {@code dry_run}) and {@code apply}. An unquoted {@code off} in
+         * YAML is read as the boolean {@code false}; {@link #parse(Object)} accepts that as {@code off}.
+         */
+        public static MigrationMode parse(final Object value) {
+            if (Boolean.FALSE.equals(value)) return OFF;
+            final String text = String.valueOf(value).strip().toLowerCase(Locale.ROOT).replace('_', '-');
+            for (final MigrationMode mode : values()) {
+                if (mode.id.equals(text)) return mode;
+            }
+            throw new IllegalArgumentException("migration.mode must be off, dry-run or apply, not " + value);
+        }
+    }
+
+    /**
+     * @param mode what to do with a format-1 store at startup
+     * @param backupDir where {@link MigrationMode#APPLY} writes the backup first: a path relative to the server
+     *     directory, or absolute; empty when not configured. Non-empty values never contain {@code ..} and never
+     *     textually overlap the store {@code directory} (neither inside it nor containing it). The overlap check is
+     *     textual only; whoever opens the path must resolve it and check it again.
+     */
+    public record Migration(MigrationMode mode, String backupDir) {
+        public Migration {
+            Objects.requireNonNull(mode, "mode");
+            Objects.requireNonNull(backupDir, "backupDir");
+            if (mode == MigrationMode.APPLY && backupDir.isBlank()) {
+                throw new IllegalArgumentException("migration.mode apply requires migration.backup-dir");
+            }
+        }
+
+        /** Whether the migration is asked to write anything. */
+        public boolean applies() {
+            return this.mode == MigrationMode.APPLY;
+        }
+    }
+
+    /** The record format of stores written before Build 51. */
+    public static final int LEGACY_STORE_FORMAT = 1;
+    /** The record format Build 51 writes. A store in this format is refused by older builds. */
+    public static final int CURRENT_STORE_FORMAT = 2;
+
+    public static final String TYPES_ALLOWED_KEY = "aurora.awf.multiprofile.types.allowed";
+    public static final String TYPES_DEFAULT_KEY = "aurora.awf.multiprofile.types.default";
+    public static final String NAMES_POLICY_KEY = "aurora.awf.multiprofile.names.policy";
+    public static final String MIGRATION_MODE_KEY = "aurora.awf.multiprofile.migration.mode";
+    public static final String MIGRATION_BACKUP_DIR_KEY = "aurora.awf.multiprofile.migration.backup-dir";
+
     public static final String ENABLED_KEY = "aurora.awf.multiprofile.enabled";
     public static final String MODE_KEY = "aurora.awf.multiprofile.mode";
     public static final String DEFAULT_SLOTS_KEY = "aurora.awf.multiprofile.default-slots";
@@ -131,21 +261,38 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         ProfileIsolation.POTION_EFFECTS_KEY, ProfileIsolation.LOCATION_KEY,
         WORLDS_IDLE_KEY,
         COORDINATION_PROVIDER_KEY, COORDINATION_FENCING_KEY, COORDINATION_SINGLE_SESSION_KEY, DIRECTORY_KEY,
-        REPOSITORY_KEY, REDIS_REQUIRE_AOF_KEY, REDIS_WAIT_FOR_AOF_KEY);
+        REPOSITORY_KEY, REDIS_REQUIRE_AOF_KEY, REDIS_WAIT_FOR_AOF_KEY,
+        TYPES_ALLOWED_KEY, TYPES_DEFAULT_KEY, NAMES_POLICY_KEY, MIGRATION_MODE_KEY, MIGRATION_BACKUP_DIR_KEY);
 
     /** The file repository; a server that sets no repository key keeps the behaviour of earlier builds. */
     public static final Repository DEFAULT_REPOSITORY = new Repository(Backend.FILE, true, true);
 
+    /** classic, ironman, stranded and bingo allowed; classic when a request names none. */
+    public static final Types DEFAULT_TYPES = new Types(EnumSet.allOf(dev.iyanz.sourbycraft.api.profile.ProfileType.class),
+        dev.iyanz.sourbycraft.api.profile.ProfileType.CLASSIC);
+    public static final Names DEFAULT_NAMES = new Names(NamePolicy.CUTE);
+    /** No migration: a format-1 store is left alone. */
+    public static final Migration DEFAULT_MIGRATION = new Migration(MigrationMode.OFF, "");
+
     public static final ProfileSettings DEFAULT = new ProfileSettings(false, Mode.STANDALONE, 3, 8,
         new Switching(true, 15_000, true), ProfileIsolation.ALL, new Worlds(300),
-        new Coordination(Provider.LOCAL, true, true), DIRECTORY_DEFAULT, DEFAULT_REPOSITORY);
+        new Coordination(Provider.LOCAL, true, true), DIRECTORY_DEFAULT, DEFAULT_REPOSITORY,
+        DEFAULT_TYPES, DEFAULT_NAMES, DEFAULT_MIGRATION);
 
-    /** Settings with {@link #DEFAULT_REPOSITORY}. */
+    /** Settings with {@link #DEFAULT_REPOSITORY} and the Build 51 defaults. */
     public ProfileSettings(final boolean enabled, final Mode mode, final int defaultSlots, final int maxSlots,
                            final Switching switching, final ProfileIsolation isolation, final Worlds worlds,
                            final Coordination coordination, final String directory) {
         this(enabled, mode, defaultSlots, maxSlots, switching, isolation, worlds, coordination, directory,
             DEFAULT_REPOSITORY);
+    }
+
+    /** Settings with the Build 51 defaults ({@link #DEFAULT_TYPES}, {@link #DEFAULT_NAMES}, {@link #DEFAULT_MIGRATION}). */
+    public ProfileSettings(final boolean enabled, final Mode mode, final int defaultSlots, final int maxSlots,
+                           final Switching switching, final ProfileIsolation isolation, final Worlds worlds,
+                           final Coordination coordination, final String directory, final Repository repository) {
+        this(enabled, mode, defaultSlots, maxSlots, switching, isolation, worlds, coordination, directory,
+            repository, DEFAULT_TYPES, DEFAULT_NAMES, DEFAULT_MIGRATION);
     }
 
     public ProfileSettings {
@@ -155,6 +302,9 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         Objects.requireNonNull(worlds, "worlds");
         Objects.requireNonNull(coordination, "coordination");
         Objects.requireNonNull(repository, "repository");
+        Objects.requireNonNull(types, "types");
+        Objects.requireNonNull(names, "names");
+        Objects.requireNonNull(migration, "migration");
         if (defaultSlots < 1 || maxSlots < 1 || defaultSlots > maxSlots || maxSlots > PlayerAccount.MAX_SLOTS) {
             throw new IllegalArgumentException("default-slots and max-slots must satisfy 1 <= default <= max <= "
                 + PlayerAccount.MAX_SLOTS);
@@ -162,6 +312,39 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         if (directory == null || directory.isBlank() || directory.length() > 128
             || directory.contains("..") || directory.startsWith("/") || directory.contains("\\")) {
             throw new IllegalArgumentException("multiprofile.directory must be a relative path without '..': " + directory);
+        }
+        if (!migration.backupDir().isBlank() && overlaps(directory, migration.backupDir())) {
+            throw new IllegalArgumentException("migration.backup-dir must not be inside or contain the store directory "
+                + directory + ": " + migration.backupDir());
+        }
+    }
+
+    /**
+     * Textual overlap of the store directory (relative) and a backup directory. A relative backup directory is
+     * compared to the store directory directly; an absolute one cannot be compared without the server directory,
+     * so it is accepted here and must be checked by whoever resolves it.
+     */
+    static boolean overlaps(final String directory, final String backupDir) {
+        try {
+            final Path store = Path.of(directory).normalize();
+            final Path backup = Path.of(backupDir).normalize();
+            if (store.isAbsolute() != backup.isAbsolute()) return false;
+            return backup.startsWith(store) || store.startsWith(backup);
+        } catch (final InvalidPathException unusable) {
+            return true;
+        }
+    }
+
+    /** Whether a backup directory text is usable: no NUL, no {@code ..} segment, at most 512 characters. */
+    static boolean validBackupDir(final String text) {
+        if (text.isBlank() || text.length() > 512 || text.indexOf('\0') >= 0) return false;
+        try {
+            for (final Path part : Path.of(text)) {
+                if (part.toString().equals("..")) return false;
+            }
+            return true;
+        } catch (final InvalidPathException unusable) {
+            return false;
         }
     }
 
@@ -247,8 +430,110 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         final Repository repository = new Repository(backend,
             flag(values, REDIS_REQUIRE_AOF_KEY, DEFAULT_REPOSITORY.requireAof(), invalid),
             flag(values, REDIS_WAIT_FOR_AOF_KEY, DEFAULT_REPOSITORY.waitForAof(), invalid));
+        final Types types = types(values, invalid);
+        final Names names = names(values, invalid);
+        final Migration migration = migration(values, directory, invalid);
         return new Parsed(new ProfileSettings(enabled, mode, defaultSlots, maxSlots, switching, isolation, worlds,
-            coordination, directory, repository), invalid);
+            coordination, directory, repository, types, names, migration), invalid);
+    }
+
+    private static Types types(final Map<String, Object> values, final List<String> invalid) {
+        Set<dev.iyanz.sourbycraft.api.profile.ProfileType> allowed = DEFAULT_TYPES.allowed();
+        final Object raw = values.get(TYPES_ALLOWED_KEY);
+        if (raw != null) {
+            final Set<dev.iyanz.sourbycraft.api.profile.ProfileType> parsed = typeSet(raw);
+            if (parsed == null) {
+                invalid.add(TYPES_ALLOWED_KEY);
+            } else {
+                allowed = parsed;
+            }
+        }
+        dev.iyanz.sourbycraft.api.profile.ProfileType defaultType = DEFAULT_TYPES.defaultType();
+        final Object rawDefault = values.get(TYPES_DEFAULT_KEY);
+        if (rawDefault != null) {
+            final var parsed = dev.iyanz.sourbycraft.api.profile.ProfileType.fromId(String.valueOf(rawDefault));
+            if (parsed.isPresent()) {
+                defaultType = parsed.get();
+            } else {
+                invalid.add(TYPES_DEFAULT_KEY);
+            }
+        }
+        if (!allowed.contains(defaultType)) {
+            // the default must be creatable: use the first allowed type and say which key was wrong
+            if (!invalid.contains(TYPES_DEFAULT_KEY)) invalid.add(TYPES_DEFAULT_KEY);
+            defaultType = allowed.iterator().next();
+        }
+        return new Types(allowed, defaultType);
+    }
+
+    /** The named types, or {@code null} when the value is not a non-empty list/comma list of known type ids. */
+    private static Set<dev.iyanz.sourbycraft.api.profile.ProfileType> typeSet(final Object raw) {
+        final List<?> items;
+        if (raw instanceof Collection<?> collection) {
+            items = List.copyOf(collection);
+        } else if (raw instanceof String text) {
+            items = List.of(text.split(","));
+        } else {
+            return null;
+        }
+        final Set<dev.iyanz.sourbycraft.api.profile.ProfileType> result =
+            EnumSet.noneOf(dev.iyanz.sourbycraft.api.profile.ProfileType.class);
+        for (final Object item : items) {
+            if (!(item instanceof String id)) return null;
+            final var type = dev.iyanz.sourbycraft.api.profile.ProfileType.fromId(id);
+            if (type.isEmpty()) return null;
+            result.add(type.get());
+        }
+        return result.isEmpty() ? null : result;
+    }
+
+    private static Names names(final Map<String, Object> values, final List<String> invalid) {
+        final Object raw = values.get(NAMES_POLICY_KEY);
+        if (raw == null) return DEFAULT_NAMES;
+        try {
+            return new Names(NamePolicy.parse(String.valueOf(raw)));
+        } catch (final IllegalArgumentException bad) {
+            invalid.add(NAMES_POLICY_KEY);
+            return DEFAULT_NAMES;
+        }
+    }
+
+    /**
+     * An invalid mode, or {@code apply} without a usable backup directory, falls back to {@code off}: a migration
+     * that rewrites the store must never start from a half-valid configuration.
+     */
+    private static Migration migration(final Map<String, Object> values, final String directory,
+                                       final List<String> invalid) {
+        MigrationMode mode = DEFAULT_MIGRATION.mode();
+        final Object rawMode = values.get(MIGRATION_MODE_KEY);
+        if (rawMode != null) {
+            try {
+                mode = MigrationMode.parse(rawMode);
+            } catch (final IllegalArgumentException bad) {
+                invalid.add(MIGRATION_MODE_KEY);
+            }
+        }
+        String backupDir = DEFAULT_MIGRATION.backupDir();
+        final Object rawDir = values.get(MIGRATION_BACKUP_DIR_KEY);
+        if (rawDir instanceof String text) {
+            final String stripped = text.strip();
+            if (stripped.isEmpty()) {
+                backupDir = "";
+            } else if (validBackupDir(stripped) && !overlaps(directory, stripped)) {
+                backupDir = stripped;
+            } else {
+                invalid.add(MIGRATION_BACKUP_DIR_KEY);
+            }
+        } else if (rawDir != null) {
+            invalid.add(MIGRATION_BACKUP_DIR_KEY);
+        }
+        if (mode == MigrationMode.APPLY && backupDir.isEmpty()) {
+            if (!invalid.contains(MIGRATION_BACKUP_DIR_KEY) && !invalid.contains(MIGRATION_MODE_KEY)) {
+                invalid.add(MIGRATION_MODE_KEY);
+            }
+            mode = MigrationMode.OFF;
+        }
+        return new Migration(mode, backupDir);
     }
 
     /** The configuration rows for {@code AuroraKeys}, in file order. */
@@ -277,7 +562,21 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         values.put(REPOSITORY_KEY, DEFAULT.repository().backend().name().toLowerCase(Locale.ROOT));
         values.put(REDIS_REQUIRE_AOF_KEY, DEFAULT.repository().requireAof());
         values.put(REDIS_WAIT_FOR_AOF_KEY, DEFAULT.repository().waitForAof());
+        values.put(TYPES_ALLOWED_KEY, typeIds(DEFAULT.types().allowed()));
+        values.put(TYPES_DEFAULT_KEY, DEFAULT.types().defaultType().id());
+        values.put(NAMES_POLICY_KEY, DEFAULT.names().policy().id());
+        values.put(MIGRATION_MODE_KEY, DEFAULT.migration().mode().id());
+        values.put(MIGRATION_BACKUP_DIR_KEY, DEFAULT.migration().backupDir());
         return values;
+    }
+
+    /** The identifiers of a type set, in enum order (the form written to the configuration file). */
+    public static List<String> typeIds(final Set<dev.iyanz.sourbycraft.api.profile.ProfileType> types) {
+        final List<String> ids = new ArrayList<>();
+        for (final dev.iyanz.sourbycraft.api.profile.ProfileType type : dev.iyanz.sourbycraft.api.profile.ProfileType.values()) {
+            if (types.contains(type)) ids.add(type.id());
+        }
+        return List.copyOf(ids);
     }
 
     private static boolean flag(final Map<String, Object> values, final String key, final boolean fallback,

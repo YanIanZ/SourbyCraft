@@ -1,7 +1,10 @@
 package dev.iyanz.sourbycraft.awf.multiprofile;
 
+import dev.iyanz.sourbycraft.awf.multiprofile.CoopWriteGuard.ProfileClaim;
 import dev.iyanz.sourbycraft.awf.redis.fabric.ClaimResult;
+import dev.iyanz.sourbycraft.awf.redis.fabric.NodeIdentity;
 import dev.iyanz.sourbycraft.awf.redis.fabric.OwnerClaim;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -18,6 +21,12 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>The counters live in memory and start at 1 in every process, so each instance has a random
  * {@link #incarnation()}: recovery does not compare a fence a journal recorded before a restart with
  * one issued after it.</p>
+ *
+ * <p>The solo claim ({@link #claim}) keeps its same-process supersession: a new token of this node
+ * replaces a live claim, which the solo switch protocol relies on. The co-op transaction claim
+ * {@code P} ({@link #claimTransaction}) is a separate {@link StrictLeases} table with its own fence
+ * counters: a live {@code P} is renewed only by the exact same token and refused for every other, also
+ * of this process. The two tables never see each other's ids as the same lease.</p>
  */
 public final class LocalProfileOwnership implements ProfileOwnership {
 
@@ -25,6 +34,7 @@ public final class LocalProfileOwnership implements ProfileOwnership {
 
     private final ConcurrentHashMap<UUID, Lease> leases = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, Long> fences = new ConcurrentHashMap<>();
+    private final StrictLeases transactions;
     private final long leaseNanos;
     private final String nodeId;
     private final String incarnation = "local:" + UUID.randomUUID();
@@ -33,6 +43,7 @@ public final class LocalProfileOwnership implements ProfileOwnership {
         this.nodeId = Objects.requireNonNull(nodeId, "nodeId");
         if (leaseSeconds < 1) throw new IllegalArgumentException("leaseSeconds " + leaseSeconds);
         this.leaseNanos = leaseSeconds * 1_000_000_000L;
+        this.transactions = new StrictLeases(leaseSeconds);
     }
 
     @Override
@@ -132,7 +143,44 @@ public final class LocalProfileOwnership implements ProfileOwnership {
         return CompletableFuture.completedFuture(holder == null || holder.node().equals(this.nodeId) ? null : holder);
     }
 
-    /** Every live lease, for admin diagnostics. */
+    // ------------------------------------------------------------------ co-op P
+
+    @Override
+    public CompletableFuture<TransactionGrant> claimTransaction(final UUID profileId, final UUID ownerToken) {
+        final StrictLeases.Outcome outcome = this.transactions.claim(profileId, this.nodeId, ownerToken);
+        if (outcome.exhausted()) return CompletableFuture.completedFuture(TransactionGrant.exhausted());
+        final ProfileClaim claim = toClaim(profileId, outcome.lease());
+        return CompletableFuture.completedFuture(outcome.granted() ? TransactionGrant.granted(claim)
+            : TransactionGrant.held(claim));
+    }
+
+    @Override
+    public CompletableFuture<Boolean> renewTransaction(final ProfileClaim claim) {
+        return CompletableFuture.completedFuture(this.transactions.renew(claim.profileId(), claim.session(), claim.fence()));
+    }
+
+    @Override
+    public CompletableFuture<Boolean> validateTransaction(final ProfileClaim claim) {
+        return CompletableFuture.completedFuture(this.transactions.valid(claim.profileId(), claim.session(), claim.fence()));
+    }
+
+    @Override
+    public CompletableFuture<Boolean> releaseTransaction(final ProfileClaim claim) {
+        return CompletableFuture.completedFuture(this.transactions.release(claim.profileId(), claim.session(), claim.fence()));
+    }
+
+    @Override
+    public CompletableFuture<ProfileClaim> transactionHolder(final UUID profileId) {
+        final StrictLeases.Lease lease = this.transactions.holder(profileId);
+        return CompletableFuture.completedFuture(lease == null ? null : toClaim(profileId, lease));
+    }
+
+    private static ProfileClaim toClaim(final UUID profileId, final StrictLeases.Lease lease) {
+        return new ProfileClaim(profileId, lease.node(), lease.incarnation(), lease.owner(), lease.fence(),
+            lease.expiresAtMillis());
+    }
+
+    /** Every live solo lease, for admin diagnostics. */
     public Map<UUID, OwnerClaim> live() {
         final Map<UUID, OwnerClaim> live = new java.util.LinkedHashMap<>();
         final long now = System.nanoTime();
@@ -148,7 +196,95 @@ public final class LocalProfileOwnership implements ProfileOwnership {
     }
 
     @Override
+    public String node() {
+        return this.nodeId;
+    }
+
+    @Override
     public String describe() {
-        return "local (node " + this.nodeId + ", " + this.leases.size() + " claims)";
+        return "local (node " + this.nodeId + ", " + this.leases.size() + " claims, " + this.transactions.size()
+            + " transaction claims)";
+    }
+
+    /**
+     * A process-local strict lease table: per id, one live lease renewed only by the exact same
+     * session and fence, refused for any other token (also of this process), with a per-id fence
+     * counter that never resets within the process and refuses to pass {@link CoopWriteGuard#MAX_COUNTER}.
+     * Expiry uses {@link System#nanoTime}. Shared by the local {@code P} and {@code Q} providers, each
+     * with its own instance, so their ids never alias.
+     */
+    static final class StrictLeases {
+
+        /** A live or lapsed lease; {@code session} is {@code node/incarnation/owner}. */
+        record Lease(String session, String node, String incarnation, UUID owner, long fence, long expiresAtNanos,
+                     long expiresAtMillis) {}
+
+        /** {@code granted} with the new or renewed lease, or refused with the live holder; {@code exhausted} refuses with no lease. */
+        record Outcome(boolean granted, boolean exhausted, Lease lease) {}
+
+        private final Map<UUID, Lease> leases = new HashMap<>();
+        private final Map<UUID, Long> fences = new HashMap<>();
+        private final long leaseNanos;
+        private final String incarnation = NodeIdentity.processIncarnation();
+
+        StrictLeases(final int leaseSeconds) {
+            if (leaseSeconds < 1) throw new IllegalArgumentException("leaseSeconds " + leaseSeconds);
+            this.leaseNanos = leaseSeconds * 1_000_000_000L;
+        }
+
+        synchronized Outcome claim(final UUID id, final String node, final UUID owner) {
+            final long now = System.nanoTime();
+            final String session = node + "/" + this.incarnation + "/" + owner;
+            final Lease current = this.leases.get(id);
+            if (current != null && current.expiresAtNanos() - now > 0L) {
+                if (!current.session().equals(session)) return new Outcome(false, false, current);
+                final Lease renewed = new Lease(session, node, this.incarnation, owner, current.fence(), now + this.leaseNanos,
+                    System.currentTimeMillis() + this.leaseNanos / 1_000_000L);
+                this.leases.put(id, renewed);
+                return new Outcome(true, false, renewed);
+            }
+            final long previous = this.fences.getOrDefault(id, 0L);
+            if (previous >= CoopWriteGuard.MAX_COUNTER) return new Outcome(false, true, null);
+            final long fence = previous + 1L;
+            this.fences.put(id, fence);
+            final Lease lease = new Lease(session, node, this.incarnation, owner, fence, now + this.leaseNanos,
+                System.currentTimeMillis() + this.leaseNanos / 1_000_000L);
+            this.leases.put(id, lease);
+            return new Outcome(true, false, lease);
+        }
+
+        synchronized boolean renew(final UUID id, final String session, final long fence) {
+            final long now = System.nanoTime();
+            final Lease current = this.leases.get(id);
+            if (current == null || !current.session().equals(session) || current.fence() != fence
+                || current.expiresAtNanos() - now <= 0L) {
+                return false;
+            }
+            this.leases.put(id, new Lease(current.session(), current.node(), current.incarnation(), current.owner(),
+                current.fence(), now + this.leaseNanos, System.currentTimeMillis() + this.leaseNanos / 1_000_000L));
+            return true;
+        }
+
+        synchronized boolean valid(final UUID id, final String session, final long fence) {
+            final Lease current = this.leases.get(id);
+            return current != null && current.session().equals(session) && current.fence() == fence
+                && current.expiresAtNanos() - System.nanoTime() > 0L;
+        }
+
+        synchronized boolean release(final UUID id, final String session, final long fence) {
+            final Lease current = this.leases.get(id);
+            if (current == null || !current.session().equals(session) || current.fence() != fence) return false;
+            this.leases.remove(id);
+            return true;
+        }
+
+        /** The stored lease, live or lapsed (callers compare {@code expiresAtMillis}), or {@code null}. */
+        synchronized Lease holder(final UUID id) {
+            return this.leases.get(id);
+        }
+
+        synchronized int size() {
+            return this.leases.size();
+        }
     }
 }

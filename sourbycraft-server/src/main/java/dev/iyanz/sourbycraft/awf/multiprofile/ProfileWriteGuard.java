@@ -5,7 +5,10 @@ import dev.iyanz.sourbycraft.api.profile.ProfileOperationException;
 import dev.iyanz.sourbycraft.awf.redis.fabric.OwnerClaim;
 
 /**
- * What a protected {@link ProfileRepository} mutation is made under.
+ * What a protected format-1 {@link ProfileRepository} mutation is made under: one solo claim and one
+ * expected revision. The format-2 (co-op) mutations take a {@link CoopWriteGuard} instead, which has
+ * no {@link #ANY}, no {@link #UNGUARDED} and one expected revision per touched record; this guard is
+ * never accepted by a format-2 method.
  *
  * <p>{@code claim} is the ownership claim (and so the fence) the caller validated before the write,
  * or {@code null} when the write is not made on behalf of an owned profile (creating a profile,

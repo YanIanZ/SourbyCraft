@@ -22,6 +22,27 @@ an account's limit within 1..`max-slots`; profiles above a lowered limit are kep
 writes compare the stored revision: within one process for the file repository, atomically in the write
 script for the Redis repository (`STALE_STATE` on a conflict).
 
+## Name and policy type (Build 51)
+
+Build 51 code written; not built by an agent; not tested by the owner. A profile gets a name and a
+policy type when it is created, both stored in the profile record (store format 2) and neither ever
+changed afterwards: no rename, no type change. The name is unique per account, ignoring case; creation
+fails with `NAME_TAKEN`, `NAME_INVALID` or `TYPE_NOT_ALLOWED`. Name and type play no part in switching,
+snapshots, recovery or ownership, and no gameplay rule is attached to the type in this build. Co-op
+membership (several players on one profile) is Build 52 and is not described here.
+
+On a format-2 store, creating and deleting a profile are each **one intent** (COOP-DESIGN §5), not two
+separately guarded writes: the engine stages the after-images (create: the new profile record at revision
+0 and the account with the slot and alias; delete: the DELETED record and the account without the slot),
+PREPARE reserves the records under the player's session claim `Q` (delete also under the profile's
+transaction claim `P`), and COMMIT installs them. A server stopped between the two phases leaves a
+PREPARED or COMMITTED intent that the next start, or the player's next login, resolves: an uncommitted
+one is aborted (its reservations cleared, nothing applied), a committed one rolls forward. The store
+checks the name is still free in the account at PREPARE and again at COMMIT. Login admission is the
+`LOGIN` operation, a slot-limit change `ACCOUNT_LIMIT`; both are single guarded account writes. A reached
+store bound (pending intents per account, profile or store; permanent receipts of a resource) is
+`CAPACITY_EXCEEDED`, a reached revision or fence counter `COUNTER_EXHAUSTED`.
+
 ## Snapshot revisions
 
 A snapshot records `revision = profile.revision + 1`, and the profile is advanced to it in the same

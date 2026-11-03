@@ -458,6 +458,12 @@ public final class SourbyUpdater {
             return Outcome.APPLYING;
         }
 
+        // OD-2: a release older than Build 51 is announced, never staged, while the MultiProfile store is format 2.
+        final Optional<String> downgrade = rollbackGuard.downgradeGate().refuse(releaseVersionOf(latest.tagName));
+        if (downgrade.isPresent()) {
+            SourbyLogger.error("auto-updater: NOT staging " + latest.tagName + ": " + downgrade.get());
+            return Outcome.NOTIFIED;
+        }
         // stage/auto: download + verify + place in the stage dir (latest is for this Minecraft version).
         try {
             Path staged = downloadAndStage(latest);
