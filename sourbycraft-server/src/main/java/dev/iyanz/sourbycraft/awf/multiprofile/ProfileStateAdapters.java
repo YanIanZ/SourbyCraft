@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
@@ -55,6 +56,15 @@ import org.bukkit.plugin.Plugin;
  * its bytes kept). Data at a <em>newer</em> version than the registration, or of an unregistered required id, refuses
  * with {@link ProfileErrorCode#ADAPTER_MISSING} naming the versions. Plugins register at most
  * {@value #MAX_PLUGIN_ADAPTERS} adapters; the 32nd snapshot entry is the reserved record.</p>
+ *
+ * <p><b>Preserved unregistered ids (Build 55.1).</b> An id listed in {@code adapters.preserve-unregistered} that no
+ * plugin registers on this node is exempt from the {@code ADAPTER_MISSING} refusal: its stored bytes are not applied,
+ * not captured, carried forward unchanged by every merge here together with the stored required record, and applied
+ * again by the node that registers the adapter. For a node that by design runs without the plugin owning the data.
+ * The ids an apply passed through for a player are remembered until that player's next apply of the id or their quit
+ * ({@link #passedThrough}, {@link #forgetPassedThrough}): an adapter that registers for the id mid-session is not asked
+ * to capture for that player, its stored bytes are carried forward, so the late registration never overwrites data
+ * that was not applied here (the plugin's own live value would be unrelated to the profile).</p>
  */
 public final class ProfileStateAdapters {
 
@@ -96,6 +106,19 @@ public final class ProfileStateAdapters {
     private final ConcurrentHashMap<String, Registered> adapters = new ConcurrentHashMap<>();
     /** Adapter ids the operator forces to REQUIRED ({@code adapters.required}). */
     private final Set<String> forcedRequired;
+    /**
+     * Build 55.1: adapter ids whose stored REQUIRED data passes through this node unchanged while no plugin registers
+     * them here ({@code adapters.preserve-unregistered}): not applied, not captured, never dropped (the carry-forward
+     * keeps them with the stored required record), and no {@code ADAPTER_MISSING}. A registered id is never affected.
+     */
+    private final Set<String> preserveUnregistered;
+    /**
+     * Build 55.1: per player, the preserved ids whose stored data an apply passed through here. Until that player's next
+     * apply of the id (or {@link #forgetPassedThrough}), a capture does not ask an adapter that registered for the id
+     * meanwhile: the stored bytes are carried forward instead, so a late registration never overwrites data this node
+     * never applied. Bounded by the players online (the runtime forgets at quit).
+     */
+    private final ConcurrentHashMap<UUID, Set<String>> passedThrough = new ConcurrentHashMap<>();
 
     public ProfileStateAdapters() {
         this(Set.of());
@@ -103,7 +126,32 @@ public final class ProfileStateAdapters {
 
     /** @param forcedRequired adapter ids treated as REQUIRED whatever their descriptor declares */
     public ProfileStateAdapters(final Set<String> forcedRequired) {
+        this(forcedRequired, Set.of());
+    }
+
+    /**
+     * @param forcedRequired adapter ids treated as REQUIRED whatever their descriptor declares
+     * @param preserveUnregistered adapter ids whose stored REQUIRED data is carried through unchanged while unregistered here
+     */
+    public ProfileStateAdapters(final Set<String> forcedRequired, final Set<String> preserveUnregistered) {
         this.forcedRequired = Set.copyOf(Objects.requireNonNull(forcedRequired, "forcedRequired"));
+        this.preserveUnregistered = Set.copyOf(Objects.requireNonNull(preserveUnregistered, "preserveUnregistered"));
+    }
+
+    /** Build 55.1: whether stored data of {@code id} passes through this node untouched (listed, and nothing registers it). */
+    public boolean preservedHere(final String id) {
+        return this.preserveUnregistered.contains(id) && !this.adapters.containsKey(id);
+    }
+
+    /** Build 55.1: the preserved ids the last apply of {@code playerId} passed through and no later apply covered. */
+    public Set<String> passedThrough(final UUID playerId) {
+        final Set<String> ids = this.passedThrough.get(playerId);
+        return ids == null ? Set.of() : Set.copyOf(ids);
+    }
+
+    /** Build 55.1: the player's session ended (quit); the pass-through memory of {@link #passedThrough} is dropped. */
+    public void forgetPassedThrough(final UUID playerId) {
+        this.passedThrough.remove(playerId);
     }
 
     /**
@@ -206,11 +254,18 @@ public final class ProfileStateAdapters {
         final Set<String> preserved = new LinkedHashSet<>();
         final Set<String> cleared = new LinkedHashSet<>();
         long total = 0L;
+        final Set<String> passed = this.passedThrough.get(player.getUniqueId());
         for (final Map.Entry<String, Registered> entry : this.adapters.entrySet()) {
             final String id = entry.getKey();
             final Registered registered = entry.getValue();
             if (!registered.captured()) continue;
             final String key = key(id, registered.version());
+            if (passed != null && passed.contains(id)) {
+                // Build 55.1: the adapter registered after this player's apply passed the stored data through; it was never
+                // applied here, so it is not asked and the stored bytes are carried forward instead.
+                preserved.add(key);
+                continue;
+            }
             final byte[] data;
             try {
                 data = registered.adapter().capture(player);
@@ -366,6 +421,7 @@ public final class ProfileStateAdapters {
             if (id == null || !requiredStored(id, recorded)) continue;
             final int stored = versionOf(key);
             final Registered registered = this.adapters.get(id);
+            if (registered == null && this.preserveUnregistered.contains(id)) continue; // Build 55.1: carried through unchanged
             if (registered == null || !registered.captured()) {
                 missing.add(key + " (" + (registered == null ? "not registered" : "registered with scope UNSUPPORTED") + ")");
                 continue;
@@ -451,6 +507,11 @@ public final class ProfileStateAdapters {
             if (version < 0) return;
             final boolean required = requiredStored(id, recorded);
             final Registered registered = this.adapters.get(id);
+            if (registered == null && this.preserveUnregistered.contains(id)) {
+                // Build 55.1: stays in the profile, silently; remembered so a later registration does not capture over it.
+                this.passedThrough.computeIfAbsent(player.getUniqueId(), ignored -> ConcurrentHashMap.newKeySet()).add(id);
+                return;
+            }
             if (registered == null || !registered.captured() || registered.version() < version) {
                 if (required) requiredFailures.add(key + " (not registered at a version that reads it)");
                 dev.iyanz.sourbycraft.util.SourbyLogger.warn("AWF MultiProfile: adapter '" + id + "' version " + version
@@ -484,6 +545,8 @@ public final class ProfileStateAdapters {
             }
             try {
                 registered.adapter().apply(player, data);
+                final Set<String> passedBefore = this.passedThrough.get(player.getUniqueId());
+                if (passedBefore != null) passedBefore.remove(id); // Build 55.1: applied for real now
             } catch (final Exception failed) {
                 if (required) {
                     requiredFailures.add(key + " (" + failed.getMessage() + ")");
