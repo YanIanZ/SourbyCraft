@@ -154,6 +154,15 @@ public class PluginsCommand extends Command {
                 sender.sendMessage(UiPanel.row("Async body time", bodyTime(bodies.async())));
                 sender.sendMessage(UiPanel.row("Startup cache", stats.startupCacheState()));
                 sender.sendMessage(UiPanel.row("Last failure", stats.lastFailure() == null ? "none" : stats.lastFailure()));
+                var exceptions = AuroraBridge.exceptionSignatures(plugin);
+                if (!exceptions.isEmpty()) {
+                    long total = exceptions.stream().mapToLong(dev.iyanz.sourbycraft.bridge.ExceptionSignatures.Entry::total).sum();
+                    sender.sendMessage(UiPanel.row("Task exceptions (total / signatures)", total + " / " + exceptions.size()));
+                    for (int i = 0; i < Math.min(3, exceptions.size()); i++) {
+                        var entry = exceptions.get(i);
+                        sender.sendMessage(UiPanel.row("  #" + (i + 1) + " " + entry.total() + "x", entry.describe()));
+                    }
+                }
             }
         }
         sender.sendMessage(UiPanel.actions(List.of("/plugins", "/plugins filter failed")));

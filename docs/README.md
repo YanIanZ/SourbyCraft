@@ -141,6 +141,7 @@ Build 49: [release notes](releases/26.2-build-49-release.md) (normal release, no
 [Build 49.1 hotfix](releases/26.2-build-49.1-hotfix.md) (test-only fix) ·
 [Build 49 real-test runbook](releases/runbooks/build-49-real-test.md) (human tester and operator handover) ·
 Build 50: [notes and gates](releases/26.2-build-50-aurora-nexus.md) (`v26.2-r50` prerelease), [readiness](releases/BUILD-50-READINESS.md), [PM matrix](releases/BUILD-50-PM-MATRIX.md) ·
+Builds 54–56: [54](releases/26.2-build-54-aurora-nexus.md) · [55](releases/26.2-build-55-aurora-nexus.md) · [55.1](releases/26.2-build-55.1-aurora-nexus.md) · [56](releases/26.2-build-56-aurora-nexus.md) · [57 (draft: off-region player snapshot, bridged exception log)](releases/26.2-build-57-aurora-nexus.md) ·
 [46](releases/46.md) · [45](releases/45.md) · [44](releases/44.md)
 
 Dated plans and specs from the v6–v12, UniverseSpigot and Folia-base eras (May–September 2026,

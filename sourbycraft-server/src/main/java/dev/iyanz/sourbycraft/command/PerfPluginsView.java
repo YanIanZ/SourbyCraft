@@ -37,8 +37,14 @@ final class PerfPluginsView implements PerfView {
                 ? "; relaxed hits " + dev.iyanz.sourbycraft.guards.ThreadChecks.relaxedHits()
                     + " (outside bridged bodies " + dev.iyanz.sourbycraft.guards.ThreadChecks.relaxedHitsOutsideBridge() + ")"
                 : ""));
+        if (dev.iyanz.sourbycraft.guards.OffRegionWorldReads.playerSnapshots() > 0) {
+            add(lines, "Off-region player snapshots", dev.iyanz.sourbycraft.guards.OffRegionWorldReads.playerSnapshots()
+                + " (world-wide read-only copies served to threads owning no region of the world)");
+        }
         renderSlowestStartups(lines, dev.iyanz.sourbycraft.startup.PluginTimings.GLOBAL);
+        final var exceptions = dev.iyanz.sourbycraft.bridge.AuroraBridge.allExceptionSignatures();
         for (final var stats : dev.iyanz.sourbycraft.bridge.AuroraBridge.allStats()) {
+            renderExceptions(lines, stats.plugin(), exceptions);
             add(lines, stats.plugin() + " redirects / handoffs / rejected / violations",
                 stats.schedulerRedirects() + " / " + stats.ownerHandoffs() + " / " + stats.rejectedOperations()
                     + " / " + stats.fatalViolations() + (stats.quarantined() ? " (quarantined)" : "")
@@ -50,6 +56,19 @@ final class PerfPluginsView implements PerfView {
                 : TpsCommand.ms(region.totalMillis()) + " / " + TpsCommand.ms(region.p99Millis()) + "; "
                     + TpsCommand.ms(global.totalMillis()) + " / " + TpsCommand.ms(global.p99Millis()));
         }
+    }
+
+    /**
+     * One line per plugin with exceptions thrown by its bridged task bodies: total occurrences, distinct signatures
+     * and the most frequent one (the full list is in {@code /plugins <name>}). Nothing when the plugin threw nothing.
+     */
+    static void renderExceptions(final List<Component> lines, final String plugin,
+                                 final List<dev.iyanz.sourbycraft.bridge.ExceptionSignatures.Entry> all) {
+        final var own = all.stream().filter(entry -> entry.plugin().equals(plugin)).toList();
+        if (own.isEmpty()) return;
+        final long total = own.stream().mapToLong(dev.iyanz.sourbycraft.bridge.ExceptionSignatures.Entry::total).sum();
+        add(lines, plugin + " task exceptions (total / signatures)", total + " / " + own.size()
+            + "; most frequent " + own.get(0).total() + "x " + own.get(0).describe());
     }
 
     /** The five slowest plugins by onLoad + onEnable wall time, this run. */

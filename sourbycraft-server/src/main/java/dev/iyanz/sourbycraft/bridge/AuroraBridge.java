@@ -568,6 +568,18 @@ public final class AuroraBridge {
         return current == null ? java.util.List.of() : current.telemetry().snapshot();
     }
 
+    /** Exception signatures of one plugin's bridged task bodies, most occurrences first; empty when none or not bridged. */
+    public static java.util.List<ExceptionSignatures.Entry> exceptionSignatures(final Plugin plugin) {
+        final BridgeRuntime current = runtime;
+        return plugin == null || current == null ? java.util.List.of() : current.exceptionSignatures(plugin.getName());
+    }
+
+    /** Exception signatures of every bridged plugin's task bodies; empty before the bridge is first used. */
+    public static java.util.List<ExceptionSignatures.Entry> allExceptionSignatures() {
+        final BridgeRuntime current = runtime;
+        return current == null ? java.util.List.of() : current.exceptionSignatures();
+    }
+
     /**
      * Test seam: forgets the lazily started runtime and the early settings read with it, and does so again
      * when closed. The runtime is process-wide and otherwise stays started for the rest of the JVM, so a

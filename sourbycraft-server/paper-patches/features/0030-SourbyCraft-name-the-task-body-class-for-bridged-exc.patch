@@ -1,0 +1,20 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Wed, 4 Nov 2026 20:04:38 +0700
+Subject: [PATCH] SourbyCraft - name the task body class for bridged exception
+ signatures
+
+The Aurora Bridge now deduplicates exceptions thrown by bridged task bodies by (plugin, body class, exception class, top frame) and logs one line per signature per minute after the first full stack trace (bridge/ExceptionSignatures). CraftScheduler's bridged Task names the plugin's own Runnable or Consumer class as the body, so the signature and the /plugins <name> view say which task class threw instead of the bridge's anonymous wrapper.
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java b/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
+index c496409af11548a0346a5189b07b1eb7cf5abb9f..a472ac3020f81008238286010d720aca0351c721 100644
+--- a/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
++++ b/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
+@@ -548,6 +548,7 @@ public class CraftScheduler implements BukkitScheduler {
+             @Override public boolean cancelled() { return task.isCancelled(); }
+             @Override public void markCancelled() { task.cancel0(); dev.iyanz.sourbycraft.bridge.FoliaSchedulerCompatibility.bridgeCancelled(task.rTask); }
+             @Override public Object handle() { return task; }
++            @Override public String body() { final Object body = task.rTask != null ? task.rTask : task.cTask; return body == null ? null : body.getClass().getName(); } // SourbyCraft - exception signatures name the plugin's own task body class
+             @Override public void run() { dev.iyanz.sourbycraft.bridge.AuroraBridge.runBukkitTask(task, task.rTask, task.cTask, task instanceof CraftFuture<?>); }
+         };
+     }

@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Wed, 4 Nov 2026 20:04:38 +0700
+Subject: [PATCH] SourbyCraft - world-wide player snapshot for off-region
+ readers
+
+Level.getLocalPlayers() answered a thread that ticks no region of the world with a NullPointerException (getCurrentWorldData() is null off every region) or an IllegalStateException (World mismatch on another world's region). Shopkeepers 2.28.1 on the WuretaMC Hub (Build 56, aurora.bridge.mode safe, thread-checks relaxed, 2026-11-04) hit it 646 times in one log: its AI task ticks each shop mob's GoalSelector through NMS and LookAtPlayerGoal asks for the nearest player. On a thread ticking a region of this world the region's own players answer as before (decided here, so guards/OffRegionWorldReads names no engine type); off every region of it the guard may hand a bridged plugin's task body (checks relaxed or bridged) or any caller (checks relaxed) an immutable world-wide copy of ServerLevel.players() (a CopyOnWriteArrayList), counted and announced by one rate-limited WARN per (plugin, world) per 60 s; under enforced, and for Folia-native callers under bridged, the base's exception stays. ServerLevel.getLocalPlayers(selector, max) goes through the same override. Taking the copy blocks nothing and touches no region structure, but the caller is still on the wrong thread and some callers of getLocalPlayers mutate player-side state (entity tracker add/clear, raids, beacons, the dragon fight): off their region they used to fail fast and now, while relaxed, proceed -- one more accepted LightingLuminol race. A relaxed server stays unsafe and unqualified.
+
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+index 967955f0945882cb03b02014267d449480601bc2..1536a8294f8d59acfba25399c099f2401e76b536 100644
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -1725,7 +1725,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+     public List<ServerPlayer> getLocalPlayers(final Predicate<? super ServerPlayer> selector, final int maxResults) {
+         List<ServerPlayer> result = Lists.newArrayList();
+ 
+-        for (ServerPlayer player : getCurrentWorldData().getLocalPlayers()) {
++        for (ServerPlayer player : this.getLocalPlayers()) { // SourbyCraft - world-wide player snapshot for off-region readers: Level.getLocalPlayers decides (the region's players on its own thread, else the snapshot or the base's exception)
+             if (selector.test(player)) {
+                 result.add(player);
+                 if (result.size() >= maxResults) {
+diff --git a/net/minecraft/world/level/Level.java b/net/minecraft/world/level/Level.java
+index 8d34ac163e26b1bc4f01e19fc51539a2f67f4c17..c227ec0a9992fae163c1c1b7c2352a42aff521ea 100644
+--- a/net/minecraft/world/level/Level.java
++++ b/net/minecraft/world/level/Level.java
+@@ -858,6 +858,16 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+ 
+     @Override
+     public List<net.minecraft.server.level.ServerPlayer> getLocalPlayers() {
++        // SourbyCraft start - world-wide player snapshot for off-region readers: on a thread ticking a region of this world the region's own players, as the base; off every region of it guards/OffRegionWorldReads may hand a bridged body (checks relaxed or bridged) or any caller (checks relaxed) an immutable world-wide copy; null = the base's path below (NullPointerException off every region, "World mismatch" on another world's region)
++        final io.papermc.paper.threadedregions.RegionizedWorldData current = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegionizedWorldData();
++        if (current != null && current.world == this) {
++            return current.getLocalPlayers();
++        }
++        final List<net.minecraft.server.level.ServerPlayer> snapshot = dev.iyanz.sourbycraft.guards.OffRegionWorldReads.localPlayers((ServerLevel) this, current == null ? null : current.world.getWorld().getName());
++        if (snapshot != null) {
++            return snapshot;
++        }
++        // SourbyCraft end - world-wide player snapshot for off-region readers
+         return this.getCurrentWorldData().getLocalPlayers();
+     }
+     // Folia end - region threading

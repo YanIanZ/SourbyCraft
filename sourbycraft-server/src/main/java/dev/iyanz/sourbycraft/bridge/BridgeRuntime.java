@@ -107,6 +107,15 @@ public final class BridgeRuntime {
         default Object handle() {
             return null;
         }
+
+        /**
+         * The class name of the plugin's own task body (its {@code Runnable} or {@code Consumer}), for the
+         * exception signature of {@link ExceptionSignatures}; {@code null} when unknown (the task's own class
+         * is used then).
+         */
+        default String body() {
+            return null;
+        }
     }
 
     /**
@@ -200,6 +209,12 @@ public final class BridgeRuntime {
      */
     private final dev.iyanz.sourbycraft.guards.LogWindows logWindows =
         new dev.iyanz.sourbycraft.guards.LogWindows(LOG_WINDOW_NANOS, MAX_LOG_WINDOWS);
+    /**
+     * Exceptions thrown by bridged bodies that are not region violations, deduplicated by signature and logged at
+     * most once per minute per signature after the first full stack trace; at most
+     * {@link ExceptionSignatures#MAX_SIGNATURES}, least recently seen evicted (see {@link ExceptionSignatures}).
+     */
+    private final ExceptionSignatures exceptions = new ExceptionSignatures();
     /** Test seam for the log rate limit and the body-time measurement. */
     java.util.function.LongSupplier nanoClock = System::nanoTime;
     /**
@@ -275,6 +290,16 @@ public final class BridgeRuntime {
 
     public BridgeTelemetry telemetry() {
         return this.telemetry;
+    }
+
+    /** Exception signatures of every bridged plugin's task bodies, most occurrences first (see {@link ExceptionSignatures}). */
+    public java.util.List<ExceptionSignatures.Entry> exceptionSignatures() {
+        return this.exceptions.snapshot();
+    }
+
+    /** Exception signatures of one plugin's task bodies, most occurrences first. */
+    public java.util.List<ExceptionSignatures.Entry> exceptionSignatures(final String plugin) {
+        return this.exceptions.snapshot(plugin);
     }
 
     /**
@@ -694,6 +719,18 @@ public final class BridgeRuntime {
         return CURRENT.get() != null;
     }
 
+    /** The plugin whose bridged task body is running on the calling thread, or {@code null}. */
+    public static String bridgedPluginOnThread() {
+        final Invocation invocation = CURRENT.get();
+        return invocation == null ? null : invocation.plugin;
+    }
+
+    /** The task id of the bridged body running on the calling thread, or {@code -1}. */
+    public static int bridgedTaskOnThread() {
+        final Invocation invocation = CURRENT.get();
+        return invocation == null ? -1 : invocation.taskId;
+    }
+
     /** Owner decision 2026-10-22 (LightingLuminol parity): count and log, never quarantine for ownership. */
     private void relaxedViolation(final Invocation invocation, final String reason) {
         final String plugin = invocation.plugin;
@@ -833,7 +870,7 @@ public final class BridgeRuntime {
                 this.telemetry.bodyTime(plugin, BridgeTelemetry.BodyLane.of(entry.route()), this.nanoClock.getAsLong() - started);
             }
         } catch (final Throwable thrown) {
-            onFailure(plugin, thrown, task.id(), invocation.violationCounted, invocation.untargeted);
+            onFailure(plugin, thrown, task, invocation.violationCounted, invocation.untargeted);
         } finally {
             if (previous == null) CURRENT.remove();
             else CURRENT.set(previous);
@@ -869,15 +906,15 @@ public final class BridgeRuntime {
         }
     }
 
-    private void onFailure(final String plugin, final Throwable thrown, final int taskId, final boolean alreadyCounted,
+    private void onFailure(final String plugin, final Throwable thrown, final Task task, final boolean alreadyCounted,
                            final boolean untargeted) {
+        final int taskId = task.id();
         final String description = thrown.getClass().getSimpleName()
             + (thrown.getMessage() == null ? "" : ": " + thrown.getMessage());
         if (!ViolationClassifier.isRegionViolation(thrown) || alreadyCounted) {
             // A body whose guard hit already counted this run's violation is not counted twice.
             this.telemetry.failure(plugin, description);
-            this.warn.accept("Bridged plugin " + plugin + " generated an exception while executing task "
-                + taskId, thrown);
+            ordinaryException(plugin, thrown, task);
             return;
         }
         final long fatal = this.telemetry.fatal(plugin, description);
@@ -889,6 +926,28 @@ public final class BridgeRuntime {
         } else {
             this.warn.accept("Bridged plugin " + plugin + " violated region ownership in task " + taskId
                 + " (" + fatal + "/" + this.quarantineAfter.getAsInt() + " before quarantine)" + sweepHint(untargeted), thrown);
+        }
+    }
+
+    /**
+     * An exception that is not a region violation: the first occurrence of its signature (plugin, task body
+     * class, exception class, top frame) is logged with the stack trace; repeats inside 60 s are counted; the
+     * first repeat after that logs one summary line without a trace. Quarantine is not involved (it never was
+     * for ordinary exceptions); the signature counts are shown by {@code /plugins <name>} and {@code /perf plugins}.
+     */
+    private void ordinaryException(final String plugin, final Throwable thrown, final Task task) {
+        final String body = task.body() == null ? task.getClass().getName() : task.body();
+        final ExceptionSignatures.Signature signature = ExceptionSignatures.Signature.of(plugin, body, thrown);
+        final ExceptionSignatures.Decision decision = this.exceptions.record(signature, this.nanoClock.getAsLong());
+        switch (decision.kind()) {
+            case FULL -> this.warn.accept("Bridged plugin " + plugin + " generated an exception while executing task "
+                + task.id() + " (" + signature.describe() + "); repeats of this exception are counted and summarised"
+                + " at most once per " + java.util.concurrent.TimeUnit.NANOSECONDS.toSeconds(ExceptionSignatures.WINDOW_NANOS)
+                + " s, see /plugins " + plugin, thrown);
+            case SUMMARY -> this.warn.accept("Bridged plugin " + plugin + " generated an exception while executing task "
+                + task.id() + " (" + signature.describe() + "): " + this.exceptions.summaryNote(decision)
+                + "; the first occurrence was logged with its stack trace", null);
+            case SUPPRESSED -> { }
         }
     }
 

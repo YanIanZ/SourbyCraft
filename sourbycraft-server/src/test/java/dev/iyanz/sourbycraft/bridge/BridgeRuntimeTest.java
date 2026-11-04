@@ -182,7 +182,64 @@ class BridgeRuntimeTest {
         assertEquals(0, stats.fatalViolations());
         assertFalse(stats.quarantined());
         assertNotNull(stats.lastFailure());
-        assertEquals(2, this.warnings.size());
+        assertEquals(1, this.warnings.size(), "the second run has the same signature and is counted, not logged");
+        assertTrue(this.warnings.get(0).startsWith("Bridged plugin Legacy generated an exception while executing task 1 (java.lang.NullPointerException at "), this.warnings.get(0));
+        final var signatures = bridge.exceptionSignatures("Legacy");
+        assertEquals(1, signatures.size());
+        assertEquals(2L, signatures.get(0).total());
+        assertEquals("java.lang.NullPointerException", signatures.get(0).exception());
+        assertEquals(FakeTask.class.getName(), signatures.get(0).body(), "a task naming no body is keyed by its own class");
+    }
+
+    @Test
+    void aRepeatingExceptionIsSummarisedOncePerMinuteWithoutAStackTrace() {
+        final BridgeRuntime bridge = runtime(BridgeMode.SAFE, 1);
+        final List<Throwable> thrown = new ArrayList<>();
+        final BridgeRuntime recording = new BridgeRuntime(BridgeMode.SAFE, () -> 1, this.executor, new BridgeTelemetry(),
+            (message, cause) -> { this.warnings.add(message); thrown.add(cause); });
+        final long[] now = {0L};
+        recording.nanoClock = () -> now[0];
+        recording.admit("Shopkeepers");
+        final Runnable body = () -> { throw new NullPointerException("Cannot invoke getLocalPlayers()"); };
+        recording.submit("Shopkeepers", null, new FakeTask(8, true, 1, body), 0);
+        for (int i = 0; i < 313; i++) {
+            now[0] = i * 100_000_000L; // 10 runs per second for 31 s
+            this.executor.fire(0);
+        }
+        assertEquals(1, this.warnings.size(), "313 identical exceptions inside the window: one full line");
+        assertNotNull(thrown.get(0), "the first line carries the stack trace");
+        now[0] = java.util.concurrent.TimeUnit.SECONDS.toNanos(61L);
+        this.executor.fire(0);
+        assertEquals(2, this.warnings.size(), "the first repeat after 60 s is one summary");
+        assertNull(thrown.get(1), "the summary carries no stack trace");
+        assertTrue(this.warnings.get(1).contains("repeated 313 time(s) in the last 60 s (314 in total)"), this.warnings.get(1));
+        assertTrue(this.warnings.get(1).contains("executing task 8"), this.warnings.get(1));
+        now[0] = java.util.concurrent.TimeUnit.SECONDS.toNanos(62L);
+        this.executor.fire(0);
+        assertEquals(2, this.warnings.size(), "inside the new window: counted only");
+        final BridgeTelemetry.PluginStats stats = recording.telemetry().stats("Shopkeepers");
+        assertEquals(0, stats.fatalViolations(), "an ordinary exception never counts toward quarantine");
+        assertFalse(recording.quarantined("Shopkeepers"));
+        assertEquals(315L, recording.exceptionSignatures().get(0).total());
+        assertTrue(bridge.exceptionSignatures().isEmpty(), "another runtime has its own signatures");
+    }
+
+    @Test
+    void aDifferentExceptionFromTheSameTaskIsLoggedInFull() {
+        final BridgeRuntime bridge = runtime(BridgeMode.SAFE, 1);
+        bridge.admit("Legacy");
+        final int[] run = {0};
+        final Runnable body = () -> {
+            if (run[0]++ % 2 == 0) throw new NullPointerException("one place");
+            throw new IllegalArgumentException("another place");
+        };
+        bridge.submit("Legacy", null, new FakeTask(1, true, 1, body), 0);
+        this.executor.fire(0);
+        this.executor.fire(0);
+        this.executor.fire(0);
+        this.executor.fire(0);
+        assertEquals(2, this.warnings.size(), "two signatures, each logged once");
+        assertEquals(2, bridge.exceptionSignatures("Legacy").size());
     }
 
     @Test

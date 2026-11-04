@@ -56,6 +56,12 @@ Rencana dan keputusan OD-1…4: [BUILD-51-55-PLAN.md](releases/BUILD-51-55-PLAN.
   tanpa dunia terikat, tanpa WRONG_NODE; butuh `switching.enabled: false`); wajib `mode: distributed` + `repository: redis`.
   Save anggota dipagari Q + revisi stream, rekaman bersama (bank, koleksi, keanggotaan, label) dipagari P + CAS. Kode
   ditulis, dikompilasi; belum diuji owner: TO-B56-01…06 di [catatan rilis Build 56](releases/26.2-build-56-aurora-nexus.md).
+- [-] Build 57 (kandidat, permintaan owner 2026-11-04: spam konsol dari bridge) — `Level.getLocalPlayers()` off-region
+  (Shopkeepers NPE `getCurrentWorldData() is null`, 646× di Hub r56) memberi salinan read-only daftar pemain dunia untuk
+  body tugas bridged saat `thread-checks: relaxed`/`bridged` atau semua pemanggil saat `relaxed` (MC 0088,
+  `guards/OffRegionWorldReads`; `enforced` dan pemanggil lain tetap exception; pemanggil tetap di thread yang salah); log `generated an exception while executing task` dideduplikasi per signature, satu stack trace
+  lalu maksimal satu ringkasan per menit (`bridge/ExceptionSignatures`, Paper 0030). Kode ditulis, dikompilasi; belum
+  diuji owner: TO-B57-01…04 di [catatan rilis Build 57](releases/26.2-build-57-aurora-nexus.md).
 
 ---
 
