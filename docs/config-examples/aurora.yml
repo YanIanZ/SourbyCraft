@@ -118,9 +118,10 @@ aurora:
       # standalone | distributed. distributed is refused at startup unless repository: redis,
       # coordination.provider: redis, fencing-enabled: true and a running Aurora Redis Fabric are set.
       # distributed, and standalone with repository: redis (nothing limits that to one server), are
-      # EXPERIMENTAL and unqualified: a player's live state does not follow them between servers, there is
-      # no proxy handoff, and the Build 53 quit capture at shutdown (shutdown.capture-deadline-ms) is bounded
-      # per node and not a distributed guarantee.
+      # EXPERIMENTAL and unqualified: a player's live state does not follow them between servers (a join
+      # restores the last committed snapshot; coordination.handoff-wait-ms lets a proxy server switch wait
+      # for the previous server's quit save), and the Build 53 quit capture at shutdown
+      # (shutdown.capture-deadline-ms) is bounded per node and not a distributed guarantee.
       mode: "standalone"
       default-slots: 3
       max-slots: 8
@@ -147,6 +148,12 @@ aurora:
         provider: "local"
         fencing-enabled: true
         single-active-session: true
+        # Build 55.1. A join refused only because another live session still holds the player's session
+        # claim or their active profile's claim (a proxy switch: the previous server has not committed the
+        # quit save and released the claim yet) retries the claim with bounded backoff, off the tick
+        # threads, for up to this long before it is refused as before. The retry never takes a live claim.
+        # 0 = one attempt (Build 51-55); 5000 recommended behind Velocity; max 15000.
+        handoff-wait-ms: 0
       # File repository directory (accounts, profiles, snapshots, transition journals); created only when
       # enabled. With repository: redis it is only read: while Redis is empty and this directory holds
       # profiles, profile writes are refused until /awf multiprofile migrate-repository copies them.
@@ -251,6 +258,11 @@ aurora:
         # (ADAPTER_REQUIRED_FAILED) and an adapter that holds data for the profile but is not registered here
         # refuses it (ADAPTER_MISSING). Can only raise strictness. A malformed entry is dropped with a WARN.
         required: []
+        # RESTART_REQUIRED (Build 55.1). Adapter ids whose stored REQUIRED data passes through this node unchanged
+        # while no plugin registers them here: not applied, not captured, never dropped, no ADAPTER_MISSING. For a
+        # node that by design runs without the plugin that owns the data (a lobby without the island plugin's
+        # economy adapter: [economy]). A registered id is not affected.
+        preserve-unregistered: []
       bank:
         # RESTART_REQUIRED (Build 54). The co-op bank policy, read once at start; used only with coop.enabled.
         # Amounts are long minor units. A bank record keeps the currency and shared capacity it was first

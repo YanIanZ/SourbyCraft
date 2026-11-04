@@ -335,7 +335,9 @@ In-memory rows, no store I/O: committed switches with latency p50/p95/p99 (last 
 failed, refused by cooldown, vetoed and guard timeouts; the profile I/O queue (waiting/running/peak, partitions, queue
 wait p50/p95/p99 over the last 1024 steps); outstanding salvage records and the oldest one's age, open kick votes and
 the oldest's age, as this node saw them (listings, claims, votes it ran; ages against this node's clock); audit
-recorded/dropped/write failures; profile events dropped. Everything resets at restart.
+recorded/dropped/write failures; profile events dropped. Build 55.1 adds the session handoff rows
+(`coordination.handoff-wait-ms`): claim waits started / admitted / timed out / left / failed (a join can wait twice:
+session claim, then node claim), and the p50/p95 of the admitted waits (last 1024). Everything resets at restart.
 
 ### Commands (Build 55)
 
@@ -390,8 +392,9 @@ backup is Redis's own persistence (RDB/AOF) of the `<prefix>fabric:mp:*` and ses
 | `the session marker of <player> is unreadable` (WARN) | a corrupt `sessions/<uuid>.awfp` (or Redis value) | the join is not refused: the committed head is restored and no vanilla playerdata is adopted (the safe choice: nothing duplicated, progress held only in vanilla playerdata may be lost); the next admission replaces the record; `/awf multiprofile session <player> reset-marker` forces the same outcome |
 | `joined into profile ... adopted the vanilla playerdata` (INFO) | the previous session was unclean (crash, kill, deadline, refused save) or this is the first authoritative login (upgrade), and the vanilla file was newer than the profile head | nothing to do; the vanilla state became the head's next snapshot. A following `the committed head is restored` INFO names why no adoption happened |
 | `ADAPTER_REQUIRED_FAILED` on a switch | a REQUIRED adapter threw, exceeded its size bound or the snapshot budget | the switch was refused or rolled back; read the WARN naming the adapter id and fix the plugin; `adapters.required` lists the ids forced to REQUIRED |
-| `ADAPTER_MISSING` on a switch or join | a REQUIRED adapter that holds data for the profile is not registered here | load or fix the plugin and retry; the data is kept untouched meanwhile |
+| `ADAPTER_MISSING` on a switch or join | a REQUIRED adapter that holds data for the profile is not registered here | load or fix the plugin and retry; the data is kept untouched meanwhile. A node that by design runs without that plugin (a lobby without the island plugin's `economy` purse) lists the id in `adapters.preserve-unregistered` (Build 55.1): the data then passes through unchanged and the node with the plugin applies it again |
 | `UNKNOWN_OUTCOME` on a membership call | the store did not confirm the write | do not repeat; list members/invitations and let recovery resolve the intent |
+| `Your profile is active on <node>` on every proxy server switch | the previous server has not committed the quit save and released the player's session claim when the new server attempts it (Build 51–55: one attempt) | set `coordination.handoff-wait-ms: 5000` on every node and restart (Build 55.1); the join then waits for the release, never taking a live claim. `/perf multiprofile` shows the waits; `timed out` rising means the previous server's quit save takes longer than the window (Redis `WAITAOF`, storage) or that server is down (its claim lapses at the TTL) |
 
 ## Shutdown
 

@@ -12,8 +12,8 @@ import net.kyori.adventure.text.Component;
 /**
  * {@code /perf multiprofile} (Build 55): AWF MultiProfile's in-memory metrics. Switch latency percentiles of the
  * switches this node committed since it started, the profile I/O queue (depth, partitions, wait percentiles), the
- * oldest outstanding salvage record and open kick vote this node has seen, switch refusals, and the audit log's
- * counters. Everything is read from memory on the command thread: no store I/O, nothing persisted, so the rows
+ * oldest outstanding salvage record and open kick vote this node has seen, switch refusals, the session handoff waits
+ * of joins (Build 55.1, {@code coordination.handoff-wait-ms}), and the audit log's counters. Everything is read from memory on the command thread: no store I/O, nothing persisted, so the rows
  * reset at restart and the ages are judged on this node's wall clock.
  */
 final class PerfMultiprofileView implements PerfView {
@@ -54,6 +54,13 @@ final class PerfMultiprofileView implements PerfView {
         add(lines, "Queue wait p50 / p95 / p99", m.queueWaitSamples() == 0 ? "no step yet"
             : micros(m.queueWaitP50Micros()) + " / " + micros(m.queueWaitP95Micros()) + " / " + micros(m.queueWaitP99Micros())
                 + " (last " + Math.min(m.queueWaitSamples(), ProfileMetrics.WINDOW) + " steps)");
+        lines.add(UiPanel.section("Session handoff (coordination.handoff-wait-ms)"));
+        // One join can wait twice (session claim, then the active profile's node claim): these are claim waits, not joins.
+        add(lines, "Claim waits / admitted / timed out / left / failed", m.handoffWaits() + " / " + m.handoffSucceeded() + " / "
+            + m.handoffTimedOut() + " / " + m.handoffAbandoned() + " / " + m.handoffFailed());
+        add(lines, "Wait p50 / p95", m.handoffSucceeded() == 0 ? "no admitted wait yet"
+            : m.handoffWaitP50Millis() + " / " + m.handoffWaitP95Millis() + " ms (last "
+                + Math.min(m.handoffSucceeded(), ProfileMetrics.WINDOW) + " admitted waits)");
         lines.add(UiPanel.section("Co-op (as seen by this node)"));
         add(lines, "Outstanding salvage / oldest age", m.outstandingSalvage() + " / " + age(m.oldestSalvageAgeMillis()));
         add(lines, "Open kick votes / oldest age", m.openVotes() + " / " + age(m.oldestVoteAgeMillis()));

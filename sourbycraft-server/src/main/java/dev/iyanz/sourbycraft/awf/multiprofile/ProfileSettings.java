@@ -132,8 +132,29 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
      * @param provider where ownership lives; {@code local} is process-local and cannot coordinate nodes
      * @param fencingEnabled validate the ownership fence before every durable profile write
      * @param singleActiveSession refuse a second live session for one profile (duplicate login)
+     * @param handoffWaitMillis Build 55.1: how long a join whose session claim ({@code Q}) or active-profile node
+     *     claim is refused only because another live session still holds it keeps retrying the claim (bounded
+     *     backoff, off the tick threads) before it is refused as before. {@code 0} (default) is the single attempt
+     *     of Builds 51–55; {@value #HANDOFF_WAIT_MAX_MILLIS} is the ceiling. The retry never takes a claim that is
+     *     still live: it succeeds only once the holder released it (the quit save runs before the release on the
+     *     holder) or its lease lapsed under the existing epoch rules
      */
-    public record Coordination(Provider provider, boolean fencingEnabled, boolean singleActiveSession) {}
+    public record Coordination(Provider provider, boolean fencingEnabled, boolean singleActiveSession, int handoffWaitMillis) {
+
+        /** The Build 51–55 shape: no handoff wait. */
+        public Coordination(final Provider provider, final boolean fencingEnabled, final boolean singleActiveSession) {
+            this(provider, fencingEnabled, singleActiveSession, 0);
+        }
+
+        public Coordination {
+            if (handoffWaitMillis < 0 || handoffWaitMillis > HANDOFF_WAIT_MAX_MILLIS) {
+                throw new IllegalArgumentException("coordination.handoff-wait-ms must be 0-" + HANDOFF_WAIT_MAX_MILLIS);
+            }
+        }
+    }
+
+    /** Ceiling of {@code coordination.handoff-wait-ms}: well below the 45 s fabric lease and the 60 s local lease. */
+    public static final int HANDOFF_WAIT_MAX_MILLIS = 15_000;
 
     /** Where profiles, snapshots and journals are stored. */
     public enum Backend {
@@ -419,26 +440,51 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
      * @param required adapter ids ({@code [a-z0-9_.:-]{1,64}}, at most {@value #MAX_REQUIRED}) that are treated as
      *     {@code REQUIRED} whatever their descriptor declares. An operator can only raise strictness: an adapter
      *     that declares REQUIRED stays REQUIRED when it is not listed.
+     * @param preserveUnregistered Build 55.1: adapter ids (same form and cap) whose stored REQUIRED data is carried
+     *     through this node unchanged when <em>no</em> plugin registers the id here, instead of refusing the apply
+     *     with {@code ADAPTER_MISSING}. For a node that by design runs without the plugin that owns the data (a lobby
+     *     without the island plugin): the bytes are never applied, never captured and never dropped on this node, and
+     *     the stored required record keeps naming them. An id that <em>is</em> registered here is not affected (an
+     *     UNSUPPORTED or older registration still refuses). Both lists may name the same id; the preserve rule only
+     *     matters while the id is unregistered
      */
-    public record Adapters(Set<String> required) {
+    public record Adapters(Set<String> required, Set<String> preserveUnregistered) {
 
         public static final int MAX_REQUIRED = 32;
         private static final java.util.regex.Pattern ID = java.util.regex.Pattern.compile("[a-z0-9_.:-]{1,64}");
 
+        /** The Build 53 shape: nothing preserved. */
+        public Adapters(final Set<String> required) {
+            this(required, Set.of());
+        }
+
         public Adapters {
             Objects.requireNonNull(required, "required");
+            Objects.requireNonNull(preserveUnregistered, "preserveUnregistered");
             if (required.size() > MAX_REQUIRED) {
                 throw new IllegalArgumentException("adapters.required lists more than " + MAX_REQUIRED + " ids");
+            }
+            if (preserveUnregistered.size() > MAX_REQUIRED) {
+                throw new IllegalArgumentException("adapters.preserve-unregistered lists more than " + MAX_REQUIRED + " ids");
             }
             for (final String id : required) {
                 if (id == null || !ID.matcher(id).matches()) throw new IllegalArgumentException("adapter id: " + id);
             }
+            for (final String id : preserveUnregistered) {
+                if (id == null || !ID.matcher(id).matches()) throw new IllegalArgumentException("adapter id: " + id);
+            }
             required = Collections.unmodifiableSet(new java.util.TreeSet<>(required));
+            preserveUnregistered = Collections.unmodifiableSet(new java.util.TreeSet<>(preserveUnregistered));
         }
 
         /** Whether an operator forces this adapter id to REQUIRED. */
         public boolean forces(final String adapterId) {
             return this.required.contains(adapterId);
+        }
+
+        /** Build 55.1: whether stored REQUIRED data of this id passes through unchanged while no plugin registers it here. */
+        public boolean preserves(final String adapterId) {
+            return this.preserveUnregistered.contains(adapterId);
         }
 
         static boolean validId(final Object id) {
@@ -556,6 +602,8 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
     public static final String SHUTDOWN_CAPTURE_DEADLINE_KEY = "aurora.awf.multiprofile.shutdown.capture-deadline-ms";
     public static final String LOGIN_AUTHORITATIVE_KEY = "aurora.awf.multiprofile.login.authoritative";
     public static final String ADAPTERS_REQUIRED_KEY = "aurora.awf.multiprofile.adapters.required";
+    /** Build 55.1 (RESTART_REQUIRED): see {@link Adapters#preserveUnregistered()}. */
+    public static final String ADAPTERS_PRESERVE_KEY = "aurora.awf.multiprofile.adapters.preserve-unregistered";
     public static final String TYPES_OVERRIDE_BUILTINS_KEY = "aurora.awf.multiprofile.types.registry.allow-override-builtins";
     public static final String TYPES_UNKNOWN_POLICY_KEY = "aurora.awf.multiprofile.types.unknown-type-policy";
     public static final String BANK_CURRENCY_PROVIDER_KEY = "aurora.awf.multiprofile.bank.currency.provider";
@@ -577,6 +625,8 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
     public static final String COORDINATION_PROVIDER_KEY = "aurora.awf.multiprofile.coordination.provider";
     public static final String COORDINATION_FENCING_KEY = "aurora.awf.multiprofile.coordination.fencing-enabled";
     public static final String COORDINATION_SINGLE_SESSION_KEY = "aurora.awf.multiprofile.coordination.single-active-session";
+    /** Build 55.1 (RESTART_REQUIRED): see {@link Coordination#handoffWaitMillis()}. */
+    public static final String COORDINATION_HANDOFF_WAIT_KEY = "aurora.awf.multiprofile.coordination.handoff-wait-ms";
     public static final String DIRECTORY_KEY = "aurora.awf.multiprofile.directory";
     public static final String DIRECTORY_DEFAULT = "awf/profiles";
     public static final String REPOSITORY_KEY = "aurora.awf.multiprofile.repository";
@@ -593,11 +643,12 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         ProfileIsolation.EXPERIENCE_KEY, ProfileIsolation.HEALTH_KEY, ProfileIsolation.FOOD_KEY,
         ProfileIsolation.POTION_EFFECTS_KEY, ProfileIsolation.LOCATION_KEY,
         WORLDS_IDLE_KEY,
-        COORDINATION_PROVIDER_KEY, COORDINATION_FENCING_KEY, COORDINATION_SINGLE_SESSION_KEY, DIRECTORY_KEY,
+        COORDINATION_PROVIDER_KEY, COORDINATION_FENCING_KEY, COORDINATION_SINGLE_SESSION_KEY, COORDINATION_HANDOFF_WAIT_KEY,
+        DIRECTORY_KEY,
         REPOSITORY_KEY, REDIS_REQUIRE_AOF_KEY, REDIS_WAIT_FOR_AOF_KEY,
         TYPES_ALLOWED_KEY, TYPES_DEFAULT_KEY, NAMES_POLICY_KEY, MIGRATION_MODE_KEY, MIGRATION_BACKUP_DIR_KEY,
         COOP_ENABLED_KEY, COOP_MAX_MEMBERS_KEY, COOP_INVITE_EXPIRY_KEY, COOP_VOTE_EXPIRY_KEY, COOP_INACTIVE_DAYS_KEY,
-        COOP_ALLOWED_TYPES_KEY, SHUTDOWN_CAPTURE_DEADLINE_KEY, LOGIN_AUTHORITATIVE_KEY, ADAPTERS_REQUIRED_KEY,
+        COOP_ALLOWED_TYPES_KEY, SHUTDOWN_CAPTURE_DEADLINE_KEY, LOGIN_AUTHORITATIVE_KEY, ADAPTERS_REQUIRED_KEY, ADAPTERS_PRESERVE_KEY,
         TYPES_OVERRIDE_BUILTINS_KEY, TYPES_UNKNOWN_POLICY_KEY,
         BANK_CURRENCY_PROVIDER_KEY, BANK_CURRENCY_ID_KEY, BANK_CURRENCY_SCALE_KEY, BANK_SHARED_CAPACITY_KEY, BANK_PERSONAL_CAP_KEY,
         BANK_INTEREST_KEY, BANK_INTEREST_INTERVAL_KEY,
@@ -840,7 +891,8 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         }
         final Coordination coordination = new Coordination(provider,
             flag(values, COORDINATION_FENCING_KEY, DEFAULT.coordination().fencingEnabled(), invalid),
-            flag(values, COORDINATION_SINGLE_SESSION_KEY, DEFAULT.coordination().singleActiveSession(), invalid));
+            flag(values, COORDINATION_SINGLE_SESSION_KEY, DEFAULT.coordination().singleActiveSession(), invalid),
+            whole(values, COORDINATION_HANDOFF_WAIT_KEY, DEFAULT.coordination().handoffWaitMillis(), 0, HANDOFF_WAIT_MAX_MILLIS, invalid));
         String directory = DEFAULT.directory();
         if (values.get(DIRECTORY_KEY) instanceof String text) {
             try {
@@ -949,16 +1001,23 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
      * entries (up to the cap) are kept, so a typo never silently relaxes the other adapters.
      */
     private static Adapters adapters(final Map<String, Object> values, final List<String> invalid) {
-        final Object raw = values.get(ADAPTERS_REQUIRED_KEY);
-        if (raw == null) return DEFAULT_ADAPTERS;
+        return new Adapters(adapterIds(values, ADAPTERS_REQUIRED_KEY, DEFAULT_ADAPTERS.required(), invalid),
+            adapterIds(values, ADAPTERS_PRESERVE_KEY, DEFAULT_ADAPTERS.preserveUnregistered(), invalid));
+    }
+
+    /** One adapter-id list key (the rule above), {@code fallback} when absent or not a list/string. */
+    private static Set<String> adapterIds(final Map<String, Object> values, final String key, final Set<String> fallback,
+                                          final List<String> invalid) {
+        final Object raw = values.get(key);
+        if (raw == null) return fallback;
         final List<?> items;
         if (raw instanceof Collection<?> collection) {
             items = List.copyOf(collection);
         } else if (raw instanceof String text) {
             items = text.isBlank() ? List.of() : List.of(text.split(","));
         } else {
-            invalid.add(ADAPTERS_REQUIRED_KEY);
-            return DEFAULT_ADAPTERS;
+            invalid.add(key);
+            return fallback;
         }
         final Set<String> ids = new java.util.TreeSet<>();
         boolean bad = false;
@@ -972,8 +1031,8 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
                 bad = true;
             }
         }
-        if (bad) invalid.add(ADAPTERS_REQUIRED_KEY);
-        return new Adapters(ids);
+        if (bad) invalid.add(key);
+        return ids;
     }
 
     /** Each unusable co-op key falls back to its own default and is reported; a bad key never enables co-op. */
@@ -1118,6 +1177,7 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         values.put(COORDINATION_PROVIDER_KEY, DEFAULT.coordination().provider().name().toLowerCase(Locale.ROOT));
         values.put(COORDINATION_FENCING_KEY, DEFAULT.coordination().fencingEnabled());
         values.put(COORDINATION_SINGLE_SESSION_KEY, DEFAULT.coordination().singleActiveSession());
+        values.put(COORDINATION_HANDOFF_WAIT_KEY, DEFAULT.coordination().handoffWaitMillis());
         values.put(DIRECTORY_KEY, DEFAULT.directory());
         values.put(REPOSITORY_KEY, DEFAULT.repository().backend().name().toLowerCase(Locale.ROOT));
         values.put(REDIS_REQUIRE_AOF_KEY, DEFAULT.repository().requireAof());
@@ -1136,6 +1196,7 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         values.put(SHUTDOWN_CAPTURE_DEADLINE_KEY, DEFAULT.shutdown().captureDeadlineMillis());
         values.put(LOGIN_AUTHORITATIVE_KEY, DEFAULT.login().authoritative().id());
         values.put(ADAPTERS_REQUIRED_KEY, List.copyOf(DEFAULT.adapters().required()));
+        values.put(ADAPTERS_PRESERVE_KEY, List.copyOf(DEFAULT.adapters().preserveUnregistered()));
         values.put(TYPES_OVERRIDE_BUILTINS_KEY, DEFAULT.typeRegistry().allowOverrideBuiltins());
         values.put(TYPES_UNKNOWN_POLICY_KEY, DEFAULT.typeRegistry().unknownTypePolicy().id());
         values.put(BANK_CURRENCY_PROVIDER_KEY, DEFAULT.bank().currencyProvider());

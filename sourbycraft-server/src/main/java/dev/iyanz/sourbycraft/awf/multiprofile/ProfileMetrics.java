@@ -7,8 +7,8 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * In-memory MultiProfile metrics for {@code /perf multiprofile} (Build 55): committed-switch latency percentiles,
- * I/O queue wait percentiles, the oldest outstanding salvage record and open kick vote this node has seen, and
- * counters for refusals, vetoes and audit drops. Everything is bounded (fixed rings) and lock-light (one short
+ * I/O queue wait percentiles, the oldest outstanding salvage record and open kick vote this node has seen, counters
+ * for refusals, vetoes and audit drops, and (Build 55.1) the session handoff waits of joins behind a proxy. Everything is bounded (fixed rings) and lock-light (one short
  * synchronized section per sample); nothing here is persisted or exact across restarts, and the rows say so.
  */
 public final class ProfileMetrics {
@@ -54,7 +54,24 @@ public final class ProfileMetrics {
                            long queueWaitSamples, long queueWaitP50Micros, long queueWaitP95Micros, long queueWaitP99Micros,
                            int queueWaiting, int queueRunning, int queuePeakWaiting, int queuePartitions,
                            long oldestSalvageAgeMillis, int outstandingSalvage, long oldestVoteAgeMillis, int openVotes,
-                           long auditRecorded, long auditDropped, long auditWriteFailures, long profileEventsDropped) {}
+                           long auditRecorded, long auditDropped, long auditWriteFailures, long profileEventsDropped,
+                           long handoffWaits, long handoffSucceeded, long handoffTimedOut, long handoffAbandoned,
+                           long handoffFailed, long handoffWaitP50Millis, long handoffWaitP95Millis) {
+
+        /** The Build 55 shape: no handoff rows. */
+        public Snapshot(final long switchesCommitted, final long switchP50Millis, final long switchP95Millis, final long switchP99Millis,
+                        final long switchesFailed, final long switchesRefusedCooldown, final long switchesVetoed, final long guardTimeouts,
+                        final long queueWaitSamples, final long queueWaitP50Micros, final long queueWaitP95Micros, final long queueWaitP99Micros,
+                        final int queueWaiting, final int queueRunning, final int queuePeakWaiting, final int queuePartitions,
+                        final long oldestSalvageAgeMillis, final int outstandingSalvage, final long oldestVoteAgeMillis, final int openVotes,
+                        final long auditRecorded, final long auditDropped, final long auditWriteFailures, final long profileEventsDropped) {
+            this(switchesCommitted, switchP50Millis, switchP95Millis, switchP99Millis, switchesFailed, switchesRefusedCooldown,
+                switchesVetoed, guardTimeouts, queueWaitSamples, queueWaitP50Micros, queueWaitP95Micros, queueWaitP99Micros,
+                queueWaiting, queueRunning, queuePeakWaiting, queuePartitions, oldestSalvageAgeMillis, outstandingSalvage,
+                oldestVoteAgeMillis, openVotes, auditRecorded, auditDropped, auditWriteFailures, profileEventsDropped,
+                0L, 0L, 0L, 0L, 0L, -1L, -1L);
+        }
+    }
 
     private final LatencyWindow switchLatency = new LatencyWindow();
     private final LatencyWindow queueWait = new LatencyWindow();
@@ -63,6 +80,14 @@ public final class ProfileMetrics {
     private final AtomicLong vetoes = new AtomicLong();
     private final AtomicLong guardTimeouts = new AtomicLong();
     private final AtomicLong profileEventsDropped = new AtomicLong();
+    /** Build 55.1: joins that waited for another node's session claim ({@code coordination.handoff-wait-ms}). */
+    private final AtomicLong handoffWaits = new AtomicLong();
+    private final AtomicLong handoffSucceeded = new AtomicLong();
+    private final AtomicLong handoffTimedOut = new AtomicLong();
+    private final AtomicLong handoffAbandoned = new AtomicLong();
+    private final AtomicLong handoffFailed = new AtomicLong();
+    /** How long the successful waits took, milliseconds. */
+    private final LatencyWindow handoffWait = new LatencyWindow();
     /** Outstanding salvage records this node created or saw, by id, value the store clock they were created at. */
     private final ConcurrentHashMap<UUID, Long> salvage = new ConcurrentHashMap<>();
     /** Open kick votes this node created or saw, by id, value the store clock they were opened at. */
@@ -92,6 +117,32 @@ public final class ProfileMetrics {
 
     void profileEventDropped() {
         this.profileEventsDropped.incrementAndGet();
+    }
+
+    /** Build 55.1: a join started waiting for a session or profile claim another live session holds. */
+    void handoffWaitStarted() {
+        this.handoffWaits.incrementAndGet();
+    }
+
+    /** Build 55.1: the claim was released (or lapsed) and the join was admitted after {@code waitedMillis}. */
+    void handoffSucceeded(final long waitedMillis) {
+        this.handoffSucceeded.incrementAndGet();
+        this.handoffWait.record(waitedMillis);
+    }
+
+    /** Build 55.1: the window elapsed with the claim still held; the join is refused as before. */
+    void handoffTimedOut() {
+        this.handoffTimedOut.incrementAndGet();
+    }
+
+    /** Build 55.1: the player left (or the engine closed) while the join was waiting. */
+    void handoffAbandoned() {
+        this.handoffAbandoned.incrementAndGet();
+    }
+
+    /** Build 55.1: a retried attempt failed (storage, Redis) while the join was waiting; the join was refused with that error. */
+    void handoffFailed() {
+        this.handoffFailed.incrementAndGet();
     }
 
     /** Queue wait of one step, nanoseconds. */
@@ -148,6 +199,7 @@ public final class ProfileMetrics {
             this.queueWait.percentile(99), queue.waitingSteps(), queue.runningSteps(), queue.peakWaiting(), queue.partitions(),
             oldestAge(this.salvage, storeNow), this.salvage.size(), oldestAge(this.votes, storeNow), this.votes.size(),
             audit == null ? 0L : audit.recorded(), audit == null ? 0L : audit.dropped(), audit == null ? 0L : audit.writeFailures(),
-            this.profileEventsDropped.get());
+            this.profileEventsDropped.get(), this.handoffWaits.get(), this.handoffSucceeded.get(), this.handoffTimedOut.get(),
+            this.handoffAbandoned.get(), this.handoffFailed.get(), this.handoffWait.percentile(50), this.handoffWait.percentile(95));
     }
 }

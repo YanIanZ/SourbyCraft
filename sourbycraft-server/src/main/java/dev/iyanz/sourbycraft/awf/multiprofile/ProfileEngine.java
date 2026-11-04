@@ -33,12 +33,15 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 /**
@@ -135,6 +138,13 @@ public final class ProfileEngine {
     private final ProfileMetrics profileMetrics = new ProfileMetrics();
     /** Build 55: the switch guards and the cooldown (settings {@code switching.cooldown-seconds}). */
     private final ProfileSwitchGuards switchGuards;
+    /**
+     * Build 55.1: the timer that re-queues the claim of a join waiting for a session handoff
+     * ({@code coordination.handoff-wait-ms}); {@code null} with a wait of 0. Its only work is to queue one I/O step.
+     */
+    private final ScheduledExecutorService handoffTimer;
+    /** Build 55.1: the waits in progress, each completing its join with the last refusal; run by {@link #close}. */
+    private final Set<Runnable> pendingHandoffs = ConcurrentHashMap.newKeySet();
     /** Build 55: the audit log; {@code null} until the runtime attaches one (or when {@code audit.enabled} is false). */
     private volatile ProfileAudit audit;
     /** Build 55: where profile lifecycle events go (the runtime maps them to Bukkit events); no-op until set. */
@@ -242,6 +252,12 @@ public final class ProfileEngine {
         this.ioQueue = new ProfileIoQueue(Objects.requireNonNull(io, "io"), IO_QUEUE_CAPACITY, settings.io().partitions(),
             Math.max(1, laneThreads), this.profileMetrics::queueWaited);
         this.switchGuards = new ProfileSwitchGuards(settings.switching().cooldownSeconds());
+        this.handoffTimer = settings.coordination().handoffWaitMillis() <= 0 ? null
+            : Executors.newSingleThreadScheduledExecutor(task -> {
+                final Thread thread = new Thread(task, "SourbyCraft-AWF-profile-handoff");
+                thread.setDaemon(true);
+                return thread;
+            });
         this.metrics = metrics;
         this.events = events;
     }
@@ -2059,6 +2075,196 @@ public final class ProfileEngine {
         return session == null ? null : session.claim();
     }
 
+    // ------------------------------------------------------------------ session handoff (Build 55.1)
+
+    /** First retry delay of a handoff wait; doubled on each refusal up to {@link #HANDOFF_MAX_DELAY_MILLIS}. */
+    static final long HANDOFF_FIRST_DELAY_MILLIS = 100L;
+    static final long HANDOFF_MAX_DELAY_MILLIS = 1_000L;
+
+    /**
+     * One join's handoff budget (Build 55.1, {@code coordination.handoff-wait-ms}): the deadline the session
+     * admission ({@code Q}) and the node claim of the active profile share. {@link #handoffWindow()} makes one per
+     * join; with a wait of 0 it is already expired, so every claim is attempted exactly once (the Build 51–55
+     * behaviour).
+     */
+    public static final class HandoffWindow {
+        private final long waitMillis;
+        private final long startedNanos = System.nanoTime();
+        private final long deadlineNanos;
+        private final AtomicBoolean waited = new AtomicBoolean();
+        private volatile Runnable onWait = () -> {};
+
+        HandoffWindow(final long waitMillis) {
+            this.waitMillis = Math.max(0L, waitMillis);
+            this.deadlineNanos = this.startedNanos + TimeUnit.MILLISECONDS.toNanos(this.waitMillis);
+        }
+
+        /** Runs once, on the first refusal this window waits out (an I/O lane thread); the runtime tells the player. */
+        public HandoffWindow onWait(final Runnable hook) {
+            this.onWait = Objects.requireNonNull(hook, "hook");
+            return this;
+        }
+
+        /** Whether any claim of this join waited. */
+        public boolean waited() {
+            return this.waited.get();
+        }
+
+        void waiting() {
+            if (this.waited.compareAndSet(false, true)) {
+                try {
+                    this.onWait.run();
+                } catch (final RuntimeException ignored) {
+                    // Telling the player is best effort; the wait itself does not depend on it.
+                }
+            }
+        }
+
+        /** The configured wait, milliseconds. */
+        public long waitMillis() {
+            return this.waitMillis;
+        }
+
+        /** Milliseconds left before the join is refused; 0 once the window elapsed. */
+        public long remainingMillis() {
+            return Math.max(0L, TimeUnit.NANOSECONDS.toMillis(this.deadlineNanos - System.nanoTime()));
+        }
+
+        public boolean expired() {
+            return System.nanoTime() - this.deadlineNanos >= 0L;
+        }
+
+        long elapsedMillis() {
+            return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - this.startedNanos);
+        }
+    }
+
+    /** A new handoff window of {@code coordination.handoff-wait-ms}; expired at once when that is 0. */
+    public HandoffWindow handoffWindow() {
+        return new HandoffWindow(this.settings.coordination().handoffWaitMillis());
+    }
+
+    /**
+     * {@link #admitSession(UUID)} with the handoff wait (Build 55.1): when the admission is refused only because
+     * another live session holds {@code Q} (a proxy server switch: the previous server has not committed the quit
+     * save and released the claim yet; its quit releases {@code Q} after that save, or after that save failed, on its
+     * FIFO lane, so the admitted join restores the last committed head as any Build 55 join does), the claim is
+     * attempted again with bounded backoff until it is granted, {@code abandoned} says the join is stale (the player
+     * left), the engine closed, or {@code window} elapsed, in which case the last refusal is returned unchanged.
+     * Nothing here takes a claim that is still live: every attempt is the strict claim of {@link #admitSession(UUID)},
+     * which succeeds only once the holder released the claim or its lease lapsed under the existing fence rules.
+     * The retries are queued by a timer thread and run on the I/O lane; no tick thread waits.
+     */
+    public CompletableFuture<Admission> admitSession(final UUID playerId, final HandoffWindow window, final BooleanSupplier abandoned) {
+        return withHandoff(window, () -> admitSession(playerId), admission -> !admission.admitted() && admission.holderNode() != null,
+            Admission::admitted, abandoned, "session claim of " + playerId,
+            admission -> admission.holderNode() == null ? "another node" : admission.holderNode());
+    }
+
+    /**
+     * {@link #claimSession(UUID, UUID)} with the handoff wait (Build 55.1): a node claim on the active profile held by
+     * another node is retried under the same rules and the same {@code window} as the admission. The previous server
+     * releases the profile claim before {@code Q}, so this mostly covers a claim its other sessions keep (a co-op
+     * profile other members still play there, OD-1), which lapses only when they leave: that wait ends in the
+     * refusal of Build 55.
+     */
+    public CompletableFuture<ClaimResult> claimSession(final UUID playerId, final UUID profileId, final HandoffWindow window,
+                                                       final BooleanSupplier abandoned) {
+        return withHandoff(window, () -> claimSession(playerId, profileId), claim -> !claim.granted() && claim.claim() != null,
+            ClaimResult::granted, abandoned, "node claim of " + playerId + " on profile " + profileId,
+            claim -> claim.claim() == null ? "another node" : claim.claim().node());
+    }
+
+    /**
+     * Runs {@code attempt}; while its outcome is {@code heldElsewhere} and {@code window} is open, re-runs it after
+     * a backoff. Every outcome that is not a held refusal (granted, or the player left during the attempt) ends the
+     * wait; a failure ends it exceptionally. Counted in {@link ProfileMetrics} per wait.
+     */
+    private <T> CompletableFuture<T> withHandoff(final HandoffWindow window, final java.util.function.Supplier<CompletableFuture<T>> attempt,
+                                                 final java.util.function.Predicate<T> heldElsewhere, final java.util.function.Predicate<T> granted,
+                                                 final BooleanSupplier abandoned, final String what,
+                                                 final java.util.function.Function<T, String> holderOf) {
+        Objects.requireNonNull(window, "window");
+        Objects.requireNonNull(abandoned, "abandoned");
+        if (this.closed) {
+            // No I/O step is queued on a closed engine (its lane would refuse it anyway): the join fails as in Build 55,
+            // with the code the runtime turns into "could not be started"; a refusal here would name no holder.
+            return CompletableFuture.failedFuture(error(ProfileErrorCode.INTERNAL_ERROR, "the profile engine is closed"));
+        }
+        final CompletableFuture<T> result = new CompletableFuture<>();
+        attempt.get().whenComplete((outcome, failed) -> {
+            if (failed != null) {
+                result.completeExceptionally(failed);
+                return;
+            }
+            if (!heldElsewhere.test(outcome) || window.expired() || this.handoffTimer == null) {
+                result.complete(outcome);
+                return;
+            }
+            this.profileMetrics.handoffWaitStarted();
+            window.waiting();
+            SourbyLogger.info("AWF MultiProfile: the " + what + " is held by " + holderOf.apply(outcome) + "; waiting up to "
+                + window.remainingMillis() + " ms for it to be released (coordination.handoff-wait-ms)");
+            final AtomicReference<T> lastRefusal = new AtomicReference<>(outcome);
+            final Runnable abort = () -> {
+                if (result.complete(lastRefusal.get())) this.profileMetrics.handoffAbandoned();
+            };
+            this.pendingHandoffs.add(abort);
+            result.whenComplete((ignored, ignoredFailure) -> this.pendingHandoffs.remove(abort));
+            if (this.closed) {
+                abort.run();
+                return;
+            }
+            retryHandoff(window, attempt, heldElsewhere, granted, abandoned, result, HANDOFF_FIRST_DELAY_MILLIS, lastRefusal);
+        });
+        return result;
+    }
+
+    private <T> void retryHandoff(final HandoffWindow window, final java.util.function.Supplier<CompletableFuture<T>> attempt,
+                                  final java.util.function.Predicate<T> heldElsewhere, final java.util.function.Predicate<T> granted,
+                                  final BooleanSupplier abandoned, final CompletableFuture<T> result, final long delayMillis,
+                                  final AtomicReference<T> lastRefusal) {
+        final long remaining = window.remainingMillis();
+        if (remaining <= 0L) {
+            if (result.complete(lastRefusal.get())) this.profileMetrics.handoffTimedOut();
+            return;
+        }
+        final long delay = Math.min(delayMillis, remaining);
+        final ScheduledExecutorService timer = this.handoffTimer;
+        try {
+            timer.schedule(() -> {
+                if (this.closed || abandoned.getAsBoolean()) {
+                    if (result.complete(lastRefusal.get())) this.profileMetrics.handoffAbandoned();
+                    return;
+                }
+                final CompletableFuture<T> next;
+                try {
+                    next = attempt.get();
+                } catch (final RuntimeException refused) {
+                    if (result.completeExceptionally(refused)) this.profileMetrics.handoffFailed();
+                    return;
+                }
+                next.whenComplete((outcome, failed) -> {
+                    if (failed != null) {
+                        if (result.completeExceptionally(failed)) this.profileMetrics.handoffFailed();
+                    } else if (heldElsewhere.test(outcome)) {
+                        lastRefusal.set(outcome);
+                        retryHandoff(window, attempt, heldElsewhere, granted, abandoned, result,
+                            Math.min(delay * 2L, HANDOFF_MAX_DELAY_MILLIS), lastRefusal);
+                    } else if (result.complete(outcome)) {
+                        if (granted.test(outcome)) {
+                            this.profileMetrics.handoffSucceeded(window.elapsedMillis());
+                        } else {
+                            this.profileMetrics.handoffAbandoned();
+                        }
+                    }
+                });
+            }, delay, TimeUnit.MILLISECONDS);
+        } catch (final RejectedExecutionException closing) {
+            if (result.complete(lastRefusal.get())) this.profileMetrics.handoffAbandoned();
+        }
+    }
+
     /**
      * Ends a player's format-2 session on this node: releases exactly {@code expected} ({@code null}: whatever
      * session is recorded), so a quit that runs after the player joined again never releases the new session.
@@ -3431,6 +3637,11 @@ public final class ProfileEngine {
 
     public void close() {
         this.closed = true;
+        final ScheduledExecutorService handoffs = this.handoffTimer;
+        if (handoffs != null) handoffs.shutdownNow();
+        // A join waiting for a handoff is refused now (its retry was dropped with the timer), so its login gate is released.
+        for (final Runnable abort : this.pendingHandoffs) abort.run();
+        this.pendingHandoffs.clear();
         final ProfileAudit log = this.audit;
         if (log != null) log.close();
         this.switchGuards.close();

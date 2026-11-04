@@ -44,6 +44,11 @@ Rencana dan keputusan OD-1…4: [BUILD-51-55-PLAN.md](releases/BUILD-51-55-PLAN.
   `/perf multiprofile`, scheduler facade + event AWF/profil di `sourbyapi`, panduan + plugin contoh, aset rilis
   `sourbyapi-<N>.zip`, port SSB-AuroraProfiles. Kode ditulis, direview, dikompilasi; belum diuji owner: TO-B55-01…09 di
   [catatan rilis Build 55](releases/26.2-build-55-aurora-nexus.md).
+- [-] Build 55.1 (hotfix, keputusan owner 2026-11-04) — B1 split-plan: join lewat Velocity menunggu claim sesi node lama
+  dilepas (`coordination.handoff-wait-ms`, default 0 = perilaku lama, retry berbatas di luar thread tick, tidak pernah
+  mengambil claim yang masih hidup), baris `/perf multiprofile`. Kode ditulis, dikompilasi; belum diuji owner: TO-B55.1-01…04 di
+  [catatan rilis Build 55.1](releases/26.2-build-55.1-aurora-nexus.md). B3: `adapters.preserve-unregistered` (default
+  kosong) meneruskan data adapter REQUIRED yang tidak terdaftar di node itu tanpa diubah (lobby: `[economy]`).
 
 ---
 

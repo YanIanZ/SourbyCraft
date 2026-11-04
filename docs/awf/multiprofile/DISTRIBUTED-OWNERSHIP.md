@@ -149,6 +149,53 @@ implements OS file locks.
 - AWF world commits keep their own per-world Redis lease; the two systems are not merged.
 - PostgreSQL is not implemented; there is no cross-store transaction.
 
+## Session handoff on a proxy server switch (Build 55.1)
+
+Behind Velocity (or any proxy) a `/server` switch logs the player in to the new server **before** the old server
+sees their quit. The new server's join queues the strict session claim `Q` at once; the old server's quit handler
+captures the player, commits the quit save (`saveCapturedAndClose`), releases the profile node claim and only then
+releases `Q`, all FIFO on that player's I/O lane. On Builds 51–55 the new server attempted `Q` exactly once, so
+almost every switch was refused with "Your profile is active on <node>. Try again in a moment." and the player was
+kicked: no duplication and no loss (the login gate kept the new server's vanilla playerdata out of every save), but
+a bad experience.
+
+`coordination.handoff-wait-ms` (RESTART_REQUIRED, default `0` = the Build 55 single attempt; `5000` recommended
+behind a proxy; ceiling `15000`) makes the join wait for the handoff:
+
+- A refusal whose cause is **another live session holding `Q`** (a refusal that names a holder) is retried with a
+  bounded backoff (100 ms, doubled on every refusal up to 1 s, never past the window). A node claim on the active
+  profile held by another node is retried under the **same window** (the old server releases it before `Q`, so this
+  mostly covers a co-op profile its other members still play there, OD-1: that wait ends in the refusal).
+- Every retry is the **same strict claim** (`admitSession` → `PlayerSessionOwnership.claim`): it is granted only
+  once the holder released the claim, or its lease lapsed and the epoch rules above replace it. The wait **never
+  takes a live claim**, never touches the holder's fence or epoch, and the holder's commits keep failing under the
+  replacement's claim exactly as before. A crashed old server therefore still refuses the join until its TTL
+  (`sessions.ttl-seconds`, 45 s by default) lapses, which is why the ceiling is well below it.
+- The retries are queued by one daemon timer thread (`SourbyCraft-AWF-profile-handoff`) and run on the profile I/O
+  lane; no region or global tick thread waits, and other players' steps keep moving. Meanwhile the player stands on
+  the new server behind the Build 53 login gate (item events cancelled, nothing captured or saved) with one
+  action bar, "Loading your profile...".
+- The wait ends with the Build 55 refusal when the window elapses, when the player leaves (the join went stale) or
+  when the engine closes (shutdown releases the join's gate). A retried attempt that fails (storage, Redis) ends the
+  wait with that error, exactly as a first attempt would.
+- The old server releases `Q` **after** its quit save settled on its lane: committed, or failed (the save is logged,
+  the session marker stays open and `Q` is still released). The admitted join then restores the **last committed
+  head** of the active profile, as every Build 55 authoritative login does: the quit state when that save committed,
+  otherwise the previous snapshot (progress since it is lost, as it is today after a failed quit save).
+- **Frozen while waiting.** The waiting player stands on the join's vanilla playerdata, which the login gate keeps out
+  of every save but which could still change the world for up to the window. Besides the gate's item, experience and
+  interaction cancellations (`SwitchFreeze`), `HandoffFreeze` cancels, for a waiting player: all damage to them and
+  dealt by them (including their projectiles), so no death and no death drops; every command (with a message);
+  opening an inventory; movement to another block (the move is cancelled, look changes pass); portal use. Each
+  handler runs on the thread that owns the player and reads one concurrent set. Lifted when the join is admitted or
+  refused, and at quit.
+
+`/perf multiprofile` counts the claim waits (started, admitted, timed out, left) and the p50/p95 of the admitted
+waits. Not covered: a proxy that keeps the old connection open after the new one joined (Velocity does not), a
+Redis outage during the wait (the attempt fails, the join is refused), and the co-op case above. Owner tests:
+switch in both directions under load, kill the old server mid-switch (expect the refusal until the TTL), restart
+Redis during a switch.
+
 ## Known gaps
 
 - A player's live state does not follow them between servers. With `login.authoritative: true` (Build 53) a
@@ -158,7 +205,9 @@ implements OS file locks.
   (Build 52 behaviour).
 - Shutdown capture (Build 53) is per node and bounded by `shutdown.capture-deadline-ms`; it is not a distributed
   handoff. A member plays a co-op only on the node holding its bound world (OD-1, `WRONG_NODE` elsewhere).
-- No proxy or portal handoff. `RoutingFabric` has no transport and advertises an empty address.
+- No proxy or portal handoff transport: `RoutingFabric` has no transport and advertises an empty address. A
+  proxy server switch is handled only on the joining side by the session handoff wait above (Build 55.1,
+  `coordination.handoff-wait-ms`, off by default); nothing moves live state, and nothing routes players.
 - No Redis Cluster and no replica topology.
 - Profile steps run one at a time per server (`ProfileIoQueue`), so one slow Redis call delays every
   profile step on that server.
