@@ -47,11 +47,14 @@ def main():
         # variety and so random-tick load, lighting, heightmaps and collision shapes.
         "level-type=minecraft\\:normal\nlevel-seed=440044\nspawn-protection=0\n"
         "enable-query=false\nenable-rcon=false\n")
-    config = output / "sourbycraft_config" / "sourbycraft_global_config.toml"
+    # Build 49+ reads YAML; a TOML fixture would be converted and renamed at boot, so the hash
+    # below could no longer be taken. The server seeds missing keys into this file on first boot.
+    config = output / "sourbycraft_config" / "sourbycraft_global_config.yml"
     config.parent.mkdir()
     config.write_text("# Isolated profiling fixture; disable external plugin/version changes.\n"
-                      "[plugins.viaversion]\nauto-provision=false\n[plugins.protocollib]\nauto-provision=false\n"
-                      "[updater]\nenabled=false\n")
+                      "plugins:\n  viaversion:\n    auto-provision: false\n"
+                      "  protocollib:\n    auto-provision: false\n"
+                      "updater:\n  enabled: false\n")
     config_before = sha256(config)
     if args.world:
         shutil.copytree(args.world.resolve(strict=True), output / "world")
@@ -116,8 +119,8 @@ def main():
                     raise RuntimeError(f"Missing fixture marker {marker}")
         if not (output / "world" / "level.dat").is_file():
             raise RuntimeError("World metadata not persisted")
-        metadata["config_after_sha256"] = sha256(config)
-        if args.expect_config_unchanged and sha256(config) != config_before:
+        metadata["config_after_sha256"] = sha256(config) if config.is_file() else None
+        if args.expect_config_unchanged and metadata["config_after_sha256"] != config_before:
             raise RuntimeError("Operator utility configuration changed during boot/run/stop")
         with (output / "jfr-summary.txt").open("w") as summary:
             subprocess.run([str(jfr), "summary", str(output / "profile.jfr")], stdout=summary, check=True)

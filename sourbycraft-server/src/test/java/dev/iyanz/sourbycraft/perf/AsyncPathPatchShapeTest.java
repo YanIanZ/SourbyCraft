@@ -141,12 +141,12 @@ class AsyncPathPatchShapeTest {
 
     @Test
     void theMobIsCapturedOnTheSubmittingThreadRightBeforeTheSubmitForPerTypeCounters() throws IOException {
-        // AsyncPathTypeStats hands the entity type from MobPathSnapshot.captureDetached to the next
-        // AsyncPathProcessor.trySubmit on the same thread. That only holds while the helper captures
-        // and submits in one straight line: nothing between them may submit, capture or return.
+        // The helper hands the snapshot it captured to AsyncPathProcessor.trySubmit(MobPathSnapshot, ..),
+        // which attributes the per-type counters from it, and captures and submits in one straight
+        // line: nothing between them may submit, capture or return.
         final String source = source();
         final int capture = at(source, "MobPathSnapshot.captureDetached(mob)");
-        final int submit = at(source, ".trySubmit(() -> solver.findPath(snapshot, subject, targets");
+        final int submit = at(source, ".trySubmit(subject, () -> solver.findPath(snapshot, subject, targets");
         assertTrue(capture < submit, "capture before submit");
         final String between = source.substring(capture, submit);
         assertFalse(between.substring("captureDetached(mob)".length()).contains("captureDetached("),
@@ -183,7 +183,7 @@ class AsyncPathPatchShapeTest {
         final int capacity = at(source, "if (!AsyncPathProcessor.hasCapacity()) {");
         final int event = at(source, "new EntityPathfindEvent(");
         final int snapshot = at(source, "new SnapshotPathRegion(");
-        final int submit = at(source, ".trySubmit(() -> solver.findPath(snapshot, subject, targets");
+        final int submit = at(source, ".trySubmit(subject, () -> solver.findPath(snapshot, subject, targets");
         assertTrue(refusals < capacity && capacity < event && event < snapshot && snapshot < submit);
         assertTrue(source.contains("if (solving == null) {"), "a refused submission falls back to the synchronous recompute");
     }
@@ -198,17 +198,22 @@ class AsyncPathPatchShapeTest {
         assertTrue(at(source, "navigation.sourbyVisitedNodesMultiplier()") > event);
         final int token = at(source, "final Path requested = navigation.getPath();");
         final int pending = at(source, "navigation.sourbyAsyncPathPending = true;");
-        final int submit = at(source, ".trySubmit(() -> solver.findPath(snapshot, subject, targets");
+        final int submit = at(source, ".trySubmit(subject, () -> solver.findPath(snapshot, subject, targets");
         assertTrue(event < token && token < pending && pending < submit);
     }
 
     @Test
     void resultsAreDeliveredThroughTheOwnerAndCheckedSubjectThenPathThenContent() throws IOException {
         final String source = source();
-        final int deliver = at(source, "AsyncPathCompletion.deliver(");
+        // The handoff reads the mob's Bukkit entity, so it is built on the owner before the submit;
+        // the worker's completion callback only passes it on.
         final int handoff = at(source, "RegionOwnerHandoff.forEntity(mob)");
-        final int release = at(source, "() -> navigation.sourbyAsyncPathPending = false));");
-        assertTrue(deliver < handoff && handoff < release, "owner handoff, then the release callback");
+        final int submit = at(source, ".trySubmit(subject, () -> solver.findPath(snapshot, subject, targets");
+        final int deliver = at(source, "AsyncPathCompletion.deliver(");
+        final int release = at(source, "() -> navigation.sourbyAsyncPathPending = false,");
+        assertTrue(handoff < submit && submit < deliver && deliver < release,
+            "owner handoff built before the submit, then the delivery, then the release callback");
+        assertEquals(1, count(source, "RegionOwnerHandoff.forEntity("), "no handoff is built in the completion callback");
         final int subject = at(source, "AsyncPathValidity.sameSubject(owner, mob)");
         final int path = at(source, "AsyncPathValidity.stillRequested(navigation.getPath(), requested)");
         final int content = at(source, "path != null && path.getTarget() != null");

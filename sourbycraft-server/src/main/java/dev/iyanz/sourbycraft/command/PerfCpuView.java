@@ -19,7 +19,9 @@ final class PerfCpuView implements PerfView {
         lines.add(UiPanel.section("CPU"));
         add(lines, "Process CPU / system CPU", percent(runtime.processCpuPercent()) + " / "
             + percent(runtime.systemCpuPercent()));
-        add(lines, "Available processors / live platform threads", count(runtime.availableProcessors())
+        // ThreadMXBean.getThreadCount: Java threads only, not JVM-internal threads such as GC and
+        // compiler threads, so below the OS thread count (/proc/self/status Threads).
+        add(lines, "Available processors / live Java threads", count(runtime.availableProcessors())
             + " / " + count(runtime.liveThreadCount()));
         add(lines, "Uptime", runtime.uptimeMillis() < 0 ? "unavailable" : runtime.uptimeMillis() / 1000 + "s");
     }

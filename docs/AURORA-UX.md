@@ -74,24 +74,33 @@ The converters live in `sourbycraft-server/src/log4jPlugins/java/dev/iyanz/sourb
    in place of its "Running Java ..." / "Loading <brand> <version>" pair:
    `SourbyCraft Build 48 - Aurora Nexus (DEV, <branch>@<commit>) for Minecraft 26.2, built 2026-10-22 03:36 Asia/Jakarta`
    and `Java 25 (<VM> <version>, <vendor>) on <OS> <version> <arch> | 8 processors | 2048 MiB max heap | ZGC`.
-   A release build shows no channel suffix; any field that cannot be read falls back to `?`.
+   A release build shows no channel suffix; a REL build made while `release=pre` shows
+   `Build N@<commit>PR!` instead of the codename (`BuildInfo#releaseIdentity`). Any field that
+   cannot be read falls back to `?`.
 2. **`-- Engine ----`** (`brand/ConsoleSections`, printed by `core/SourbyCraftBootstrap#init`).
-   The engine's 15 service stages no longer print a line each: a stage that finishes is a log4j
-   DEBUG event on the `Aurora` logger (`  3/15  configuration  20 ms  ok`, next to the existing
-   `START n/15 <name>` event; show both with a copy of `log4j2.xml` that adds
+   The engine's service stages (19 on the current source, `TOTAL_STAGES` in
+   `core/SourbyCraftBootstrap`; Build 48 had 15, as in the samples below) no longer print a line
+   each: a stage that finishes is a log4j
+   DEBUG event on the `Aurora` logger (`  3/19  configuration  20 ms  ok`, next to the existing
+   `START n/19 <name>` event; show both with a copy of `log4j2.xml` that adds
    `<Logger name="Aurora" level="debug"/>` and `-Dlog4j.configurationFile=<file>`). A stage that
-   throws prints one WARN, `Stage n/15 "<name>" FAILED after <ms> ms - see the error above; the
+   throws prints one WARN, `Stage n/19 "<name>" FAILED after <ms> ms - see the error above; the
    engine continues without it`, after the stack trace; a stage still running after 10 seconds
    prints one WARN naming it. The section closes with one line (WARN when a stage failed):
-   `Engine COMPLETE | 15/15 stages ok | 0 failed | 106 ms | slowest: startup index 23 ms`, or
-   `Engine DEGRADED | 13/15 stages ok | 2 failed: configuration, commands | ...`
+   `Engine COMPLETE | 19/19 stages ok | 0 failed | 106 ms | slowest: startup index 23 ms`, or
+   `Engine DEGRADED | 17/19 stages ok | 2 failed: configuration, commands | ...`
    (`scripts/run_baseline.py` `BOOT_SUMMARY` reads this line). The thread ledger
    (`execution/ThreadLedger`, configured ceilings per pool, not measured load) follows it. The
-   stages run in this fixed order: metrics runtime, network counters, configuration, stall
-   recorder, aurora worlds, plugin provisioning, jvm advisor, plugin diagnostics, startup index,
-   commands, messages, player slots, virtual executor, auto updater, gc tracker. `/aurora status`
+   stages run in this fixed order (`SourbyCraftBootstrap#init`): metrics runtime, network
+   counters, configuration, sourby mods, stall recorder, aurora redis fabric, aurora worlds, awf
+   multiprofile, plugin provisioning, jvm advisor, plugin diagnostics, startup index, commands,
+   messages, player slots, virtual executor, abysslink, auto updater, gc tracker. The update
+   rollback guard runs before the first stage and is not counted as one. `/aurora status`
    keeps the per-stage results after boot. "ok" means the stage returned without an exception;
-   it does not prove the service it started is healthy.
+   it does not prove the service it started is healthy. A stage whose feature is off (AWF
+   MultiProfile, the Redis fabric, AbyssLink are off by default) is "ok", and so is a stage that
+   logs its own failure instead of throwing (the Redis fabric when Redis is unreachable, AbyssLink
+   with an unreadable settings file).
 3. **`-- Plugins ----`** before Paper's `loadPlugins()` and the STARTUP enable pass, and
    **`-- Worlds ----`** before `Preparing level "<name>"` (both one-line calls in
    `DedicatedServer#initServer`, minecraft feature patch 0078); **`-- Plugins (post-world) ----`**
@@ -108,8 +117,15 @@ The converters live in `sourbycraft-server/src/log4jPlugins/java/dev/iyanz/sourb
 The section rules use box-drawing characters only when `ConsoleStyle.unicode()` is true (an
 interactive console, or `console.style = rich`); otherwise plain dashes, so a server started
 under the C locale prints no `?`. The same switch picks `-` over the em dash in the build identity.
-`console.style` (`auto` / `plain` / `rich`, `-Dsourbycraft.console=` overrides) now only
-chooses that character set; the terminal, not the setting, decides colour. RESTART_REQUIRED.
+`console.style` (`auto` / `plain` / `rich`, `-Dsourbycraft.console=` overrides; RESTART_REQUIRED)
+chooses that character set and whether the build identity in the launch line and the ready
+summary is coloured by stage (`ConsoleStyle.color()`: `rich`, or `auto` on an interactive console;
+`NO_COLOR` or `TERM=dumb` turn it off). The level, tag and message colours of log lines are
+decided by the terminal's ANSI support, not by the setting. The launch lines and the Engine rule
+print before the configuration stage, so since PR #62 `ConsoleStyle` reads `console.style` once
+from `sourbycraft_config/sourbycraft_global_config.yml` for them (an unreadable file reads as
+`auto`); before, they followed only `-Dsourbycraft.console`. PR #62 code is written and statically
+reviewed; not built; not tested by the owner.
 
 Removed with this design: the mid-boot banner written straight to stdout (`StartupBanner`,
 `SourbyCraftBanner`; it bypassed `logs/latest.log` and broke the line shape), the 15 per-stage
@@ -194,7 +210,7 @@ Clicking an action in Minecraft fills the command input; it does not execute it.
 | `/sourbycraft` | Operator hub and command guide |
 | `/aurora` or `/aurora status` | Aurora service state, active bridge mode and boot stages |
 | `/sourbycraft config` or `/aurora config` | File locations, loaded settings and lifecycle groups |
-| `/sourbycraft reload` | Explicit reload with errors and restart requirements |
+| `/sourbycraft reload` | Explicit reload with errors and restart requirements. Since PR #62 (Build 50 source; not in the published `v26.2-r50` prerelease; code written and statically reviewed, not built, not tested by the owner) it reads and applies the files on the SourbyCraft I/O executor, not on the tick thread that ran the command: the sender gets `Reloading configuration...` at once and the report panel when the reload finishes. Refused while the runtime is stopping or failed to start, and when the I/O executor is stopped or full |
 | `/ver`, `/version`, `/about` | Release, build time, runtime, API and source identity |
 | `/sys` | System summary, measured region health and plugin counts |
 | `/spec` | Hardware and JVM facts; unreadable fields say unavailable |
@@ -211,7 +227,9 @@ the console carry Adventure colour; on a redirected console `%ansiIfTerminal` st
 
 `/pl` and `/plugins` resolve to the same command instance and share permissions, output,
 search, filters and tab completion. Names are sorted without putting versions in the roster.
-Default page size is 12; `ui.plugins-page-size` is clamped to 1–40 and changes after reload.
+Default page size is 12; `console.plugins-page-size` is clamped to 1–40 and changes after reload
+(LIVE). Its pre-Build-49 name `ui.plugins-page-size` is no longer read since PR #62 (not in any published build);
+the one-time boot migration renames it.
 
 ```text
 /plugins                  first page
@@ -251,8 +269,13 @@ Performance command consumers retain the immutable-snapshot and freshness contra
 
 See [Aurora configuration](AURORA-CONFIG.md) and the annotated
 [UI section](config-examples/utility-ui.yml) / [Aurora defaults](config-examples/aurora.yml).
-Boot/reload preserves existing utility and Aurora TOML files. New defaults and comments are written only for
-new files; message variants are not replaced in existing deployments.
+Both files are YAML since Build 49 (`sourbycraft_config/sourbycraft_global_config.yml`,
+`sourbycraft_config/aurora.yml`). A reload never rewrites them. Boot rewrites a file only once, to
+convert an old `*.toml` or bring a pre-49 layout to the Build 49 one (copy kept as `*.migrated`);
+otherwise defaults and comments are written only into a new (or just migrated) file and an
+existing file is seeded in memory only. The one write outside boot is explicit: `/maxp <n>`
+persists that single key into the global file (re-read first, so other operator edits are kept).
+Message variants are not replaced in existing deployments.
 
 UI regression tests: `console/StartupLogLayoutTest` (shipped patterns, tags, level column,
 no escapes off a terminal, repeat filter), `brand/AuroraBootTest` (engine summary and the

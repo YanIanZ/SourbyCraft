@@ -5,6 +5,12 @@
 - Branch `26.2`, Build 48. Read 2026-10-21 from the materialized sources at `paperRef` 9240f586 with
   the tree's feature patches applied, plus the SourbyCraft-owned engine sources. Nothing here was
   booted; every statement is from reading code and is marked LIVE (current code) or planned.
+- Re-checked 2026-10-25 against the patch files of the Build 50 candidate (PR #62): `paperRef` is still
+  9240f586, feature patch 0055 is still the only one that touches these three commands or
+  `AbstractCommandExecution`, and neither PR #61 nor PR #62 changed their baseline patches, so the
+  behaviour below still holds. Line numbers under `sourbycraft-server/src/minecraft/` are those of the
+  2026-10-21 materialized tree and were not re-verified (no materialized tree in that review); citations
+  of owned sources were updated.
 - Source of truth for the guard list: `docs/architecture/inherited-guards.md`. This guide covers the
   commands whose ledger row has kind `REROUTED`. There are exactly three such commands in the ledger:
   `/tp` (`TeleportCommand#1`), `/clone` (`CloneCommands#1`), `/summon` (`SummonCommand#1`). The other
@@ -90,8 +96,10 @@ and default rotations) are still honoured because they feed `newYRot`/`newXRot` 
 
 Register path: `sourbycraft-server/src/minecraft/java/net/minecraft/server/commands/CloneCommands.java:47-165`.
 The clone body is `clone(...)` (`:231-550`). SourbyCraft-owned command-block check:
-`CommandBlockRegions.requireOwned(...)` for source and destination (`:266-269`), a no-op outside a
-command-block scope (`sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/commandblock/CommandBlockRegions.java:45-47`).
+`CommandBlockRegions.requireOwned(...)` for source and destination (`:266-269`; feature patch 0055 hunk
+`@@ -263,6 +263,11 @@` in `CloneCommands.java`), each box widened by the 32-block physics buffer on every
+side, a no-op outside a command-block scope
+(`sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/commandblock/CommandBlockRegions.java:88-106`).
 
 ### What happens on SourbyCraft versus vanilla
 
@@ -197,12 +205,14 @@ entity into an unloaded chunk is not verified in this reading (see Unverified).
 - `execute if|unless success` and command-block comparators measure the command *return*, which for
   these commands reports "scheduled", not "done". A conditional block chained off a rerouted `/clone`
   will fire even if the clone later produces zero blocks.
-- `/clone` still fails fast on unloaded chunks (`commands.clone.failed`-style "not loaded", `:258-260`);
+- `/clone` still fails fast on unloaded chunks (`BlockPosArgument.ERROR_NOT_LOADED`, the vanilla
+  `argument.pos.unloaded` error, `:258-260`);
   it is the one of the three that both checks and then loads chunks itself. `/tp` loads the destination
   chunk via `TELEPORT_FLAG_LOAD_CHUNK`. `/summon` requests no chunk load — pre-load the area if you
   need the mob to tick immediately.
 - `/tp ... facing ...` does not rotate the victim on this engine (`TeleportCommand.java:251-270`). Use
-  explicit `rotation` coordinates instead if facing matters.
+  explicit `rotation` coordinates instead if facing matters. A fix needs a new feature patch that runs
+  `lookAt.perform` on the entity's thread after `teleportAsync` completes (PM-257, not in PR #62).
 - A duplicate-UUID `/summon` silently reports success instead of failing
   (`SummonCommand.java:108-111`); do not use the command's failure to detect that the entity was not
   created.

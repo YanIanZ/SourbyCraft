@@ -1,0 +1,145 @@
+# Testing
+
+Build 50, PR #62 (2026-10-25): code written and statically reviewed; not built; not tested by the
+owner. No Gradle build, Java test, Python suite, Redis server or boot was run for PR #62, and no new test
+was written (owner rule); whether the existing tests still compile and pass against it is unknown.
+Evidence and per-item status: [readiness](../../releases/BUILD-50-READINESS.md),
+[PM matrix](../../releases/BUILD-50-PM-MATRIX.md) and [Tester Owner](../../tester%20owner.md).
+
+> **Owner-managed testing.** The results below were produced by coding agents during implementation;
+> they are implementation evidence, not qualification. No runtime result in this repository is
+> accepted until the project owner runs it. The owner-facing procedures and the authoritative status
+> per case are in [`docs/testing/owner/00-TESTING-INDEX.md`](../../testing/owner/00-TESTING-INDEX.md);
+> distributed mode, real-player switching and any multi-node behaviour are never "passed" there.
+> Owner report 2026-10-24: MultiProfile testing complete on the tree of that date, before PR #61 and
+> PR #62 (MP-007 and MP-010 were reported BLOCKED then). PR #62 changed the switch order, recovery, quit and join handling, isolation and storage, so
+> MP-001 to MP-009 need a run on a build of this PR (the index keeps the 2026-10-24 results visible as
+> NEEDS RETEST; MP-007, extended for the PR #61 binding API, is READY FOR OWNER TEST there).
+> MP-010 (two nodes) was blocked by the missing shared fenced repository; `RedisProfileRepository` is
+> that precondition, and MP-010 now waits for a build of this PR and an owner run. Result sheets belong
+> in [`06-RESULTS-TEMPLATE.md`](../../testing/owner/06-RESULTS-TEMPLATE.md).
+
+## Commands
+
+```bash
+# Area suite (MultiProfile + Redis Fabric)
+./gradlew :sourbycraft-server:test --tests 'dev.iyanz.sourbycraft.awf.multiprofile.AwfMultiProfileTestSuite'
+
+# Full server/API suite (the area suite and these tests are also selected by the main suite)
+./gradlew :sourbycraft-server:test --tests 'dev.iyanz.SourbyCraftTestSuite'
+
+# Repository policy/tooling suite
+python3 -m unittest discover -s scripts -p 'test_*.py'
+```
+
+Redis tests start a real `redis-server` on a free port (`RedisTestServer`). Without the binary they
+skip; with `SOURBY_REQUIRE_REDIS=1` they fail instead of skipping.
+
+## Test inventory
+
+The area suite selects `dev.iyanz.sourbycraft.awf.multiprofile` and `dev.iyanz.sourbycraft.awf.redis.fabric`:
+44 `@Test` methods on this branch.
+
+| Class | `@Test` | Covers |
+|---|---|---|
+| `ProfileStateCodecTest` | 7 | all categories round-trip, deterministic bytes and checksum, truncation, trailing bytes, foreign payload refused before allocation, huge declared length, empty state |
+| `FileProfileRepositoryTest` | 6 | account/profile/binding round-trip, latest snapshot + retention, corrupt snapshot reported, journal round-trip and listing, tombstone delete, no temp file left |
+| `ProfileEngineTest` | 13 | slot limit, first switch commit, old-state snapshot, concurrent switch rejection, failed apply rollback, stale snapshot refusal, recovery forward, recovery rollback, stale-fence recovery refusal, active-profile switch refusal, active-profile delete refusal, concurrent creates keep every profile within the slot limit, public binding persists and refuses active-profile mutation |
+| `RedisFabricServicesTest` | 12 | settings parsing, session TTL must exceed the heartbeat, session exclusivity and takeover epoch, refresh/release need the same incarnation, same-node token replacement, lease TTL units (`PTTL`), coordination fencing/monotonic fence/expiry takeover, cache bound/TTL/version invalidation/single flight, routing directory/least-loaded/profile owner, fabric probe and pool sizes |
+| `EventFabricTest` | 6 | publish/consume/ack, handler failure stays pending, redelivery idempotency, delivery-budget dead letter, retention backpressure without a consumer group, unknown type acknowledged |
+| `AuroraKeysTest` / `ConfigExamplesTest` | — | keys in the table and the golden example at their defaults (outside the area suite) |
+| `UnboundedQueueAuditTest` | — | no unbounded queue introduced (existing policy test) |
+
+PR #62 edited one existing assertion: `ProfileEngineTest.recoveryRefusesAJournalOlderThanTheCurrentFence`
+now records the journal's target fence with the ownership incarnation, because recovery compares fences
+only within one incarnation.
+
+### Build 55 unit tests (written, compiled; not run by the agent — owner rule)
+
+| Class | Covers |
+|---|---|
+| `ProfileIoQueuePartitionTest` | one partition = Build 54 FIFO; different partitions run at once while each key stays FIFO; a later step never overtakes an earlier waiting step of its partition; barrier waits for every running step and blocks later ones; capacity bound; lane rejection releases partitions without recursing; the in-flight cap (lane threads) below the partition count; key/mask contract and wait sampling (hand-driven lane, no threads) |
+| `ProfileAuditTest` | ring + daily file line format, sanitising, paging with cursor, ring bound, a refusing lane counts drops, an unwritable directory counts write failures, a write handed to the lane before `close()` still lands, entry contract |
+| `ProfileSwitchGuardsTest` | cooldown on an injected clock (committed only, reset, 0 = off); guards in order, first refusal wins, duplicate registration, per-plugin removal; throwing guard = refusal, reason cut, blank reason; registration bound; the guard lane (own named threads, a hung guard is interrupted at the budget, a full lane is a veto) |
+| `Build55ReviewFixesTest` | review fixes through the engine over a FILE store: leaving an archived co-op is allowed; archive refused while a member has the co-op active or plays it here; unarchive restores a prior lock; a salvage apply never resets a best-effort adapter whose capture failed; a switch rollback restores such an adapter from the stored entry its rollback point carries and resets it when the source stores none, never leaving the target's value (review N1); `profile.switch` does not gate an undefined type; the Build 55 action ids ignore a deny `defaultRule` (N2); a ballot is a `coop.kick` action; a create request may not carry the archive markers (N4); `CoopInviteInfo` carries the profile's name and type |
+| `ProfileSettingsBuild55Test` | the four Build 55 keys: defaults, parsing, per-key fallback, AuroraKeys rows, shorter constructors; seasonal type-definition round trip and record version (1 without the flag, 2 with it) |
+| `PerfViewRegistryTest`, `PerfCommandGoldenTest` | the view count (20) and the golden `VIEWS` lines include `multiprofile` (existing tests, pins updated) |
+
+Not covered (owner cases from COOP-DESIGN §10 slice 7): `CoopAuditRuntimeWired`, `CoopAuditFailureDoesNotRollback`,
+`CoopAuditQueueBounded`, `CoopSwitchGuardAdmissionAndReentrancy`, `CoopCooldownOnlyAfterCommit`; the engine-level
+switch path with a vetoing guard, the archived-profile refusals and the `applyAbsent` call on each apply path are
+exercised by no test on this branch.
+
+### Build 55.1 unit tests (written, compiled; not run by the agent — owner rule)
+
+| Class | Covers |
+|---|---|
+| `SessionHandoffTest` | `coordination.handoff-wait-ms` through the real engine over a format-2 FILE store with the session claim held under another node id: the admission waits and is admitted after the holder releases `Q` (under a higher fence, the live claim never replaced); the window elapses with the Build 55 refusal while the holder's claim stays live and valid; default 0 is one attempt with nothing counted; a stale join (player left) stops the wait with the refusal; closing the engine ends a wait with the refusal; the active profile's node claim waits under the same window; a join on a closed engine fails at once with `INTERNAL_ERROR` before any attempt (Build 55 behaviour); the metrics rows. The `HandoffFreeze` listener is not unit-tested (Bukkit events; owner case TO-B55.1-01) |
+| `ProfileSettingsBuild551Test` | `coordination.handoff-wait-ms`: default 0, the Build 51 `Coordination` constructor keeping it, parsing, per-key fallback with the key reported, the 0..15000 range, the AuroraKeys row; `adapters.preserve-unregistered`: default empty, the Build 53 `Adapters` constructor, parsing, id validation and cap, the AuroraKeys row |
+| `AdapterPreservationTest` | `adapters.preserve-unregistered` in the registry: stored REQUIRED data of a listed, unregistered id passes `validateApply` and `apply` untouched, is carried forward byte-identical with the required record and applied again by a registry that registers the adapter; an unlisted id still refuses `ADAPTER_MISSING`; a listed id that is registered here (UNSUPPORTED scope, older version) still refuses; a plugin registering the id mid-session is not captured for a player whose apply passed the data through, until the next apply (`passedThrough`, `forgetPassedThrough`); `preservedHere` |
+
+### Build 56 unit tests (written, compiled; not run by the agent — owner rule)
+
+| Class | Covers |
+|---|---|
+| `CoopCrossNodeRedisTest` | two engines as two nodes on one Redis (`FabricTestNodes.sessionsAs`): island = world host, spawn = satellite. A member on each node at once (the spawn join is admitted without a node claim, `satelliteSession`, restore `RESTORED` not `WRONG_NODE`, `prepareActive` false, each member's stream moves only with that member's saves, the spawn quit publishes the head, the island keeps its claim, then both members on the island); the island bed and return point kept by a satellite (restore applied location-off, first stream entry stores no location, every save and the quit on the spawn node carry the head's island locations unchanged while the rest of the capture is stored); a bank posting from each node (conservation; two at once serialise on `P` or the `S` CAS, both futures awaited, a loser writes nothing and its sequential retry posts; `P` held on the island refuses the spawn node until released); membership while a member is on the other node (an invite accepted on the spawn node joins; a leave on the spawn node and the same leave from the island are `MEMBER_ONLINE`; an operator lock from the island is `PROFILE_LOCKED` naming the member; after the quit the leave repoints and the lock goes through); the default (cross-node off) keeping the Build 55.1 `WRONG_NODE` on claim, restore, bank and label. Needs `redis-server` (skipped without it; CI requires it) |
+| `ProfileSettingsBuild56Test` | both keys: defaults (OD-1, every node a world host), the Build 52 `Coop` constructor, parsing, per-key fallback with the key reported, AuroraKeys rows, `crossNodeCoop()`/`satellite()` need the feature on; `ProfileRuntime.validateCrossNode`: cross-node off is never refused, the FILE repository and standalone mode refuse cross-node, a satellite needs switching off and cross-node on (the WuretaMC shape passes) |
+
+Not covered: the runtime wiring of the no-op world port on a satellite, the start-up INFO, and every multi-server
+behaviour (TO-B56-01..06 in the [Build 56 notes](../../releases/26.2-build-56-aurora-nexus.md)).
+
+### Not covered by any test (pending for the owner or a test wave)
+
+- `RedisProfileRepository`: `FENCED`/`STALE`/`MISSING` replies, a stale owner refused after a takeover,
+  staged-snapshot expiry, retention with pinned snapshots, journal limits, the unmigrated-directory
+  write refusal, `WAITAOF` confirmation and fallback, startup refusals (cluster, replica, old Redis,
+  AOF off).
+- The lost-commit-reply settle path, compensation with a player going offline after the apply, the
+  new phase order and recovery rules, the first-switch archive, `ProfileRuntime.validate` refusals.
+- `ProfileRepositoryMigration` (copy, verify, refusal when Redis holds data, re-run after a failure).
+- `NodeIdentity` predecessor and fingerprint cases; `SessionFabric` predecessor takeover.
+- Event publishing past retention with an acknowledging consumer group.
+- `ProfileIoQueue` ordering and capacity, the freeze listener, the quit capture, the join return,
+  adapter limits and carry-forward, infinite-duration effects in the codec, legacy armor slots.
+
+The owner procedures for these behaviours are in
+[03-EXPERIMENTAL-FEATURES-TESTING.md](../../testing/owner/03-EXPERIMENTAL-FEATURES-TESTING.md) and
+[Tester Owner](../../tester%20owner.md).
+
+## Historical results (tree c117739, before PR #61 and PR #62)
+
+Kept as history; they say nothing about the current branch. Those runs had `redis-server` installed,
+so the Redis suites executed. The tree was hardened by a second session while that work was verified;
+the numbers are from the final run after integrating its changes and the review fixes.
+
+- Area suite: **42 tests, 0 failed**.
+- Full `SourbyCraftTestSuite`: **2617 tests, 0 failed, 6 skipped** (2m25s).
+- `scripts/test_*.py`: **723 tests, OK**; `scripts/patch_surface.py --check` passed.
+- An earlier full run also passed (2614/0/6); one intermediate run failed only
+  `VanillaFixesConfigurationTest.checkMojiraIssueStatuses` (external Mojira HTTP timeout), which
+  passed in the final run and is unrelated to these changes.
+- `:sourbyapi:compileJava`, `:sourbycraft-server:compileJava`, `compileTestJava`: success.
+- `./gradlew slimServerJar`: success (`build/libs/SourbyCraft-slim.jar`, 41,557,420 bytes); the jar
+  was not booted and the CI boot markers were not exercised.
+- `verify_build_identity.py` was not run against that jar: the slim/paperclip layout does not expose
+  `META-INF/sourbycraft-build.properties` at the top level, and that change did not touch build
+  identity.
+
+Fault injection covered then: truncated/corrupt snapshot; stale snapshot revision; failed target apply
+(rollback); concurrent switch; duplicate session claim; takeover with a stale epoch; expired
+coordination lease followed by a takeover (old fence rejected); handler exception/`false`; redelivery
+of the same event id; delivery budget exceeded (dead letter); retention backpressure; cache
+invalidation across two cache instances; Redis `DEL` of a lease key.
+
+## Not run (explicit)
+
+- **Nothing for PR #62**: no build, no test, no boot (see the top of this page).
+- **No multi-node run.** Distributed mode and `repository: redis` are therefore EXPERIMENTAL and not
+  qualified.
+- **No benchmark.** See [BENCHMARKS.md](BENCHMARKS.md).
+- **No server boot / CI boot gate with MultiProfile enabled** by an agent; the owner's 2026-10-24
+  boot/join/switch/reconnect run predates PR #61 and PR #62.
+- **No proxy/portal integration**; `RoutingFabric` has no transport.
+- **No MultiProfile probe plugin**: the test plugins do not exercise `AuroraProfiles`.
+
+These omissions are why the feature is documented as implemented but not production-qualified.

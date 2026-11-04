@@ -31,8 +31,34 @@ public record WorldProperties(@Nullable Spawn spawn, @Nullable Difficulty diffic
     /** No overrides at all. */
     public static final WorldProperties NONE = new WorldProperties(null, null, null, null, null, null, null, null);
 
-    /** A spawn point. */
-    public record Spawn(double x, double y, double z, float yaw) {}
+    /**
+     * A spawn point inside the world: finite coordinates, {@code x} and {@code z} between -29999984
+     * and 29999984 (half the largest world border), {@code y} from -2032 up to, but not including,
+     * 2032 (the build limits a dimension type can have), and a finite yaw. It is applied on every
+     * load, so a value outside the world would put every join and respawn there.
+     *
+     * @throws IllegalArgumentException if a coordinate or the yaw is outside those limits
+     */
+    public record Spawn(double x, double y, double z, float yaw) {
+        private static final double MAX_HORIZONTAL = 29_999_984;
+        private static final double MIN_Y = -2032;
+        private static final double MAX_Y_EXCLUSIVE = 2032;
+
+        public Spawn {
+            if (!Double.isFinite(x) || Math.abs(x) > MAX_HORIZONTAL) {
+                throw new IllegalArgumentException("spawn x must be a finite number from -29999984 to 29999984, not " + x);
+            }
+            if (!Double.isFinite(z) || Math.abs(z) > MAX_HORIZONTAL) {
+                throw new IllegalArgumentException("spawn z must be a finite number from -29999984 to 29999984, not " + z);
+            }
+            if (!Double.isFinite(y) || y < MIN_Y || y >= MAX_Y_EXCLUSIVE) {
+                throw new IllegalArgumentException("spawn y must be a finite number from -2032 to below 2032, not " + y);
+            }
+            if (!Float.isFinite(yaw)) {
+                throw new IllegalArgumentException("spawn yaw must be a finite number, not " + yaw);
+            }
+        }
+    }
 
     /** Inclusive chunk-coordinate bounds. */
     public record Bounds(int minChunkX, int minChunkZ, int maxChunkX, int maxChunkZ) {

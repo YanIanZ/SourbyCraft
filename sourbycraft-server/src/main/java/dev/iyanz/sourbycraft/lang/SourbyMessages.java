@@ -31,14 +31,19 @@ import java.util.concurrent.ThreadLocalRandom;
  *
  * <h2>Config schema</h2>
  * <pre>
- * [messages]
- * server-full = [ "&lt;variant 1 MiniMessage&gt;", "&lt;variant 2&gt;", ... ]
- * motd        = [ "&lt;line1&gt;\n&lt;line2&gt;", ... ]
- * join        = [ "&lt;uses &lt;player&gt; placeholder&gt;", ... ]
- * leave       = [ ... ]
+ * messages:
+ *   server-full:
+ *     - "&lt;variant 1 MiniMessage&gt;"
+ *     - "&lt;variant 2&gt;"
+ *   motd:
+ *     - "&lt;line1&gt;\n&lt;line2&gt;"
+ *   join:
+ *     - "&lt;uses &lt;player&gt; placeholder&gt;"
+ *   leave:
+ *     - ...
  * </pre>
- * Keys are read through {@link SourbyCraftConfig#cfgGet} which already consults the unified
- * TOML first. When a key is absent/empty (or every entry is blank), {@link #get(String, TagResolver...)}
+ * Keys are read through {@link SourbyCraftConfig#cfgGet}, which reads the loaded
+ * {@code sourbycraft_global_config.yml}. When a key is absent/empty (or every entry is blank), {@link #get(String, TagResolver...)}
  * falls back to a sane built-in default variant registered in {@link #DEFAULTS} — the server
  * never renders an empty message and boot never depends on the operator having seeded the file.
  *
@@ -54,7 +59,7 @@ import java.util.concurrent.ThreadLocalRandom;
  */
 public final class SourbyMessages {
 
-    /** Config section prefix. Every key lives under {@code messages.<key>} in the unified TOML. */
+    /** Config section prefix. Every key lives under {@code messages.<key>} in {@code sourbycraft_global_config.yml}. */
     public static final String SECTION = "messages";
 
     // Message keys — the first consumers (F1-7). New keys append here + to DEFAULTS + seedDefaults.
@@ -216,7 +221,7 @@ public final class SourbyMessages {
      * (list of MiniMessage variant strings), only when the key is absent — never clobbering an
      * operator edit. Mirrors {@code SourbyCraftConfig.seed(...)} semantics but for list values.
      *
-     * <p>Called from {@code SourbyCraftConfig.seedUnifiedPerfDefaults}. The nightconfig
+     * <p>Called from {@code SourbyCraftConfig.seedDefaults}. The nightconfig
      * {@code CommentedFileConfig} stores lists natively; the caller saves once after all seeds.
      *
      * @param f       the nightconfig unified file (typed loosely to avoid a hard dep here)
@@ -238,7 +243,7 @@ public final class SourbyMessages {
             }
         }
         // Per-key comments (only if not already commented).
-        maybeComment(f, SECTION + "." + SERVER_FULL, "Kick line shown when a non-bypass player hits a full server (KICK_FULL).");
+        maybeComment(f, SECTION + "." + SERVER_FULL, "Kick line shown when a non-bypass player hits a full server. Used only while players.full-server-bypass is true (that key is RESTART_REQUIRED); otherwise the vanilla server-full message is shown. LIVE (/sourbycraft reload).");
         maybeComment(f, SECTION + "." + MOTD, "Server-list MOTD, one variant picked at random per boot and applied in memory (server.properties is not rewritten). \\n splits two lines. [] (empty list) = keep the server.properties motd. RESTART_REQUIRED.");
         maybeComment(f, SECTION + "." + JOIN, "Broadcast when a player joins. <player> = their name. [] (empty list) = no join message; remove the key to restore the built-in variants. LIVE (/sourbycraft reload).");
         maybeComment(f, SECTION + "." + LEAVE, "Broadcast when a player leaves. <player> = their name. [] (empty list) = no leave message; remove the key to restore the built-in variants. LIVE (/sourbycraft reload).");

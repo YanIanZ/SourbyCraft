@@ -3,7 +3,10 @@
 The PRD forbids optimization before a measurable baseline exists, and blocks a merge
 on an unexplained regression of roughly 3% in the directly affected benchmark. This
 document describes the harness that produces those numbers, and — as important — what
-it does not measure.
+it does not measure. The PRD and its section numbers cited here (§9, §10, §84, §85) come from
+`docs/PRD.md`, removed from the repository in `c86b3be` (2026-10-22, still in git history); the
+T10 requirements this harness serves are listed in
+[qualification-readiness.md](architecture/qualification-readiness.md).
 
 | Script | Role |
 | --- | --- |
@@ -38,11 +41,23 @@ threads.txt       thread dump taken at the end of the measurement window
 heap.txt          heap summary taken at the end of the measurement window
 ```
 
-The runner changes no performance-related setting. It writes only `eula.txt`, a
-loopback-bound `server.properties`, and a utility TOML that disables auto-update and
-ViaVersion provisioning so a run cannot reach the network for anything but its own
-load. The one addition is `aurora.bridge.mode = "safe"`, written only for a workload that
-declares bridged plugins (`plugins-10`). Heap size and collector are explicit arguments and are recorded in provenance.
+The runner writes only `eula.txt`, a loopback-bound `server.properties` and a SourbyCraft
+global config. It changes **one performance-related setting**: `server.properties` sets
+`sync-chunk-writes=false`, so region-file writes in every run, including `save-stress`, are not
+synchronous, and a number taken here describes that write path, not a server that writes
+synchronously. `verify_persistence.py` sets `sync-chunk-writes=true` because its point is that
+writes reach disk; `profile_server.py` does not set the key at all. The other
+`server.properties` values shape the workload, not the server's speed: `online-mode=false` for the
+headless clients, `allow-flight=true` because half of them fly, `max-players` raised to the client
+count, `level-type`, `level-seed=440044`, `spawn-protection=0`, and query and RCON off.
+
+The global config disables auto-update and ViaVersion/ProtocolLib provisioning so a run cannot
+reach the network for anything but its own load. The runner still writes it as a Build 49-layout
+`sourbycraft_global_config.toml` (`[plugins.viaversion]`, `[plugins.protocollib]`, `[updater]`),
+which the server converts once at boot to `sourbycraft_global_config.yml` and renames to
+`*.toml.migrated`. For a workload that declares bridged plugins (`plugins-10`) it appends
+`[aurora.bridge] mode = "safe"`; the same boot migration moves that key into `aurora.yml`. Heap
+size and collector are explicit arguments and are recorded in provenance.
 
 ## Comparing
 
@@ -91,6 +106,7 @@ python3 scripts/run_baseline.py build/libs/SourbyCraft-slim.jar \
 | `plugins-10` | `players-10` plus the representative plugin set, loaded but not driven | yes |
 | `entity-stress` | Entity tick, collision, item merge and despawn | yes |
 | `chunk-stress` | Generation, load, integration, unload and save | no |
+| `save-stress` | Rewriting already loaded chunks that keep changing, flushed with `save-all flush` every 15 s: save queue, chunk serialization, region-file writes | no |
 | `network-stress` | Accept, decode, encode, flush, connection teardown | no |
 
 `players-N` is a spatial-distribution model, not a player simulation: N disjoint
@@ -186,14 +202,17 @@ run — a run with no clients measures the *inactive* entity path.
 
 Workloads that depend on that gate set `requires_connected_players`. The runner does
 not fake a player and does not pretend the gap away: it marks such a run **not
-certified** unless the operator asserts attached clients with `--connected-players N`,
-and `compare_baseline.py` prints that on any report using it. An uncertified run keeps
-all of its evidence; it is simply refused as a regression reference.
+certified** when no client was in play, or when fewer stayed in play than were requested with
+`--connected-players N`, and `compare_baseline.py` prints that on any report using it. An
+uncertified run keeps all of its evidence; it is simply refused as a regression reference.
 
-To capture a certified `players-N` or `entity-stress` baseline today, attach N real
-clients to the loopback port before the warmup ends and pass `--connected-players N`.
-Closing this properly means a headless client driver, which is the natural follow-up
-to this harness.
+The runner has a built-in headless client driver for this (`scripts/baseline_client.py`).
+With `--connected-players N` it starts N clients (`baseline_client.ClientSwarm`, named
+`Baseline000`…) after the workload setup and before the warmup, fails the run if fewer than N
+reach play, and teleports them over the workload's sites so each site has a player. The
+clients move (`client_roam_blocks` per plan; some fly), and their movement is partly rejected by
+the server (*The client swarm's movement is partly rejected* below), so a run models activation
+and chunk residency around players, not real player behaviour.
 
 ### Version-sensitive commands
 
@@ -225,8 +244,21 @@ Every metric names its source, and an unsupported metric is reported as
 `mspt` is the distribution of the worst region's average MSPT across the published
 samples — it is not a per-tick histogram. The server's own in-window percentile
 estimates are reported separately as `reported_estimated_p95_mspt` / `_p99_`, so the
-two are never confused. Chunk request and generation latency are not yet directly
-instrumented; read them from the recording.
+two are never confused.
+
+The server measures more than the harness records. These live sources exist, but
+`baseline_metrics.py` reads only the JFR events in the table above, so none of them reaches
+`baseline.json`; read them on the server console during a run, or from the recording:
+
+| Live view | What it shows |
+| --- | --- |
+| `/perf chunks` | Loaded chunks per world, generation-stage timing, chunk lifecycle counters |
+| `/perf storage` | Chunk-system I/O counts, region-file save and load timing, pending I/O |
+| `/perf network` | Wire and packet rates, totals since start, outbound queues |
+| `/perf entities` | Entities and players per world, entity tick counters |
+| `/perf scheduler` | Region scheduler state and region task wait latency (tick and chunk tasks) |
+| `dev.iyanz.sourbycraft.LaneLoad` (JFR) | One event per execution lane per collection (threads, cores used); in the recording, not parsed by the harness |
+| `/perf lanes` | The same lane split on the console |
 
 Telemetry samples carry a `MetricState`. `AVAILABLE` and `WARMING` samples both hold
 freshly collected values and both count: `WARMING` means only that some longer window
@@ -274,13 +306,15 @@ serializes every stack trace in the recording.
 `run_baseline.py` refuses to certify a run as a comparison reference when any of these
 hold, and records the reason in `baseline.json`:
 
-* the workload needs connected clients and none were asserted
+* the workload needs connected clients and none was in play
+* fewer clients stayed in play than were requested
 * tick telemetry was unavailable in the recording
 * the worktree was dirty, so the jar cannot be tied to a commit
 * the server rejected a setup command
 * the measurement window was shorter than 300 seconds
 * another server was already running when the run started
 * HEAD moved while the measurement was running
+* the shutdown was not clean, so the world the run leaves behind may be torn
 * the machine averaged more than 10% CPU on work other than this server
 
 `run_baseline.py` also refuses to *start* on a dirty worktree, because such a run could

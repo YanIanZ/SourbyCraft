@@ -63,7 +63,7 @@ class PerfViewRegistryTest {
 
     @Test
     void theDefaultRegistryListsEveryViewOnceAndHidesOnlyTheOverview() {
-        assertEquals(19, PerfCommand.VIEWS.size());
+        assertEquals(20, PerfCommand.VIEWS.size());
         assertTrue(PerfViews.DEFAULT.find("overview") != null && !PerfCommand.VIEWS.contains("overview"));
         for (final String view : PerfCommand.VIEWS) {
             assertTrue(PerfViews.DEFAULT.find(view) != null, view);

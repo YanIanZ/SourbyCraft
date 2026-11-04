@@ -106,7 +106,8 @@ public final class RegionFileStorageHooks {
             try {
                 awf.close();
             } catch (final IOException | RuntimeException failed) {
-                logger.error("Aurora World Fabric could not commit {} on close; its uncommitted chunks are lost", folder, failed);
+                logger.error("Aurora World Fabric could not confirm the final commit of {} on close; the chunks written since"
+                    + " its last confirmed commit may or may not have been applied", folder, failed);
                 throw failed;
             }
         }

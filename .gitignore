@@ -26,6 +26,7 @@ logs/
 !gradle/wrapper/gradle-wrapper.jar
 test-plugin.settings.gradle.kts
 legacy-test-plugin.settings.gradle.kts
+sourbyapi-example.settings.gradle.kts
 
 # Materialized by applyAllPatches (Paper upstream checkouts and SourbyPatcher patchFile outputs)
 paper-server/
@@ -104,3 +105,6 @@ world*/
 AGENT-COORDINATION.md
 .board-queue.json*
 *.hprof
+
+# SourbyMod runtime directory (operator-provided jars + per-mod data)
+/mods/

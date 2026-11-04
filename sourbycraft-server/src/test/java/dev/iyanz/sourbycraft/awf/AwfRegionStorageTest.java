@@ -129,6 +129,8 @@ class AwfRegionStorageTest {
             AwfWorldStore.open(templateStore, WorldRole.VANILLA, 1).commit(
                 java.util.Map.of(new ChunkKey(0, 0), b("t0"), new ChunkKey(1, 0), b("t1")), Set.of(),
                 PersistenceMode.INCREMENTAL);
+            // A template is complete only with its description; an instance of a missing one is refused.
+            Files.writeString(templateStore.getParent().resolve("template.json"), "{}");
             final Path dimension = this.dir.resolve("inst");
             Files.createDirectories(dimension.resolve("region"));
             final AwfEngine engine = engine(Set.of());

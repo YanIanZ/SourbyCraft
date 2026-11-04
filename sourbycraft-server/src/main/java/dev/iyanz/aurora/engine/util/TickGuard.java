@@ -36,10 +36,13 @@ public class TickGuard {
             case LOG -> {
                 // ensure tick thread first, since that is required, then we check and log
                 ensureIsTickThread(reason);
-                // SourbyCraft - inside a bridged plugin's task the hit counts toward its quarantine
-                if (!TickThread.isTickThreadFor(level, chunkX, chunkZ) && !dev.iyanz.sourbycraft.bridge.GuardViolations.report(reason)) {
-                    LOGGER.warn("Thread failed main thread check: {}, context={}, world={}, chunk_pos={}", reason, getThreadContext(), WorldUtil.getWorldName(level), new ChunkPos(chunkX, chunkZ), new Throwable());
+                // SourbyCraft start - inside a bridged plugin's task the hit counts toward its quarantine; elsewhere the line is
+                // rate-limited. Off a tick thread ensureIsTickThread already decided the hit (ThreadChecks), so it is not counted twice.
+                if (TickThread.isTickThread() && !TickThread.isTickThreadFor(level, chunkX, chunkZ) && !dev.iyanz.sourbycraft.bridge.GuardViolations.report(reason)) {
+                    final long suppressed = dev.iyanz.sourbycraft.bridge.GuardViolations.admitEngineLog(reason);
+                    if (suppressed >= 0) LOGGER.warn("Thread failed main thread check: {}, context={}, world={}, chunk_pos={}{}", reason, getThreadContext(), WorldUtil.getWorldName(level), new ChunkPos(chunkX, chunkZ), dev.iyanz.sourbycraft.bridge.GuardViolations.suppressedNote(suppressed), new Throwable());
                 }
+                // SourbyCraft end
             }
             case THROW -> TickThread.ensureTickThread(level, chunkX, chunkZ, reason); // SourbyCraft - relaxed by ThreadChecks inside ensureTickThread (paper feature patch)
         }
@@ -51,10 +54,13 @@ public class TickGuard {
             case LOG -> {
                 // ensure tick thread first, since that is required, then we check and log
                 ensureIsTickThread(reason);
-                // SourbyCraft - inside a bridged plugin's task the hit counts toward its quarantine
-                if (!TickThread.isTickThreadFor(entity) && !dev.iyanz.sourbycraft.bridge.GuardViolations.report(reason)) {
-                    LOGGER.warn("Thread failed main thread check: {}, context={}, entity={}", reason, getThreadContext(), TickThread.getEntityContext(entity), new Throwable());
+                // SourbyCraft start - inside a bridged plugin's task the hit counts toward its quarantine; elsewhere the line is
+                // rate-limited. Off a tick thread ensureIsTickThread already decided the hit (ThreadChecks), so it is not counted twice.
+                if (TickThread.isTickThread() && !TickThread.isTickThreadFor(entity) && !dev.iyanz.sourbycraft.bridge.GuardViolations.report(reason)) {
+                    final long suppressed = dev.iyanz.sourbycraft.bridge.GuardViolations.admitEngineLog(reason);
+                    if (suppressed >= 0) LOGGER.warn("Thread failed main thread check: {}, context={}, entity={}{}", reason, getThreadContext(), TickThread.getEntityContext(entity), dev.iyanz.sourbycraft.bridge.GuardViolations.suppressedNote(suppressed), new Throwable());
                 }
+                // SourbyCraft end
             }
             case THROW -> TickThread.ensureTickThread(entity, reason);
         }

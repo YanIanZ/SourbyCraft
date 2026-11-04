@@ -41,7 +41,7 @@ public final class ThreadLedger {
         pools.add(read("Netty event loops", () -> Integer.getInteger("io.netty.eventLoopThreads", processors * 2),
             "spigot.yml settings.netty-threads"));
         pools.add(read("Async scheduler core", () -> Math.max(4, processors / 2),
-            "Folia async scheduler: max(4, processors / 2) core threads, more on demand"));
+            "async scheduler (threaded-regions API): max(4, processors / 2) core threads, more on demand"));
         pools.add(read("Async pathfinding", () -> dev.iyanz.sourbycraft.perf.AsyncPathProcessor.isEnabled()
             ? dev.iyanz.sourbycraft.perf.AsyncPathProcessor.poolThreads() : 0,
             dev.iyanz.sourbycraft.config.AuroraConfig.ASYNC_PATH_KEY + " (processors / 4 when on)"));

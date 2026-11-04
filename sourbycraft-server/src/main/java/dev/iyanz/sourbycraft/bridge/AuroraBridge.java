@@ -23,9 +23,9 @@ import org.bukkit.plugin.Plugin;
  * {@code CraftScheduler} patches call, and what {@code /plugins} reads.
  *
  * <p>Plugin providers are built during Paper's bootstrap, before {@code SourbyCraftBootstrap}
- * loads configuration, so the bridge reads its own keys straight from the TOML files on first
- * use, read-only. {@code aurora.bridge.mode} is therefore fixed for the run (RESTART_REQUIRED);
- * {@code aurora.bridge.quarantine-after} follows later reloads (LIVE).</p>
+ * loads configuration, so the bridge reads its own keys straight from the YAML files on first
+ * use, read-only ({@link #earlySettings()}). {@code aurora.bridge.mode} is therefore fixed for
+ * the run (RESTART_REQUIRED); {@code aurora.bridge.quarantine-after} follows later reloads (LIVE).</p>
  */
 public final class AuroraBridge {
 
@@ -44,7 +44,10 @@ public final class AuroraBridge {
 
     private AuroraBridge() {}
 
-    /** The bridge settings as the TOML files held them when first asked; read once, never creates the runtime. */
+    /**
+     * The bridge settings as the YAML files held them when first asked (a legacy TOML file only while its YAML
+     * file does not exist yet); read once, never creates the runtime.
+     */
     private static volatile AuroraConfig.Bridge earlySettings;
     // ThreadChecks class initialization reads these settings while runtime() invokes ThreadChecks
     // under AuroraBridge.class. A separate monitor prevents a class-initialization lock cycle.
@@ -52,7 +55,8 @@ public final class AuroraBridge {
 
     /**
      * {@code aurora.bridge.*} as configured on disk, read once on first use (before the plugin scan, or earlier
-     * when the region-ownership checks ask: {@code guards/ThreadChecks}). Never creates the bridge runtime.
+     * when the region-ownership checks ask: {@code guards/ThreadChecks}) from {@code sourbycraft_config/aurora.yml}
+     * over {@code sourbycraft_global_config.yml} ({@code readEarly}). Never creates the bridge runtime.
      */
     public static AuroraConfig.Bridge earlySettings() {
         AuroraConfig.Bridge settings = earlySettings;
@@ -444,15 +448,17 @@ public final class AuroraBridge {
 
     /**
      * {@code PaperEventManager#callEvent}, before the listener loop: publishes the player the event is about
-     * (players only; leaving/not-yet-placed players resolve to nothing, see {@link EventAnchors}) for the
-     * listeners' duration. An event about no player keeps the frame it was fired in (an async body carrying a
-     * player's context firing a plugin's own event). Returns the token {@link #exitContext} takes; {@code null}
-     * while nothing is bridged, so the hot path costs one volatile read.
+     * (players only, see {@link EventAnchors}) for the listeners' duration. An event about a leaving or
+     * not-yet-placed player publishes no anchor at all, hiding the frame it was fired in (a kick inside another
+     * player's command); an event about no player keeps that frame (an async body carrying a player's context
+     * firing a plugin's own event). Returns the token {@link #exitContext} takes; {@code null} while nothing is
+     * bridged, so the hot path costs one volatile read.
      */
     public static Object enterEventContext(final org.bukkit.event.Event event) {
         if (!contextActive) return null;
         try {
-            return SchedulingContext.enter(EventAnchors.resolve(event));
+            final Object anchor = EventAnchors.anchor(event);
+            return anchor == EventAnchors.CLEAR ? SchedulingContext.clear() : SchedulingContext.enter(anchor);
         } catch (final RuntimeException unexpected) {
             return null;
         }
@@ -496,6 +502,17 @@ public final class AuroraBridge {
     public static void cancelGlobal(final Plugin plugin) {
         final BridgeRuntime current = runtime;
         if (plugin != null && current != null) current.cancelGlobal(plugin.getName());
+    }
+
+    /**
+     * For {@code FoliaAsyncScheduler#cancelTasks}, the counterpart of {@link #cancelGlobal}: a plugin cancelling its
+     * Folia async tasks directly also cancels the timers behind its bridged async tasks, so their index entries
+     * are released (cancelled, never a violation) instead of counting as pending until disable. Not wired yet:
+     * the call site needs a Paper feature patch made from the materialized sources. Never creates the runtime.
+     */
+    public static void cancelAsync(final Plugin plugin) {
+        final BridgeRuntime current = runtime;
+        if (plugin != null && current != null) current.cancelAsync(plugin.getName());
     }
 
     /**
@@ -638,8 +655,16 @@ public final class AuroraBridge {
             final Plugin plugin = (Plugin)owner;
             final org.bukkit.entity.Entity entity = (org.bukkit.entity.Entity)target;
             final var scheduler = entity.getScheduler();
+            // A repeating run whose own body removed the entity: Folia retires the scheduler while this task is
+            // running, not queued, so retire() does not call its retired callback, and the reschedule after the
+            // body fails and drops the task silently. Checked on the owner thread right after the body, before
+            // that reschedule; isPurged() is the scheduler's retired state.
+            final Runnable repeatingBody = () -> {
+                body.run();
+                if (entity instanceof org.bukkit.craftbukkit.entity.CraftEntity craft && craft.isPurged()) retired.run();
+            };
             final var task = periodTicks > 0
-                ? scheduler.runAtFixedRate(plugin, t -> body.run(), retired, Math.max(1L, delayTicks), periodTicks)
+                ? scheduler.runAtFixedRate(plugin, t -> repeatingBody.run(), retired, Math.max(1L, delayTicks), periodTicks)
                 : delayTicks > 0 ? scheduler.runDelayed(plugin, t -> body.run(), retired, delayTicks)
                 : scheduler.run(plugin, t -> body.run(), retired);
             if (task == null) {
@@ -666,11 +691,20 @@ public final class AuroraBridge {
         @Override
         public BridgeRuntime.Handle async(final Object owner, final Runnable body, final long delayTicks,
                                           final long periodTicks, final Runnable rejected) {
+            return async(owner, body, delayTicks, periodTicks, rejected, () -> true);
+        }
+
+        @Override
+        public BridgeRuntime.Handle async(final Object owner, final Runnable body, final long delayTicks,
+                                          final long periodTicks, final Runnable rejected,
+                                          final java.util.function.BooleanSupplier claim) {
             final Plugin plugin = (Plugin)owner;
             final var scheduler = Bukkit.getAsyncScheduler();
             // Folia's async scheduler only times the work; the Resource Governor's bounded
             // BRIDGE_IO lane runs it, so legacy async tasks cannot grow into unbounded threads.
+            // The claim runs on the timer thread before the hand-off, like the rejection report.
             final Runnable governed = () -> {
+                if (!claim.getAsBoolean()) return;
                 try {
                     dev.iyanz.sourbycraft.execution.ResourceGovernor.GLOBAL
                         .lane(dev.iyanz.sourbycraft.execution.ResourceGovernor.Lane.BRIDGE_IO).execute(body);

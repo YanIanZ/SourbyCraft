@@ -4,7 +4,7 @@ Date: Fri, 23 Oct 2026 00:15:51 +0700
 Subject: [PATCH] SourbyCraft - relaxed region-ownership checks
  (LightingLuminol)
 
-Owner decision 2026-10-22, verbatim after the risks were stated (data races, chunk corruption persisted to disk, item dupes, deadlocks): "Tiru penuh LightingLuminol". Adapted from LightingLuminol (GPL-3.0, Bacteriawa, revision 72d51c4d, minecraft patch 0001 "Base Dirty Patches"), where the throws are commented out unconditionally; here every check stays and asks guards/ThreadChecks (aurora.bridge.thread-checks: relaxed by default, bridged, enforced; effective only while aurora.bridge.mode admits plugins). RegionizedServer.ensureGlobalTickThread and the six RegionizedWorldData "not under this region's control" checks consult it; RegionizedServer.getCurrentTick and MinecraftServer.getTickCount answer with the global tick counter off every region (all modes); TickRegions.RegionStats tolerates a foreign thread; NearbyPlayers and EntityLookup (section-status guard, entity slices) lock only while checks are relaxed (static final, folded away otherwise); the RegionizedWorldData block-entity ticker hand-off, block events and the broadcast set lock their cross-thread touch points while the fields keep upstream's containers (LightingLuminol swapped the containers); redstoneTime is volatile; ServerChunkCache lets the global tick load a chunk synchronously while pumping global chunk tasks and keeps refusing a non-owning region thread (Folia#280); ChunkMap and the chunk tick loop tolerate holes a foreign removal leaves. A relaxed server is unsafe and unqualified; the boot log, /ver and /sourbycraft config say so.
+Owner decision 2026-10-22, verbatim after the risks were stated (data races, chunk corruption persisted to disk, item dupes, deadlocks): "Tiru penuh LightingLuminol". Adapted from LightingLuminol (GPL-3.0, Bacteriawa, revision 72d51c4d, minecraft patch 0001 "Base Dirty Patches"), where the throws are commented out unconditionally; here every check stays and asks guards/ThreadChecks (aurora.bridge.thread-checks: relaxed by default, bridged, enforced; effective only while aurora.bridge.mode admits plugins). RegionizedServer.ensureGlobalTickThread and the six RegionizedWorldData "not under this region's control" checks consult it; RegionizedServer.getCurrentTick and MinecraftServer.getTickCount answer with the global tick counter off every region (all modes); TickRegions.RegionStats tolerates a foreign thread; NearbyPlayers and EntityLookup's entity slices lock only while checks are relaxed (static final, folded away otherwise), and EntityLookup skips Moonrise's section-status guards only for a caller that does not own the entity (the owning thread is refused a reentrant add, remove or status change as upstream); the RegionizedWorldData block-entity ticker hand-off, block events and the broadcast set lock their cross-thread touch points while the fields keep upstream's containers (LightingLuminol swapped the containers); redstoneTime is volatile; ServerChunkCache lets the global tick load a chunk synchronously while pumping global chunk tasks and keeps refusing a non-owning region thread (Folia#280); ChunkMap and the chunk tick loop tolerate holes a foreign removal leaves. A relaxed server is unsafe and unqualified; the boot log, /ver and /sourbycraft config say so.
 
 diff --git a/ca/spottedleaf/moonrise/common/misc/NearbyPlayers.java b/ca/spottedleaf/moonrise/common/misc/NearbyPlayers.java
 index f7ac9ce135af97056f1a7f8bf9633837f90ed60d..cf4207e6c03036a1a42e58aa2871a7e3d73f00f3 100644
@@ -128,43 +128,44 @@ diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/EntityLoo
 index b6c99d7a84263e5239946296d8e803a0e5e36b55..d8a7381de871b12fc2d036f09849e380383142f9 100644
 --- a/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/EntityLookup.java
 +++ b/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/EntityLookup.java
-@@ -239,13 +239,15 @@ public abstract class EntityLookup implements LevelEntityGetter<Entity> {
+@@ -239,13 +239,16 @@ public abstract class EntityLookup implements LevelEntityGetter<Entity> {
                                     final boolean created, final boolean destroyed) {
          this.checkThread(entity, "Entity status change must only happen on the main thread");
  
 -        if (((ChunkSystemEntity)entity).moonrise$isUpdatingSectionStatus()) {
-+        // SourbyCraft start - relaxed thread checks: LightingLuminol MC 0001 commented Moonrise's section-status reentrancy guard out; here it is skipped only while checks are relaxed (a foreign thread's add/remove would otherwise be dropped with an error)
-+        if (!dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE && ((ChunkSystemEntity)entity).moonrise$isUpdatingSectionStatus()) {
++        // SourbyCraft start - relaxed thread checks: LightingLuminol MC 0001 commented Moonrise's section-status reentrancy guard out; here it is skipped only while checks are relaxed and only for a caller that does not own the entity (a foreign thread's add/remove would otherwise be dropped with an error); the owning thread is still refused a recursive update, as upstream. Decided once, so the start/stop of the slices' status-update flag below stay paired.
++        final boolean relaxedForeignCaller = dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(entity);
++        if (!relaxedForeignCaller && ((ChunkSystemEntity)entity).moonrise$isUpdatingSectionStatus()) {
              // recursive status update
              LOGGER.error("Cannot recursively update entity chunk status for entity " + entity, new Throwable());
              return;
          }
  
 -        final boolean entityStatusUpdateBefore = slices == null ? false : slices.startPreventingStatusUpdates();
-+        final boolean entityStatusUpdateBefore = dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE || slices == null ? false : slices.startPreventingStatusUpdates();
++        final boolean entityStatusUpdateBefore = relaxedForeignCaller || slices == null ? false : slices.startPreventingStatusUpdates();
 +        // SourbyCraft end - relaxed thread checks
  
          if (entityStatusUpdateBefore) {
              LOGGER.error("Cannot update chunk status for entity " + entity + " since entity chunk (" + slices.chunkX + "," + slices.chunkZ + ") is receiving update", new Throwable());
-@@ -328,7 +330,7 @@ public abstract class EntityLookup implements LevelEntityGetter<Entity> {
+@@ -328,7 +331,7 @@ public abstract class EntityLookup implements LevelEntityGetter<Entity> {
                  this.setBlockTicketUpdates(ticketBlockBefore);
              }
          } finally {
 -            if (slices != null) {
-+            if (!dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE && slices != null) { // SourbyCraft - relaxed thread checks
++            if (!relaxedForeignCaller && slices != null) { // SourbyCraft - relaxed thread checks: only a caller that started preventing status updates above stops it
                  slices.stopPreventingStatusUpdates(false);
              }
          }
-@@ -417,7 +419,7 @@ public abstract class EntityLookup implements LevelEntityGetter<Entity> {
+@@ -417,7 +420,7 @@ public abstract class EntityLookup implements LevelEntityGetter<Entity> {
              return false;
          }
  
 -        if (((ChunkSystemEntity)entity).moonrise$isUpdatingSectionStatus()) {
-+        if (!dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE && ((ChunkSystemEntity)entity).moonrise$isUpdatingSectionStatus()) { // SourbyCraft - relaxed thread checks (LightingLuminol MC 0001)
++        if (!(dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(entity)) && ((ChunkSystemEntity)entity).moonrise$isUpdatingSectionStatus()) { // SourbyCraft - relaxed thread checks (LightingLuminol MC 0001): skipped only for a caller that does not own the entity
              LOGGER.warn("Entity " + entity + " is currently prevented from being added/removed to world since it is processing section status updates", new Throwable());
              return false;
          }
-@@ -444,6 +446,20 @@ public abstract class EntityLookup implements LevelEntityGetter<Entity> {
+@@ -444,6 +447,20 @@ public abstract class EntityLookup implements LevelEntityGetter<Entity> {
          ((ChunkSystemEntity)entity).moonrise$setSectionY(sectionY);
          ((ChunkSystemEntity)entity).moonrise$setSectionZ(sectionZ);
          final ChunkEntitySlices slices = this.getOrCreateChunk(sectionX, sectionZ);
@@ -185,7 +186,7 @@ index b6c99d7a84263e5239946296d8e803a0e5e36b55..d8a7381de871b12fc2d036f09849e380
          if (!slices.addEntity(entity, sectionY)) {
              LOGGER.warn("Entity " + entity + " added to world '" + WorldUtil.getWorldName(this.world) + "', but was already contained in entity chunk (" + sectionX + "," + sectionZ + ")");
          }
-@@ -453,11 +469,12 @@ public abstract class EntityLookup implements LevelEntityGetter<Entity> {
+@@ -453,11 +470,12 @@ public abstract class EntityLookup implements LevelEntityGetter<Entity> {
          this.addEntityCallback(entity);
  
          this.entityStatusChange(entity, slices, Visibility.HIDDEN, getEntityStatus(entity), false, !fromDisk, false);
@@ -194,13 +195,13 @@ index b6c99d7a84263e5239946296d8e803a0e5e36b55..d8a7381de871b12fc2d036f09849e380
      }
  
      public boolean canRemoveEntity(final Entity entity) {
-+        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE) {
-+            return true; // SourbyCraft - relaxed thread checks: LightingLuminol MC 0001 returns true unconditionally
++        if (dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(entity)) {
++            return true; // SourbyCraft - relaxed thread checks: LightingLuminol MC 0001 returns true unconditionally; here only for a caller that does not own the entity
 +        }
          if (((ChunkSystemEntity)entity).moonrise$isUpdatingSectionStatus()) {
              return false;
          }
-@@ -490,11 +507,23 @@ public abstract class EntityLookup implements LevelEntityGetter<Entity> {
+@@ -490,11 +508,23 @@ public abstract class EntityLookup implements LevelEntityGetter<Entity> {
              throw new IllegalStateException("Only call Entity#setRemoved to remove an entity");
          }
          final ChunkEntitySlices slices = this.getChunk(sectionX, sectionZ);
@@ -221,7 +222,7 @@ index b6c99d7a84263e5239946296d8e803a0e5e36b55..d8a7381de871b12fc2d036f09849e380
              LOGGER.warn("Cannot remove entity " + entity + " from null entity slices (" + sectionX + "," + sectionZ + ")");
          } else {
 -            if (slices.isPreventingStatusUpdates()) {
-+            if (!dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE && slices.isPreventingStatusUpdates()) { // SourbyCraft - relaxed thread checks (LightingLuminol MC 0001)
++            if (!(dev.iyanz.sourbycraft.guards.ThreadChecks.RELAXED_SCOPE && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(entity)) && slices.isPreventingStatusUpdates()) { // SourbyCraft - relaxed thread checks (LightingLuminol MC 0001): skipped only for a caller that does not own the entity
                  throw new IllegalStateException("Attempting to remove entity " + entity + " from entity slices (" + sectionX + "," + sectionZ + ") that is receiving status updates");
              }
              if (!slices.removeEntity(entity, sectionY)) {

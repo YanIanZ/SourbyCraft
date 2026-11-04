@@ -16,21 +16,21 @@ import java.util.Set;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The Build 49 relayout of the two SourbyCraft TOML files, in two independent halves.
- *
- * <p><b>Reading</b> ({@link #normalize}): a flattened utility snapshot with every old key name
- * ({@code ui.*}, {@code misc.auto_update.*}, ...) resolved to its current name, so consumers read the
- * new names whether or not the file on disk has been rewritten. The new name wins when both are
- * present. This is what keeps an old file working (read-only directory, a key re-added by hand)
- * until Build 50; the caller logs one WARN per old key it had to use.</p>
+ * The Build 49 relayout of the two SourbyCraft configuration files, in two independent halves.
  *
  * <p><b>Rewriting</b> ({@link #plan} + {@link #apply}): once, at boot, the file on disk is brought
  * to the new layout: renamed keys move to their new table with their value and the current comment,
- * Aurora keys still kept in the utility file move to {@code aurora.toml} (unless it already sets them,
- * then the stale copy is dropped: {@code aurora.toml} always won), retired keys nothing reads are
+ * Aurora keys still kept in the utility file move to {@code aurora.yml} (unless it already sets them,
+ * then the stale copy is dropped: {@code aurora.yml} always won), retired keys nothing reads are
  * removed, and emptied tables disappear. Every file that is rewritten is first copied to
  * {@code <file>.migrated} (never overwritten; {@code .migrated.1} and so on when taken), so no operator
- * data is lost. Nothing here changes a value.</p>
+ * data is lost. Nothing here changes a value. This half stays after the old names stopped being read,
+ * so a server that skipped Build 49 still keeps its settings (migrate before remove).</p>
+ *
+ * <p><b>Reading</b> ({@link #stripLegacyNames}): since {@link #LEGACY_READS_REMOVED} an old key name
+ * ({@code ui.*}, {@code misc.auto_update.*}, ...) is not read. It survives on disk only where the
+ * rewrite could not run (a read-only directory) or where it was added back by hand; the snapshot
+ * consumers read leaves it out, and the caller logs one WARN per old name per load.</p>
  */
 public final class ConfigMigration {
 
@@ -38,41 +38,29 @@ public final class ConfigMigration {
 
     /** Appended to a file's name for the copy taken before it is rewritten. */
     public static final String MIGRATED_SUFFIX = ".migrated";
-    /** When the old key names stop being read. */
-    public static final String DEPRECATION_END = "Build 50";
+    /** The first build that no longer reads the old key names (the one-time rewrite still renames them). */
+    public static final String LEGACY_READS_REMOVED = "Build 50";
 
     // --------------------------------------------------------------------------------- reading
 
     /**
-     * @param values         the snapshot with current names only
-     * @param deprecatedUsed old names whose value was used because the current name was absent
-     * @param staleIgnored   old names ignored because the current name was present too
+     * @param values  the snapshot without any old key name
+     * @param ignored old names that were present, in table order; none of them was read
      */
-    public record Normalized(ConfigSnapshot values, List<String> deprecatedUsed, List<String> staleIgnored) {
-        public Normalized {
-            deprecatedUsed = List.copyOf(deprecatedUsed);
-            staleIgnored = List.copyOf(staleIgnored);
+    public record Stripped(ConfigSnapshot values, List<String> ignored) {
+        public Stripped {
+            ignored = List.copyOf(ignored);
         }
     }
 
-    /** Old utility key names resolved to the current ones; pure. */
-    public static Normalized normalize(final ConfigSnapshot utility) {
+    /** Leaves the old utility key names out of a flattened snapshot and lists them; pure. */
+    public static Stripped stripLegacyNames(final ConfigSnapshot utility) {
         final Map<String, Object> values = new LinkedHashMap<>(utility.values());
-        final List<String> deprecated = new ArrayList<>();
-        final List<String> stale = new ArrayList<>();
-        for (final Map.Entry<String, String> rename : UtilityKeys.legacyToCurrent().entrySet()) {
-            final String old = rename.getKey();
-            if (!values.containsKey(old)) continue;
-            final String current = rename.getValue();
-            if (values.containsKey(current)) {
-                stale.add(old);
-            } else {
-                values.put(current, values.get(old));
-                deprecated.add(old);
-            }
-            values.remove(old);
+        final List<String> ignored = new ArrayList<>();
+        for (final String old : UtilityKeys.legacyToCurrent().keySet()) {
+            if (values.remove(old) != null) ignored.add(old);
         }
-        return new Normalized(new ConfigSnapshot(values), deprecated, stale);
+        return new Stripped(new ConfigSnapshot(values), ignored);
     }
 
     // ------------------------------------------------------------------------------- rewriting
@@ -84,8 +72,8 @@ public final class ConfigMigration {
      * What {@link #apply} will do.
      *
      * @param renames       utility keys renamed inside the utility file
-     * @param toAurora      keys leaving the utility file for {@code aurora.toml}
-     * @param auroraRenames old Aurora key names renamed inside {@code aurora.toml}
+     * @param toAurora      keys leaving the utility file for {@code aurora.yml}
+     * @param auroraRenames old Aurora key names renamed inside {@code aurora.yml}
      * @param retired       utility keys removed because nothing reads them any more
      * @param dropped       utility keys removed because their current name is already set (the copy that
      *                      never decided anything)
@@ -120,7 +108,7 @@ public final class ConfigMigration {
      * Computes the rewrite from the two parsed files; reads only.
      *
      * @param utility the utility file
-     * @param aurora  {@code aurora.toml}, or {@code null} when it could not be opened (Aurora keys then stay
+     * @param aurora  {@code aurora.yml}, or {@code null} when it could not be opened (Aurora keys then stay
      *                where they are: they are still read through the layering)
      */
     public static Plan plan(final UnmodifiableConfig utility, final @Nullable UnmodifiableConfig aurora) {
@@ -175,7 +163,7 @@ public final class ConfigMigration {
      * What {@link #apply} did.
      *
      * @param utilityBackup the copy of the utility file taken before it was rewritten, or {@code null}
-     * @param auroraBackup  the copy of {@code aurora.toml} taken before it was rewritten, or {@code null}
+     * @param auroraBackup  the copy of the Aurora file taken before it was rewritten, or {@code null}
      */
     public record Report(Plan plan, @Nullable Path utilityBackup, @Nullable Path auroraBackup) {
 
@@ -194,7 +182,7 @@ public final class ConfigMigration {
             if (!p.dropped().isEmpty()) out.append(" stale duplicate(s) dropped (the current key already decided): ").append(p.dropped()).append(';');
             out.append(" values unchanged.");
             if (this.utilityBackup != null) out.append(" Previous file kept as ").append(this.utilityBackup.getFileName()).append('.');
-            if (this.auroraBackup != null) out.append(" Previous aurora.toml kept as ").append(this.auroraBackup.getFileName()).append('.');
+            if (this.auroraBackup != null) out.append(" Previous Aurora file kept as ").append(this.auroraBackup.getFileName()).append('.');
             return out.toString();
         }
     }

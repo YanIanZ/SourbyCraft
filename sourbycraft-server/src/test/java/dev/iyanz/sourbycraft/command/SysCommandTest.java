@@ -141,7 +141,7 @@ class SysCommandTest {
         final String withRss = plain(SysCommand.renderPerformance(() ->
             healthy(20.0, 10.0).runtime(runtime("heapUsedBytes", 512L << 20, "heapMaxBytes", 1024L << 20,
                 "processRssBytes", 4L << 30, "rssPercent", 57.9))));
-        assertTrue(withRss.contains("Process RSS: 4.0G"), withRss);
+        assertTrue(withRss.contains("Process RSS: 4.00G"), withRss);
         assertTrue(withRss.contains("Cgroup memory (incl. page cache): 57.9%"), withRss);
 
         final String noRss = plain(SysCommand.renderPerformance(() ->

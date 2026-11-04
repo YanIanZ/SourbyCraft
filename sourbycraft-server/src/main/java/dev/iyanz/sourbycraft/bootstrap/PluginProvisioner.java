@@ -16,9 +16,11 @@ import java.nio.charset.StandardCharsets;
  * Installs pinned ViaVersion/ViaBackwards and ProtocolLib before the plugin scan.
  * The active SourbyClip launcher enters the patched Minecraft Main, which invokes phase 1
  * before PluginInitializerManager.load. SourbyCraftBootstrap seeds absent Via configs later.
- * Independent RESTART_REQUIRED toggles live in the global TOML ([plugins.viaversion] / [plugins.protocollib]
- * auto-provision; the pre-Build-49 [viaversion] / [protocollib] tables are still read). Operator jars/configs are
- * preserved; only exact pinned jars are quarantined/restored. No network is used in Clip offline mode.
+ * Independent RESTART_REQUIRED toggles live in the global config (plugins.viaversion / plugins.protocollib
+ * auto-provision). A file that still has only the pre-Build-49 [viaversion] / [protocollib] key, an invalid
+ * value or an unreadable file skips that group for the boot: nothing is downloaded, installed or quarantined
+ * ({@link BootstrapPluginSettings}). Operator jars/configs are preserved; only exact pinned jars are
+ * quarantined/restored. No network is used in Clip offline mode.
  */
 public final class PluginProvisioner {
 
@@ -102,7 +104,9 @@ public final class PluginProvisioner {
      * provisioned on an earlier boot (exact SHA-256 match) is quarantined to
      * {@code <name>.jar.disabled}. The plugin scan loads every {@code plugins/*.jar}, so a jar left
      * behind would keep loading against the operator's intent. Operator-installed Via jars (same
-     * prefix, different hash) are never touched; we warn instead.
+     * prefix, different hash) are never touched; we warn instead. A setting that cannot be used
+     * (only the pre-Build-49 key, an invalid value, an unreadable file) changes nothing in
+     * {@code plugins/} for that boot.
      */
     public static void provisionJars() {
         provisionJars(Paths.get("plugins"));
@@ -115,12 +119,36 @@ public final class PluginProvisioner {
     }
 
     static void provisionJars(Path pluginsDir, Path config, LibDownloader.Transport transport) {
-        ProtocolLibProvisioner.provision(pluginsDir, config, transport);
-        if (!BootstrapPluginSettings.enabled(config, "viaversion", true)) {
-            BootLog.info("ViaVersion auto-provision disabled "
-                + "(plugins.viaversion.auto-provision=false) — old clients will not be bridged.");
-            quarantineProvisionedJars(pluginsDir, PINS);
-            return;
+        // Each group on its own: an unexpected failure is logged and the server still boots (and
+        // still scans plugins) instead of the exception escaping into Main before the plugin scan.
+        try {
+            ProtocolLibProvisioner.provision(pluginsDir, config, transport);
+        } catch (RuntimeException failure) {
+            BootLog.warn("ProtocolLib auto-provision failed unexpectedly (" + failure + "); it stopped there and the "
+                + "server boots on.");
+        }
+        try {
+            provisionVia(pluginsDir, config, transport);
+        } catch (RuntimeException failure) {
+            BootLog.warn("ViaVersion auto-provision failed unexpectedly (" + failure + "); it stopped there and the "
+                + "server boots on.");
+        }
+    }
+
+    private static void provisionVia(Path pluginsDir, Path config, LibDownloader.Transport transport) {
+        switch (BootstrapPluginSettings.setting(config, "viaversion", true)) {
+            case DISABLED -> {
+                BootLog.info("ViaVersion auto-provision disabled "
+                    + "(plugins.viaversion.auto-provision=false) — old clients will not be bridged.");
+                quarantineProvisionedJars(pluginsDir, PINS);
+                return;
+            }
+            case SKIP -> {
+                BootLog.warn("ViaVersion auto-provision skipped this boot: the setting could not be used (see the line "
+                    + "above); nothing downloaded, installed or quarantined.");
+                return;
+            }
+            case ENABLED -> { }
         }
         try {
             Files.createDirectories(pluginsDir);
@@ -265,7 +293,9 @@ public final class PluginProvisioner {
                 String filename = jar.getFileName().toString();
                 if (!filename.toLowerCase(java.util.Locale.ROOT).endsWith(".jar")) continue;
                 if (filename.equalsIgnoreCase(pin.plugin() + ".jar")) return true;
-                try (JarFile archive = new JarFile(jar.toFile())) {
+                // verify=false: only the descriptor is read, and a jar with stale signature files (common
+                // in shaded plugins) must not throw a SecurityException into the boot.
+                try (JarFile archive = new JarFile(jar.toFile(), false)) {
                     for (String descriptor : List.of("plugin.yml", "paper-plugin.yml")) {
                         var entry = archive.getJarEntry(descriptor);
                         if (entry == null) continue;
@@ -278,7 +308,9 @@ public final class PluginProvisioner {
                             }
                         }
                     }
-                } catch (java.util.zip.ZipException ignored) { /* Unrelated broken jar: Paper reports it. */ }
+                } catch (IOException | RuntimeException unreadable) {
+                    // A jar that cannot be read is not this plugin; Paper reports a broken jar itself.
+                }
             }
         }
         return false;

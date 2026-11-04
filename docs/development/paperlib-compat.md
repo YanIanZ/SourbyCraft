@@ -36,3 +36,12 @@ Remaining EssentialsX behaviour on the async path: `nowAsync`'s continuation (sa
   - control (`-Dsourbycraft.paperlib.adapt=false`, run `opus-ess-paperlib-control-3`): `env=PaperEnvironment mcVersion=0 chunks=AsyncChunksSync teleport=AsyncTeleportSync`; both calls fail with `Thread failed main thread check: Async chunk retrieval` (A on `region={god-tick}`, B on `region={center=[0, 0]}`), matching the panel logs.
   - fix (run `opus-ess-paperlib-fix-2`): `PaperLib in Essentials (...Environment): version check adapted`; `env=PaperEnvironment mcVersion=21 chunks=AsyncChunksPaper_15 teleport=AsyncTeleportPaper_13`; A completes with `CraftChunk{x=1z=-1}`, B with `CraftChunk{x=-166z=-69}`, each on a region thread, no guard failure.
 - Not done: a real player join/warp (needs a client); this is the owner's panel test.
+
+## Status 2026-10-25 (PR #62)
+
+The panel failures in *Finding* (a violation counted for Essentials, quarantine after three new players) happened on
+v26.2-r48.2, whose ownership checks behave like today's `aurora.bridge.thread-checks = enforced`. Since Build 49,
+with `aurora.bridge.mode = safe`, the default is `relaxed` (owner decision 2026-10-22): the same synchronous
+`getChunkAt` on a thread that does not own the chunk would be counted as a relaxed ownership hit instead of refused,
+and would never quarantine. With this adapter in place the path is not reached (PaperLib uses `getChunkAtAsync`).
+Relaxed is unsafe and unqualified. PR #62 did not change the adapter.

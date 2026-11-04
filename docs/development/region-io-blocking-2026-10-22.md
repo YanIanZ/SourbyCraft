@@ -8,6 +8,15 @@ real-server G06 run and it qualifies nothing.
 
 **Result: the expectation "no region thread touches file I/O" does not hold.**
 
+**Status 2026-10-25 (PR #62).** The F2 fix is on 26.2 as MC feature patch 0077 (commit `7db5209`, in
+the `v26.2-r50` tag), so the note below that its number is local is resolved. F1/F4 (structure lookups
+on a region thread) and F5 (player saves and the join-time read on the owning region) are still open;
+PR #62 did not change them (PM-060: needs an owner review of an asynchronous structure search and a
+feature patch made from materialized sources; PM-204: needs such a patch and a disk-stall run with
+players, [BUILD-50-PM-MATRIX.md](../releases/BUILD-50-PM-MATRIX.md)). The setup's
+`sourbycraft_config/aurora.toml` and `config/canvas-server.yml` are the pre-Build-49 names these runs
+used; the current files are `sourbycraft_config/aurora.yml` and `config/aurora-server.yml`.
+
 | # | Thread | Path | Stall effect | Status |
 | --- | --- | --- | --- | --- |
 | F1 | region (command block `/locate`) | `LocateCommand` -> `ChunkGenerator.findNearestMapStructure` -> `StructureManager.checkStructurePresence` -> `StructureCheck.tryLoadFromStorage` -> `SimpleRegionStorage.chunkScanner` (inline) -> `RegionFileStorage.scanChunk` -> `RegionFile.getChunkDataInputStream` -> `FileChannelImpl.read` / `pread0` | region held for the stall: `Locating ... took 52977 ms` / `59859 ms` (run 3), `51347 ms` / `58211 ms` (run 4); stall recorder: region #1 and #2 completed no tick for up to 30+ s | **defect, not fixed** (proposal below). Vanilla/Folia shape, the R2 path of [region-io-audit.md](../architecture/region-io-audit.md) |

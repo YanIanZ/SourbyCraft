@@ -4,16 +4,28 @@
 >
 > Entry point: [docs/architecture/AURORA.md](AURORA.md).
 
-Aurora is the engine; SourbyCraft is what surrounds it. The console already says so — a line from
-`net.minecraft`, `io.papermc.paper` or `dev.iyanz.aurora` prints as **Aurora Engine**, a line from
-`dev.iyanz.sourbycraft` prints as **SourbyCraft**. The source tree now says so too.
+Aurora is the engine; SourbyCraft is what surrounds it. The console says so: the logger tag
+converter (`sourbycraft-server/src/log4jPlugins/java/dev/iyanz/sourbycraft/console/SourbyCraftLoggerConverter`)
+folds logger names onto five tags, first matching prefix wins:
+
+| Tag | Logger names |
+| --- | --- |
+| `SourbyCraft` | `dev.iyanz.sourbycraft.*` (and the owned `SourbyCraft/<Area>` loggers) |
+| `Aurora` | `dev.iyanz.aurora.*`, the region-threading engine's `io.papermc.paper.threadedregions.*`, and a fixed list of engine classes that log by simple name (`TickRegionScheduler`, `WorldShutdownThread`, `ConfigurationProvider`, ...) |
+| `Minecraft` | `net.minecraft.*`, `com.mojang.*`, the `Minecraft` logger and the root logger |
+| `Paper` | every other `io.papermc.*`, `ca.spottedleaf.*`, `org.bukkit.craftbukkit.*`, `com.destroystokyo.paper.*`, `org.spigotmc.*`, and a fixed list of Paper classes that log by simple name (`ChunkTaskScheduler`, `MoonriseCommon`, ...) |
+| `OSHI` | `oshi.*` |
+
+`com.sk89q.*` and `ru.tehkode.*` print their simple class name; every other logger name, plugin
+names included, prints unchanged ([AURORA-UX.md](../AURORA-UX.md) "Line shape"). The source tree
+draws the same line between `dev.iyanz.aurora` and `dev.iyanz.sourbycraft`.
 
 ## The two trees
 
 | Tree | Package | What belongs there |
 | --- | --- | --- |
-| `sourbycraft-server/src/minecraft/java` | `dev.iyanz.aurora.*` | engine code SourbyCraft wrote |
-| both trees | `dev.iyanz.aurora.engine.*` | the region-threading engine inherited from Canvas (formerly `io.canvasmc.canvas`, renamed 2026-10-05); its plugin API moved to `dev.iyanz.sourbycraft.api` in `sourbyapi` in Build 48 (the old package was removed, no shim) |
+| both trees | `dev.iyanz.aurora.*` outside `engine` | engine code SourbyCraft wrote: a class a feature patch adds lands in `src/minecraft/java` (`dev.iyanz.aurora.level.SnapshotPathRegion`); a class written as owned source lives in `src/main/java` (`dev.iyanz.aurora.cpu.AuroraCpu`, `dev.iyanz.aurora.command.AuroraCommandErrors`) |
+| both trees | `dev.iyanz.aurora.engine.*` | the region-threading engine inherited from Canvas (formerly `io.canvasmc.canvas`, renamed 2026-10-05): the engine-baseline classes materialized into `src/minecraft/java`, and the owned engine sources in `src/main/java` (`configuration`, `spark`, `util`, `world`, `threadedregions`, plus `GlobalConfiguration`, `WorldConfig` and `BroadcastPermission` at the package root); its plugin API moved to `dev.iyanz.sourbycraft.api` in `sourbyapi` in Build 48 (the old package was removed, no shim) |
 | `sourbycraft-server/src/minecraft/java` | `net.minecraft.*`, `ca.spottedleaf.*` | upstream, and SourbyCraft's edits to it |
 | `sourbycraft-server/src/main/java` | `dev.iyanz.sourbycraft.*` | everything outside the engine |
 
@@ -29,9 +41,30 @@ the engine.
 
 ## Current inhabitants
 
-* `dev.iyanz.aurora.level.SnapshotPathRegion` — an immutable block snapshot so an A* solve can run
-  off the region thread. Added by feature patch 0005, previously sitting in
-  `net.minecraft.world.level` where nothing distinguished it from Mojang's own classes.
+SourbyCraft-written classes outside the inherited `engine` package (checked 2026-10-25):
+
+* `dev.iyanz.aurora.level.SnapshotPathRegion` (`src/minecraft/java`) — an immutable block
+  snapshot so an A* solve can run off the region thread. Added by feature patch 0005, previously
+  sitting in `net.minecraft.world.level` where nothing distinguished it from Mojang's own classes.
+* `dev.iyanz.aurora.cpu.AuroraCpu` (`src/main/java`) — the Aurora CPU budget: resolves the region
+  tick-thread default from `aurora.cpu.cores` or the processor count. Called from feature patch
+  0002 while `GlobalConfiguration` loads, before the bootstrap has read any SourbyCraft file.
+* `dev.iyanz.aurora.command.AuroraCommandErrors` (`src/main/java`) — the cross-region command
+  failure (`CANNOT_DO_X_CROSS_REGION`) Minecraft patches report, so a vanilla class does not reach
+  into the engine's plugin API.
+
+SourbyCraft-written classes inside `dev.iyanz.aurora.engine` (`src/main/java`):
+
+* `engine.threadedregions.WorldUnloadDrain` and `WorldUnloadCompletion` — what a world unload
+  owes the work still queued on it (audit ENG-3), run by the engine's `WorldShutdownThread`
+  (feature patch 0033) after the world's chunks are saved.
+* `engine.threadedregions.scheduler.AuroraEdfScheduler` — the LeafPile-derived EDF backend.
+  **Unselected:** the EDF patch that would construct it is parked (owner decision 2026-10-07;
+  [AURORA-EDF-UPGRADE.md](../development/AURORA-EDF-UPGRADE.md)), so the running scheduler is
+  still LeafPile's `EDFSchedulerThreadPool`.
+
+The rest of `dev.iyanz.aurora.engine` is the inherited engine (former Canvas/Folia sources)
+that SourbyCraft has owned since 2026-10-05.
 
 ## What does not move here
 

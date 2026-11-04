@@ -5,6 +5,35 @@ import re
 import subprocess
 from pathlib import Path
 
+# Owner decision 2026-10-24: the Minecraft 26.3 line starts at Build 100 with codename
+# "aurora-forge" (Aurora Forge). 26.2 and earlier stay below 100, so the two series never share a
+# build number and a 26.2 hotfix cannot collide with the first 26.3 release.
+FIRST_BUILD_100_VERSION = (26, 3)
+VERSION_CODENAMES = {"26.3": "aurora-forge"}
+
+
+def _version_tuple(version: str) -> tuple[int, int]:
+    parts = version.split(".")
+    if len(parts) < 2 or not parts[0].isdigit() or not parts[1].isdigit():
+        raise ValueError(f"releaseVersion={version} is not <major>.<minor>")
+    return int(parts[0]), int(parts[1])
+
+
+def check_version_rules(values: dict[str, str], build: int) -> None:
+    """The build-number line and codename the owner fixed per Minecraft version."""
+    version = values["releaseVersion"].strip()
+    major, minor = _version_tuple(version)
+    if (major, minor) >= FIRST_BUILD_100_VERSION:
+        if build < 100:
+            raise ValueError(
+                f"{version} starts at Build 100 (owner decision 2026-10-24); sourbyBuild={build} is below it")
+    elif build >= 100:
+        raise ValueError(
+            f"Build {build} is reserved for 26.3 and later (owner decision 2026-10-24); {version} stays below 100")
+    expected = VERSION_CODENAMES.get(f"{major}.{minor}")
+    if expected is not None and values.get("codename", "").strip() != expected:
+        raise ValueError(f"{version} uses codename={expected} (Aurora Forge)")
+
 
 def resolve(properties: str, tags: str, *, development: bool = False) -> tuple[str, int]:
     values = dict(re.findall(r"^([\w]+)=(.*)$", properties, re.MULTILINE))
@@ -12,6 +41,7 @@ def resolve(properties: str, tags: str, *, development: bool = False) -> tuple[s
     raw = values["sourbyBuild"].strip()
     if not re.fullmatch(r"[0-9]+", raw) or int(raw) < 1:
         raise ValueError("Release sourbyBuild must be a positive integer")
+    check_version_rules(values, int(raw))
     pattern = re.compile(r"^v" + re.escape(version) + r"-(?:r)?([0-9]+)(?:c|[.-].*)?$")
     previous = [int(match[1]) for tag in tags.splitlines()
                 if (match := pattern.fullmatch(tag.strip()))]
@@ -43,6 +73,7 @@ def resolve_hotfix(properties: str, tags: str, branch: str, *,
     number = f"{match['build']}.{match['fix']}"
     if raw != number:
         raise ValueError(f"sourbyBuild={raw} must be {number} on {branch}")
+    check_version_rules(values, int(match["build"]))
     tag = f"v{version}-r{number}"
     base = f"v{version}-r{match['build']}"
     if development:

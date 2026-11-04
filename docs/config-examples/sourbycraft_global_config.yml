@@ -1,6 +1,10 @@
 # sourbycraft_config/sourbycraft_global_config.yml — Build 49 layout, every key at its default.
-# A fresh server writes this file (comments included) at first boot. An older file is migrated to
-# this layout once, with the previous file kept beside it as sourbycraft_global_config.yml.migrated.
+# A fresh server writes this file (comments included) at first boot. A pre-49 sourbycraft_global_config.toml
+# is converted to YAML once (the original kept as sourbycraft_global_config.toml.migrated), then an older
+# layout is relaid once (the file as it was kept as sourbycraft_global_config.yml.migrated). Since Build 50
+# an old key name (ui.*, branding.*, sourbycraft.*, viaversion.*, protocollib.*, misc.auto_update.*) is not
+# read: one the migration could not rename is ignored, with one WARN per load. A key no table documents
+# gets one WARN per load and is ignored; a key written twice makes the whole file unreadable.
 # LIVE = /sourbycraft reload applies it; RESTART_REQUIRED = read once at startup.
 # Not here: Aurora services (aurora.yml), the region engine (config/aurora-server.yml,
 # config/aurora-worlds.yml), network limits (sourbycraft-security.yml). Reference: docs/AURORA-CONFIG.md.
@@ -8,7 +12,8 @@
 console:
   # RESTART_REQUIRED. Character set of the startup lines SourbyCraft builds (section rules, launch and ready
   # lines): auto = rich on an interactive terminal, plain otherwise; plain = ASCII dashes and hyphens;
-  # rich = Unicode box drawing and em dash. -Dsourbycraft.console=plain|rich|auto overrides this.
+  # rich = Unicode box drawing and em dash. -Dsourbycraft.console=plain|rich|auto overrides this. Read once
+  # from this file before the configuration loads, so the launch lines and the Engine rule follow it too.
   # Not colour: the console colours time, level and tag only when the terminal supports ANSI
   # (-Dterminal.ansi=false turns that off); redirected output and logs/latest.log are never coloured.
   style: "auto"
@@ -17,24 +22,34 @@ console:
   # RESTART_REQUIRED. Print the GC / JVM-flag advisory at startup.
   gc-advisor: true
 players:
-  # RESTART_REQUIRED when edited here; /maxp <n> changes the live count and writes this key.
+  # RESTART_REQUIRED when edited here; /maxp <n> changes the live count and writes this key (re-reading the
+  # file first, so other edits are kept; not reported as a pending restart afterwards).
   # Re-applied at boot so it wins over server.properties; 0 = use server.properties.
   max-players: 0
   # RESTART_REQUIRED. Let holders of sourbycraft.maxplayers.bypass (and operators) join a full server.
   # true registers a PlayerLoginEvent listener that slows every join; false keeps the fast join path.
   full-server-bypass: false
+# Varied server messages: each key is a LIST of MiniMessage/hex variants and one is picked at random per
+# event. <player> is the player's name in join/leave. [] (an empty list) disables an optional message;
+# remove a key to restore the built-in variants. A fresh server seeds the built-in variants here; this
+# example leaves them out (a missing key means the built-in variants). The shape, with sample lines:
+#
+#   messages:
+#     server-full:      # LIVE. Used only while players.full-server-bypass is true (RESTART_REQUIRED);
+#       - "<red>Full.</red> <gray>Try again soon.</gray>"   # otherwise the vanilla message is shown.
+#     motd:             # RESTART_REQUIRED. One variant per boot, applied in memory; [] = server.properties.
+#       - "<aqua>Line 1</aqua>\n<gray>Line 2</gray>"
+#     join:             # LIVE.
+#       - "<#77DD77><player> joined</#77DD77>"
+#     leave:            # LIVE.
+#       - "<gray><player> left</gray>"
+#
 messages: {}
+# Plugins the server installs itself (pinned versions, SHA-256-verified, https only; nothing is downloaded
+# with -Dsourbyclip.offline=true). RESTART_REQUIRED: read before the plugin scan. A file that sets only the
+# pre-49 <group>.auto-provision key, an invalid value or an unreadable file skips that group's provisioning
+# for the boot (nothing downloaded, installed or quarantined).
 plugins:
-  # Each key is a LIST of MiniMessage/hex variants; one is picked at random per event. <player> = the
-  # player's name in join/leave. [] (empty list) disables an optional message; remove a key to restore
-  # the built-in variants. The built-in variants are seeded here at first boot (omitted in this example).
-  # server-full: kick line on a full server (LIVE). motd: RESTART_REQUIRED, one variant per boot.
-  # join / leave: LIVE.
-  # server-full = [ "...", "..." ]
-  # motd = [ "line1\nline2", "..." ]
-  # join = [ "<#77DD77><player> joined</#77DD77>" ]
-  # leave = [ "<gray><player> left</gray>" ]
-  #
   viaversion:
     # RESTART_REQUIRED (read before the plugin scan). Install the pinned, SHA-256-verified ViaVersion and
     # ViaBackwards jars and their default configs. false = manage Via yourself (jars this server installed
@@ -46,26 +61,32 @@ plugins:
     auto-provision: true
 updater:
   # SourbyCraft auto-updater (docs/development/AUTO-UPDATER.md): checks GitHub Releases on this build's channel.
-  # RESTART_REQUIRED. Check at all.
+  # RESTART_REQUIRED. Check at all (false builds no schedule).
   enabled: true
   # LIVE (next check). GitHub repository, owner/name.
   repository: "YanIanZ/SourbyCraft"
   # LIVE (next check). REL, DEV or EXP; blank = this build's own channel.
   channel: ""
-  # LIVE (next check). notify = log and tell operators; stage = download, verify, swap at the next restart;
-  # auto = download, verify, swap the launch jar and self-restart (keeps <jar>.prev, restores it if the next
-  # boot fails); off = no checks. Switching from or to off is RESTART_REQUIRED (the schedule is built once).
+  # LIVE (next check). notify = log and tell operators; stage = download and verify only (a restart does
+  # not install it; /update apply does); auto = download, verify, swap the launch jar and self-restart
+  # (keeps <jar>.prev, restores it if the next boot fails); off = no checks. A release for another
+  # Minecraft version is never staged. Switching to off takes effect at the next scheduled check;
+  # switching from off needs a restart (no schedule was built). /update apply forces one auto run.
   apply-mode: "notify"
   # RESTART_REQUIRED. Daily check times, HH:mm, server-local time zone.
   check-times:
     - "06:00"
   # RESTART_REQUIRED. Also poll every N minutes; 0 = only the daily check-times.
   check-interval-minutes: 30
-  # LIVE (next check). How apply-mode = auto restarts: auto (Pterodactyl -> exit 70, else spigot), spigot, exit or stop.
+  # LIVE (next check). How apply-mode = auto restarts after the swap: auto (Pterodactyl/Pelican detected ->
+  # exit 70, else stop), exit (exit code 70) or stop (exit code 0; something outside must start the server
+  # again). spigot is treated as stop, with a WARN: its restart-script cannot run under region threading.
   restart-mode: "auto"
   # LIVE (next check). Warning window broadcast before an automatic restart; at least 5.
   restart-delay-seconds: 60
   # LIVE (next check). Whether GitHub prereleases on the tracked channel are eligible.
   allow-prerelease: false
-  # LIVE (next check). Also keep the auto-provisioned ViaVersion and ViaBackwards current on the same cadence.
+  # LIVE (next check). On the updater's schedule, reinstall the reviewed ViaVersion/ViaBackwards pin when it
+  # is missing; it never upgrades them. Needs plugins.viaversion.auto-provision and a running updater
+  # schedule (enabled: true and apply-mode not off at boot).
   via-auto-update: true

@@ -59,11 +59,22 @@ public final class SourbyCraftBootstrap {
      * Runs service cleanup after plugin disable, publishing STOPPING before cleanup and STOPPED
      * after all attempts. Each failure is logged without preventing the remaining cleanup steps;
      * STOPPED reports completion of this sequence, not proof that every service stopped successfully.
+     *
+     * <p>Called on the region shutdown thread while every player is still online; after mods shut down it runs the
+     * MultiProfile shutdown capture (when one is registered) before any service closes.</p>
      */
     public static void close() {
-        // Before the first service goes down, so anything consulting acceptingWork() stops
-        // admitting during the window when shutdown is in flight and work is still arriving.
+        // Before the first service goes down, so anything consulting stopping() (such as /awf, /speedtest
+        // and the async path offload) refuses new work while shutdown is in flight and work is still arriving.
         AuroraRuntime.transition(AuroraRuntime.State.STOPPING);
+        // Mods first: they may still need Bukkit and every SourbyCraft service below.
+        try { dev.iyanz.sourbycraft.mod.ModLoader.shutdown(); }
+        catch (Throwable failure) { SourbyLogger.error("SourbyMod shutdown failed", failure); }
+        // PM-076: every player is still online here (the server sends the disconnects, saves the worlds and writes
+        // vanilla playerdata after close() returns). MultiProfile captures and saves them now, before the AWF
+        // deadline starts and before any service its saves use goes down; it is closed further below.
+        try { captureProfilesBeforePlayersSaved(); }
+        catch (Throwable failure) { SourbyLogger.error("AWF MultiProfile shutdown capture failed", failure); }
         // Before the first AWF wait of the shutdown (the storage lane draining below, then the region
         // saves, the chunk I/O drain and AwfEngine.closeAll): one deadline for all of them.
         try { dev.iyanz.sourbycraft.awf.AwfEngine.beginShutdown(); }
@@ -84,21 +95,69 @@ public final class SourbyCraftBootstrap {
         catch (Throwable failure) { SourbyLogger.error("AbyssLink shutdown failed", failure); }
         try { VirtualExecutor.shutdown(); }
         catch (Throwable failure) { SourbyLogger.error("I/O shutdown failed", failure); }
+        // Profile I/O runs on the storage lane; it may use the Redis fabric, whose pools stay open
+        // until AwfEngine.closeAll() has committed the last world (see AwfEngine.closeAll).
+        // The runtime drains the saves the capture above queued for whatever is left of the configured capture deadline;
+        // this budget only applies when no shutdown capture ran (never below 10 s).
+        try { dev.iyanz.sourbycraft.awf.multiprofile.ProfileRuntime.stop(Math.max(10_000L, profileCaptureDeadlineMillis())); }
+        catch (Throwable failure) { SourbyLogger.error("AWF MultiProfile shutdown failed", failure); }
         try { dev.iyanz.sourbycraft.execution.ResourceGovernor.GLOBAL.shutdown(10_000L); }
         catch (Throwable failure) { SourbyLogger.error("Resource Governor shutdown failed", failure); }
         AuroraRuntime.transition(AuroraRuntime.State.STOPPED);
     }
 
     /**
-     * Starts metrics, network counters, configuration, the stall recorder, plugin config provisioning, branding,
-     * diagnostics, the startup index, commands, listeners, player-slot settings, I/O workers, the
-     * updater and GC sampling, in that order.
+     * Runs the MultiProfile shutdown capture ({@link dev.iyanz.sourbycraft.awf.multiprofile.ProfileShutdownHook}),
+     * bounded by {@code aurora.awf.multiprofile.shutdown.capture-deadline-ms}. Open containers are closed first through the
+     * pass the shutdown thread registered (feature patch 0081), as a quit closes them before its save. Nothing registered:
+     * nothing happens.
+     */
+    private static void captureProfilesBeforePlayersSaved() {
+        if (!dev.iyanz.sourbycraft.awf.multiprofile.ProfileShutdownHook.registered()) return;
+        dev.iyanz.sourbycraft.awf.multiprofile.ProfileShutdownHook.closeInventoriesBeforeCapture();
+        dev.iyanz.sourbycraft.awf.multiprofile.ProfileShutdownHook.runBeforePlayersSaved(profileCaptureDeadlineMillis());
+    }
+
+    /**
+     * Called by the server's stop sequence on the region shutdown thread right before plugins are disabled (players
+     * online, plugin state adapters still registered): runs the MultiProfile adapter capture
+     * ({@link dev.iyanz.sourbycraft.awf.multiprofile.ProfileShutdownHook#runBeforePluginsDisabled}), bounded by
+     * {@code aurora.awf.multiprofile.shutdown.capture-deadline-ms}. Nothing registered: nothing happens. Never throws.
+     */
+    public static void captureProfileAdaptersBeforePluginsDisabled() {
+        try {
+            if (!dev.iyanz.sourbycraft.awf.multiprofile.ProfileShutdownHook.adapterCaptureRegistered()) return;
+            dev.iyanz.sourbycraft.awf.multiprofile.ProfileShutdownHook.runBeforePluginsDisabled(profileCaptureDeadlineMillis());
+        } catch (Throwable failure) {
+            SourbyLogger.error("AWF MultiProfile shutdown adapter capture failed", failure);
+        }
+    }
+
+    private static long profileCaptureDeadlineMillis() {
+        final dev.iyanz.sourbycraft.awf.multiprofile.ProfileRuntime runtime =
+            dev.iyanz.sourbycraft.awf.multiprofile.ProfileRuntime.running();
+        return runtime == null
+            ? dev.iyanz.sourbycraft.awf.multiprofile.ProfileShutdownHook.DEFAULT_DEADLINE_MILLIS
+            : runtime.settings().shutdown().captureDeadlineMillis();
+    }
+
+    /**
+     * Prints the Engine section rule, then runs the boot stages in this order: metrics
+     * runtime, network counters, configuration, SourbyMods, stall recorder, Aurora Redis fabric, AuroraWorlds,
+     * AWF MultiProfile, plugin config provisioning, JVM advisor, plugin diagnostics, startup index, commands,
+     * messages (join/leave broadcasts and MOTD), player slots, I/O virtual executor, AbyssLink, auto-updater
+     * and GC tracker.
      * A second invocation is a no-op, including after a partially failed startup. Individual stage
      * failures are logged and counted without skipping subsequent stages.
      */
     public static synchronized void init() {
         if (started) return;
         started = true;
+
+        // The update rollback guard before every stage: a new jar that fails or hangs in any of them
+        // must leave the BOOTING phase behind so the next boot restores the previous jar. File I/O
+        // only; it logs its own errors and never throws.
+        AutoUpdateSettings.runBootGuard();
 
         AuroraRuntime.transition(AuroraRuntime.State.BOOTSTRAPPING);
         AuroraRuntime.transition(AuroraRuntime.State.STARTING);
@@ -118,10 +177,15 @@ public final class SourbyCraftBootstrap {
             dev.iyanz.sourbycraft.perf.NetworkMetrics.install();
         });
 
-        // The unified TOML: messages, /maxp, auto-updater settings.
+        // sourbycraft_global_config.yml and aurora.yml (messages, /maxp, auto-updater settings, Aurora services),
+        // the security limits and the engine files.
         stage("configuration", () -> {
             SourbyCraftConfig.init();
         });
+
+        // SourbyMod (ML1): after configuration, before worlds and Bukkit plugins. onLoad may read
+        // SourbyCraft settings; onEnable fires at ServerLoadEvent(STARTUP), onDisable at close().
+        stage("sourby mods", dev.iyanz.sourbycraft.mod.ModLoader::bootstrap);
 
         // After configuration (reads aurora.diagnostics.stall-recorder.*, RESTART_REQUIRED). Its own daemon
         // thread; evidence for a hung tick on hosts with no shell. Disabled = no thread, no hook.
@@ -129,6 +193,9 @@ public final class SourbyCraftBootstrap {
             dev.iyanz.sourbycraft.diagnostics.StallRecorderRuntime.start(
                 SourbyCraftConfig.aurora().diagnostics().stallRecorder());
         });
+
+        // The fabric's pools, before any AWF Redis backend can register and share the STORAGE pool.
+        stage("aurora redis fabric", dev.iyanz.sourbycraft.awf.redis.fabric.FabricRuntime::start);
 
         // AuroraWorlds API: before plugins enable, so they can look it up in onEnable.
         stage("aurora worlds", () -> {
@@ -139,10 +206,18 @@ public final class SourbyCraftBootstrap {
             }
         });
 
+        // AWF MultiProfile: after AuroraWorlds (it binds worlds through that API), before plugins enable
+        // so AuroraProfiles is in the services manager when a consumer looks it up.
+        stage("awf multiprofile", () -> dev.iyanz.sourbycraft.awf.multiprofile.ProfileRuntime.start(owner));
+
         // ORDERING: must precede CraftServer#enablePlugins, where Via reads its config in
         // onEnable. Writes the shipped default ViaVersion/ViaBackwards config only when absent.
+        // Read strictly: only an absent key (its default) or true provisions. A value that is not a
+        // boolean writes nothing; the early jar provisioning (BootstrapPluginSettings) also skips the
+        // group for an invalid value rather than taking the default.
         stage("plugin provisioning", () -> {
-            PluginProvisioner.provisionConfigs(SourbyCraftConfig.cfgBool(dev.iyanz.sourbycraft.config.UtilityKeys.VIAVERSION_AUTO_PROVISION.path(), true));
+            final Object provision = SourbyCraftConfig.cfgGet(dev.iyanz.sourbycraft.config.UtilityKeys.VIAVERSION_AUTO_PROVISION.path(), null);
+            PluginProvisioner.provisionConfigs(provision == null || Boolean.TRUE.equals(provision));
         });
 
         // Warning-only JVM flag advice, logged so it reaches logs/latest.log (no stdout banner since Build 49).
@@ -265,7 +340,7 @@ public final class SourbyCraftBootstrap {
     static synchronized int failureCountForTesting() { return failureCount; }
 
     /** Stages the engine brings up, in order; the denominator of the boot bar. */
-    private static final int TOTAL_STAGES = 16;
+    private static final int TOTAL_STAGES = 19;
     private static int stageCount;
     private static int failureCount;
     private static final java.util.List<dev.iyanz.sourbycraft.brand.AuroraBoot.Stage> progress = new java.util.ArrayList<>();

@@ -1,6 +1,8 @@
 # Aurora Entity & AI Engine — Ownership
 
-> **Role:** T5 ownership document for Entity and AI. **Status:** Active; async-path overload wording corrected against code on 2026-10-07.
+> **Role:** T5 ownership document for Entity and AI. **Status:** Active; tables and async-path metrics refreshed
+> against the Build 50 branch on 2026-10-25. The PR #62 changes named below are code written and statically
+> reviewed; not built; not tested by the owner, and in no published build (`v26.2-r50` predates them).
 >
 > Entry point: [docs/architecture/AURORA.md](AURORA.md).
 
@@ -32,7 +34,13 @@ admitted, where it runs, who owns the data it touches, and what it costs.
 
 | Service | Owns | Where |
 |---|---|---|
-| `perf/AsyncPathProcessor` | Admission policy for off-thread pathfinding: pool sizing, bounded queue, refusal on saturation and after shutdown (inline only before the pool starts) | `dev.iyanz.sourbycraft.perf` |
+| `perf/AsyncPathProcessor` | Admission policy for off-thread pathfinding: capacity check, submission and refusal on saturation and after shutdown (inline only before the pool starts), and the counters behind `/perf async` | `dev.iyanz.sourbycraft.perf` |
+| `execution/ResourceGovernor`, `Lane.PATHFINDING` | The pathfinding pool's size (`max(1, availableProcessors/4)` threads) and queue (1024); not operator-configurable | `dev.iyanz.sourbycraft.execution` |
+| `perf/AsyncPathRecompute` | The offloaded periodic recompute: owner-thread check (*PR #62*), admission checks, `EntityPathfindEvent`, snapshots, submission, and the owner-thread delivery with its staleness checks; patch 0006 only calls it | `dev.iyanz.sourbycraft.perf` |
+| `perf/MobPathSnapshot` | The immutable mob members an off-thread solve reads (MC 0039) | `dev.iyanz.sourbycraft.perf` |
+| `perf/AsyncPathCompletion`, `AsyncPathValidity` | Delivery of a finished solve through the owner handoff (or its retirement), and the subject/path/generation checks before it is applied | `dev.iyanz.sourbycraft.perf` |
+| `perf/AsyncPathTypeStats` | Per-entity-type admitted/solved/refused/declined counts (bounded table with an "other" row) | `dev.iyanz.sourbycraft.perf` |
+| `perf/EntityTickCounters` | Entity ticks per world, counted in the region entity loop (MC 0052) | `dev.iyanz.sourbycraft.perf` |
 | `execution/ExecutionLane` + `LaneCpuSampler` | Which lane entity/AI work is attributed to, and its CPU cost | `dev.iyanz.sourbycraft.execution` |
 | `execution/OwnerHandoff` → `RegionOwnerHandoff` | Moving work to the thread that owns an entity | `dev.iyanz.sourbycraft.execution` |
 | `config/AuroraConfig.Entity` | The operator-facing switch (`aurora.entity.async-pathfinding`), its lifecycle class and its default | `dev.iyanz.sourbycraft.config` |
@@ -45,12 +53,23 @@ the data.
 | Patch | File(s) | Domain | Nature |
 |---|---|---|---|
 | 0005 | `dev/iyanz/aurora/level/SnapshotPathRegion.java`, `PathNavigationRegion.java` | AI | The immutable block snapshot that makes off-thread solving safe — Aurora's own class, in the Minecraft tree because it implements a vanilla interface |
-| 0006 | `Mob`, `PathNavigation`, `AmphibiousPathNavigation`, `Sniffer`, `PathfindingContext` | AI | The offload call sites for periodic path recomputation |
+| 0006 | `PathNavigation` | AI | The offload call site for periodic path recomputation (`AsyncPathRecompute.offload`) and the navigation's private-state hooks; the code itself moved to Sourby source on 2026-10-22 |
+| 0039 | `NodeEvaluator`, `PathFinder`, `PathfindingContext`, `Walk`/`Fly`/`Swim`/`AmphibiousNodeEvaluator`, `Frog` | AI | Off-thread solves read a `MobPathSnapshot`, never the live mob |
+| 0042 | `Creaking` | AI | The Creaking home position captured on the owner for an off-thread solve |
+| 0047 | `PathNavigation` | AI | A navigation generation that invalidates in-flight async results |
+| 0048 | `SnapshotPathRegion` | AI | `*IfLoaded` reads answer `null` for an unloaded chunk, as vanilla |
+| 0082 | `PathfindingContext` | AI | No shared path-type cache on a thread that ticks no region |
 | 0003 | `NaturalSpawner` | Entity | Skip provably capped spawn categories |
 | 0014 | `ServerChunkCache` | Entity | Skip a spawn-state scan a region cannot use |
-| 0009, 0012 | `Entity` | Entity | Allocation/reuse in movement and collision |
+| 0009, 0012, 0044, 0046 | `Entity` | Entity | Allocation/reuse in movement and collision; horizontal speed read from one field; the horizontal-movement predicate published as a volatile boolean |
 | 0011 | `Level` | Entity | Caller-owned entity query overloads |
+| 0017 | `ChunkEntitySlices` | Entity | Query bounds hoisted out of the entity intersection loop |
+| 0018 | `CollisionUtil` | Entity | Block collision boxes translated without allocating on a miss |
 | 0015 | `AbstractArrow` | Entity (projectiles) | Reject a landed arrow before the projectile tag lookup |
+| 0052 | `RegionizedWorldData`, `ServerLevel` | Entity (metrics) | Entity ticks per world for `/perf entities` |
+| 0057, 0064, 0086 | `Entity`, `ServerPlayer`, `ThrownEnderpearl` | Entity (teleport) | Owned synchronous teleport on the owning region, the ender pearl teleport event, legacy `PlayerTeleportEvent`/`PlayerPortalEvent` on the async routes |
+| 0068 | `WanderingTraderSpawner` and world data | Entity (spawning) | One wandering trader spawner per world on the global tick ([wandering-traders.md](wandering-traders.md)) |
+| 0084, 0085 | `EntityLookup`, `ChunkMap` and others | Entity (relaxed thread checks only) | Relaxed ownership checks and cross-region world data; in effect only while `aurora.bridge.thread-checks` relaxes them ([aurora-plugin-bridge.md](aurora-plugin-bridge.md)) |
 
 ---
 
@@ -62,18 +81,24 @@ The gate asks for metrics, not for a promise of them.
 |---|---|---|
 | Solves admitted / outstanding | `AsyncPathProcessor.PathStats` | `/perf async` |
 | Solve time mean / slowest | `PathStats.meanMillis` / `slowestMillis` | `/perf async` |
-| Solves refused (queue saturated, pool stopped, or shutdown) | `PathStats.refused` | `/perf async` |
+| Queue wait mean / slowest; queue depth / active workers / pool size | `PathStats.meanWaitMillis` / `slowestWaitMillis`, `queueDepth`, `activeWorkers`, `poolSize` | `/perf async` |
+| Offloads declined before the snapshot (pool full or stopping); the synchronous recompute ran (*PR #62*) | `PathStats.declined` (per type too) | `/perf async` |
+| Submissions refused after the capacity check (queue filled in between, shutdown race); the synchronous recompute ran | `PathStats.refused` | `/perf async` |
+| Results applied / discarded (entity replaced, path replaced, generation moved on, no path) (*PR #62*) | `PathStats.applied`, `staleSubject`, `stalePath`, `staleGeneration`, `noPath` | `/perf async` |
+| Results retired before delivery (mob removed or unloaded, or the owner handoff refused) (*PR #62*) | `PathStats.retired` | `/perf async` |
+| Busiest mob types: admitted / solved / refused / declined | `AsyncPathTypeStats.top` | `/perf async` |
 | Legacy caller-run count (should stay zero) | `PathStats.inline` | `/perf async` |
-| Solves refused after shutdown | `PathStats.refused` | `/perf async` |
+| Entities and players per world; entity ticks per world | world population (as `/perf chunks`); `EntityTickCounters` (MC 0052) | `/perf entities` |
 | Per-lane CPU attribution | `LaneCpuSampler` / `LanePortions` | `/perf lanes` |
 | Region tick cost | `RegionTickMetrics` | `/tps`, `/perf` |
 
-The **refused** count is the one that judges this domain. Since the overload policy changed to
-`AbortPolicy`, a saturated pool refuses the solve and the mob keeps its current path; it no longer
-runs A* on the region thread after paying for the snapshot. A rising refused count means the pool
-is undersized for the workload. (Corrected 2026-10-07: this paragraph previously described the
-earlier caller-runs policy and the `inline` count, which `perf/AsyncPathProcessor` now keeps only
-for telemetry compatibility.)
+The **declined** count, with refused, is the one that judges this domain. Since 2026-10-14 (audit
+ENG-7/ENG-14) a saturated pool declines the offload before the snapshot is built, and the vanilla
+synchronous recompute runs on the region thread for that slot; a submission refused after the
+capacity check also falls back to the synchronous recompute. Before *PR #62* those declines were
+counted nowhere, so a saturated pool showed `refused` near zero. A rising declined count means the
+pool is at capacity for the workload: investigate the workload rather than adding threads blindly.
+(This paragraph described an earlier keep-the-stale-path policy until 2026-10-25.)
 
 ---
 

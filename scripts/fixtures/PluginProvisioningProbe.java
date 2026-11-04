@@ -53,10 +53,10 @@ public final class PluginProvisioningProbe {
         Path target = PLUGINS.resolve(pin.fileName());
         switch (args[0]) {
             case "settings" -> {
-                Files.writeString(CONFIG, "[other]\nauto-provision=false\n[protocollib]\nauto-provision=false\n[viaversion]\nauto-provision=true\n");
+                Files.writeString(CONFIG, "[other]\nauto-provision=false\n[plugins.protocollib]\nauto-provision=false\n[plugins.viaversion]\nauto-provision=true\n");
                 check(!BootstrapPluginSettings.enabled(CONFIG, "protocollib", true), "ProtocolLib toggle ignored");
                 check(BootstrapPluginSettings.enabled(CONFIG, "viaversion", true), "ProtocolLib disabled Via");
-                Files.writeString(CONFIG, "viaversion.auto-provision = false\n\"protocollib.auto-provision\" = true\n");
+                Files.writeString(CONFIG, "plugins.viaversion.auto-provision = false\n\"plugins.protocollib.auto-provision\" = true\n");
                 check(!BootstrapPluginSettings.enabled(CONFIG, "viaversion", true), "dotted Via toggle ignored");
                 check(BootstrapPluginSettings.enabled(CONFIG, "protocollib", false), "quoted dotted ProtocolLib toggle ignored");
                 Files.writeString(CONFIG, "['protocollib']\n'auto-provision'=false # operator decision\n");
@@ -138,11 +138,11 @@ public final class PluginProvisioningProbe {
                 check(Files.exists(target), "verified offline jar lost");
             }
             case "protocollib-toggle" -> {
-                // Only [protocollib] auto-provision decides whether the official jar is fetched.
-                Files.writeString(CONFIG, "[viaversion]\nauto-provision=false\n[protocollib]\nauto-provision=false\n");
+                // Only [plugins.protocollib] auto-provision decides whether the official jar is fetched.
+                Files.writeString(CONFIG, "[plugins.viaversion]\nauto-provision=false\n[plugins.protocollib]\nauto-provision=false\n");
                 PluginProvisioner.provisionJars(PLUGINS, CONFIG, forbidden);
                 check(!Files.exists(PLUGINS.resolve(ProtocolLibProvisioner.PIN.fileName())), "disabled toggle installed ProtocolLib");
-                Files.writeString(CONFIG, "[viaversion]\nauto-provision=false\n[protocollib]\nauto-provision=true\n");
+                Files.writeString(CONFIG, "[plugins.viaversion]\nauto-provision=false\n[plugins.protocollib]\nauto-provision=true\n");
                 PluginProvisioner.provisionJars(PLUGINS, CONFIG, good);
                 check(calls.get() == 1, "enabled toggle did not fetch the pinned ProtocolLib");
                 check(!Files.exists(PLUGINS.resolve(ProtocolLibProvisioner.PIN.fileName())), "unverified ProtocolLib installed");

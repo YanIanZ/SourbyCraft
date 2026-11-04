@@ -26,16 +26,18 @@ import java.util.logging.Logger;
  * and offers the solve with {@link #trySubmit}; when either says no, the offload is declined and
  * the navigation runs its ordinary synchronous recompute for that slot, exactly as with the
  * feature off. A refusal therefore never consumes the recompute slot without a path being
- * computed (the old behaviour kept the stale path and skipped the recompute). {@link #submit}
- * keeps the older contract of a completed {@code null} future for callers that want it.</p>
+ * computed (the old behaviour kept the stale path and skipped the recompute). A no from
+ * {@link #hasCapacity()} is counted as {@code declined} ({@link #noteDeclined}), a no from
+ * {@link #trySubmit} as {@code refused}. {@link #submit} keeps the older contract of a completed
+ * {@code null} future for callers that want it.</p>
  *
  * <p>A stopped pool or failed/stopping runtime uses the same refusal contract. Work admitted
  * before shutdown follows {@link #shutdown()}'s disposal rules.</p>
  *
  * <p>The threads and queue are the Resource Governor's {@link ResourceGovernor.Lane#PATHFINDING}
  * lane, so the budget is owned and reported ({@code /perf governor}) with the other SourbyCraft
- * lanes. This class keeps the admission policy, the solve telemetry and the stop/start
- * lifecycle; the result handoff to the entity owner is {@code AsyncPathCompletion}.</p>
+ * lanes. This class keeps the admission policy, the solve and delivery telemetry and the
+ * stop/start lifecycle; the result handoff to the entity owner is {@code AsyncPathCompletion}.</p>
  */
 public final class AsyncPathProcessor {
 
@@ -55,6 +57,12 @@ public final class AsyncPathProcessor {
         new java.util.concurrent.atomic.AtomicLong();
     private static final java.util.concurrent.atomic.AtomicLong REFUSED =
         new java.util.concurrent.atomic.AtomicLong();
+    /** Offloads declined on {@link #hasCapacity()} before anything was submitted. */
+    private static final java.util.concurrent.atomic.AtomicLong DECLINED =
+        new java.util.concurrent.atomic.AtomicLong();
+    /** Finished solves by how they ended (on the owner, or retired before it), indexed by {@link Delivery#ordinal()}. */
+    private static final java.util.concurrent.atomic.AtomicLongArray DELIVERIES =
+        new java.util.concurrent.atomic.AtomicLongArray(Delivery.values().length);
     private static final java.util.concurrent.atomic.AtomicLong SOLVE_NANOS =
         new java.util.concurrent.atomic.AtomicLong();
     private static final java.util.concurrent.atomic.AtomicLong SOLVED =
@@ -80,15 +88,22 @@ public final class AsyncPathProcessor {
      *
      * <p>{@code inline} is retained for telemetry compatibility with older builds. Current
      * overload policy never executes a rejected solve on the submitting thread, so this counter
-     * should remain zero. Saturation is represented by {@code refused} instead.</p>
+     * should remain zero. Saturation shows as {@code declined}, and as {@code refused} when the
+     * queue fills between the capacity check and the submission.</p>
+     *
+     * <p>The last six count finished solves by how they ended: five by what the owner found, and
+     * {@code retired} for a result that never reached the owner.</p>
      *
      * @param admitted      solves the executor accepted; a submission it rejected (saturation or a
      *                      concurrent shutdown) is counted in {@code refused} only; excludes
      *                      pre-start inline solves
      * @param inline        legacy caller-run count; should remain zero with current backpressure policy
-     * @param refused       submissions declined because the queue was saturated, the pool stopped,
-     *                      the runtime failed/stopped, or executor admission raced with shutdown;
-     *                      disjoint from admitted
+     * @param refused       submissions {@link #trySubmit} turned away: the queue was saturated, the
+     *                      pool stopped, the runtime failed/stopped, or executor admission raced
+     *                      with shutdown; disjoint from admitted and declined
+     * @param declined      offloads declined before any submission because {@link #hasCapacity()}
+     *                      said no (full queue, stopped pool, failed/stopping runtime); the caller
+     *                      ran its synchronous recompute instead; disjoint from admitted and refused
      * @param outstanding   admitted solves that have not completed
      * @param meanMillis    mean solve duration, or NaN before anything has solved
      * @param slowestMillis the slowest single solve seen
@@ -98,11 +113,44 @@ public final class AsyncPathProcessor {
      * @param poolSize      worker threads the pool currently holds, or -1 when it is not running
      * @param meanWaitMillis    mean time a solve waited in the queue, or NaN before any ran
      * @param slowestWaitMillis the longest a single solve waited before starting
+     * @param applied         results that were still the requested route and were applied
+     * @param staleSubject    results discarded because the owner handed back another entity object
+     *                        (dimension transfer)
+     * @param stalePath       results discarded because the navigation's path was replaced or
+     *                        cleared while the solve ran
+     * @param staleGeneration results discarded because the navigation's request generation moved
+     *                        on (patch 0047), such as a {@code stop()} on an already-null path
+     * @param noPath          results that were still valid but carried no path (none found, solver
+     *                        failure, cancellation) or one without a target; nothing was applied
+     * @param retired         results that never reached the owner: the entity was removed or unloaded
+     *                        before its next owning tick (the handoff's retirement callback ran), or the
+     *                        owner handoff refused the delivery; nothing was applied
      */
-    public record PathStats(long admitted, long inline, long refused, int outstanding,
+    public record PathStats(long admitted, long inline, long refused, long declined, int outstanding,
                             double meanMillis, double slowestMillis,
                             int queueDepth, int activeWorkers, int poolSize,
-                            double meanWaitMillis, double slowestWaitMillis) {}
+                            double meanWaitMillis, double slowestWaitMillis,
+                            long applied, long staleSubject, long stalePath, long staleGeneration,
+                            long noPath, long retired) {}
+
+    /**
+     * How a finished solve ended. The first five are counted by {@code AsyncPathRecompute.deliver} on the owner;
+     * {@link #RETIRED} by the retired callback {@code AsyncPathRecompute} hands to {@code AsyncPathCompletion}.
+     */
+    enum Delivery {
+        /** Still the requested route: applied to the navigation. */
+        APPLIED,
+        /** The owner handed back another entity object. */
+        STALE_SUBJECT,
+        /** The navigation's path was replaced or cleared meanwhile. */
+        STALE_PATH,
+        /** The navigation's request generation moved on meanwhile. */
+        STALE_GENERATION,
+        /** Still valid, but no path (or one without a target) to apply. */
+        NO_PATH,
+        /** Never reached the owner: it retired (entity removed or unloaded) or refused the handoff. */
+        RETIRED
+    }
 
     /**
      * A snapshot of the pool's counters. Never blocks and never throws.
@@ -116,14 +164,29 @@ public final class AsyncPathProcessor {
         final GovernedLane p = pool;
         final boolean running = p != null && !p.isShutdown();
         final GovernedLane.Stats lane = running ? p.stats() : null;
-        return new PathStats(ADMITTED.get(), INLINE.get(), REFUSED.get(), OUTSTANDING.get(),
+        return new PathStats(ADMITTED.get(), INLINE.get(), REFUSED.get(), DECLINED.get(), OUTSTANDING.get(),
             solved == 0L ? Double.NaN : SOLVE_NANOS.get() / (double) solved / 1.0E6,
             SLOWEST_NANOS.get() / 1.0E6,
             running ? lane.queued() : -1,
             running ? lane.active() : -1,
             running ? p.poolSize() : -1,
             solved == 0L ? Double.NaN : WAIT_NANOS.get() / (double) solved / 1.0E6,
-            SLOWEST_WAIT_NANOS.get() / 1.0E6);
+            SLOWEST_WAIT_NANOS.get() / 1.0E6,
+            DELIVERIES.get(Delivery.APPLIED.ordinal()),
+            DELIVERIES.get(Delivery.STALE_SUBJECT.ordinal()),
+            DELIVERIES.get(Delivery.STALE_PATH.ordinal()),
+            DELIVERIES.get(Delivery.STALE_GENERATION.ordinal()),
+            DELIVERIES.get(Delivery.NO_PATH.ordinal()),
+            DELIVERIES.get(Delivery.RETIRED.ordinal()));
+    }
+
+    /**
+     * Counts how one finished solve ended. Thread-safe: the owner outcomes are counted on the entity's owning
+     * thread, {@link Delivery#RETIRED} in the handoff's retirement callback, or, when the handoff refused the
+     * delivery, on the thread that ran the solve's completion callback.
+     */
+    static void noteDelivery(final Delivery outcome) {
+        DELIVERIES.incrementAndGet(outcome.ordinal());
     }
 
     /**
@@ -160,12 +223,12 @@ public final class AsyncPathProcessor {
         if (pool != null && !pool.isShutdown()) {
             return;
         }
-        // The governed lane: bounded queue, rejection instead of CallerRuns. Path recomputes are
-        // periodic and the mob already has a live path, so saturation should defer work rather
-        // than push CPU-bound A* back onto the region thread. CallerRuns created a positive
-        // feedback loop under load: snapshot cost + rejected submission + full synchronous solve
-        // on the latency-critical owner thread. Threads run below normal priority so they yield
-        // to region tick threads under contention.
+        // The governed lane: bounded queue, rejection instead of CallerRuns. A refused solve goes
+        // back to the navigation, which runs the vanilla synchronous recompute it runs with the
+        // feature off, and the capacity check comes before the snapshot so a full pool costs no
+        // more than that. CallerRuns created a positive feedback loop under load: snapshot cost +
+        // rejected submission + full synchronous solve on the latency-critical owner thread.
+        // Threads run below normal priority so they yield to region tick threads under contention.
         final GovernedLane p = ResourceGovernor.GLOBAL.restart(ResourceGovernor.Lane.PATHFINDING);
         pool = p;
         final int threads = p.stats().threads();
@@ -195,7 +258,8 @@ public final class AsyncPathProcessor {
     /**
      * Whether a solve offered now would be admitted, checked before the caller pays for a
      * snapshot. Best effort: {@link #trySubmit} can still refuse when another region filled the
-     * queue in between.
+     * queue in between. A query only; a caller that declines on {@code false} reports it with
+     * {@link #noteDeclined}.
      */
     public static boolean hasCapacity() {
         if (stopped || dev.iyanz.sourbycraft.core.AuroraRuntime.stopping()) return false;
@@ -205,8 +269,21 @@ public final class AsyncPathProcessor {
     }
 
     /**
+     * Counts an offload declined because {@link #hasCapacity()} said no, under the mob's entity
+     * type key. The request never reached {@link #trySubmit}, so it is neither admitted nor
+     * refused; the caller runs its synchronous recompute instead.
+     */
+    static void noteDeclined(final String type) {
+        DECLINED.incrementAndGet();
+        AsyncPathTypeStats.slotFor(type).declined();
+    }
+
+    /**
      * As {@link #submit}, except that a refused solve returns {@code null} instead of a completed
      * future, so the caller can run its synchronous path instead. Refusals are counted.
+     *
+     * <p>The entity type comes from the per-thread hand-off ({@link AsyncPathTypeStats}); the
+     * navigation's offload uses {@link #trySubmit(MobPathSnapshot, Supplier)} instead.</p>
      *
      * @return the result future, or {@code null} when the solve was refused and never ran
      */
@@ -234,8 +311,8 @@ public final class AsyncPathProcessor {
             // Refuse, rather than degrading to an inline solve as a not-yet-started pool does.
             // The two look alike but are not: after shutdown the region threads are trying to
             // stop, and running a CPU-bound A* on one of them delays exactly that. The caller
-            // still receives a completed future, so its pending bookkeeping is released and no
-            // request is left outstanding.
+            // receives null (submit() turns it into a completed null future), releases its
+            // pending bookkeeping itself, and no request is left outstanding.
             REFUSED.incrementAndGet();
             slot.refused();
             return null;
@@ -293,9 +370,9 @@ public final class AsyncPathProcessor {
         try {
             p.execute(task);
         } catch (RejectedExecutionException rejected) {
-            // Saturation and a concurrent shutdown have the same safe result for this periodic
-            // recompute: keep the mob's existing live path, release pending bookkeeping, and let
-            // a later recompute try again. Never run A* on the rejecting region thread.
+            // Saturation and a concurrent shutdown have the same result: the caller gets null; the
+            // navigation's offload (AsyncPathRecompute) then releases its pending flag and runs its
+            // synchronous recompute for this slot. Never run the A* on the rejecting thread here.
             // The task never ran and its future is dropped; release the outstanding count here.
             // A rejected execution is a refusal and not also an admission: roll the admission back
             // so admitted + refused counts each submission once.

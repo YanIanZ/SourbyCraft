@@ -7,9 +7,12 @@ import dev.iyanz.sourbycraft.config.AuroraConfig.BridgeMode;
  * {@code docs/architecture/aurora-plugin-bridge.md}.
  *
  * <p>Entity-owned work goes to the entity's owner, location-owned work to the region that owns the
- * location, global-safe work to the global region, blocking work to the plugin/I/O lane, and
- * anything whose owner cannot be determined is rejected. There is no "run it wherever the caller
- * is" route: that is exactly the arbitrary-thread execution SAFE mode exists to prevent.</p>
+ * location, global-safe work to the global region and blocking work to the plugin/I/O lane. The bridge
+ * routes scheduler tasks only: a bridged plugin's direct world access is not intercepted here, and what
+ * happens to it is decided by the engine's ownership checks, {@code guard-severity} and
+ * {@code aurora.bridge.thread-checks} (enforced: refused, or logged and counted where the guard only logs;
+ * relaxed: it proceeds and is counted). There is no "run it wherever the caller is" route: that is exactly
+ * the arbitrary-thread execution SAFE mode exists to prevent.</p>
  */
 public final class BridgeRouter {
 
@@ -33,7 +36,11 @@ public final class BridgeRouter {
         SYNC_TASK,
         /** A Bukkit async scheduler task. */
         ASYNC_TASK,
-        /** A direct world mutation whose owner the bridge cannot determine. */
+        /**
+         * Reserved: a direct world mutation whose owner the bridge cannot determine. Routed to {@link Route#REJECT},
+         * but nothing produces it at runtime; the bridge does not intercept direct world access (see the class
+         * comment).
+         */
         UNKNOWN_WORLD_MUTATION
     }
 

@@ -30,9 +30,15 @@ commands:
 
 - block changes (`setblock`, `summon`, `particle`, `place`, `loot`, `playsound`) are queued to the region that owns
   the target position (`AbstractCommandExecution.executeAtPos[WithRadius]`); `fill`, `fillbiome` and `clone` load and
-  run at the target chunks; `data ... block` does the same through `BlockDataAccessor`;
+  run at the target chunks; `data ... block` (MC 0069, data-command threading) is handed to the owning region
+  from the console or RCON (the result reaches the sender when it runs), while a player or command block gets
+  the command error `Cannot access block data outside the owning region; run from a player or command block
+  in that region` for a block its region does not own; command storage (`data ... storage`, `execute ... storage`,
+  `function ... with storage`) belongs to the global tick, see [datapack functions](datapack-functions.md);
 - entity actions (`kill`, `tp`, `scoreboard players ...` on entities, `effect`, ...) are scheduled on each target's
   own entity scheduler;
+- `execute if|unless block` on a position the calling thread does not own fails with `Cannot test a block
+  cross-region` (MC 0016) instead of reading another region's block;
 - global state (`time`, `gamerule`, `difficulty`, `worldborder`, objectives, teams, bossbars, `forceload`) runs
   on the global region (`executeOnGlobal`);
 - entity selectors are **not** region-filtered: `@a`/`@e` see every region, and the predicate reads foreign
@@ -77,7 +83,13 @@ region-local. The risk is the command. The rules, all in `CommandBlockPolicy`:
    the scope; otherwise `cannot <action> outside the region…` or `cannot <action> in chunks that are not
    loaded`. `clone` checks source and destination with its 32-block buffer, so the engine's
    `loadOrRunAtChunksAsync` takes its run-now branch. `executeAtPos[WithRadius]` and `data … block` target
-   owned chunks only, so they also run now.
+   owned chunks only, so they also run now. For `data ... block` the data-command check of MC 0069 runs
+   first and refuses with its own message (`Cannot access block data outside the owning region ...`); the
+   two-region run below predates 0069 in its jar and saw the engine's `Target not in same region` there.
+   **Entities the command block owns may move:** `tp` of an entity this region owns to a position another
+   region owns goes through the engine's entity teleport route (observed, case 60 of the
+   [two-region run](../development/cmdblock-two-region-2026-10-21.md)); nothing the other region owns is
+   mutated, and the selectors stay region-local. This is not covered by the block-target rule above.
 5. **Global state keeps the engine's route.** Commands the engine already sends to the global region keep
    doing so (the console path). Their result is asynchronous, so a command block reports success when the
    work is queued, as console does.
@@ -99,12 +111,16 @@ Command-block minecarts follow the same rules (they share `performCommand`).
 
 - **Clean refusals** are exactly the hooked paths in rules 3, 4, 7 and 8 above: a command error (or "condition
   not met"), no exception.
-- **Synchronous read paths not hooked and not audited yet**: `execute if|unless block[s]`, `execute store …
+- **Synchronous read paths not hooked by 0055**: `execute if|unless block[s]`, `execute store …
   block`, `loot … mine`, block predicates, `clone`'s `masked/filtered` reads are covered only through the
   footprint check above. What such a read of another region's block does from a command block's region
   thread depends on the engine's own checks at that call site (an ownership exception that Paper reports as
-  `command.failed` with an ERROR log line, or an unsynchronised read); see Evidence for the one case run.
-  These need a per-path audit before the switch can be called safe for arbitrary command-block content.
+  `command.failed` with an ERROR log line, or an unsynchronised read). Observed in the two-region run (E1-E3):
+  `execute if block` and `execute store result|success … if block` on a foreign position fail with
+  `Cannot test a block cross-region` (MC 0016's refusal), and `execute unless block` fails silently; none
+  reads the foreign block as present or absent. `blocks`, `loot … mine`, block predicates and `clone`'s
+  masked/filtered reads are still not audited; they need a per-path audit before the switch can be called
+  safe for arbitrary command-block content.
 - Anything dispatched synchronously inside the scope (a plugin command run by a command block that calls
   `Bukkit.dispatchCommand`) inherits the region-local selectors and block-target refusal.
 - LIVE switch caveat: while off, a repeating block's tick is dropped without rescheduling (inherited
@@ -144,8 +160,15 @@ Functional, shared machine, not certified (jar `6a6b2823…`, worktree build at 
   0 ERROR/Exception lines. `opus-cmdblock-off-2` (flag off, same script): nothing ran, 0 errors. Both stops exit 0.
 - Console `scoreboard players add #t clk 1` fails with `Holder target "#t" must be an entity` (inherited, all
   sources); console `data get block ...` throws an inherited NPE in `BlockDataAccessor` on the global thread
-  (unrelated to this change; noted for the inherited-guards ledger).
+  (unrelated to this change; noted for the inherited-guards ledger). *Fixed since:* MC 0069 builds the console
+  accessor without touching the block entity and hands the command to the owning region, which looks the
+  block entity up there (code read; no rerun of this case is recorded).
+- Two regions, flag on and off (2026-10-21, independent re-run from HEAD, 4 runs):
+  [cmdblock-two-region-2026-10-21.md](../development/cmdblock-two-region-2026-10-21.md). Command blocks in
+  both regions ran their own work; 19 foreign-aimed command types per direction mutated nothing (command
+  error or no target); 0 ownership violations in the logs; with the flag off none of 64 blocks executed.
+  Functional evidence only: no real client, no soak.
 
-See also the coordination entry `### opus-cmdblock — task_ab3bda9af0b220f4` for the test-server run names, jar
-hash and log lines. Unit tests: `CommandBlockPolicyTest`, `CommandBlockPatchShapeTest`,
-`AuroraConfigTest` (command-block cases).
+The `opus-cmdblock-*` runs above were recorded in the agent coordination file, which is not committed;
+their run names, jar hashes and log lines are not available in this repository. Unit tests:
+`CommandBlockPolicyTest`, `CommandBlockPatchShapeTest`, `AuroraConfigTest` (command-block cases).

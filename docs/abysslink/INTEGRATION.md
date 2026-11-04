@@ -1,6 +1,6 @@
 # Configuration and integration
 
-AbyssLink lives in `sourbycraft_config/aurora.yml`, under `aurora.abysslink`, beside the other Aurora services (the whole file is YAML since Build 49). All AbyssLink keys are **RESTART_REQUIRED**; `/sourbycraft reload` does not apply them. `AuroraKeys.ABYSSLINK_KEYS` is part of the seeded key table, so a fresh file carries the keys and their comments; `AbyssLinkSettings` only validates and reads them (it never writes the operator's file).
+AbyssLink lives in `sourbycraft_config/aurora.yml`, under `aurora.abysslink`, beside the other Aurora services (the whole file is YAML since Build 49). All AbyssLink keys are **RESTART_REQUIRED**; `/sourbycraft reload` does not apply them (since PR #62 it lists a changed AbyssLink key under RESTART_REQUIRED until the restart). `AuroraKeys.ABYSSLINK_KEYS` is part of the seeded key table, so a newly created `aurora.yml` carries the keys and their comments; an existing file is not reseeded, and missing keys take their defaults. `AbyssLinkSettings` only validates and reads them (it never writes the operator's file).
 
 ## Secure setup
 
@@ -43,7 +43,18 @@ The example overrides host, identity, node and paths. Actual defaults and loader
 | threat-reporting |true|Advisory aggregate signals|
 | max-sample-age-ms |2000|100–10000; synchronize clocks|
 
-Unknown keys inside `aurora.abysslink` are rejected. Invalid enabled configuration must leave the optional service unavailable without blocking gameplay startup; inspect bounded diagnostic messages and retain the local ping fallback.
+Unknown keys inside `aurora.abysslink` are rejected. Invalid configuration leaves the optional service unavailable without blocking gameplay startup, and `/ping` keeps its local fallback.
+
+## Diagnostics
+
+Behaviour since PR #62 (code written and statically reviewed; not built; not tested by the owner):
+
+- **Unreadable settings** (an unknown key, a value outside its bounds, a half-configured client identity): one WARN `AbyssLink: unavailable (configuration): <exception class: message naming the key>; fix sourbycraft_config/aurora.yml and restart; gameplay remains available`. `/ping` and `/perf network` show `AbyssLink: unavailable (configuration)`; before PR #62 they showed `disabled`.
+- **Failed connection attempts** with valid settings: a TLS/DNS setup failure (certificate or key files, host resolution), a connect failure or a TLS handshake failure is logged on the first failed attempt and then on every 10th consecutive one, as `AbyssLink: <stage> failed (attempt N): <exception class: message>; retrying with backoff`. The exception text has control characters removed and is capped at 240 characters; the count restarts after an authenticated session. The cadence of 10 is a constant, not a setting. Before PR #62 these attempts were retried silently.
+- **Status line.** After a failed attempt, `/ping` and `/perf network` show `disconnected (<stage> failed)` until an attempt completes the TLS handshake or authenticates. The status never includes an address or exception text, because `/ping` is visible to every player; the detail is only in the server log. A peer that completes TLS and then rejects authentication shows plain `disconnected`.
+- A failure while starting the client itself is logged as `AbyssLink: startup failed: <exception>; gameplay remains available`.
+
+Scripts or monitors that compare `disabled` or `disconnected` literally see the new forms. Owner checks for these messages are listed in [TESTING.md](TESTING.md).
 
 ## Runtime boundaries
 
@@ -55,7 +66,7 @@ Ping replies must match request ID, UUID and session generation. A hard 64-query
 
 Control-node authentication grants no forwarding trust, player permission, bypass or proof of backend attachment. Never log player UUID/address, raw payloads, certificates or secrets. Remote text must remain bounded/sanitized; no frame may execute commands or alter guards.
 
-Compatibility, deployment and verification status: [workflow report](../../.workflow/ultracode/abysslink-v1/final-report.md).
+Compatibility, deployment and verification status: [TESTING.md](TESTING.md) (per-check status and the latest interoperability evidence).
 
 AbyssLink has no pre-YAML history: an old TOML file simply gets the `aurora.abysslink` defaults when it is converted, and a missing `aurora.yml` takes the documented defaults without writing anything. Match `heartbeat-ms` to Leviathan's `heartbeat-interval-ms`; liveness closes after three expected intervals plus `timeout-ms`. The backend requires existing BungeeCord or Velocity forwarding to be configured before native `/ping` requests proxy samples. That prerequisite still provides no proof of per-player backend attachment; protect the backend with the existing forwarding secret/firewall policy.
 

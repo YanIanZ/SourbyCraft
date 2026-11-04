@@ -103,12 +103,33 @@ public enum RegionRefusal {
     }
 
     /** The exception the guarded method throws. */
-    public UnsupportedOperationException error() {
-        return new UnsupportedOperationException(this.message());
+    public Refused error() {
+        return new Refused(this, this.message());
     }
 
     /** As {@link #error()}, with a detail. */
-    public UnsupportedOperationException error(final String detail) {
-        return new UnsupportedOperationException(this.message(detail));
+    public Refused error(final String detail) {
+        return new Refused(this, this.message(detail));
+    }
+
+    /**
+     * What {@link #error()} throws: still an {@link UnsupportedOperationException} for every caller, typed so the
+     * Aurora Bridge recognises an owned refusal by its class rather than by its message text
+     * ({@code bridge/ViolationClassifier}).
+     */
+    public static final class Refused extends UnsupportedOperationException {
+        private static final long serialVersionUID = 1L;
+
+        private final RegionRefusal refusal;
+
+        private Refused(final RegionRefusal refusal, final String message) {
+            super(message);
+            this.refusal = refusal;
+        }
+
+        /** The refused call. */
+        public RegionRefusal refusal() {
+            return this.refusal;
+        }
     }
 }

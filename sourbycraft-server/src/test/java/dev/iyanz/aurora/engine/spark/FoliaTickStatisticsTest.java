@@ -79,6 +79,7 @@ class FoliaTickStatisticsTest {
     @Test
     void durationsCarryTheWorstAverageAndTheWindowsExtremes() {
         final WindowMetrics ten = window(20, 31.5, 2.0, 80.0, 25.0, 60.0);
+        when(ten.estimatedP99Mspt()).thenReturn(70.0);
         final FoliaTickStatistics stats = new FoliaTickStatistics(metricsWith(MetricWindow.TEN_SECONDS, ten));
 
         final DoubleAverageInfo info = stats.duration10Sec();
@@ -90,8 +91,20 @@ class FoliaTickStatisticsTest {
         assertEquals(60.0, info.percentile95th(), 0.0);
         assertEquals(25.0, info.percentile(0.5), 0.0);
         assertEquals(60.0, info.percentile(0.95), 0.0);
-        assertTrue(Double.isNaN(info.percentile(0.99)), "only the median and p95 are known");
-        assertTrue(Double.isNaN(info.percentile(0.0)));
+        assertEquals(70.0, info.percentile(0.99), 0.0);
+        assertEquals(2.0, info.percentile(0.0), 0.0, "percentile 0 is the minimum");
+        assertEquals(80.0, info.percentile(1.0), 0.0, "percentile 1 is the maximum");
+        assertTrue(Double.isNaN(info.percentile(0.9)), "only min, median, p95, p99 and max are known");
+    }
+
+    @Test
+    void histogramEstimatesNeverReadAboveTheObservedMaximum() {
+        final WindowMetrics ten = window(20, 31.5, 2.0, 50.0, 25.0, 60.0);
+        when(ten.estimatedP99Mspt()).thenReturn(75.0);
+        final DoubleAverageInfo info = new FoliaTickStatistics(metricsWith(MetricWindow.TEN_SECONDS, ten)).duration10Sec();
+
+        assertEquals(50.0, info.percentile95th(), 0.0);
+        assertEquals(50.0, info.percentile(0.99), 0.0);
     }
 
     @Test

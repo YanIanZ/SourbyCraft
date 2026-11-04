@@ -31,6 +31,8 @@ class BlockingIoBoundaryTest {
         "dev/iyanz/sourbycraft/bootstrap/LibDownloader.java",
         "dev/iyanz/sourbycraft/bootstrap/PluginProvisioner.java",
         "dev/iyanz/sourbycraft/awf/redis/RedisClient.java",
+        // loads mod jars through a URLClassLoader over file: URLs only; opens no connection, never resolves a name
+        "dev/iyanz/sourbycraft/mod/ModLoader.java",
         // parses IP literals for the handshake; opens no connection and never resolves a name (Netty event loop)
         "dev/iyanz/sourbycraft/net/HandshakeAddresses.java",
         // reads numeric peer bytes from an InetSocketAddress for admission limits; opens no connection, never resolves (Netty event loop)

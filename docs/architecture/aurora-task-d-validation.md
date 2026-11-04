@@ -64,6 +64,12 @@ arithmetic coverage, not a world-traversal or gameplay integration test.
 
 ## Reproduce verification
 
+> Status 2026-10-25: these are the 2026-09-21 commands and are kept as the record of that run.
+> They no longer reproduce it as written: the Weaver toolchain was dropped on 2026-10-05 (the
+> build now goes through the private SourbyPatcher toolchain, `docs/development/PRIVATE-TOOLCHAIN.md`),
+> the Python suite is `test_*.py`, not only `test_*policy.py`, and the test-plugin projects need
+> `-PincludeTestPlugin=true`. Current commands: AGENTS.md "Running tests".
+
 Run patch materialization separately from tests (Weaver uses nested build outputs):
 
 ```sh

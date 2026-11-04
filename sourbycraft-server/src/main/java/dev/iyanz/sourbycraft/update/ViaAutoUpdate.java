@@ -30,9 +30,15 @@ public final class ViaAutoUpdate {
 
     private ViaAutoUpdate() {}
 
+    /**
+     * Reinstall missing pins, unless {@code updater.via-auto-update} is off, Clip runs offline, or
+     * {@code plugins.viaversion.auto-provision} is anything but absent (default on) or a boolean
+     * {@code true}: a quoted or misspelt value disables the download, as it does at boot.
+     */
     public static void check() {
         if (!AutoUpdateSettings.viaAutoUpdate || Boolean.getBoolean("sourbyclip.offline")) return;
-        if (!dev.iyanz.sourbycraft.SourbyCraftConfig.cfgBool(dev.iyanz.sourbycraft.config.UtilityKeys.VIAVERSION_AUTO_PROVISION.path(), true)) return;
+        if (!provisioningAllowed(dev.iyanz.sourbycraft.SourbyCraftConfig.cfgGet(
+            dev.iyanz.sourbycraft.config.UtilityKeys.VIAVERSION_AUTO_PROVISION.path(), null))) return;
         String mc = BuildInfo.load().mcVersion();
         for (var trusted : PluginProvisioner.viaPins()) {
             Pin pin = new Pin(trusted.projectId(), trusted.prefix(), trusted.filename(), trusted.url(), trusted.sha256(), trusted.size());
@@ -44,6 +50,11 @@ public final class ViaAutoUpdate {
                 SourbyLogger.warn("via-updater: " + pin.prefix() + " check failed: " + failure.getMessage());
             }
         }
+    }
+
+    /** Strict read of the auto-provision value: absent means the default (on); only {@code Boolean.TRUE} enables. */
+    static boolean provisioningAllowed(Object configured) {
+        return configured == null || Boolean.TRUE.equals(configured);
     }
 
     static boolean check(Pin pin, String mc, Path plugins, HttpTransport transport) throws Exception {

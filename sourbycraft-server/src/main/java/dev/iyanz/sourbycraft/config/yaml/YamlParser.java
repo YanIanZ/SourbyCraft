@@ -3,13 +3,16 @@ package dev.iyanz.sourbycraft.config.yaml;
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.electronwill.nightconfig.core.Config;
 import com.electronwill.nightconfig.core.ConfigFormat;
+import com.electronwill.nightconfig.core.UnmodifiableConfig;
 import com.electronwill.nightconfig.core.io.ConfigParser;
 import com.electronwill.nightconfig.core.io.ParsingException;
 import com.electronwill.nightconfig.core.io.ParsingMode;
 import java.io.Reader;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.yaml.snakeyaml.DumperOptions;
 import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
@@ -45,6 +48,14 @@ final class YamlParser implements ConfigParser<CommentedConfig> {
         return config;
     }
 
+    /**
+     * Parses the whole document into a fresh tree first, refusing a duplicate key at any level whatever
+     * {@code mode} is, so a file is accepted or refused the same way by {@code CommentedFileConfig.load()}
+     * ({@link ParsingMode#REPLACE}) and by a one-shot read ({@link ParsingMode#MERGE}). Only then is
+     * {@code destination} touched, through {@code mode}: REPLACE empties it first (a section deleted from
+     * the file is gone after a reload), MERGE overwrites, ADD keeps values already present. A file that
+     * fails to parse leaves {@code destination} unchanged.
+     */
     @Override
     public void parse(final Reader reader, final Config destination, final ParsingMode mode) {
         final Node root;
@@ -53,18 +64,32 @@ final class YamlParser implements ConfigParser<CommentedConfig> {
         } catch (final YAMLException malformed) {
             throw new ParsingException(malformed.getMessage(), malformed);
         }
-        if (root == null) return; // an empty (or comment-only) file is an empty config
-        if (!(root instanceof MappingNode mapping)) {
+        if (root != null && !(root instanceof MappingNode)) {
             throw new ParsingException("The top level of a SourbyCraft config file must be a YAML mapping");
         }
-        fill(mapping, destination, mode);
+        final CommentedConfig parsed = this.format.createConfig(LinkedHashMap::new); // copied in file order
+        // an empty (or comment-only) file is an empty config
+        if (root != null) fill((MappingNode) root, parsed);
+        mode.prepareParsing(destination);
+        for (final UnmodifiableConfig.Entry entry : parsed.entrySet()) {
+            final List<String> key = Collections.singletonList(entry.getKey());
+            final Object value = entry.getValue();
+            if (mode == ParsingMode.ADD) destination.add(key, value);
+            else destination.set(key, value);
+        }
+        if (destination instanceof CommentedConfig commented) {
+            for (final Map.Entry<String, String> comment : parsed.commentMap().entrySet()) {
+                commented.setComment(Collections.singletonList(comment.getKey()), comment.getValue());
+            }
+        }
     }
 
-    private void fill(final MappingNode mapping, final Config destination, final ParsingMode mode) {
+    /** Fills {@code destination}, which starts empty, from {@code mapping}; a key seen twice is refused. */
+    private void fill(final MappingNode mapping, final Config destination) {
         for (final NodeTuple tuple : mapping.getValue()) {
             final String key = keyOf(tuple.getKeyNode());
             final Object value = valueOf(tuple.getValueNode());
-            if (mode == ParsingMode.MERGE && destination.contains(key)) {
+            if (destination.contains(key)) {
                 throw new ParsingException("Duplicate config key '" + key + "'");
             }
             destination.set(key, value);
@@ -85,7 +110,7 @@ final class YamlParser implements ConfigParser<CommentedConfig> {
     private Object valueOf(final Node node) {
         if (node instanceof MappingNode mapping) {
             final CommentedConfig sub = this.format.createConfig();
-            fill(mapping, sub, ParsingMode.MERGE);
+            fill(mapping, sub);
             return sub;
         }
         if (node instanceof SequenceNode sequence) {

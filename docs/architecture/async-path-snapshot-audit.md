@@ -18,7 +18,7 @@ Every region member a solve reaches, from `PathFinder.findPath` → `NodeEvaluat
 | Member | Callers | Vanilla `PathNavigationRegion` | `SnapshotPathRegion` | Verdict |
 |---|---|---|---|---|
 | `getBlockState(pos)` | `PathfindingContext.getBlockState` (48), `WalkNodeEvaluator` 56-83, 217, `SwimNodeEvaluator` 119-133, `FlyNodeEvaluator` 42-44, `BlockCollisions` 89 via `getChunkForCollisions` | out of build height → `AIR`; chunk from the grid, missing chunk → `EmptyLevelChunk` → **`VOID_AIR`** | out of build height → `AIR`; copied section → its state; missing chunk / empty section / out of grid → **`AIR`** | Same except `VOID_AIR` vs `AIR` identity for a missing chunk: benign, see finding 2 |
-| `getBlockStateIfLoaded(pos)` | `WalkNodeEvaluator.getPathTypeFromState` 525 (every path-type classification; `null` → `BLOCKED`) | `null` for an unloaded or out-of-grid chunk (Paper "do not load chunks during pathfinding") | `AIR` (a `null` section entry cannot tell unloaded from empty) | **Known divergence**, `OPEN` instead of `BLOCKED`; recorded in the spec 2026-10-20, pinned by `SnapshotPathRegionTest` (parity test `@Disabled`), fix needs a patch slot |
+| `getBlockStateIfLoaded(pos)` | `WalkNodeEvaluator.getPathTypeFromState` 525 (every path-type classification; `null` → `BLOCKED`) | `null` for an unloaded or out-of-grid chunk (Paper "do not load chunks during pathfinding") | At audit time `AIR` (a `null` section entry could not tell unloaded from empty); since MC 0048 `null` for an unloaded or out-of-grid chunk, as vanilla | Divergence found here (`OPEN` instead of `BLOCKED`), **fixed in MC 0048** the same day; parity pinned by `SnapshotPathRegionTest` (parity test enabled), see finding 1 |
 | `getFluidState(pos)` / `getFluidIfLoaded(pos)` | `WalkNodeEvaluator` 212, `SwimNodeEvaluator` 94, `LiquidBlock.getCollisionShape` (reads `pos.above()`) | `chunk.getFluidState` = section state's `getFluidState()`; `EMPTY` for a missing chunk | copied state's `getFluidState()`; `EMPTY` for a missing chunk | Same (`IfLoaded` shares finding 1) |
 | `getBlockEntity(pos)` | block shapes only (`ShulkerBoxBlock.getShape` and the like; no evaluator reads it) | live block entity | `null` | Documented approximation: a shulker box reads as a full cube either way (`getShape` falls back to the block cube when no block entity is found) |
 | `getMinY()` / `getHeight()` | `WalkNodeEvaluator` 72, 339, 353, 476; `FlyNodeEvaluator` 291; `isOutsideBuildHeight` | the level's | inherited, the level's; `CollisionView` delegates | Same; immutable ints, safe off-thread |
@@ -26,7 +26,7 @@ Every region member a solve reaches, from `PathFinder.findPath` → `NodeEvaluat
 | `getChunkForCollisions(x, z)` | `BlockCollisions.getChunk` 72 (only through `noCollision`) | `getChunk` → the live `ChunkAccess` or `EmptyLevelChunk` | one `CollisionView` whose reads route back to the copies | Same answers; the view is never cast to `ChunkAccess` (Moonrise's `CollisionUtil` fast path takes a `Level`, not a `CollisionGetter`) |
 | `getEntityCollisions(..)` | `CollisionGetter.noCollision`, `MobPathSnapshot.noCollision` 191 | `List.of()` | inherited `List.of()` | Same |
 | `noCollision(mob, box)` | `WalkNodeEvaluator` 376-377 | `noBlockCollision` + `noEntityCollision` + `noBorderCollision(entity)` | `MobPathSnapshot.noCollision`: same three steps; the border step recomputes `WorldBorder.isInsideCloseToBorder` from the captured `x`, `z` and box (`max(absMax(xsize, zsize), 1)`, `< bbMax * 2`, `isWithinBounds(x, z, bbMax)`) | Same, verified against `WorldBorder` 130-133 |
-| `getPathTypeFromState(x, y, z)` | all evaluators via `PathfindingContext` | `PathTypeCache` when on a region tick thread, else static | always static (`cache = null` in the snapshot constructor, `PathfindingContext` 36-40) | Same result: the cache memoises `WalkNodeEvaluator.getPathTypeFromState`; `BlockState.pathType` is a per-state constant (Canvas "optimize path type cache") |
+| `getPathTypeFromState(x, y, z)` | all evaluators via `PathfindingContext` | `PathTypeCache` when on a region tick thread, else static | always static (`cache = null` in the snapshot constructor, `PathfindingContext` 36-40, MC 0039; and since MC 0082 any context built on a thread that ticks no region uses no cache) | Same result: the cache memoises `WalkNodeEvaluator.getPathTypeFromState`; `BlockState.pathType` is a per-state constant (Canvas "optimize path type cache") |
 
 Nothing else on the region is called. `PathFinder.findPath` touches the region only to hand it
 to `prepare`; the profiler it reads is thread-local.
@@ -68,14 +68,16 @@ to `prepare`; the profiler it reads is thread-local.
    `SnapshotPathRegionAuditTest.anUnloadedChunkAnswersAirWhereVanillaAnswersVoidAirAndTheSolveCannotTellThemApart`.
    The spec's sentence "Plain `getBlockState`/`getFluidState` reads (AIR for an unloaded chunk) are
    equal in both" should say "equivalent for the solve (`VOID_AIR` vs `AIR`)"; the spec file was
-   locked by another agent at audit time, so the wording stays theirs to fix.
+   locked by another agent at audit time, so the wording stays theirs to fix. **Resolved:** the spec
+   now says "equivalent for the solve (`SnapshotPathRegionAuditTest`), not identical" (Correctness notes).
 3. **Stale guard claim in the spec.** "Guarded: only snapshot occupied sections; skip when the
    region is `allEmpty`" — the first half is true (`hasOnlyAir` sections are not copied); the
    second is not: `PathNavigationRegion.allEmpty` is written by the constructor and read by
    nothing on this branch (`PathNavigation`, `PathFinder` and both patches have no reader). An
    all-empty region is snapshotted and solved like any other. Not a correctness issue (the solve
    over an all-air region returns no path either way); the spec sentence is wrong and should be
-   corrected by its owner.
+   corrected by its owner. **Resolved:** the spec now says the snapshot is not skipped for an
+   `allEmpty` region and points here (Correctness notes).
 4. **Block entities** — `null` on the snapshot (and on its `CollisionView`). Only block shapes
    read them; the evaluators never do. Same class of approximation the spec already lists.
 5. **Fluids** — derived from the copied block state exactly as `LevelChunkSection.getFluidState`
@@ -89,13 +91,14 @@ to `prepare`; the profiler it reads is thread-local.
    `isInsideCloseToBorder` from the captured position. Verified by reading both; the border test
    is covered by `MobPathSnapshotTest` ("border test from the captured position").
 8. **`PathTypeCache` not used off-thread** — correct by construction (`cache = null`), and
-   necessary: the cache is regionized and belongs to the owning tick thread.
+   necessary: the cache is regionized and belongs to the owning tick thread. MC 0082 extends this
+   to any `PathfindingContext` built on a thread that ticks no region.
 
 ## What this audit does not cover
 
 - A flag-on server run. Nothing here replaces the spec's verification gate 2 (mobs path
   normally over a soak with the flag on) or 3 (spark A/B).
-- Finding 1's fix and its parity test, which need the MC patch slot.
+- ~~Finding 1's fix and its parity test, which need the MC patch slot.~~ Done in MC 0048 (see finding 1).
 - Collision shapes of modded/plugin-registered blocks whose `getCollisionShape` reads more of the
   level than vanilla blocks do (they get a `BlockGetter` that answers from the snapshot, so they
   cannot race the live world; they can only see the approximations above).

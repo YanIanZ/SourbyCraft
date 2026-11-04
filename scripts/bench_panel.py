@@ -355,7 +355,7 @@ def main():
             print(f"declared plugins not found by name on the panel: {missing}", flush=True)
         record["plugins_declared_missing"] = missing
         cpu, _ = panel.run("perf cpu", r"Freshness", 20)
-        record["available_processors"] = number(r"Available processors / live platform threads: (\d+)", cpu)
+        record["available_processors"] = number(r"Available processors / live (?:platform|Java) threads: (\d+)", cpu)
         memory, _ = panel.run("perf memory", r"Freshness", 20)
         heap = re.search(r"Heap used / committed / maximum: \S+ / \S+ / (\S+)", memory)
         record["heap_maximum"] = heap.group(1) if heap else None

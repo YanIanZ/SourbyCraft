@@ -31,8 +31,10 @@ import java.util.concurrent.atomic.AtomicReference;
  * {@link #degradedDirectoryForces()} stays non-zero so the gap is visible, never silent ({@code /perf awf}
  * shows the count and reason while it is non-zero).</p>
  *
- * <p>Public only for the two static degraded-state accessors; the primitives are the FILE
- * backend's own.</p>
+ * <p>Public for the two static degraded-state accessors ({@code /perf awf}) and for the writers of
+ * AWF's own files outside this package: {@code AuroraWorldRegistry} ({@code aurora-worlds.json}) and
+ * {@code AuroraTemplates} ({@code template.json} and the template folder) force through
+ * {@link #DISK} as the FILE backend's stores do.</p>
  */
 public interface Durability {
 

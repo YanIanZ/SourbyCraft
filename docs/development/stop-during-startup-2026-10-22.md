@@ -6,6 +6,13 @@ owned logic `dev.iyanz.sourbycraft.startup.StartupStopGate`, test `StartupStopGa
 Found by opus-gate48-ssb2 (`docs/development/ssb2-real-jar-2026-10-22.md`, finding 2).
 Functional runs on the shared agent laptop; no performance claim.
 
+**Status 2026-10-25 (PR #62):** the fix landed. MC feature 0076 was committed in `efb64fb` (2026-10-22) and is in
+every release tag from `v26.2-r48` on (`StartupStopGate`, `StartupStopGateTest`). The residual-risk item about the
+startup-timeline line was addressed in PR #62 (`e7c8c57`): a startup during which a stop is held logs no Ready
+summary and does not overwrite `sourbycraft_config/cache/startup-profile.properties`, and the auto-updater does not
+confirm a just-applied update on such a startup (code written and statically reviewed; not built; not tested by the
+owner). A stop from a non-server thread during startup is still not addressed. The runs below are unchanged.
+
 ## Root cause
 
 `CraftServer#shutdown` → `MinecraftServer#halt(false)` → `running = false` → `stopServer()`. In the region-threading

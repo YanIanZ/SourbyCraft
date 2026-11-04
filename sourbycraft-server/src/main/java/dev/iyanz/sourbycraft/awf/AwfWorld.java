@@ -37,7 +37,8 @@ import java.util.concurrent.atomic.AtomicLong;
  * reappear from the base after a save or a restart.</p>
  *
  * <p><b>Scope.</b> The engine reaches this through {@link AwfRegionStorage}, for the worlds an
- * operator lists in {@code aurora.awf.worlds}. Nothing else creates one.</p>
+ * operator lists in {@code aurora.awf.worlds}, the worlds managed through the AuroraWorlds API and
+ * any storage folder whose store already exists ({@link AwfEngine#open}). Nothing else creates one.</p>
  */
 public final class AwfWorld {
 
@@ -46,9 +47,17 @@ public final class AwfWorld {
     private final ChunkSource base;
     private final AwfStore store;
     private final AwfMetrics metrics = new AwfMetrics();
-    private final Map<ChunkKey, byte[]> owned = new ConcurrentHashMap<>();
-    /** Dirty chunks and the write version that dirtied them. */
-    private final Map<ChunkKey, Long> dirty = new ConcurrentHashMap<>();
+    /**
+     * Chunks this world holds in memory. An entry is replaced whole, by a write, a deletion or the
+     * commit that carried it, so a chunk's bytes and its dirty state always change together.
+     */
+    private final ConcurrentHashMap<ChunkKey, Entry> owned = new ConcurrentHashMap<>();
+    /**
+     * The keys of the dirty entries in {@link #owned}, so that counting, sampling and snapshotting
+     * them never walks the clean ones. Changed only inside {@code owned.compute*} for the same key,
+     * which keeps it in step with the entries.
+     */
+    private final Set<ChunkKey> dirty = ConcurrentHashMap.newKeySet();
     private final AtomicLong versions = new AtomicLong();
     /** Saves queued or running, by enqueue time; bounded so a stalled backend cannot pile them up. */
     static final int MAX_PENDING_SAVES = 16;
@@ -61,6 +70,25 @@ public final class AwfWorld {
     private final AtomicLong evicted = new AtomicLong();
     /** Stands in for a deleted chunk in {@link #owned}; compared by identity, never exposed. */
     private static final byte[] DELETED = new byte[0];
+
+    /**
+     * One chunk in {@link #owned}: its bytes ({@link #DELETED} for a deletion) and, while it is not
+     * committed, the write that dirtied it ({@code version}, unique per write) and when the chunk
+     * became dirty ({@code dirtySince}, {@link System#nanoTime}). A clean entry has version 0.
+     */
+    private record Entry(byte[] bytes, long version, long dirtySince) {
+        boolean dirty() {
+            return this.version != 0L;
+        }
+
+        Entry clean() {
+            return new Entry(this.bytes, 0L, 0L);
+        }
+
+        Entry since(final long nanos) {
+            return new Entry(this.bytes, this.version, nanos);
+        }
+    }
 
     /**
      * @param base where unowned chunks are read from, or {@code null} for an empty world
@@ -133,7 +161,7 @@ public final class AwfWorld {
 
     /** Up to {@code limit} of the dirty positions, lowest first, for reports. */
     java.util.List<ChunkKey> dirtySample(final int limit) {
-        final java.util.List<ChunkKey> keys = new java.util.ArrayList<>(this.dirty.keySet());
+        final java.util.List<ChunkKey> keys = new java.util.ArrayList<>(this.dirty);
         java.util.Collections.sort(keys);
         return keys.size() <= limit ? keys : java.util.List.copyOf(keys.subList(0, limit));
     }
@@ -165,10 +193,10 @@ public final class AwfWorld {
 
     /** The chunk's bytes: world-owned if written, else from the base; a fresh copy either way. */
     public Optional<byte[]> read(final ChunkKey key) throws IOException {
-        final byte[] mine = this.owned.get(key);
+        final Entry mine = this.owned.get(key);
         if (mine != null) {
             this.lastAccess.put(key, this.accessClock.incrementAndGet());
-            return mine == DELETED ? Optional.empty() : Optional.of(mine.clone());
+            return mine.bytes() == DELETED ? Optional.empty() : Optional.of(mine.bytes().clone());
         }
         // A chunk this world wrote (or deleted), committed and then dropped from memory lives in
         // the store; a committed deletion reads as absent rather than falling through to the base.
@@ -194,8 +222,8 @@ public final class AwfWorld {
             keys.addAll(this.store.keys());
             keys.removeAll(this.store.deleted());
         }
-        this.owned.forEach((key, bytes) -> {
-            if (bytes == DELETED) keys.remove(key);
+        this.owned.forEach((key, entry) -> {
+            if (entry.bytes() == DELETED) keys.remove(key);
             else keys.add(key);
         });
         return keys;
@@ -208,8 +236,8 @@ public final class AwfWorld {
             keys.addAll(this.store.keys());
             keys.removeAll(this.store.deleted());
         }
-        this.owned.forEach((key, bytes) -> {
-            if (bytes == DELETED) keys.remove(key);
+        this.owned.forEach((key, entry) -> {
+            if (entry.bytes() == DELETED) keys.remove(key);
             else keys.add(key);
         });
         return keys.size();
@@ -220,8 +248,21 @@ public final class AwfWorld {
         if (!this.role.mutable()) {
             throw new IllegalStateException("a " + this.role + " world is not mutable");
         }
-        this.owned.put(key, serialized.clone());
-        this.dirty.put(key, this.versions.incrementAndGet());
+        put(key, serialized.clone());
+    }
+
+    /**
+     * Installs a dirty entry in one step, so eviction (which removes only the clean entry it saw)
+     * and the commit snapshot (which takes whole entries) never see the bytes without the dirty
+     * state. A chunk already dirty keeps the time it became dirty.
+     */
+    private void put(final ChunkKey key, final byte[] bytes) {
+        final long version = this.versions.incrementAndGet();
+        final long now = System.nanoTime();
+        this.owned.compute(key, (k, previous) -> {
+            this.dirty.add(k);
+            return new Entry(bytes, version, previous != null && previous.dirty() ? previous.dirtySince() : now);
+        });
         this.lastAccess.put(key, this.accessClock.incrementAndGet());
     }
 
@@ -233,9 +274,7 @@ public final class AwfWorld {
         if (!this.role.mutable()) {
             throw new IllegalStateException("a " + this.role + " world is not mutable");
         }
-        this.owned.put(key, DELETED);
-        this.dirty.put(key, this.versions.incrementAndGet());
-        this.lastAccess.put(key, this.accessClock.incrementAndGet());
+        put(key, DELETED);
     }
 
     /**
@@ -267,10 +306,10 @@ public final class AwfWorld {
     public boolean dirtyBytesAtLeast(final long limit) {
         if (limit <= 0L) return true;
         long total = 0L;
-        for (final ChunkKey key : this.dirty.keySet()) {
-            final byte[] bytes = this.owned.get(key);
-            if (bytes == null || bytes == DELETED) continue;
-            total += bytes.length;
+        for (final ChunkKey key : this.dirty) {
+            final Entry entry = this.owned.get(key);
+            if (entry == null || !entry.dirty() || entry.bytes() == DELETED) continue;
+            total += entry.bytes().length;
             if (total >= limit) return true;
         }
         return false;
@@ -453,15 +492,18 @@ public final class AwfWorld {
     private AwfStore.CommitResult commitInOrder(final PersistenceMode mode, final int maxAttempts,
                                                 final AwfShutdownBudget budget) {
         final long prepared = System.nanoTime();
-        final Map<ChunkKey, Long> taken = new HashMap<>(this.dirty);
+        final Map<ChunkKey, Entry> taken = new HashMap<>();
         final Map<ChunkKey, byte[]> changed = new HashMap<>();
         final Set<ChunkKey> deleted = new java.util.HashSet<>();
-        for (final Map.Entry<ChunkKey, Long> entry : taken.entrySet()) {
-            final byte[] bytes = this.owned.get(entry.getKey());
-            // A chunk dirtied after the snapshot of versions may carry newer bytes than its
-            // version says; that is harmless: its newer version keeps it dirty for the next save.
-            if (bytes == DELETED) deleted.add(entry.getKey());
-            else if (bytes != null) changed.put(entry.getKey(), bytes);
+        for (final ChunkKey key : this.dirty) {
+            // Whole entries, so the bytes are the ones of the version taken. A key whose write is
+            // still being installed can show its previous (clean or absent) entry here: it stays
+            // dirty and the next commit takes it.
+            final Entry entry = this.owned.get(key);
+            if (entry == null || !entry.dirty()) continue;
+            taken.put(key, entry);
+            if (entry.bytes() == DELETED) deleted.add(key);
+            else changed.put(key, entry.bytes());
         }
         this.metrics.serialization.record(System.nanoTime() - prepared);
         if (mode == PersistenceMode.INCREMENTAL && changed.isEmpty() && deleted.isEmpty()) {
@@ -469,7 +511,6 @@ public final class AwfWorld {
             // pending-save check) must not cost the store an empty generation or a backend round
             // trip. FULL and CHECKPOINT rewrite or verify what the store already holds, so they
             // still run. Generation -1: no store generation was produced.
-            taken.forEach(this.dirty::remove);
             return new AwfStore.CommitResult(-1L, 0, 0, 0L, 0);
         }
         for (int attempt = 1; ; attempt++) {
@@ -484,8 +525,7 @@ public final class AwfWorld {
                 final AwfStore.CommitResult r = this.store.commit(changed, Set.of(), deleted, mode);
                 this.metrics.backend.record(System.nanoTime() - begun);
                 this.metrics.bytesWritten.addAndGet(r.bytesWritten());
-                // Only entries whose version is unchanged: a chunk rewritten meanwhile stays dirty.
-                taken.forEach(this.dirty::remove);
+                markCommitted(taken, prepared);
                 this.uncertainChunks = 0;
                 evictCleanBeyondLimit();
                 return r;
@@ -509,21 +549,39 @@ public final class AwfWorld {
     }
 
     /**
+     * After a successful commit: marks clean exactly the entries it carried. An entry replaced
+     * since the snapshot (the chunk was written or deleted again) is not the one committed and
+     * stays dirty; its unsaved write happened after the snapshot began, so its dirty time moves up
+     * to {@code prepared} rather than keeping the time of bytes that are now committed.
+     */
+    private void markCommitted(final Map<ChunkKey, Entry> taken, final long prepared) {
+        for (final Map.Entry<ChunkKey, Entry> committed : taken.entrySet()) {
+            this.owned.computeIfPresent(committed.getKey(), (key, now) -> {
+                if (now == committed.getValue()) {
+                    this.dirty.remove(key);
+                    return now.clean();
+                }
+                return now.dirty() && now.dirtySince() - prepared < 0 ? now.since(prepared) : now;
+            });
+        }
+    }
+
+    /**
      * Drops clean world-owned chunks, least recently used first, until at most
      * {@code residentLimit} remain. Runs on the storage lane after a successful commit.
      */
     private void evictCleanBeyondLimit() {
         if (this.residentLimit == 0 || this.owned.size() <= this.residentLimit) return;
-        final java.util.List<Map.Entry<ChunkKey, byte[]>> clean = new java.util.ArrayList<>();
-        for (final Map.Entry<ChunkKey, byte[]> e : this.owned.entrySet()) {
-            if (!this.dirty.containsKey(e.getKey())) clean.add(Map.entry(e.getKey(), e.getValue()));
+        final java.util.List<Map.Entry<ChunkKey, Entry>> clean = new java.util.ArrayList<>();
+        for (final Map.Entry<ChunkKey, Entry> e : this.owned.entrySet()) {
+            if (!e.getValue().dirty()) clean.add(Map.entry(e.getKey(), e.getValue()));
         }
         clean.sort(java.util.Comparator.comparingLong(e -> this.lastAccess.getOrDefault(e.getKey(), 0L)));
-        for (final Map.Entry<ChunkKey, byte[]> e : clean) {
+        for (final Map.Entry<ChunkKey, Entry> e : clean) {
             if (this.owned.size() <= this.residentLimit) break;
-            // Only the exact bytes observed as clean: a write since then replaced the array and
-            // re-dirtied the chunk, and must stay.
-            if (!this.dirty.containsKey(e.getKey()) && this.owned.remove(e.getKey(), e.getValue())) {
+            // Only the exact clean entry observed: a write since then replaced it with a dirty
+            // entry, which must stay.
+            if (this.owned.remove(e.getKey(), e.getValue())) {
                 this.lastAccess.remove(e.getKey());
                 this.evicted.incrementAndGet();
             }
@@ -535,10 +593,25 @@ public final class AwfWorld {
         return this.evicted.get();
     }
 
+    /**
+     * Milliseconds since the oldest unsaved chunk became dirty, 0 when none is: how much work a
+     * crash now would lose, in time. A chunk rewritten while a commit carried its previous bytes
+     * counts from that commit's snapshot. Walks the dirty entries only.
+     */
+    long oldestDirtyMillis() {
+        final long now = System.nanoTime();
+        long oldest = 0L;
+        for (final ChunkKey key : this.dirty) {
+            final Entry entry = this.owned.get(key);
+            if (entry != null && entry.dirty()) oldest = Math.max(oldest, now - entry.dirtySince());
+        }
+        return oldest / 1_000_000L;
+    }
+
     public AwfMetrics.Snapshot metrics() {
         final Long oldest = this.pendingSaves.peek();
         return new AwfMetrics.Snapshot(this.owned.size(), this.dirty.size(), this.pendingSaves.size(),
-            oldest == null ? 0L : (System.nanoTime() - oldest) / 1_000_000L,
+            oldest == null ? 0L : (System.nanoTime() - oldest) / 1_000_000L, oldestDirtyMillis(),
             this.metrics.serialization.percentiles(), this.metrics.backend.percentiles(),
             this.metrics.retries.get(), this.metrics.failures.get(), this.metrics.bytesRead.get(),
             this.metrics.bytesWritten.get(), this.metrics.materialized.get());

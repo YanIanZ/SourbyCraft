@@ -70,7 +70,7 @@ public class VerCommand extends Command {
         }
 
         s.sendMessage(UiPanel.header("Version"));
-        s.sendMessage(UiPanel.row("Release", brand.releaseIdentity()));
+        s.sendMessage(UiPanel.row("Release", brand.releaseIdentity(), SourbyCraftColors.releaseStage(brand)));
         s.sendMessage(UiPanel.row("Built (Asia/Jakarta)", buildDate.isEmpty() ? "unavailable" : buildDate));
         s.sendMessage(line("Minecraft", bi.minecraftVersionId() + "  (" + bi.minecraftVersionName() + ")"));
         // Transition §14 names the build identity an operator should be able to read back:

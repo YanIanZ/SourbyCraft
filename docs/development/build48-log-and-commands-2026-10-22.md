@@ -3,6 +3,14 @@
 Status: **evidence, local agent test server only.** Not CI, not the tag commit, no real client.
 Worker: `opus-gate48-log`, worktree `sc-worktrees/opus-gate48-log` (base `6176d517`, uncommitted, not applied to the main tree).
 
+**Status 2026-10-25 (PR #62):** the gate 1 change landed: MC feature 0075 and `RegionSchedulerLogWordingTest` were
+committed in `f694b18` (2026-10-22) and are in every release tag from `v26.2-r48` on. Of the leftovers listed for the
+owner: the thread-ledger line no longer names Folia since PR #62 (`e7c8c57`, `execution/ThreadLedger.java`: "async
+scheduler (threaded-regions API)"; code written and statically reviewed; not built; not tested by the owner), and the
+engine files are `config/aurora-server.yml` / `aurora-worlds.yml` since Build 49 (the `canvas-*.yml` files are
+migrated once at boot). The `Folia Region Scheduler Thread #n` thread names are unchanged (PM-270, needs a
+materialized patch). The evidence below is unchanged.
+
 Gates (`docs/releases/26.2-build-48.md`, `ROADMAP-47-50.md` Build 48):
 
 - Gate 1 "Startup log boot→`Done` clean": no raw ANSI in non-terminal logs, no `dev.iyanz.*`/`io.canvasmc.*` logger names, repeated lines collapsed. CI run 39687296516 was clean on these except the scope item task_d2d28a6f780c9b3d: `Initialised EDF Folia scheduler ...`.

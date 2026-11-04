@@ -63,9 +63,13 @@ import org.slf4j.Logger;
  * <p><b>0068</b> — wandering trader countdown, delay and chance are global-owned and saved
  * with the per-world contained types. No region callback mutates this saved data.</p>
  *
- * <p>Region-owned {@link SavedData} (raids, the dragon fight, forceload tickets, the
- * never-ticked scheduled events, the plugin world PDC) must never be listed here; see
- * {@code docs/architecture/persistence-save-paths.md} for who saves what and when.</p>
+ * <p>Region-owned {@link SavedData} (raids, the dragon fight, forceload tickets, the plugin world
+ * PDC) must never be listed here; see {@code docs/architecture/persistence-save-paths.md} for who
+ * saves what and when (forceload tickets are saved periodically from their own detached snapshot,
+ * feature patch 0067). The {@code /schedule} queue ({@code ServerLevel.scheduledEvents}) has been
+ * global-owned since feature patch 0065 (ticked and mutated only on the global tick), but is still
+ * saved only at a clean stop: it is not listed here until its class is confirmed to be a
+ * {@link SavedData} held in the world's data storage.</p>
  */
 public final class WorldMetadataAutosave {
 

@@ -1,8 +1,11 @@
 package dev.iyanz.sourbycraft.command;
 
 import dev.iyanz.sourbycraft.SourbyCraftColors;
+import dev.iyanz.sourbycraft.execution.region.RegionOwnership;
 import dev.iyanz.sourbycraft.maxplayers.MaxPlayersConfig;
 import dev.iyanz.sourbycraft.util.BarUtil;
+import dev.iyanz.sourbycraft.util.VirtualExecutor;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.bukkit.Bukkit;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
@@ -16,10 +19,17 @@ import static net.kyori.adventure.text.Component.text;
  * divider/header style as the rest of the SourbyCraft command suite. With a
  * positive integer argument it {@link org.bukkit.Server#setMaxPlayers(int) sets
  * the live cap} AND persists the value into the unified SourbyCraft config
- * ({@code sourbycraft.max-players} in
+ * ({@code players.max-players} in
  * {@code sourbycraft_config/sourbycraft_global_config.yml}) so it survives a
  * restart — {@link MaxPlayersConfig#applyAtBoot()} re-applies the persisted
  * value at every boot so it wins over {@code server.properties}.
+ *
+ * <p>The config write is blocking file I/O. Run on a region or the global tick
+ * thread (a player, command block or the console), it goes to the shared I/O
+ * executor and the result is reported through {@link SourbyReply}; on any other
+ * thread it runs inline. Whichever write runs last persists the newest count
+ * any {@code /maxp} asked for (the live one), so when that write succeeds the
+ * file does not end behind the live value; a failed write is reported.
  *
  * <p>Console-runnable (extends {@link Command}, no {@code Player} assumption).
  * Registered with the {@code "sourbycraft"} fallback prefix so it is reachable
@@ -33,6 +43,13 @@ public class MaxpCommand extends Command {
     // hundreds of thousands is nonsensical and almost certainly a typo. Cap at
     // 100k so a fat-fingered value can't set an absurd server list count.
     private static final int MAX_ALLOWED = 100_000;
+
+    /** The newest count a {@code /maxp} asked for; written by whichever persist runs last. */
+    private static final AtomicInteger REQUESTED = new AtomicInteger();
+    /** Sets the live count and {@link #REQUESTED} together, so the newest requested count is the live one. */
+    private static final Object LIVE_LOCK = new Object();
+    /** Orders persists, so a write of an older count can never land after a newer one. */
+    private static final Object PERSIST_LOCK = new Object();
 
     public MaxpCommand(String name) {
         super(name);
@@ -75,26 +92,49 @@ public class MaxpCommand extends Command {
             return true;
         }
 
-        int previous = Bukkit.getServer().getMaxPlayers();
-        // 1) live change
-        Bukkit.getServer().setMaxPlayers(n);
-        // 2) persist to the unified SourbyCraft config so it survives restart.
-        boolean persisted = MaxPlayersConfig.persist(n);
+        final int previous;
+        // 1) live change (in memory, no I/O), recorded as the count the next persist writes
+        synchronized (LIVE_LOCK) {
+            previous = Bukkit.getServer().getMaxPlayers();
+            Bukkit.getServer().setMaxPlayers(n);
+            REQUESTED.set(n);
+        }
+        // 2) persist to the unified SourbyCraft config so it survives restart; never file I/O on a tick thread.
+        if (RegionOwnership.current().isTickThread()) {
+            VirtualExecutor.supply(MaxpCommand::persistNewest)
+                .exceptionally(failure -> 0)
+                .thenAccept(persisted -> SourbyReply.run(s, () -> report(s, previous, n, persisted)));
+        } else {
+            report(s, previous, n, persistNewest());
+        }
+        return true;
+    }
 
+    /** Persists the newest requested count; returns it, or 0 when it could not be written. */
+    private static int persistNewest() {
+        synchronized (PERSIST_LOCK) {
+            final int newest = REQUESTED.get();
+            return MaxPlayersConfig.persist(newest) ? newest : 0;
+        }
+    }
+
+    private static void report(final CommandSender s, final int previous, final int n, final int persisted) {
         s.sendMessage(UiPanel.header("Player slots"));
         s.sendMessage(text()
             .append(text(BarUtil.FILLED + " ", SourbyCraftColors.PRIMARY))
             .append(text("Max players ", SourbyCraftColors.HEADER))
             .append(text(previous + " -> " + n, SourbyCraftColors.VALUE))
             .build());
-        if (persisted) {
+        if (persisted == n) {
             s.sendMessage(text("  persisted (" + MaxPlayersConfig.KEY + ") — survives restart", SourbyCraftColors.SUCCESS));
+        } else if (persisted > 0) {
+            s.sendMessage(text("  persisted (" + MaxPlayersConfig.KEY + ") as " + persisted
+                + ", the count of a newer /maxp — survives restart", SourbyCraftColors.SUCCESS));
         } else {
             s.sendMessage(text("  applied live, but could NOT persist (config unavailable) — will reset on restart",
                 SourbyCraftColors.WARNING));
         }
         s.sendMessage(UiPanel.footer());
-        return true;
     }
 
     private static void showCurrent(CommandSender s) {

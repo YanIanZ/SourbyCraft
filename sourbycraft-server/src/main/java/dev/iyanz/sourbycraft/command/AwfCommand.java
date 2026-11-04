@@ -48,11 +48,23 @@ import static net.kyori.adventure.text.Component.text;
  * <p>File arguments are names inside {@code awf/imports} (read) and {@code awf/exports} (written)
  * under the server directory, see {@link AuroraWorldFiles#confine}: an operator with the command
  * permission can move worlds, not read or write arbitrary files on the host.</p>
+ *
+ * <p>Permissions: {@code sourbycraft.command.awf} for the command. Delete, import, export, convert,
+ * clone, set, template delete and unload nosave also check {@code sourbycraft.command.awf.admin},
+ * which the command node implies unless that node is explicitly set (see {@link #admin}).
+ * {@code multiprofile} and {@code redis} have their own nodes; {@code multiprofile coop} changes (Build 52, see
+ * {@link CoopCommand#admin}) also check {@code sourbycraft.command.awf.admin}. Once shutdown has begun (or startup
+ * failed, see {@link dev.iyanz.sourbycraft.core.AuroraRuntime#stopping()}) the command starts no new
+ * work.</p>
  */
 public class AwfCommand extends Command {
 
     private static final List<String> SUBCOMMANDS =
-        List.of("list", "info", "create", "load", "save", "unload", "delete", "autoload", "template", "import", "export", "convert", "clone", "set", "compact");
+        List.of("list", "info", "create", "load", "save", "unload", "delete", "autoload", "template", "import", "export",
+            "convert", "clone", "set", "compact", "multiprofile", "redis");
+
+    /** Destructive and host-file subcommands, see {@link #admin(CommandSender)}. */
+    private static final String ADMIN_PERMISSION = "sourbycraft.command.awf.admin";
 
     private final Supplier<AuroraWorldsService> service;
     private final BiConsumer<CommandSender, Runnable> reply;
@@ -73,7 +85,8 @@ public class AwfCommand extends Command {
                final java.util.function.Function<String, CompletableFuture<List<dev.iyanz.sourbycraft.awf.AwfEngine.CompactionReport>>> compactor) {
         super(name);
         this.description = "Manage Aurora World Fabric worlds";
-        this.usageMessage = "/awf <list|info|create|load|save|unload|delete|autoload|template|import|export|convert|compact>";
+        this.usageMessage = "/awf <list|info|create|load|save|unload|delete|autoload|template|import|export|convert"
+            + "|compact|multiprofile|redis>";
         this.setPermission("sourbycraft.command.awf");
         this.service = service;
         this.reply = reply;
@@ -83,6 +96,24 @@ public class AwfCommand extends Command {
     @Override
     public boolean execute(final CommandSender s, final String alias, final String[] args) {
         if (!testPermission(s)) return true;
+        if (dev.iyanz.sourbycraft.core.AuroraRuntime.stopping()) {
+            // Work already started still drains (the shutdown saves the worlds); nothing new starts.
+            s.sendMessage(text("The server is stopping or failed to start; /awf starts no new work",
+                SourbyCraftColors.DANGER));
+            return true;
+        }
+        if (args.length > 0) {
+            final String early = args[0].toLowerCase(Locale.ROOT);
+            // These do not need the world service: the fabric can be diagnosed even if AWF worlds failed.
+            if (early.equals("multiprofile")) {
+                multiprofile(s, args);
+                return true;
+            }
+            if (early.equals("redis")) {
+                redis(s, args);
+                return true;
+            }
+        }
         final AuroraWorldsService worlds = this.service.get();
         if (worlds == null) {
             s.sendMessage(text("Aurora World Fabric worlds are not available on this server", SourbyCraftColors.DANGER));
@@ -93,6 +124,11 @@ public class AwfCommand extends Command {
             return true;
         }
         final String sub = args[0].toLowerCase(Locale.ROOT);
+        if (adminSubcommand(sub, args) && !admin(s)) {
+            s.sendMessage(text("Refused: " + ADMIN_PERMISSION + " is denied to you; delete, import, export, convert, clone,"
+                + " set, template delete and unload nosave need it", SourbyCraftColors.DANGER));
+            return true;
+        }
         if (sub.equals("list")) {
             list(s, worlds);
             return true;
@@ -144,7 +180,11 @@ public class AwfCommand extends Command {
                 worlds.unload(name, save).whenComplete((result, failed) -> this.reply.accept(s, () -> {
                     if (failed != null) fail(s, failed);
                     else if (result == dev.iyanz.sourbycraft.api.world.UnloadResult.SUCCESS) ok(s, "Unloaded " + name);
-                    else s.sendMessage(text("Could not unload " + name + ": " + result, SourbyCraftColors.DANGER));
+                    // The engine closes the storages after removing the world; a failed final commit there is FAILED.
+                    else if (result == dev.iyanz.sourbycraft.api.world.UnloadResult.FAILED && !worlds.isLoaded(name)) {
+                        s.sendMessage(text("Unloaded " + name + ", but AWF could not confirm its last commit (see the"
+                            + " server log)", SourbyCraftColors.WARNING));
+                    } else s.sendMessage(text("Could not unload " + name + ": " + result, SourbyCraftColors.DANGER));
                 }));
             }
             case "delete" -> {
@@ -180,6 +220,32 @@ public class AwfCommand extends Command {
             default -> usage(s);
         }
         return true;
+    }
+
+    /**
+     * Whether {@code args} name a destructive or host-file subcommand: delete, import, export,
+     * convert, clone, set, template delete, or unload without saving.
+     */
+    private static boolean adminSubcommand(final String sub, final String[] args) {
+        return switch (sub) {
+            case "delete", "import", "export", "convert", "clone", "set" -> true;
+            case "template" -> args.length > 1 && args[1].equalsIgnoreCase("delete");
+            case "unload" -> args.length > 2 && args[2].equalsIgnoreCase("nosave");
+            default -> false;
+        };
+    }
+
+    /**
+     * Whether the sender may run an {@link #adminSubcommand}. The command node
+     * {@code sourbycraft.command.awf} (op-only unless granted) still gates all of {@code /awf} and
+     * implies {@link #ADMIN_PERMISSION}: only a value set on the sender for that node (by a
+     * permissions plugin, or as a child of a {@code permissions.yml} node the sender has) decides
+     * otherwise; a {@code default:} alone in {@code permissions.yml} cannot take it away.
+     * Setting it to false lets a role list, inspect, load and save worlds without deleting them or
+     * reading and writing host files.
+     */
+    private static boolean admin(final CommandSender s) {
+        return !s.isPermissionSet(ADMIN_PERMISSION) || s.hasPermission(ADMIN_PERMISSION);
     }
 
     private static String orDefault(final Object value) {
@@ -489,6 +555,725 @@ public class AwfCommand extends Command {
                 s.sendMessage(text("Not every store of " + target + " is a full index; do not downgrade yet", SourbyCraftColors.DANGER));
             }
         }));
+    }
+
+
+    // ------------------------------------------------------------------ AWF MultiProfile
+
+    private void multiprofile(final CommandSender s, final String[] args) {
+        final dev.iyanz.sourbycraft.awf.multiprofile.ProfileEngine engine =
+            dev.iyanz.sourbycraft.awf.multiprofile.ProfileRuntime.engineOrNull();
+        if (engine == null) {
+            s.sendMessage(text("AWF MultiProfile is unavailable; check aurora.awf.multiprofile.enabled and startup errors",
+                SourbyCraftColors.DANGER));
+            return;
+        }
+        if (!s.hasPermission("sourbycraft.command.awf.multiprofile")) {
+            s.sendMessage(text("You do not have sourbycraft.command.awf.multiprofile", SourbyCraftColors.DANGER));
+            return;
+        }
+        final String action = args.length > 1 ? args[1].toLowerCase(Locale.ROOT) : "status";
+        switch (action) {
+            case "coop" -> CoopCommand.admin(s, engine, args, this.reply, admin(s));
+            case "status" -> {
+                final dev.iyanz.sourbycraft.awf.multiprofile.ProfileSettings settings = engine.settings();
+                s.sendMessage(UiPanel.header("AWF MultiProfile"));
+                s.sendMessage(UiPanel.row("mode", settings.mode().name().toLowerCase(Locale.ROOT)
+                    + ", node " + engine.nodeId()));
+                s.sendMessage(UiPanel.row("ownership", engine.ownership().describe()));
+                // The repository reports what it found at startup and its counters; no I/O on this thread.
+                s.sendMessage(UiPanel.row("repository", engine.repository().describe()));
+                final var store = engine.storeStatus();
+                s.sendMessage(UiPanel.row("store format", store == null ? "not checked"
+                    : store.gate().name().toLowerCase(Locale.ROOT).replace('_', ' ') + " ("
+                        + dev.iyanz.sourbycraft.awf.multiprofile.ProfileEngine.describe(store.marker()) + ")"
+                        + (store.unresolvedIntents().isEmpty() ? "" : ", " + store.unresolvedIntents().size()
+                            + " intent(s) pending")));
+                s.sendMessage(UiPanel.row("switching", settings.switching().enabled()
+                    ? settings.switching().timeoutMillis() + " ms budget" + (settings.switching().cooldownSeconds() == 0 ? ", no cooldown"
+                        : ", cooldown " + settings.switching().cooldownSeconds() + " s") + ", " + engine.switchGuards().guardCount() + " guard(s)"
+                    : "disabled"));
+                s.sendMessage(UiPanel.row("audit", engine.audit() == null ? "off" : "on, " + engine.audit().recorded() + " recorded, "
+                    + engine.audit().dropped() + " dropped, files under " + engine.audit().directory()));
+                s.sendMessage(UiPanel.row("I/O queue", settings.io().partitions() + " partition(s); /perf multiprofile for wait percentiles"));
+                s.sendMessage(UiPanel.row("isolation", isolationSummary(settings.isolation())));
+                s.sendMessage(UiPanel.row("worlds", "idle unload " + (settings.worlds().idleUnloadSeconds() == 0
+                    ? "off" : settings.worlds().idleUnloadSeconds() + " s")));
+                final var sweep = engine.lastIdleSweep();
+                s.sendMessage(UiPanel.row("last idle sweep", sweep == null ? "no idle world found yet"
+                    : sweep.unloaded() + " unloaded, " + sweep.failed() + " failed, "
+                        + Math.max(0L, (System.currentTimeMillis() - sweep.finishedAtMillis()) / 1000L) + " s ago"));
+                engine.journalStatus().whenComplete((journals, failed) -> this.reply.accept(s, () -> {
+                    if (failed != null) {
+                        fail(s, failed);
+                        return;
+                    }
+                    final var pending = journals.pending();
+                    s.sendMessage(UiPanel.row("pending transitions", Integer.toString(pending.size())
+                        + (pending.isEmpty() ? "" : " (run /awf multiprofile recover <id>)")));
+                    for (final dev.iyanz.sourbycraft.awf.multiprofile.ProfileTransition transition : pending) {
+                        s.sendMessage(text("  " + transition.transitionId() + "  " + transition.phase()
+                            + "  player " + transition.playerId() + "  -> " + transition.toProfile()
+                            + (transition.failure() == null ? "" : "  (" + transition.failure() + ")"),
+                            SourbyCraftColors.WARNING));
+                    }
+                    final var failedJournals = journals.failed();
+                    s.sendMessage(UiPanel.row("failed journals", Integer.toString(failedJournals.size())
+                        + (failedJournals.isEmpty() ? "" : " (records; recover <id> removes one)")));
+                    for (final dev.iyanz.sourbycraft.awf.multiprofile.ProfileTransition transition
+                            : failedJournals.subList(Math.max(0, failedJournals.size() - 5), failedJournals.size())) {
+                        s.sendMessage(text("  " + transition.transitionId() + "  player " + transition.playerId()
+                            + "  " + transition.failure(), SourbyCraftColors.DIM));
+                    }
+                    final var quarantined = journals.quarantined();
+                    if (!quarantined.isEmpty()) {
+                        s.sendMessage(UiPanel.row("unreadable journals", quarantined.size()
+                            + " set aside in the transitions directory; inspect and delete them"));
+                        for (final String file : quarantined) s.sendMessage(text("  " + file, SourbyCraftColors.DANGER));
+                    }
+                }));
+            }
+            case "list" -> {
+                final java.util.UUID player = playerId(s, args);
+                if (player == null) return;
+                engine.listDetails(player).whenComplete((profiles, failed) -> this.reply.accept(s, () -> {
+                    if (failed != null) {
+                        profileFail(s, failed);
+                        return;
+                    }
+                    s.sendMessage(UiPanel.header("Profiles of " + player));
+                    if (profiles.isEmpty()) s.sendMessage(UiPanel.row("(none)", "no profiles"));
+                    for (final var details : profiles) {
+                        final var profile = details.info();
+                        s.sendMessage(UiPanel.row(profile.id().toString(), details.name() + " ("
+                            + details.profileType().id() + "), " + profile.type() + ", revision " + profile.revision()
+                            + ", " + profile.status()
+                                + (profile.active() ? ", ACTIVE" : "")
+                                + (profile.worlds().isEmpty() ? "" : ", worlds " + String.join(",", profile.worlds()))));
+                    }
+                }));
+            }
+            case "create" -> {
+                if (!s.hasPermission("sourbycraft.command.awf.multiprofile.admin")) {
+                    s.sendMessage(text("You do not have sourbycraft.command.awf.multiprofile.admin",
+                        SourbyCraftColors.DANGER));
+                    return;
+                }
+                final java.util.UUID player = playerId(s, args);
+                if (player == null) return;
+                // create <player> [namespace] [type=<classic|ironman|stranded|bingo>] [name=<pool name...>]
+                String namespace = "default";
+                dev.iyanz.sourbycraft.api.profile.ProfileType policy = null;
+                String name = null;
+                for (int i = 3; i < args.length; i++) {
+                    final String token = args[i];
+                    final String lower = token.toLowerCase(Locale.ROOT);
+                    if (lower.startsWith("type=")) {
+                        final var parsed = dev.iyanz.sourbycraft.api.profile.ProfileType.fromId(lower.substring(5));
+                        if (parsed.isEmpty()) {
+                            s.sendMessage(text("Unknown profile type '" + token.substring(5)
+                                + "'; use classic, ironman, stranded or bingo", SourbyCraftColors.DANGER));
+                            return;
+                        }
+                        policy = parsed.get();
+                    } else if (lower.startsWith("name=")) {
+                        // A name may contain a space ("Apple 2"): name= takes the rest of the arguments.
+                        name = String.join(" ", java.util.Arrays.copyOfRange(args, i, args.length)).substring(5).strip();
+                        break;
+                    } else if (i == 3) {
+                        namespace = lower;
+                    } else {
+                        s.sendMessage(text("Usage: /awf multiprofile create <player> [namespace] [type=<classic|ironman|"
+                            + "stranded|bingo>] [name=<name>]", SourbyCraftColors.WARNING));
+                        return;
+                    }
+                }
+                final var request = new dev.iyanz.sourbycraft.api.profile.ProfileRequest(player, namespace,
+                    java.util.Map.of(), policy, name == null || name.isEmpty() ? null : name);
+                engine.createDetailed(request)
+                    .whenComplete((created, failed) -> this.reply.accept(s, () -> {
+                        if (failed != null) {
+                            profileFail(s, failed);
+                            return;
+                        }
+                        s.sendMessage(text("Created profile " + created.name() + " " + created.id() + " (type "
+                            + created.profileType().id() + ", namespace " + created.info().type() + ")",
+                            SourbyCraftColors.SUCCESS));
+                    }));
+            }
+            case "switch" -> {
+                if (!s.hasPermission("sourbycraft.command.awf.multiprofile.admin")) {
+                    s.sendMessage(text("You do not have sourbycraft.command.awf.multiprofile.admin",
+                        SourbyCraftColors.DANGER));
+                    return;
+                }
+                final java.util.UUID player = playerId(s, args);
+                if (player == null) return;
+                if (args.length < 4) {
+                    s.sendMessage(text("Usage: /awf multiprofile switch <player> <profile-uuid>",
+                        SourbyCraftColors.WARNING));
+                    return;
+                }
+                final java.util.UUID profile;
+                try {
+                    profile = java.util.UUID.fromString(args[3]);
+                } catch (final IllegalArgumentException notUuid) {
+                    s.sendMessage(text("Not a profile uuid: " + args[3], SourbyCraftColors.DANGER));
+                    return;
+                }
+                s.sendMessage(text("Switching...", SourbyCraftColors.DIM));
+                engine.switchProfile(player, profile).whenComplete((result, failed) -> this.reply.accept(s, () -> {
+                    if (failed != null) {
+                        fail(s, failed);
+                        return;
+                    }
+                    final String detail = (result.success() ? "Switched" : "Refused: " + result.errorCode())
+                        + " — " + result.message() + " (" + result.durationMillis() + " ms"
+                        + (result.transitionId() == null ? "" : ", transition " + result.transitionId()) + ")";
+                    s.sendMessage(text(detail, result.success() ? SourbyCraftColors.SUCCESS : SourbyCraftColors.WARNING));
+                }));
+            }
+            case "inspect", "info" -> {
+                final java.util.UUID profile = profileId(s, args);
+                if (profile == null) return;
+                engine.getDetails(profile).whenComplete((found, failed) -> this.reply.accept(s, () -> {
+                    if (failed != null) {
+                        profileFail(s, failed);
+                        return;
+                    }
+                    if (found.isEmpty()) {
+                        s.sendMessage(text("No profile " + profile, SourbyCraftColors.DANGER));
+                        return;
+                    }
+                    final var info = found.get().info();
+                    s.sendMessage(UiPanel.header("Profile " + info.id()));
+                    s.sendMessage(UiPanel.row("name", found.get().name()));
+                    s.sendMessage(UiPanel.row("profile type", found.get().profileType().id()));
+                    s.sendMessage(UiPanel.row("account", info.accountId().toString()));
+                    s.sendMessage(UiPanel.row("namespace", info.type()));
+                    s.sendMessage(UiPanel.row("revision", Long.toString(info.revision()) + ", " + info.status()
+                        + (info.active() ? ", active" : "")));
+                    s.sendMessage(UiPanel.row("worlds", info.worlds().isEmpty() ? "none"
+                        : String.join(",", info.worlds())));
+                    s.sendMessage(UiPanel.row("metadata", info.metadata().toString()));
+                }));
+            }
+            case "bind", "unbind" -> {
+                if (!s.hasPermission("sourbycraft.command.awf.multiprofile.admin")) {
+                    s.sendMessage(text("You do not have sourbycraft.command.awf.multiprofile.admin", SourbyCraftColors.DANGER));
+                    return;
+                }
+                final java.util.UUID profile = profileId(s, args);
+                if (profile == null) return;
+                if (action.equals("bind") && (args.length < 4 || args.length > 5)) {
+                    s.sendMessage(text("Usage: /awf multiprofile bind <profile-uuid> <world> [template]"
+                        + " (replaces the entire binding with one PRIMARY world)", SourbyCraftColors.WARNING));
+                    return;
+                }
+                try {
+                    final var request = new dev.iyanz.sourbycraft.api.profile.ProfileWorldBindingRequest(profile,
+                        action.equals("unbind") ? java.util.Map.of() : java.util.Map.of(args[3].toLowerCase(Locale.ROOT),
+                            dev.iyanz.sourbycraft.api.profile.ProfileWorldRole.PRIMARY),
+                        action.equals("bind") && args.length == 5 ? args[4].toLowerCase(Locale.ROOT) : null);
+                    engine.bindWorlds(request).whenComplete((ignored, failed) -> this.reply.accept(s, () -> {
+                        if (failed != null) { fail(s, failed); return; }
+                        s.sendMessage(text("Replaced world binding of " + profile
+                            + "; existing worlds were not deleted", SourbyCraftColors.SUCCESS));
+                    }));
+                } catch (final IllegalArgumentException invalid) {
+                    s.sendMessage(text(invalid.getMessage(), SourbyCraftColors.DANGER));
+                }
+            }
+            case "recover" -> {
+                if (!s.hasPermission("sourbycraft.command.awf.multiprofile.admin")) {
+                    s.sendMessage(text("You do not have sourbycraft.command.awf.multiprofile.admin",
+                        SourbyCraftColors.DANGER));
+                    return;
+                }
+                final java.util.UUID transition = uuidArg(s, args, "transition uuid");
+                if (transition == null) return;
+                s.sendMessage(text("Recovering...", SourbyCraftColors.DIM));
+                engine.recover(transition).whenComplete((result, failed) -> this.reply.accept(s, () -> {
+                    if (failed != null) {
+                        fail(s, failed);
+                        return;
+                    }
+                    s.sendMessage(text((result.success() ? "Recovered: " : "Recovery result: ") + result.errorCode()
+                            + " — " + result.message(),
+                        result.success() ? SourbyCraftColors.SUCCESS : SourbyCraftColors.WARNING));
+                }));
+            }
+            case "session" -> {
+                // Build 53 operator escape from a fail-closed login or a refused-save freeze (authoritative login).
+                if (!s.hasPermission("sourbycraft.command.awf.multiprofile.admin")) {
+                    s.sendMessage(text("You do not have sourbycraft.command.awf.multiprofile.admin",
+                        SourbyCraftColors.DANGER));
+                    return;
+                }
+                final java.util.UUID player = playerId(s, args);
+                if (player == null) return;
+                final String what = args.length > 3 ? args[3].toLowerCase(Locale.ROOT) : "";
+                switch (what) {
+                    case "reset-marker" -> engine.resetSessionMarker(player).whenComplete((result, failed) -> this.reply.accept(s, () -> {
+                        if (failed != null) {
+                            fail(s, failed);
+                            return;
+                        }
+                        s.sendMessage(text(result, SourbyCraftColors.SUCCESS));
+                    }));
+                    case "clear-refusal" -> s.sendMessage(text(engine.clearSaveRefusal(player)
+                        ? "Lifted the refused-save freeze of " + player + "; their next save is attempted again"
+                        : "No refused-save freeze is set for " + player + " (a new session clears it on its own)",
+                        SourbyCraftColors.SUCCESS));
+                    default -> s.sendMessage(text("Usage: /awf multiprofile session <player> <reset-marker|clear-refusal>: reset-marker"
+                        + " makes the next login restore the committed head (no vanilla playerdata adoption); clear-refusal lifts the"
+                        + " freeze of a save that was refused in the current session", SourbyCraftColors.WARNING));
+                }
+            }
+            case "archive", "unarchive" -> {
+                // Build 55: read-only archive (a seasonal profile at its event's end, or any inactive profile); data kept.
+                if (!s.hasPermission("sourbycraft.command.awf.multiprofile.admin")) {
+                    s.sendMessage(text("You do not have sourbycraft.command.awf.multiprofile.admin",
+                        SourbyCraftColors.DANGER));
+                    return;
+                }
+                final java.util.UUID profile = profileId(s, args);
+                if (profile == null) return;
+                final boolean archive = action.equals("archive");
+                engine.setArchived(profile, archive).whenComplete((ignored, failed) -> this.reply.accept(s, () -> {
+                    if (failed != null) {
+                        profileFail(s, failed);
+                        return;
+                    }
+                    s.sendMessage(text((archive ? "Archived " : "Unarchived ") + profile + (archive
+                        ? "; it is read-only: listed and readable, not switchable into, joinable or changeable until unarchived"
+                        : "; it is ACTIVE again"), SourbyCraftColors.SUCCESS));
+                }));
+            }
+            case "audit" -> {
+                // Build 55: the node-local audit entries about a profile (newest first), from memory; the files hold the rest.
+                final java.util.UUID profile = profileId(s, args);
+                if (profile == null) return;
+                final String cursor = args.length > 3 ? args[3] : null;
+                engine.auditPage(profile, cursor).whenComplete((page, failed) -> this.reply.accept(s, () -> {
+                    if (failed != null) {
+                        profileFail(s, failed);
+                        return;
+                    }
+                    s.sendMessage(UiPanel.header("Audit of " + profile + " (this node, in memory)"));
+                    if (page.items().isEmpty()) {
+                        s.sendMessage(text("  no entry since this node started" + (engine.audit() == null ? ""
+                            : "; the retained log is under " + engine.audit().directory()), SourbyCraftColors.DIM));
+                    }
+                    for (final dev.iyanz.sourbycraft.api.profile.ProfileAuditEntry entry : page.items()) {
+                        s.sendMessage(text("  #" + entry.sequence() + "  " + java.time.Instant.ofEpochMilli(entry.atMillis()) + "  "
+                            + entry.kind() + (entry.success() ? "" : " " + entry.errorCode()) + "  actor "
+                            + (entry.actorId() == null ? "-" : entry.actorId()) + (entry.operationId() == null ? "" : "  op " + entry.operationId())
+                            + (entry.detail().isEmpty() ? "" : "  " + entry.detail()),
+                            entry.success() ? SourbyCraftColors.DIM : SourbyCraftColors.WARNING));
+                    }
+                    if (page.nextCursor() != null) {
+                        s.sendMessage(text("  more: /awf multiprofile audit " + profile + " " + page.nextCursor(), SourbyCraftColors.DIM));
+                    }
+                }));
+            }
+            case "cooldown" -> {
+                // Build 55: the player's switch cooldown; "reset" (admin) forgets it on this node.
+                final java.util.UUID player = playerId(s, args);
+                if (player == null) return;
+                if (args.length > 3 && args[3].equalsIgnoreCase("reset")) {
+                    if (!s.hasPermission("sourbycraft.command.awf.multiprofile.admin")) {
+                        s.sendMessage(text("You do not have sourbycraft.command.awf.multiprofile.admin",
+                            SourbyCraftColors.DANGER));
+                        return;
+                    }
+                    final boolean cleared = engine.switchGuards().clearCooldown(player);
+                    s.sendMessage(text(cleared ? "Switch cooldown of " + player + " cleared on this node"
+                        : "No switch cooldown was remembered for " + player, SourbyCraftColors.SUCCESS));
+                    return;
+                }
+                final long remaining = engine.switchGuards().cooldownRemainingMillis(player);
+                s.sendMessage(UiPanel.row("switch cooldown of " + player, engine.switchGuards().cooldownMillis() == 0L
+                    ? "off (switching.cooldown-seconds: 0)" : remaining == 0L ? "none; may switch now"
+                    : ((remaining + 999L) / 1000L) + " s remaining"));
+            }
+            case "lock", "unlock" -> {
+                if (!s.hasPermission("sourbycraft.command.awf.multiprofile.admin")) {
+                    s.sendMessage(text("You do not have sourbycraft.command.awf.multiprofile.admin",
+                        SourbyCraftColors.DANGER));
+                    return;
+                }
+                final java.util.UUID profile = profileId(s, args);
+                if (profile == null) return;
+                final boolean lock = action.equals("lock");
+                engine.setLocked(profile, lock).whenComplete((ignored, failed) -> this.reply.accept(s, () -> {
+                    if (failed != null) {
+                        fail(s, failed);
+                        return;
+                    }
+                    s.sendMessage(text((lock ? "Locked " : "Unlocked ") + profile
+                        + (lock ? "; switching to it is refused until it is unlocked" : ""), SourbyCraftColors.SUCCESS));
+                }));
+            }
+            case "slots" -> {
+                if (!s.hasPermission("sourbycraft.command.awf.multiprofile.admin")) {
+                    s.sendMessage(text("You do not have sourbycraft.command.awf.multiprofile.admin",
+                        SourbyCraftColors.DANGER));
+                    return;
+                }
+                final java.util.UUID player = playerId(s, args);
+                if (player == null) return;
+                final int slots;
+                try {
+                    slots = args.length == 4 ? Integer.parseInt(args[3]) : -1;
+                } catch (final NumberFormatException notANumber) {
+                    s.sendMessage(text("Not a slot count: " + args[3], SourbyCraftColors.DANGER));
+                    return;
+                }
+                if (slots < 0) {
+                    s.sendMessage(text("Usage: /awf multiprofile slots <player> <1-" + engine.settings().maxSlots() + ">",
+                        SourbyCraftColors.WARNING));
+                    return;
+                }
+                engine.setSlotLimit(player, slots).whenComplete((limit, failed) -> this.reply.accept(s, () -> {
+                    if (failed != null) {
+                        fail(s, failed);
+                        return;
+                    }
+                    s.sendMessage(text("Slot limit of " + player + " is now " + limit
+                        + "; existing profiles above it are kept", SourbyCraftColors.SUCCESS));
+                }));
+            }
+            case "owner" -> {
+                // The ownership provider's holder: with coordination.provider: redis, the session fabric's.
+                final java.util.UUID profile = profileId(s, args);
+                if (profile == null) return;
+                engine.owner(profile).whenComplete((owner, failed) -> this.reply.accept(s, () -> {
+                    if (failed != null) {
+                        fail(s, failed);
+                        return;
+                    }
+                    if (owner.isEmpty()) {
+                        s.sendMessage(UiPanel.row(profile.toString(), "unowned"));
+                        return;
+                    }
+                    final var holder = owner.get();
+                    s.sendMessage(UiPanel.row(profile.toString(), "node " + holder.node() + ", epoch " + holder.epoch()
+                        + (holder.expiresAtMillis() > 0L ? ", expires in "
+                            + Math.max(0L, (holder.expiresAtMillis() - System.currentTimeMillis()) / 1000L) + " s" : "")
+                        + (holder.distributed() ? " (session fabric)" : " (this process)")));
+                }));
+            }
+            case "reclaim" -> {
+                if (!s.hasPermission("sourbycraft.command.awf.multiprofile.admin")) {
+                    s.sendMessage(text("You do not have sourbycraft.command.awf.multiprofile.admin",
+                        SourbyCraftColors.DANGER));
+                    return;
+                }
+                final java.util.UUID profile = profileId(s, args);
+                if (profile == null) return;
+                final long epoch;
+                try {
+                    epoch = args.length == 4 ? Long.parseLong(args[3]) : -1L;
+                } catch (final NumberFormatException notANumber) {
+                    s.sendMessage(text("Not an epoch: " + args[3], SourbyCraftColors.DANGER));
+                    return;
+                }
+                if (epoch < 1L) {
+                    s.sendMessage(text("Usage: /awf multiprofile reclaim <profile-uuid> <epoch> (the epoch"
+                        + " /awf multiprofile owner shows; for a holder that is gone)", SourbyCraftColors.WARNING));
+                    return;
+                }
+                engine.reclaim(profile, epoch).whenComplete((ignored, failed) -> this.reply.accept(s, () -> {
+                    if (failed != null) {
+                        fail(s, failed);
+                        return;
+                    }
+                    s.sendMessage(text("Took over and released the claim on " + profile + " at epoch " + epoch
+                        + "; writes under the old claim are refused", SourbyCraftColors.SUCCESS));
+                }));
+            }
+            case "migrate-repository" -> {
+                if (!s.hasPermission("sourbycraft.command.awf.multiprofile.admin")) {
+                    s.sendMessage(text("You do not have sourbycraft.command.awf.multiprofile.admin",
+                        SourbyCraftColors.DANGER));
+                    return;
+                }
+                final dev.iyanz.sourbycraft.awf.multiprofile.ProfileRuntime runtime =
+                    dev.iyanz.sourbycraft.awf.multiprofile.ProfileRuntime.running();
+                if (runtime == null) {
+                    s.sendMessage(text("AWF MultiProfile is unavailable", SourbyCraftColors.DANGER));
+                    return;
+                }
+                if (args.length < 3 || !args[2].equalsIgnoreCase("confirm")) {
+                    s.sendMessage(text("Usage: /awf multiprofile migrate-repository confirm: copies "
+                        + engine.settings().directory() + " into the Redis repository once (refused when Redis already"
+                        + " holds profiles), verifies every record and keeps the directory unchanged", SourbyCraftColors.WARNING));
+                    return;
+                }
+                if (!org.bukkit.Bukkit.getOnlinePlayers().isEmpty()) {
+                    s.sendMessage(text("Refused: players are online. Run the migration with nobody online, right after"
+                        + " switching to repository: redis", SourbyCraftColors.DANGER));
+                    return;
+                }
+                s.sendMessage(text("Migrating...", SourbyCraftColors.DIM));
+                runtime.migrateFileRepository().whenComplete((summary, failed) -> this.reply.accept(s, () -> {
+                    if (failed != null) {
+                        fail(s, failed);
+                        return;
+                    }
+                    s.sendMessage(text("Migrated: " + summary, SourbyCraftColors.SUCCESS));
+                }));
+            }
+            case "format", "migrate" -> {
+                if (!admin(s)) {
+                    s.sendMessage(text("You do not have " + ADMIN_PERMISSION, SourbyCraftColors.DANGER));
+                    return;
+                }
+                final dev.iyanz.sourbycraft.awf.multiprofile.ProfileRuntime runtime =
+                    dev.iyanz.sourbycraft.awf.multiprofile.ProfileRuntime.running();
+                if (runtime == null) {
+                    s.sendMessage(text("AWF MultiProfile is unavailable", SourbyCraftColors.DANGER));
+                    return;
+                }
+                final String mode = args.length > 2 ? args[2].toLowerCase(Locale.ROOT) : "";
+                if (action.equals("format") || mode.isEmpty()) {
+                    final var store = runtime.storeStatus();
+                    s.sendMessage(UiPanel.header("AWF MultiProfile store"));
+                    if (store == null) {
+                        s.sendMessage(UiPanel.row("format", "not checked"));
+                        return;
+                    }
+                    s.sendMessage(UiPanel.row("marker", dev.iyanz.sourbycraft.awf.multiprofile.ProfileEngine.describe(store.marker())));
+                    s.sendMessage(UiPanel.row("decision", store.gate() + ": " + store.reason()));
+                    s.sendMessage(UiPanel.row("startup migration", store.migration()));
+                    s.sendMessage(UiPanel.row("pending intents", store.unresolvedIntents().isEmpty() ? "none"
+                        : store.unresolvedIntents().size() + ": " + store.unresolvedIntents()));
+                    if (action.equals("migrate")) {
+                        s.sendMessage(text("Usage: /awf multiprofile migrate <dry-run|apply>", SourbyCraftColors.WARNING));
+                    }
+                    return;
+                }
+                if (mode.equals("dry-run") || mode.equals("dry_run")) {
+                    s.sendMessage(text("Reading the store (nothing is written)...", SourbyCraftColors.DIM));
+                    runtime.migrationDryRun().whenComplete((summary, failed) -> this.reply.accept(s, () -> {
+                        if (failed != null) {
+                            profileFail(s, failed);
+                            return;
+                        }
+                        s.sendMessage(text("Migration dry-run: " + summary, SourbyCraftColors.SUCCESS));
+                    }));
+                    return;
+                }
+                if (mode.equals("apply")) {
+                    // The migration is offline: every writer stopped, before any player is admitted.
+                    s.sendMessage(text("Refused: the format-2 migration runs only at startup, before players are admitted."
+                        + " Set aurora.awf.multiprofile.migration.mode: apply and migration.backup-dir, then restart"
+                        + " (RESTART_REQUIRED). It is one way: rollback means restoring the backup (OD-2).",
+                        SourbyCraftColors.WARNING));
+                    return;
+                }
+                s.sendMessage(text("Usage: /awf multiprofile migrate <dry-run|apply> | format", SourbyCraftColors.WARNING));
+            }
+            default -> s.sendMessage(text("Usage: /awf multiprofile <status|list <player>|create <player> [namespace]"
+                + " [type=<type>] [name=<name>]|switch <player> <profile-uuid>|bind <profile> <world> [template]|"
+                + "unbind <profile>|inspect|info <profile>|lock <profile>|unlock <profile>|archive <profile>|unarchive <profile>|"
+                + "audit <profile> [cursor]|cooldown <player> [reset]|slots <player> <n>|"
+                + "recover <transition>|session <player> <reset-marker|clear-refusal>|owner <profile>|reclaim <profile> <epoch>|"
+                + "migrate-repository confirm|format|"
+                + "migrate <dry-run|apply>|coop <convert|invite|accept|decline|cancel|leave|kick|vote|members|invites|info|label> ...>",
+                SourbyCraftColors.WARNING));
+        }
+    }
+
+    /** A MultiProfile failure with its error code and, for the Build 51 codes, what the operator can do. */
+    private static void profileFail(final CommandSender s, final Throwable failed) {
+        Throwable cause = failed;
+        while (cause instanceof CompletionException && cause.getCause() != null) cause = cause.getCause();
+        if (!(cause instanceof dev.iyanz.sourbycraft.api.profile.ProfileOperationException operation)) {
+            fail(s, failed);
+            return;
+        }
+        final String hint = switch (operation.code()) {
+            case NAME_TAKEN -> " (choose another name, or omit name= to get a free one)";
+            case NAME_INVALID -> " (names come from the server's fruit and vegetable pool, e.g. name=Apple)";
+            case TYPE_NOT_ALLOWED -> " (see aurora.awf.multiprofile.types.allowed)";
+            case MIGRATION_REQUIRED -> " (the store is format 1: /awf multiprofile migrate dry-run, then"
+                + " migration.mode: apply and restart)";
+            case STORE_FORMAT_REFUSED -> " (restore the pre-migration backup; no in-place downgrade, OD-2)";
+            case COUNTER_EXHAUSTED -> " (a counter reached 2^53-1; the store needs an offline migration)";
+            case CLAIM_LOST -> " (the session or transaction claim is gone; the player must rejoin)";
+            case UNKNOWN_OUTCOME -> " (the store did not confirm the write; check the record before retrying)";
+            case CAPACITY_EXCEEDED -> " (a store bound is reached: pending operations, receipts or an index; retry later)";
+            default -> CoopCommand.hint(operation.code());
+        };
+        s.sendMessage(text("Failed (" + operation.code() + "): " + operation.getMessage() + hint, SourbyCraftColors.DANGER));
+    }
+
+    private static String isolationSummary(final dev.iyanz.sourbycraft.awf.multiprofile.ProfileIsolation isolation) {
+        final java.util.List<String> on = new java.util.ArrayList<>();
+        if (isolation.inventory()) on.add("inventory");
+        if (isolation.armor()) on.add("armor/offhand");
+        if (isolation.enderChest()) on.add("ender-chest");
+        if (isolation.experience()) on.add("experience");
+        if (isolation.health()) on.add("health");
+        if (isolation.food()) on.add("food");
+        if (isolation.potionEffects()) on.add("effects");
+        if (isolation.location()) on.add("location");
+        return on.isEmpty() ? "none (active-profile reference only)" : String.join(", ", on);
+    }
+
+    private java.util.UUID playerId(final CommandSender s, final String[] args) {
+        if (args.length < 3) {
+            s.sendMessage(text("Usage: /awf multiprofile " + (args.length > 1 ? args[1].toLowerCase(Locale.ROOT) : "list")
+                + " <player>" + (args.length > 1 && args[1].equalsIgnoreCase("session") ? " <reset-marker|clear-refusal>" : ""),
+                SourbyCraftColors.WARNING));
+            return null;
+        }
+        final org.bukkit.entity.Player online = org.bukkit.Bukkit.getPlayerExact(args[2]);
+        if (online != null) return online.getUniqueId();
+        try {
+            return java.util.UUID.fromString(args[2]);
+        } catch (final IllegalArgumentException notUuid) {
+            s.sendMessage(text("No online player " + args[2] + "; pass the UUID for an offline player",
+                SourbyCraftColors.DANGER));
+            return null;
+        }
+    }
+
+    private java.util.UUID profileId(final CommandSender s, final String[] args) {
+        return uuidArg(s, args, "profile uuid");
+    }
+
+    private java.util.UUID uuidArg(final CommandSender s, final String[] args, final String what) {
+        if (args.length < 3) {
+            s.sendMessage(text("Expected a " + what, SourbyCraftColors.WARNING));
+            return null;
+        }
+        try {
+            return java.util.UUID.fromString(args[2]);
+        } catch (final IllegalArgumentException notUuid) {
+            s.sendMessage(text("Not a " + what + ": " + args[2], SourbyCraftColors.DANGER));
+            return null;
+        }
+    }
+
+    // ------------------------------------------------------------------ Aurora Redis Fabric
+
+    private void redis(final CommandSender s, final String[] args) {
+        if (!s.hasPermission("sourbycraft.command.awf.redis")) {
+            s.sendMessage(text("You do not have sourbycraft.command.awf.redis", SourbyCraftColors.DANGER));
+            return;
+        }
+        final dev.iyanz.sourbycraft.awf.redis.fabric.RedisFabric fabric =
+            dev.iyanz.sourbycraft.awf.redis.fabric.FabricRuntime.running();
+        if (fabric == null) {
+            s.sendMessage(text("The Aurora Redis Fabric is disabled or was not reachable at startup"
+                + " (aurora.awf.redis.fabric.enabled)", SourbyCraftColors.WARNING));
+            return;
+        }
+        final String action = args.length > 1 ? args[1].toLowerCase(Locale.ROOT) : "status";
+        s.sendMessage(text("Working...", SourbyCraftColors.DIM));
+        // Administrative I/O, not the storage lane: with Redis unreachable every call holds its thread
+        // for the client timeout, and the storage lane is the one AWF commits and profile I/O wait on.
+        // A full or stopped executor completes the future with RejectedExecutionException ("busy").
+        final java.util.concurrent.CompletableFuture<
+            dev.iyanz.sourbycraft.awf.redis.fabric.FabricHealth> health =
+            dev.iyanz.sourbycraft.util.VirtualExecutor.supply(fabric::probe);
+        health.whenComplete((probe, probeFailed) -> this.reply.accept(s, () -> {
+            if (probeFailed != null) {
+                redisFailed(s, probeFailed);
+                return;
+            }
+            switch (action) {
+                case "status", "health" -> {
+                    s.sendMessage(UiPanel.header("Aurora Redis Fabric"));
+                    s.sendMessage(UiPanel.row("node", probe.nodeId()));
+                    s.sendMessage(UiPanel.row("redis", probe.reachable()
+                        ? "reachable, " + probe.redisVersion() + ", " + probe.latencyMicros() + " us" : "UNREACHABLE"));
+                    s.sendMessage(UiPanel.row("keys", probe.prefix() + "*"));
+                    s.sendMessage(UiPanel.row("pools", "storage " + probe.pools().get(
+                            dev.iyanz.sourbycraft.awf.redis.fabric.RedisWorkload.STORAGE).size()
+                        + ", coordination " + probe.pools().get(
+                            dev.iyanz.sourbycraft.awf.redis.fabric.RedisWorkload.COORDINATION).size()
+                        + ", events " + probe.pools().get(
+                            dev.iyanz.sourbycraft.awf.redis.fabric.RedisWorkload.EVENTS).size()
+                        + ", control " + probe.pools().get(
+                            dev.iyanz.sourbycraft.awf.redis.fabric.RedisWorkload.CONTROL).size()));
+                    if (!fabric.settings().services().telemetry()) {
+                        s.sendMessage(UiPanel.row("telemetry", "disabled"
+                            + " (aurora.awf.redis.fabric.services.telemetry)"));
+                        break;
+                    }
+                    final var metrics = probe.metrics();
+                    s.sendMessage(UiPanel.row("operations", metrics.operations() + " (" + metrics.failures()
+                        + " failed, " + metrics.timeouts() + " timed out), mean "
+                        + String.format(Locale.ROOT, "%.2f", metrics.meanLatencyMillis()) + " ms"));
+                    s.sendMessage(UiPanel.row("cache", metrics.cacheHitRatio() < 0 ? "no lookups"
+                        : String.format(Locale.ROOT, "%.1f%% hit", metrics.cacheHitRatio() * 100.0)
+                            + ", " + metrics.cacheEvictions() + " evictions"));
+                    s.sendMessage(UiPanel.row("fences", metrics.ownershipConflicts() + " conflicts, "
+                        + metrics.staleFenceRejections() + " stale rejections, "
+                        + metrics.leaseRenewFailures() + " renew failures"));
+                }
+                case "pools" -> {
+                    probe.pools().forEach((kind, stat) -> s.sendMessage(UiPanel.row(kind.name().toLowerCase(Locale.ROOT),
+                        stat.inUse() + " in use of " + stat.size())));
+                }
+                case "events" -> dev.iyanz.sourbycraft.util.VirtualExecutor.supply(() -> {
+                    if (!fabric.settings().services().events()) return -1L;
+                    return fabric.events().backlog();
+                }).whenComplete((backlog, failed) -> this.reply.accept(s, () -> {
+                    if (failed != null) {
+                        redisFailed(s, failed);
+                        return;
+                    }
+                    s.sendMessage(UiPanel.row("stream", backlog < 0 ? "service disabled"
+                        : backlog + " entries, retention " + fabric.settings().events().retention()));
+                    s.sendMessage(UiPanel.row("consumers", "retry budget "
+                        + fabric.settings().events().maxDeliveries() + " deliveries"
+                        + (fabric.settings().services().events()
+                            ? ", dead-letter at " + fabric.events().deadStream() : ", events service disabled")));
+                    final var metrics = probe.metrics();
+                    s.sendMessage(UiPanel.row("events", metrics.eventsPublished() + " published, "
+                        + metrics.eventsConsumed() + " consumed, " + metrics.eventsRetried() + " retried, "
+                        + metrics.deadLettered() + " dead-lettered, " + metrics.duplicatesSuppressed() + " duplicates"));
+                }));
+                case "sessions", "ownership" -> {
+                    final java.util.UUID id = uuidArg(s, args, action.equals("sessions") ? "profile uuid" : "object uuid");
+                    if (id == null) return;
+                    final String kind = action.equals("sessions") ? "session" : "profile";
+                    // MultiProfile claims live in the session fabric; no runtime code writes a coordination claim
+                    // of kind "profile", so "ownership" shows only a claim made by code calling CoordinationFabric.
+                    final String label = kind.equals("session") ? ""
+                        : "coordination claim (API-only; profiles: /awf multiprofile owner): ";
+                    dev.iyanz.sourbycraft.util.VirtualExecutor.supply(() -> kind.equals("session")
+                        ? fabric.sessions().holder(id)
+                        : fabric.coordination().current("profile", id.toString())
+                    ).whenComplete((claim, failed) -> this.reply.accept(s, () -> {
+                        if (failed != null) {
+                            redisFailed(s, failed);
+                            return;
+                        }
+                        if (claim == null) s.sendMessage(UiPanel.row(id.toString(), label + "unowned"));
+                        else s.sendMessage(UiPanel.row(id.toString(), label + "node " + claim.node() + ", epoch/fence "
+                            + claim.fence() + ", expires " + claim.expiresAtMillis()));
+                    }));
+                }
+                default -> s.sendMessage(text("Usage: /awf redis <status|pools|sessions <profile>|events|"
+                    + "ownership <uuid> (coordination claim, API-only)|health>", SourbyCraftColors.WARNING));
+            }
+        }));
+    }
+
+    /** A diagnostic the I/O executor refused (full, or stopped) is reported as busy; anything else as a failure. */
+    private static void redisFailed(final CommandSender s, final Throwable failed) {
+        final Throwable cause = failed instanceof CompletionException && failed.getCause() != null ? failed.getCause() : failed;
+        if (cause instanceof java.util.concurrent.RejectedExecutionException) {
+            s.sendMessage(text("Busy: " + cause.getMessage() + "; try again shortly", SourbyCraftColors.WARNING));
+        } else {
+            fail(s, cause);
+        }
     }
 
     private void report(final CommandSender s, final String success, final CompletableFuture<?> future) {

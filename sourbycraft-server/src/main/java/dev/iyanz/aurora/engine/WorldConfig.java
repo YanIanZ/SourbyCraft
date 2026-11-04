@@ -131,13 +131,27 @@ public class WorldConfig extends Part {
         }
     }
 
+    /**
+     * The per-world patch file {@link #buildForLevel} merges over {@code config/aurora-worlds.yml}:
+     * {@code canvas-patch.yml} (the name was kept in Build 49) in the level's dimension storage folder,
+     * which on 26.2 is {@code <level>/dimensions/<namespace>/<path>/} for every dimension, the overworld
+     * included.
+     */
+    public static Path patchFile(final ServerLevel level) {
+        return patchFile(level.dimension());
+    }
+
+    private static Path patchFile(final ResourceKey<Level> dimension) {
+        return MinecraftServer.getServer().storageSource.getDimensionPath(dimension).resolve("canvas-patch.yml");
+    }
+
     public static WorldConfig buildForLevel(final ServerLevel level, final ResourceKey<Level> dimension) {
 
         // we build it as a patch here, and from here we can set the level properly
         final WorldConfig[] result = new WorldConfig[1];
 
         ConfigurationProvider.buildPatchableConfiguration(
-            MinecraftServer.getServer().storageSource.getDimensionPath(dimension).resolve("canvas-patch.yml"),
+            patchFile(dimension),
             BASE_FILE,
             WorldConfig::new,
             instance -> {

@@ -44,6 +44,16 @@ import org.jspecify.annotations.Nullable;
  * Conflicting lifecycle work fails with {@link WorldOperationBusyException}, and
  * cancelling its future does not stop engine work. World and template names are lower-case {@code [a-z0-9_-]}, 1 to 48
  * characters.</p>
+ *
+ * <p>Since Build 55 the outcomes of these operations are also announced as asynchronous Bukkit events, fired after
+ * the outcome is final (a save once it is durable) and independent of whether anyone holds the returned future:
+ * {@link dev.iyanz.sourbycraft.api.world.event.AwfWorldCreatedEvent},
+ * {@link dev.iyanz.sourbycraft.api.world.event.AwfWorldLoadedEvent},
+ * {@link dev.iyanz.sourbycraft.api.world.event.AwfWorldSavedEvent},
+ * {@link dev.iyanz.sourbycraft.api.world.event.AwfWorldUnloadedEvent},
+ * {@link dev.iyanz.sourbycraft.api.world.event.AwfWorldDeletedEvent} and
+ * {@link dev.iyanz.sourbycraft.api.world.event.AwfInstanceDisposedEvent}; see that package for their thread and
+ * delivery rules.</p>
  */
 @NullMarked
 public interface AuroraWorlds {
@@ -111,8 +121,12 @@ public interface AuroraWorlds {
                                          boolean autoload);
 
     /**
-     * Imports an {@code .awf} world file as a new world and loads it, with the environment, seed
-     * and generator the file records.
+     * Imports an {@code .awf} world file as a new world and loads it, with the environment, seed,
+     * generator and properties the file records. Plugin data the file records (a file converted
+     * from a Slime world with {@code BukkitValues}) is merged into the world's persistent data
+     * container on the global region thread just before the future completes, so a
+     * {@code WorldLoadEvent} listener does not see it yet; a file whose properties or plugin data
+     * are malformed fails the import before anything is created.
      */
     CompletableFuture<World> importWorld(java.nio.file.Path file, String name, boolean autoload);
 
@@ -144,12 +158,20 @@ public interface AuroraWorlds {
     CompletableFuture<Void> save(String name);
 
     /**
-     * Unloads a loaded world. Fails with the engine's reason when the world cannot be unloaded,
-     * for example while players are in it.
+     * Unloads a loaded world. Completes with the engine's reason when the world cannot be
+     * unloaded, for example while players are in it.
      *
-     * @param save {@code true} commits the world's current chunks; {@code false} keeps the state
-     *     of its last commit and writes nothing (what changed since is lost) — the region-threaded
-     *     engine itself always saves on unload, so this is done by its AWF storages discarding
+     * <p>{@link UnloadResult#FAILED} can also mean that the world was unloaded but its final AWF
+     * commit, made as its storages close after the world is removed, was not confirmed; the
+     * server log names the storage. {@link #isLoaded} tells the two apart.</p>
+     *
+     * @param save {@code true} first saves a world created through this API durably, as
+     *     {@link #save} does, and fails exceptionally, the world left loaded, when that save fails
+     *     (while the server is stopping, the unload is asked for without that save, and the engine
+     *     normally refuses it with {@link UnloadResult#SERVER_STOPPING}); {@code false} keeps the
+     *     state of its last commit and writes nothing (what changed since is lost) — the
+     *     region-threaded engine itself always saves on unload, so this is done by its AWF
+     *     storages discarding
      */
     CompletableFuture<UnloadResult> unload(String name, boolean save);
 
@@ -193,4 +215,82 @@ public interface AuroraWorlds {
 
     /** Deletes a template. Fails while any world is an instance of it. */
     CompletableFuture<Void> deleteTemplate(String template);
+
+    // ------------------------------------------------------------------ Build 54 additions
+
+    /**
+     * Added in Build 54. Every world managed through this API, loaded or not, in registration order,
+     * with what the server knows of it without touching storage, from any thread. (Called before the
+     * server's first world has loaded, it reads the AWF settings once, as {@link #storage()} does.)
+     *
+     * <p>The default implementation (an implementation compiled before Build 54) throws
+     * {@link UnsupportedOperationException}.</p>
+     */
+    default java.util.List<AwfWorldSummary> listWorlds() {
+        throw new UnsupportedOperationException("listWorlds needs SourbyCraft Build 54 or later");
+    }
+
+    /**
+     * Added in Build 54. A managed world's storage state: backend, store format and size, uncommitted
+     * chunks and the time of its last commit ({@link AwfWorldInfo}). Gathered off the calling thread
+     * (the FILE backend's size and commit time are read from disk), so it never blocks a region,
+     * entity or global-tick thread; do not join the future there. Completes with empty when no world
+     * of that name is managed through this API.
+     *
+     * <p>The default implementation completes exceptionally with {@link UnsupportedOperationException}.</p>
+     */
+    default CompletableFuture<Optional<AwfWorldInfo>> info(final String name) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("info needs SourbyCraft Build 54 or later"));
+    }
+
+    /**
+     * Added in Build 54. {@link #templates()} read off the calling thread: {@code templates()} lists the
+     * {@code awf-templates/} folder on the caller's thread, the server's implementation does not. This
+     * default (for other implementations) calls {@code templates()} on the calling thread and returns the
+     * result as a completed future; it never uses the common pool.
+     */
+    default CompletableFuture<Set<String>> listTemplates() {
+        try {
+            return CompletableFuture.completedFuture(templates());
+        } catch (final RuntimeException failed) {
+            return CompletableFuture.failedFuture(failed);
+        }
+    }
+
+    /**
+     * Added in Build 54. Whether the world's chunks are stored through Aurora World Fabric: a world
+     * managed through this API, or one listed in {@code aurora.awf.worlds} whose storages are attached.
+     * No I/O, any thread. The default implementation answers {@link #exists}{@code (world.getName())}.
+     */
+    default boolean isAwfWorld(final World world) {
+        return exists(world.getName());
+    }
+
+    /**
+     * Added in Build 54. Creates and loads a disposable copy-on-write instance of a template: as
+     * {@link #createFromTemplate(String, String, boolean)} without autoload, and deleted (its folder,
+     * its own AWF stores and its entry; never the template) once it is unloaded.
+     *
+     * <ul>
+     *   <li>An unload through {@link #unload} deletes it within the same operation, after the engine
+     *       reports the unload done; the {@code save} flag is ignored, nothing is saved, and the
+     *       returned result is the unload's. When that deletion cannot run yet (a storage still
+     *       closing), or the world was unloaded some other way, the service deletes it within about a
+     *       second of it being unloaded with no storage open and no operation on it.</li>
+     *   <li>If the server stops or crashes while it is loaded, it is deleted after the next startup.</li>
+     *   <li>It cannot be {@linkplain #load loaded} again once unloaded. A {@link #cloneWorld} of it
+     *       (possible only in the moment between its unload and its deletion) is an ordinary
+     *       persistent world.</li>
+     * </ul>
+     *
+     * <p>A server running a build before 54 reads such a world as an ordinary persistent instance
+     * (the flag is an extra field of its {@code aurora-worlds.json} entry that older builds ignore)
+     * and never deletes it.</p>
+     *
+     * <p>The default implementation completes exceptionally with {@link UnsupportedOperationException}.</p>
+     */
+    default CompletableFuture<World> createInstance(final String template, final String name) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException(
+            "createInstance needs SourbyCraft Build 54 or later"));
+    }
 }

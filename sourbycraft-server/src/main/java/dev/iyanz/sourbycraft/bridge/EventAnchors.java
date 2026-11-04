@@ -25,16 +25,32 @@ import org.spigotmc.event.player.PlayerSpawnLocationEvent;
  * (never run) when it does, and a silently dropped task is a worse surprise than a task on the global
  * region. A player is stable while connected, and the events that mean "this player is leaving"
  * ({@link PlayerQuitEvent}, {@link PlayerKickEvent}) or "this player is not in a world yet"
- * ({@link PlayerLoginEvent}, {@link PlayerSpawnLocationEvent}) resolve to nothing: a task scheduled
- * from a quit handler must run (cleanup), and the entity scheduler of a player who is gone or not yet
- * placed would retire or hold it.</p>
+ * ({@link PlayerLoginEvent}, {@link PlayerSpawnLocationEvent}) anchor nothing and also hide the
+ * enclosing frame's player ({@link #CLEAR}): a task scheduled from a quit handler must run (cleanup),
+ * the entity scheduler of a player who is gone or not yet placed would retire or hold it, and a kick
+ * fired inside another player's command ({@code /kick X}) must not tie the handler's cleanup to the
+ * kicker, whose leaving would cancel it.</p>
  */
 final class EventAnchors {
+
+    /** {@link #anchor}: publish no anchor for this event's listeners, not even the enclosing frame's. */
+    static final Object CLEAR = new Object() {
+        @Override public String toString() { return "EventAnchors.CLEAR"; }
+    };
 
     private EventAnchors() {}
 
     /** The player the event is about, or {@code null}. Never throws. */
     static Player resolve(final Event event) {
+        return anchor(event) instanceof Player player ? player : null;
+    }
+
+    /**
+     * What the event publishes to its listeners: the player it is about, {@link #CLEAR} for a leaving or
+     * not-yet-placed player, or {@code null} to keep the frame it was fired in (an event about no player).
+     * Never throws.
+     */
+    static Object anchor(final Event event) {
         if (event == null) return null;
         try {
             return resolve0(event);
@@ -43,11 +59,11 @@ final class EventAnchors {
         }
     }
 
-    private static Player resolve0(final Event event) {
+    private static Object resolve0(final Event event) {
         if (event instanceof PlayerEvent player) {
             if (event instanceof PlayerQuitEvent || event instanceof PlayerKickEvent
                 || event instanceof PlayerLoginEvent || event instanceof PlayerSpawnLocationEvent) {
-                return null;
+                return CLEAR;
             }
             return player.getPlayer();
         }

@@ -31,6 +31,9 @@ final class RuntimeSampler {
             if (time >= 0) { collectionTime += time; timeKnown = true; }
         }
         final var gc = GcTracker.snapshot();
+        // Swap reads cgroup files: sampled here, on the collector thread, for the /rambar HUD, which
+        // renders on the global region tick and only reads the cached value (audit PM-244).
+        ContainerMemory.sampleSwap();
         // third argument: cgroup memory.current / limit (page cache included), not RSS; RSS is readRss() below.
         return new ImmutableRuntimeMetrics(heap.getUsed(), heap.getMax(), ContainerMemory.usagePercentOrNaN(),
             gc.hasData() ? gc.gcTimePercent() : Double.NaN,

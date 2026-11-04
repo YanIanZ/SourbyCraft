@@ -1766,10 +1766,10 @@
       "origin": "Folia",
       "patch": "sourbycraft-server/minecraft-patches/sources/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java.patch",
       "kind": "DEGRADED",
-      "effect": "A pearl hit teleports its owner through attemptTeleport -> Entity.teleportAsync(..., cause ENDER_PEARL). That path fires the Canvas EntityTeleportAsyncEvent (when listened to), the endermite CreatureSpawnEvent and the 0-damage hurt; it does NOT fire Bukkit PlayerTeleportEvent: that event is constructed only in the dead synchronous ServerPlayer.teleport and in the packet-level ServerGamePacketListenerImpl.teleport, which teleportAsync's internalTeleport calls bypass. Anti-pearl/claim protection plugins that cancel PlayerTeleportEvent(ENDER_PEARL) silently stop working.",
-      "decision": "REPLACE",
-      "note": "REPLACE (medium; protection plugins). Fire PlayerTeleportEvent(cause ENDER_PEARL) on the owner's region before the async move: same-region, right before internalTeleport; cross-region, as the first step on the destination region (the player is already owned there), honouring cancel/relocation. Risk: a cancelled event after a cross-region hop must send the player back, which is itself a teleport; keep it on the region that owns the player at that moment.",
-      "test": "test missing (test-plugin listener on the test server once implemented)"
+      "effect": "The guard skips the vanilla synchronous owner teleport on a pearl hit. Since MC 0064 the hit goes through dev.iyanz.sourbycraft.entity.teleport.PearlTeleport: the pearl is consumed on its own region and the owner's teleport is scheduled on the owner's region, where a player's PlayerTeleportEvent(ENDER_PEARL) fires before the async move (a cancel stops it, a changed destination is used), followed by the endermite CreatureSpawnEvent, the pearl damage and the sound.",
+      "decision": "KEEP-OWNED",
+      "note": "KEEP-OWNED, landed in MC 0064 (ender pearl teleport event); PlayerTeleportEvent(ENDER_PEARL) fires on the owning region through dev.iyanz.sourbycraft.entity.teleport.PearlTeleport/PearlTeleportFlow, and cancel and relocation are honoured.",
+      "test": "PearlTeleportFlowTest, PearlTeleportPatchShapeTest"
     },
     {
       "id": "BaseCommandBlock#2",

@@ -2,6 +2,25 @@
 
 > **Numbering (annotated 2026-10-20):** patch numbers in this audit (and the `features/00NN-...patch:line` references) are the build-45 numbers, before the 2026-09-14 cleanup, so they do not name the files of the same number today. Old -> current Minecraft feature patch: 0001-0006 unchanged; old 0007 was folded into 0006; old 0008 -> 0007 (elytra); old 0009 removed (collision scratch lists); old 0010 -> 0008 (Projectile); old 0011 -> 0009 (lastKnownSpeed); old 0012 -> 0010 (random-tick BlockPos); old 0013, 0014, 0015 removed (world-border set, particle list, block-event list); old 0016 -> only its `Level` query overload remains, as 0011; old 0017 -> 0012 (`Entity#isInWall`); old 0018 -> 0013 (custom tick metrics); old 0019 folded into 0013. Current numbers 0014 and up are newer patches. Verify against `sourbycraft-server/minecraft-patches/features/` (`python3 scripts/patch_surface.py`).
 
+> **Status 2026-10-25 (PR #62 docs pass; read from code, nothing run).** This audit is the
+> 2026-09-14 inspection and its findings are kept as written. What has changed since:
+>
+> | Item | Current status |
+> | --- | --- |
+> | §1/§3 "no mutable `ThreadLocal`" | **No longer true.** Seven mutable `ThreadLocal`s exist in `dev.iyanz.sourbycraft`; each is listed with its scope and restore path in §3 below. No defect found; one latent fragility recorded (`CommandBlockPolicy.Scope`). |
+> | §4 `AsyncPathProcessor.pool` | Now the Resource Governor's `PATHFINDING` lane (`execution/GovernedLane`; max(1, processors/4) threads, queue 1024): a full queue **refuses** (the caller runs the synchronous recompute, counted as declined or refused); no caller-runs. |
+> | F1 `MetricWindow` order | Pinned: `MetricsApiSurfaceTest` asserts the enum's constant order. |
+> | F3 `PluginLoadDiagnostics` eviction | Not a defect: the JUL handler and the Log4j appender both publish through `capture()`, which is `static synchronized` like `record()` (PR #62 review, PM-249). |
+> | F4 `GeoUtil` cache | Fixed in PR #62 (PM-249): an access-ordered `LinkedHashMap` with `removeEldestEntry`, every access under its monitor, so the 1024 cap is exact and eviction is least recently used. Code written and statically reviewed; not built; not tested by the owner. |
+> | F6 `ScratchBufferConfinementTest` | Half closed: `isInWallScratch` is covered (`remainingPositionScratchIsAnOwnerConfinedInstanceField`); the `ServerLevel` guard is still name-based. |
+> | U1 reentrancy proof | Open. Of the four scratches only `isInWallScratch` remains (§12 removed the others). |
+> | U2 no benchmark | Open. |
+> | U3 Adventure `BossBar` | Answered in [execution-contract.md, *The HUD does not want this contract*](execution-contract.md#the-hud-does-not-want-this-contract): the viewer list is a `CopyOnWriteArrayList`; name, progress and colour are plain fields read at most one update stale. |
+> | U4 live world border | Closed: `SnapshotPathRegion` (MC 0005) captures a detached copy of the border at construction. |
+>
+> Dead references below: `docs/DEVELOPMENT-TASKS.md` (no longer in the repository) and `canvas-patches`
+> (folded into the owned engine sources on 2026-10-05).
+
 Closes the inspection half of `docs/DEVELOPMENT-TASKS.md` section A items
 "audit remaining reusable mutable state / scratch buffers", "audit all `ThreadLocal`
 usage relevant to Sourby performance patches", "audit remaining object pools" and
@@ -33,7 +52,7 @@ code was changed.
 * **There is no mutable `ThreadLocal` storage anywhere in Sourby-owned code.** The
   only `ThreadLocal`-family use is `ThreadLocalRandom`, which is not reusable
   mutable storage at all. Section A's `ThreadLocal` item is satisfied by absence,
-  not by review — see §3.
+  not by review — see §3. *(True on 2026-09-14; seven exist on 2026-10-25, reviewed in §3.)*
 * **There is no object pool in Sourby-owned code.** The two things named "pool" are
   a thread pool and a histogram *accumulator*, neither of which recycles objects.
   See §4.
@@ -70,7 +89,7 @@ Inventory of the reusable state inspected in `dev.iyanz.sourbycraft`; this is no
 | S11 | GC ring buffers `ringCount` / `ringTimeMs` / `ringNanos` (21 slots, `static`) | `perf/GcTracker.java:21-23` | `GcTracker.class` monitor (`sampleOnce` `:72`, `stop` `:57`); reset by `stop()` | **KEEP** |
 | S12 | Three shared `BossBar` instances | `hud/HudBars.java:74-79` | Mutated by the global-region updater task `update` `:394-418`; shown/hidden from player region threads in `applyShown` `:331-340` and `applyPerf` `:287-303` | **KEEP** (see U3) |
 | S13 | `TPS_VIEWERS` / `RAM_VIEWERS` / `PERF_VIEWERS` / `ANY`, actionbar maps `TPS_ACTIONBAR` / `RAM_ACTIONBAR` / `PERF_ACTIONBAR`, and the `SESSIONS` counter | `hud/HudBars.java:61-72` | Process-wide; keys are `UUID`s, the actionbar maps also hold a `Long` session token, and no `Player` is stored; `SESSIONS` is a single never-reset `AtomicLong`. Evicted in `onQuit` `:360-370`; cleared in `close()` `:378-392`; actionbar entries also removed on toggle-off and mode switch in `applyShown` `:320-327` and on perf retirement `:300-303` | **KEEP** — satisfies the "no player reference leak after disconnect" rule in `docs/DEVELOPMENT.md` §14 |
-| S14 | `Map<String,String> cache` (GeoIP) | `util/GeoUtil.java:53` | Process-wide; hard cap 1024 with half-eviction `:115-123` | **KEEP** (see F4) |
+| S14 | `Map<String,String> cache` (GeoIP) | `util/GeoUtil.java:53` | Process-wide; hard cap 1024 with half-eviction `:115-123` (since PR #62: access-ordered LRU, exact cap, every access under its monitor) | **KEEP** (see F4) |
 | S15 | `List<Entry> ENTRIES` (plugin-load failures) | `brand/PluginLoadDiagnostics.java:30` | JUL handler thread; capped at 16 `:63-66` | **KEEP** (see F3) |
 | S16 | `Set<String> WARNED_KEYS` | `SourbyCraftConfig.java:281` | Process-wide; bounded by the config key space | **KEEP** |
 | S17 | `Map<String,Command> OURS` (plain `LinkedHashMap`) | `command/SourbyCraftCommands.java:29` | Only ever touched inside `synchronized registerAll()` `:36-81`; no other reader | **KEEP** |
@@ -106,12 +125,32 @@ implementation detail of the JDK, never handed to the caller, never cleared, nev
 reset, and never a lifetime or escape hazard. It is the *correct* replacement for a
 shared `Random`, which would be a contended mutable object. No action.
 
-**Mutable `ThreadLocal` storage — none.** There is no `new ThreadLocal<>(...)`,
-`ThreadLocal.withInitial(...)`, or `extends ThreadLocal` anywhere under
+**Mutable `ThreadLocal` storage — none (2026-09-14; no longer true, see below).** There was no
+`new ThreadLocal<>(...)`, `ThreadLocal.withInitial(...)`, or `extends ThreadLocal` anywhere under
 `dev.iyanz.sourbycraft`, and no `.patch` file in `minecraft-patches`,
-`canvas-patches` or `paper-patches` introduces one. The section A item
-"audit all `ThreadLocal` usage relevant to Sourby performance patches" is therefore
+`canvas-patches` or `paper-patches` introduced one. The section A item
+"audit all `ThreadLocal` usage relevant to Sourby performance patches" was therefore
 closed with an empty result set.
+
+**Status 2026-10-25: seven mutable `ThreadLocal`s in `dev.iyanz.sourbycraft`** (none added by a
+feature patch; MC 0055 only shows upstream's `BaseCommandBlock.CloseableCommandBlockSource.TIME_FORMAT`
+as context). Each is set and restored on one thread; none holds a world object past its scope.
+
+| `ThreadLocal` | Holds | Scope and restore path | Leak / cross-thread risk |
+| --- | --- | --- | --- |
+| `commandblock/CommandBlockPolicy.DEPTH` (`int[1]`, `withInitial`) | nesting depth of command-block execution on this thread | `enter()` increments and returns a `Scope`; `Scope.close()` decrements once (idempotent). The one caller (MC 0055, `BaseCommandBlock`) opens it in try-with-resources around `performPrefixedCommand`, so it closes on the same thread, also on a throw | One `int[1]` per thread that ever ran a command block (never removed; tick threads are long-lived). **Latent:** `close()` decrements the *closing* thread's array; a `Scope` closed on another thread would corrupt both threads' depths. Not reachable today (the scope is a local, lexically closed); there is no guard or assertion |
+| `perf/AsyncPathTypeStats.SUBJECT` (`String`) | entity-type key of the mob captured last on this thread | `MobPathSnapshot.captureDetached` clears, then notes it after a successful capture; `AsyncPathProcessor.trySubmit(MobPathSnapshot, …)` (the production path) clears it; `trySubmit(Supplier)` consumes it | At most one short `String` per region thread; a stale note could only mis-attribute one `/perf async` count for a `trySubmit(Supplier)` caller, which production does not use |
+| `entity/teleport/SyncTeleportScope.CURRENT` (`Set<Object>`, identity) | entities an admitted synchronous API teleport may move | `run()` saves the previous set, sets a new one and restores it in `finally` (`remove()` when there was none); nested teleports from listeners stack | Holds entity references only while the call runs; none afterwards |
+| `entity/teleport/AsyncTeleportEvents.SUPPRESSED` (`Boolean`, `withInitial`) | "`PlayerTeleportEvent` already fired for this move" | `suppressPlayerTeleportEvent` saves, sets `TRUE`, restores the previous value in `finally` | A `Boolean` per thread; no object references |
+| `bridge/SchedulingContext.CURRENT` (`Object`, an entity anchor) | the player a frame acts for (bridged legacy task routing) | `enter`/`body`/`clear` return a `Scope` that restores the previous value (`remove()` when none); Paper 0026 closes it in `finally` around the event listener loop and in try-with-resources around a Bukkit command; `BridgeRuntime` wraps each bridged body | Holds a player reference only inside the frame; inert while no plugin is bridged (`contextActive`) |
+| `bridge/BridgeRuntime.CURRENT` (`Invocation`) | the bridged plugin task body running on this thread (guard-violation and relaxed-hit accounting) | set before the body, restored to the previous value (or removed) in `finally` | Only during a bridged body |
+| `security/SecurityGuards.active` (`Scope`, instance field) | the packet being decoded and its connection state | `begin(channel)` / `open` set it; `Scope.close()` restores the previous scope; MC 0034 opens it in try-with-resources in the packet decoder | Only during one decode on the channel's event loop; the connection state lives on the channel attribute |
+
+Engine sources (`dev.iyanz.aurora.engine`, inherited from Canvas, outside this audit's 2026-09 scope)
+also hold per-thread caches that are never removed: `util/Util` (`XoroshiroRandomSource`,
+`SingleThreadedRandomSource`) and the `DecimalFormat`s of `world/RegionizedTpsBar` and
+`world/RegionizedRamBar` (those bars are off by default). They are reusable per-thread objects, not
+scoped state.
 
 **The one thread-confined lookup that is *not* a `ThreadLocal` but behaves like
 one, and that Sourby code depends on.** `ServerLevel#getCurrentWorldData()` resolves
@@ -132,7 +171,7 @@ for one:
 
 | Candidate | Location | What it actually is | Verdict |
 |---|---|---|---|
-| `AsyncPathProcessor.pool` | `perf/AsyncPathProcessor.java:34`, `:49-73` | A bounded platform-thread `ThreadPoolExecutor` (cores/4, min 1), queue capacity 1024, caller-runs rejection `:66-69`, `allowCoreThreadTimeOut(true)` `:70`. A *thread* pool. No object recycling. | **KEEP** |
+| `AsyncPathProcessor.pool` | `perf/AsyncPathProcessor.java:34`, `:49-73` | A bounded platform-thread `ThreadPoolExecutor` (cores/4, min 1), queue capacity 1024, caller-runs rejection `:66-69`, `allowCoreThreadTimeOut(true)` `:70`. A *thread* pool. No object recycling. *Since 2026-10-20 the Resource Governor's `PATHFINDING` lane (`GovernedLane`, same sizing), which refuses instead of running on the caller.* | **KEEP** |
 | `BoundedIoExecutor` | `util/BoundedIoExecutor.java:12-20` | Thread-per-task virtual threads with a 64-permit `Semaphore` admission bound and no queue. Explicitly *not* a pool — a new virtual thread per task is the point. | **KEEP** |
 | `PerformanceCollector.pooledHistograms` | `perf/PerformanceCollector.java:50` | A pooled *histogram* in the statistical sense — rank mass from many regions merged into one array. Not an object pool. | **KEEP** |
 
@@ -346,10 +385,15 @@ Keep the mutation visible to maintainers; no defect is established here.
 (`:63-66`) is not atomic. Concurrent publishes can overshoot the 16-entry cap
 slightly. The handler is installed before `loadPlugins` and is effectively
 single-threaded, so this is theoretical — worth a comment, not a change.
+*Status 2026-10-25: resolved, not a defect: both publish paths (JUL handler, Log4j appender) go
+through `capture()`, which is `static synchronized` like `record()` (PM-249).*
 
 **F4 — same pattern in `GeoUtil`.** The size check and half-eviction at
 `util/GeoUtil.java:115-123` are not atomic either, so the 1024 cap is approximate
 under concurrent lookups. A strict bound under concurrent insertions was not proven by this audit.
+*Status 2026-10-25: fixed in PR #62 (PM-249): the cache is an access-ordered `LinkedHashMap` with
+`removeEldestEntry(size > 1024)`, and `get`, `put` and `clear` all hold its monitor, so the cap is
+exact and eviction is least recently used. Not built; not tested by the owner.*
 
 **F5 — `medianCapacity` is monotonic.** `PerformanceCollector` grows
 `medianBuffer` to the highest active-region count ever observed and never shrinks
@@ -447,6 +491,8 @@ Line references identify that inspected revision and may move after integration.
 - The report's original guaranteed-CME and median/extrema claims were corrected
   during integration review. Shared HUD safety, strict concurrent cache bounds,
   live world-border reads and remaining reentrancy proof are still open.
+  *(Status 2026-10-25: HUD safety, the GeoIP cache bound and the world border are closed; the
+  reentrancy proof and benchmarks are still open — see the status block at the top.)*
 
 Collaboration: Claude CLI session 988a8822-80be-44bc-9c26-9bbc2aa1467b produced the
 initial audit; Codex reviewed the findings and owns the follow-up changes/tests.

@@ -1,20 +1,24 @@
 # Testing legacy plugins through the Aurora Bridge
 
 For operators who want to try a plugin that does not declare `folia-supported` on SourbyCraft
-26.2 Build 47. The bridge is **off by default** and **not qualified**. Test on a copy of your
-server, never on production data.
+26.2 (checked against the Build 50 candidate, PR #62, on 2026-10-25; items marked *Build 50
+candidate* are not in the published `v26.2-r49`/`v26.2-r50` jars). The bridge is **off by default**
+and **not qualified**. Test on a copy of your server, never on production data.
 
 ## 1. Enable it
 
-`sourbycraft_config/aurora.toml`:
+`sourbycraft_config/aurora.yml` (YAML; an `aurora.toml` beside it is never read, and the Build 50
+candidate logs one WARN about it at boot and on every reload):
 
-```toml
-[aurora.bridge]
-mode = "safe"                  # RESTART_REQUIRED
-sync-route = "caller-region"   # LIVE; "global" sends every sync task to the global region
-quarantine-after = 3           # LIVE
-max-pending-tasks-per-plugin = 0        # LIVE; 0 disables the optional task limit
-max-running-async-tasks-per-plugin = 0  # LIVE; 0 preserves existing async overlap
+```yaml
+aurora:
+  bridge:
+    mode: "safe"                          # RESTART_REQUIRED
+    thread-checks: "relaxed"              # RESTART_REQUIRED; owner default, see section 2b; "enforced" restores the checks
+    sync-route: "caller-region"           # LIVE; "global" sends every sync task to the global region
+    quarantine-after: 3                   # LIVE
+    max-pending-tasks-per-plugin: 0       # LIVE; 0 disables the optional task limit
+    max-running-async-tasks-per-plugin: 0 # LIVE; 0 preserves existing async overlap
 ```
 
 Restart. The log names every plugin the bridge admits:
@@ -29,14 +33,16 @@ Aurora Bridge admitted <Plugin> (no folia-supported/canvas-supported). ...
 | --- | --- |
 | `runTask`, `runTaskLater`, `runTaskTimer`, `scheduleSync*`, `callSyncMethod`, `BukkitRunnable.runTask*` from a command, event or task running on a region | That region, anchored on a chunk it owned when the task was scheduled |
 | `runTask`, `runTaskLater`, `runTaskTimer`, `scheduleSync*` scheduled while a **player's** event is handled or a player's command runs (also from the plugin's own async task started there, e.g. DeluxeMenus's async menu build, or an event the plugin fires from it) | The region owning that player when the task is due, following the player (2026-10-22). Player already gone when scheduled: the row below. Player leaves before the task runs: cancelled and counted rejected (not a violation); a repeating task stops |
-| The same from `onEnable`, the console, the global region or async code with no player frame | The global region: server-wide state only; any block or entity access is refused by the engine |
+| The same from `onEnable`, the console, the global region or async code with no player frame | The global region: server-wide state only. Block or entity access from there is refused by the engine with `thread-checks: "enforced"`; under the default `relaxed` it runs on the wrong thread and is only counted (section 2b) |
 | The same with the callback wrapped in `EntityTask.of(entity, action)` (`sourbyapi`) | The region owning the entity when the task is due, following it across regions; if the entity is removed first the task is cancelled without running and counted under rejected operations in `/plugins` (not a violation) |
-| `runTaskAsynchronously`, `runTaskTimerAsynchronously` | Timed by Folia's async scheduler, executed on the bounded `SourbyCraft-BridgeIO-*` lane (`/perf governor`) |
+| The same with the callback wrapped in `RegionTask.at(location, action)` or `new RegionTask(world, chunkX, chunkZ, action)` (`sourbyapi`) | The region owning that chunk when the task is due (world and chunk captured when the task is created) |
+| `runTaskAsynchronously`, `runTaskTimerAsynchronously` | Timed by Folia's async scheduler, executed on the bounded `SourbyCraft-BridgeIO-*` lane (`/perf governor`). A repeating task keeps at most one run waiting in that lane; a period that fires while the previous run has not started is skipped, not queued (*Build 50 candidate*) |
 | `BukkitTask.cancel`, `cancelTask`, `cancelTasks`, `isQueued`, `isCurrentlyRunning`, `getPendingTasks` | Answered by the bridge |
 
 Since patch 0008 `getActiveWorkers` lists running bridged async bodies too. Not covered: a task that
 touches a player or block in a *different* region than the one it runs on is refused by the
-engine (`IllegalStateException`). A timer anchored on a region (not on a player) does not follow a
+engine (`IllegalStateException`) with `thread-checks: "enforced"`; under the default `relaxed` the
+access proceeds on a thread that does not own that state (unsafe, counted, not refused). A timer anchored on a region (not on a player) does not follow a
 player who walks away. A task that sweeps every entity or chunk of a world from the global region
 (ClearLag's clear task) has no single owner and cannot be routed; its violation line says so, and the
 plugin needs a Folia-supported replacement
@@ -87,13 +93,17 @@ unregistered: `/tick query` reads main-loop tick times that do not exist under r
 
 ## 2b. Thread checks: relaxed by default (owner decision 2026-10-22)
 
-With `mode = "safe"` the region-ownership checks are **relaxed** unless `aurora.bridge.thread-checks` says
+With `mode: "safe"` the region-ownership checks are **relaxed** unless `aurora.bridge.thread-checks` says
 `"enforced"` (or `"bridged"`: relaxed only inside bridged task bodies). Relaxed means a legacy plugin's
 cross-region access runs on the wrong thread and is only counted (`/perf plugins`: "Thread checks" and per-plugin
-"relaxed ownership hits"; `/plugins <name>`). Test both: the thing you are checking under `relaxed` is "does the
+"relaxed ownership hits"; `/plugins <name>`: "Relaxed ownership hits"): it never throws, never counts as a fatal
+violation and never quarantines the plugin. The log names it at most once per plugin and reason per 60 s; in
+the Build 50 candidate the reason is keyed without its per-hit thread and position, so a sweep across many
+positions logs once. Test both: the thing you are checking under `relaxed` is "does the
 plugin's flow complete", under `enforced` "what does it still refuse". Neither result qualifies the plugin, and a
-relaxed server must never be presented as stable (boot WARN, `/ver`). For a one-off run, `-Daurora.bridge.thread-checks=enforced`
-overrides the file. Details: [aurora-plugin-bridge.md, Thread checks](../architecture/aurora-plugin-bridge.md#thread-checks-owner-decision-2026-10-22).
+relaxed server must never be presented as stable (boot WARN, `/ver` "Thread checks" row). The setting is
+RESTART_REQUIRED; for a one-off run, `-Daurora.bridge.thread-checks=enforced` overrides the file. Which mode a
+release qualifies is owner decision PM-012. Details: [aurora-plugin-bridge.md, Thread checks](../architecture/aurora-plugin-bridge.md#thread-checks-owner-decision-2026-10-22).
 
 ## 3. Test it
 
@@ -104,29 +114,41 @@ overrides the file. Details: [aurora-plugin-bridge.md, Thread checks](../archite
 4. Run `/plugins <name>`. Watch:
    - **Scheduler redirects**: tasks the bridge accepted.
    - **Owner handoffs**: tasks run on the caller's region.
-   - **Rejected operations**: tasks refused (quarantined plugin, or a full Bridge I/O queue).
-   - **Fatal violations**: region-ownership exceptions its tasks threw.
-   - **Quarantined**: after `quarantine-after` violations its tasks are cancelled and new ones
-     rejected. The plugin is not disabled.
-   - **Last failure**: the most recent exception.
+   - **Rejected operations**: tasks refused (quarantined plugin, a full Bridge I/O queue, a configured
+     limit, or an anchor that went away before the task ran).
+   - **Fatal violations**: region-ownership exceptions its tasks threw. Ownership exceptions exist only with
+     `thread-checks: "enforced"`; under `relaxed` this stays at the count of other fatal exceptions.
+   - **Relaxed ownership hits (thread-checks)**: shown while checks are relaxed; wrong-thread accesses that
+     were allowed.
+   - **Quarantined**: after `quarantine-after` fatal violations its tasks are cancelled and new ones
+     rejected. The plugin is not disabled. Relaxed hits never quarantine.
+   - **Pending tasks / limit**, **Running async / limit**: current counts against the optional limits.
+   - **Sync body time (region / global)**, **Async body time**: wall time of the task bodies on the thread
+     that ran them, without queue wait (count, mean, p50, p99, max).
+   - **Last failure**: the most recent exception (*Build 50 candidate*: a relaxed hit fills it only when
+     nothing else was recorded).
 5. Run `/perf governor` for the Bridge I/O queue and rejections, and `/perf plugins` for every
    bridged plugin at once.
-6. Check the log for `Bridged plugin <name> violated region ownership` and
+6. Check the log for `Bridged plugin <name> violated region ownership` (enforced),
+   `Bridged plugin <name> accessed state owned by another thread … and was allowed to` (relaxed) and
    `generated an exception while executing task`.
 
 ## 4. Read the result honestly
 
 - No violations, and the features work: the plugin *ran* here under this load. It is still not
-  qualified for region threading.
-- Violations: the plugin touches state from the wrong thread. `sync-route = "caller-region"` is
-  the best the bridge can do without rewriting the plugin. Ask its author for Folia support.
+  qualified for region threading. Under `relaxed` "no violations" says nothing: read the relaxed
+  ownership hits instead, and repeat with `enforced` to see what the plugin would be refused.
+- Violations (enforced) or relaxed hits: the plugin touches state from the wrong thread.
+  `sync-route: "caller-region"` is the best the bridge can do without rewriting the plugin. Ask its
+  author for Folia support.
 - Quarantined: the plugin keeps loading, but its scheduled work stops. Remove it or run it
   elsewhere.
 
 What **BRIDGED** means: the plugin loaded and enabled, the bridge accepted and routed its scheduled
-tasks, and no fatal ownership violation has been counted *yet*. It does not mean the plugin is
-region-aware, Folia-supported or qualified, and it says nothing about its cost: the counters in
-`/plugins <name>` count tasks, they do not time them. The bridge chooses a thread for each task; it
+tasks, and no fatal ownership violation has been counted *yet* (under `relaxed`, none can be). It does
+not mean the plugin is region-aware, Folia-supported or qualified. The body-time rows of
+`/plugins <name>` measure the wall time of its task bodies on the running thread; they are observations of
+this workload, not a cost certification. The bridge chooses a thread for each task; it
 cannot know which region owns the blocks, entities or players the task touches, so code paths you did
 not exercise can still violate ownership later. The only route to full compatibility is a native
 Folia port of the plugin, after which it shows as NATIVE and no longer goes through the bridge (see
@@ -136,10 +158,16 @@ Report results with the `/plugins <name>` output, the plugin version and the log
 
 ## 5. CI evidence
 
-`legacy-test-plugin` (a synthetic fixture, not a real plugin) runs on every CI build with
-`mode = "safe"`. It covers sync, async, timer cancel, `isQueued`, a region-context `runTask`
-reading a block (`LEGACY_BRIDGE_REGION_SYNC_OK`), and a global-region world access that is
-refused and counted.
+`legacy-test-plugin` (a synthetic fixture, not a real plugin) runs on every CI build of a push
+(pull requests run no Java build) with `mode: "safe"` and the default `relaxed` thread checks. It
+covers sync, async, timer cancel, `isQueued`, `getPendingTasks`, a region-context `runTask` reading a
+block (`LEGACY_BRIDGE_REGION_SYNC_OK`), `RegionTask` and `EntityTask` routing (`LEGACY_REGION_TASK_OK`,
+`LEGACY_ENTITY_TASK_OK`, `LEGACY_ENTITY_RETIRED_OK`), the global-scheduler port markers and a
+global-region world access, for which CI accepts either `LEGACY_BRIDGE_WORLD_ACCESS_ALLOWED` or
+`_REFUSED`. Because the checks are relaxed, CI requires the boot WARN `region-ownership checks are
+RELAXED`, `LEGACY_RELAXED_MODE effective=RELAXED`, every `LEGACY_RELAXED_*_OK` probe (sweep, block write,
+global chunk, teleport join) and **no** quarantine of the fixture: relaxed checks must count, not
+quarantine. CI does not run an `enforced` boot.
 
 ## 6. Optional per-plugin limits (locally tested 2026-10-22, not qualified)
 
@@ -150,12 +178,13 @@ limits. Select nonzero values from the plugin's workload rather than treating th
 as universal performance settings.
 
 A submission exceeding the pending limit is cancelled before it is scheduled.
-An async callback exceeding the running limit cancels its task/timer; existing
-bodies finish normally. The bridge records a capacity rejection and reason without
-classifying it as a fatal ownership violation. Every refusal is counted in
-`/plugins <name>` (Rejected, Last failure); the log shows at most one
+An async callback exceeding the running limit cancels a one-shot task; a repeating task skips that
+run and stays scheduled (*Build 50 candidate*; logged as `Aurora Bridge skipped a run of repeating
+async task N for <plugin>: … the task stays scheduled`). Existing bodies finish normally. The bridge
+records a capacity rejection and reason without classifying it as a fatal ownership violation. Every
+refusal is counted in `/plugins <name>` (Rejected, Last failure); the log shows at most one
 `Aurora Bridge cancelled task N for <plugin>: pending task limit N (aurora.bridge.max-pending-tasks-per-plugin) ...`
-line (or the running-async one) per plugin and limit per 60 s, without a stack trace. Limits do not queue excess work or
+line (or the running-async one, or the skipped-run one) per plugin and limit per 60 s, without a stack trace. Limits do not queue excess work or
 promise fairness in the shared I/O lane. Lowering a limit is LIVE and affects new
 admission; it does not interrupt bodies already running.
 
@@ -168,7 +197,7 @@ load remain the owner's acceptance (Build 49 runbook G07).
 
 ## 7. With the bridge off
 
-With `mode = "off"` (the default) a plugin without `folia-supported`/`canvas-supported`
+With `mode: "off"` (the default) a plugin without `folia-supported`/`canvas-supported`
 is not loaded. The log has one line, no stack trace:
 
 ```

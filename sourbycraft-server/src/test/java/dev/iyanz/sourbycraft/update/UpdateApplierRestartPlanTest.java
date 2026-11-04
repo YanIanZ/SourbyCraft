@@ -23,14 +23,15 @@ class UpdateApplierRestartPlanTest {
     @Test
     void autoPicksExit70OnlyInsideAPanelContainer() {
         assertEquals(RestartPlan.EXIT_70, RestartPlan.resolve("auto", true));
-        assertEquals(RestartPlan.SPIGOT, RestartPlan.resolve("auto", false));
-        assertEquals(RestartPlan.SPIGOT, RestartPlan.resolve(null, false));
+        assertEquals(RestartPlan.STOP, RestartPlan.resolve("auto", false));
+        assertEquals(RestartPlan.STOP, RestartPlan.resolve(null, false));
     }
 
     @Test
     void stopAndSpigotAreExplicit() {
+        // spigot is a clean stop: Spigot's restart command is disabled under region threading.
         assertEquals(RestartPlan.STOP, RestartPlan.resolve("stop", true));
-        assertEquals(RestartPlan.SPIGOT, RestartPlan.resolve("spigot", true));
-        assertEquals(RestartPlan.SPIGOT, RestartPlan.resolve("nonsense", true));
+        assertEquals(RestartPlan.STOP, RestartPlan.resolve("spigot", true));
+        assertEquals(RestartPlan.STOP, RestartPlan.resolve("nonsense", true));
     }
 }

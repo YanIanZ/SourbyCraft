@@ -149,10 +149,14 @@ public final class BridgeTelemetry {
         return c.fatal.incrementAndGet();
     }
 
-    /** Records an ownership check relaxed inside this plugin's body and returns the new total. */
+    /**
+     * Records an ownership check relaxed inside this plugin's body and returns the new total. A relaxed hit is
+     * allowed, not a failure: it becomes the last failure only while none is recorded, and never replaces one, so a
+     * plugin touching foreign state thousands of times does not hide the exception it last threw.
+     */
     long relaxed(final String plugin, final String description) {
         final Counters c = of(plugin);
-        c.lastFailure.set(description);
+        c.lastFailure.compareAndSet(null, description);
         return c.relaxed.incrementAndGet();
     }
 

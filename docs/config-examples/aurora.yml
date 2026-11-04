@@ -1,14 +1,18 @@
 aurora:
   # sourbycraft_config/aurora.yml — Aurora services, Build 49 layout, every key at its default.
-  # A fresh server writes this file (comments included) at first boot; an existing file is never
-  # reformatted. Aurora keys an older server still kept in sourbycraft_global_config.yml are moved here
-  # once (copy of each rewritten file kept as *.migrated). LIVE = /sourbycraft reload applies it;
-  # RESTART_REQUIRED = read once at startup. Keys marked "read early" are read straight from this file
-  # before the configuration loads. Not performance tuning: these are the implemented defaults.
+  # A fresh server writes this file (comments included) at first boot. An existing file is never
+  # reformatted or seeded: keys added by a later build (AbyssLink, MultiProfile, Redis Fabric) are not
+  # written into it and run on their defaults until you copy them from this example. Aurora keys an older
+  # server still kept in sourbycraft_global_config.yml are moved here once (copy of the previous file kept
+  # as aurora.yml.migrated). LIVE = /sourbycraft reload applies it; RESTART_REQUIRED = read once at
+  # startup. Keys marked "read early" are read straight from this file before the configuration loads.
+  # A key no table documents gets one WARN per load and is ignored; a key written twice makes the whole
+  # file unreadable. Not performance tuning: these are the implemented defaults.
   # Reference: docs/AURORA-CONFIG.md.
   #
   entity:
     # LIVE. Experimental and default-off; functional tests do not establish qualification.
+    # The pre-49 name perf.ai.async-pathfinding is not read since Build 50 (one WARN per load).
     async-pathfinding: false
   diagnostics:
     # LIVE. Attribute per-thread CPU to execution lanes once a second (/perf lanes).
@@ -46,8 +50,11 @@ aurora:
     # enforced = throws, as before. relaxed/bridged are UNSAFE (data races, chunk corruption, item dupes, deadlocks
     # possible) and the server is not qualified; the boot log, /ver and /sourbycraft config say so.
     thread-checks: "relaxed"
-    # LIVE. 0 = unlimited, otherwise 1..100000. Over-limit submissions are cancelled and diagnosed.
+    # LIVE. 0 = unlimited, otherwise 1..100000. Over-limit submissions are cancelled and diagnosed;
+    # existing tasks drain normally.
     max-pending-tasks-per-plugin: 0
+    # LIVE. 0 = unlimited, otherwise 1..100000. Over the limit a one-shot async callback is cancelled and a
+    # repeating task skips that run and stays scheduled (both diagnosed, rate-limited). Rejection, not a queue.
     max-running-async-tasks-per-plugin: 0
   scheduler:
     # RESTART_REQUIRED. Resource Governor lane budgets (docs/architecture/aurora-resource-governor.md);
@@ -75,6 +82,12 @@ aurora:
     worlds: []
     # Move these worlds back to region files on the next load; must not overlap worlds.
     export: []
+    # file = a directory beside each region folder. redis = the built-in Redis backend, configured by the
+    # aurora.awf.redis.* keys (uri, key-prefix, pool-size, timeout-ms, lease-seconds, wait-for-aof). Those
+    # keys are read but never seeded, so they are not in this example: a uri written here takes precedence
+    # over the SOURBYCRAFT_AWF_REDIS_URI environment variable, which is used only while the key is absent.
+    # Another name selects a backend registered by server-side code; if it is not registered, listed worlds
+    # fail to load (no fallback).
     backend: "file"
     persistence: "incremental"
     # Writes become durable at commit / save-all / shutdown. A crash can lose this interval.
@@ -91,10 +104,247 @@ aurora:
     # Start a commit as soon as a storage's unsaved chunks hold at least this many bytes, without waiting for
     # commit-interval-seconds. 0 = off (interval only). A trigger checked once a second, not a hard cap.
     commit-dirty-bytes: 0
-    # One budget (ms) for every AWF wait at shutdown, counted from the start of shutdown (so including the
-    # vanilla chunk save). When it passes, no further commit is attempted, Redis connections are cut, every
-    # unconfirmed storage is logged and the stop ends with AWF-SHUTDOWN-INCOMPLETE and exit status 70.
+    # One budget (ms) for the AWF waits at shutdown (lock waits, the start of each commit attempt, Redis
+    # calls, lease release), counted from the start of shutdown (so including the vanilla chunk save). When
+    # it passes, no further commit is attempted, Redis connections are cut, every unconfirmed storage is
+    # logged and the stop ends with AWF-SHUTDOWN-INCOMPLETE and exit status 70. A FILE commit already
+    # writing (files plus fsync) is not interrupted and can hold the stop past the deadline. Also how long an
+    # AuroraWorlds save (/awf save, the save before an unload) waits for its world's chunk I/O to drain.
     shutdown-deadline-ms: 30000
+    multiprofile:
+      # RESTART_REQUIRED, read early (every multiprofile key). AWF MultiProfile. Default false: no
+      # directory, thread, listener or service registration. docs/awf/multiprofile/CONFIGURATION.md.
+      enabled: false
+      # standalone | distributed. distributed is refused at startup unless repository: redis,
+      # coordination.provider: redis, fencing-enabled: true and a running Aurora Redis Fabric are set.
+      # distributed, and standalone with repository: redis (nothing limits that to one server), are
+      # EXPERIMENTAL and unqualified: a player's live state does not follow them between servers (a join
+      # restores the last committed snapshot; coordination.handoff-wait-ms lets a proxy server switch wait
+      # for the previous server's quit save), and the Build 53 quit capture at shutdown
+      # (shutdown.capture-deadline-ms) is bounded per node and not a distributed guarantee.
+      mode: "standalone"
+      default-slots: 3
+      max-slots: 8
+      switching:
+        enabled: true
+        timeout-ms: 15000
+        require-durable-save: true
+        # RESTART_REQUIRED (Build 55). Seconds after a COMMITTED switch during which the player's next switch is
+        # refused (SWITCH_COOLDOWN). 0 = off (the Build 54 behaviour); Hypixel parity is 90; at most 86400. A refused,
+        # vetoed or failed switch starts none; kept in memory on this node (a restart clears it).
+        cooldown-seconds: 0
+      isolation:
+        inventory: true
+        armor: true
+        ender-chest: true
+        experience: true
+        health: true
+        food: true
+        potion-effects: true
+        location: true
+      worlds:
+        idle-unload-seconds: 300
+      coordination:
+        provider: "local"
+        fencing-enabled: true
+        single-active-session: true
+        # Build 55.1. A join refused only because another live session still holds the player's session
+        # claim or their active profile's claim (a proxy switch: the previous server has not committed the
+        # quit save and released the claim yet) retries the claim with bounded backoff, off the tick
+        # threads, for up to this long before it is refused as before. The retry never takes a live claim.
+        # 0 = one attempt (Build 51-55); 5000 recommended behind Velocity; max 15000.
+        handoff-wait-ms: 0
+      # File repository directory (accounts, profiles, snapshots, transition journals); created only when
+      # enabled. With repository: redis it is only read: while Redis is empty and this directory holds
+      # profiles, profile writes are refused until /awf multiprofile migrate-repository copies them.
+      directory: "awf/profiles"
+      # RESTART_REQUIRED. file = the directory above, one server only (its lock refuses a second server).
+      # redis = the Aurora Redis Fabric (STORAGE pool, keys <prefix>fabric:mp:*): each write is one Lua
+      # script that checks the writer's session claim (when the write carries one) and the record revision
+      # (when the record has one) before it writes. Needs coordination.provider: redis, fencing-enabled:
+      # true, a running fabric and a Redis 7.0+ primary (no cluster).
+      repository: "file"
+      redis:
+        # RESTART_REQUIRED. repository: redis only. true = refuse to start when Redis reports appendonly
+        # off. Even with AOF, appendfsync everysec can lose about 1 s of acknowledged writes on a Redis
+        # crash, and a promoted replica can lose acknowledged writes; one primary is the supported topology.
+        require-aof: true
+        # RESTART_REQUIRED. repository: redis only. true = snapshot, account, profile and binding writes,
+        # and the journal write before a target state is applied, wait for WAITAOF (Redis 7.2+, up to half
+        # of aurora.awf.redis.timeout-ms); a write not confirmed in time is still applied, logged and counted
+        # in /awf multiprofile status. Unsupported by Redis: logged once, then acknowledged from memory.
+        wait-for-aof: true
+      types:
+        # RESTART_REQUIRED. Built-in policy types a profile may be created with (classic, ironman, stranded,
+        # bingo). Not the free consumer namespace (ProfileRequest.type), not a plugin-registered type. Since
+        # Build 54 each type's rules come from the profile type registry (PROFILE-TYPES.md): the engine
+        # enforces its own actions (bank, co-op, salvage); trade/auction/bazaar are the consumer's to enforce.
+        allowed: ["classic", "ironman", "stranded", "bingo"]
+        # RESTART_REQUIRED. Type of a profile created without one; must be in allowed (else the first
+        # allowed type is used, with a WARN).
+        default: "classic"
+        # RESTART_REQUIRED (Build 54). deny | allow. A profile whose type has no known definition (not built
+        # in, never registered here, no readable stored copy): deny = every action refused, bank/co-op/salvage
+        # included (ACTION_FORBIDDEN_BY_TYPE), one WARN per type, until its plugin registers it. allow = every
+        # action allowed as for classic, which lifts what the lost definition denied. Invalid = deny + WARN.
+        unknown-type-policy: "deny"
+        registry:
+          # RESTART_REQUIRED (Build 54). Whether a plugin may replace a built-in type (classic, ironman,
+          # stranded, bingo) with its own definition. false = refused (TYPE_NOT_ALLOWED) and a stored
+          # override is ignored with a WARN. Invalid = true + WARN.
+          allow-override-builtins: true
+      names:
+        # RESTART_REQUIRED. cute = the server assigns a fruit or vegetable name when the profile is
+        # created: unique per account, immutable. The only policy.
+        policy: "cute"
+      migration:
+        # RESTART_REQUIRED. What happens to a profile store written before Build 51 (format 1).
+        # off = nothing. dry-run = report only, writes nothing. apply = back the store up to backup-dir,
+        # then convert it to format 2. One way: builds older than Build 51 refuse a format-2 store;
+        # rolling back = restoring the backup into an isolated store. Quote the value (YAML reads an
+        # unquoted off as false). apply without a valid backup-dir falls back to off with a WARN.
+        mode: "off"
+        # RESTART_REQUIRED. Backup target for mode: apply; relative to the server directory or absolute.
+        # No ..; must not be inside or contain the store directory. Empty = not configured.
+        backup-dir: ""
+      coop:
+        # RESTART_REQUIRED. Default false. Co-op membership (Build 52) and play (Build 53): convert a solo
+        # profile, invite, accept, decline, cancel, leave, kick vote, shared label; since Build 53 a member can
+        # switch into the co-op and play it with their own state, and a member whose active profile is the co-op
+        # can be removed (captured and switched out first). false = every co-op operation is refused
+        # (COOP_DISABLED) and nothing co-op is written. Needs multiprofile.enabled, a store in format 2 and
+        # authoritative login (login.authoritative auto or true). A member can play only on the node that holds the co-op's bound world
+        # (WRONG_NODE elsewhere). Build 54 adds the shared/personal bank, collections and salvage delivery
+        # (bank: below). No build transfers ownership.
+        # The first co-op record raises the store to minimum build 52 (Build 51 then refuses it).
+        enabled: false
+        # RESTART_REQUIRED. Members of one co-op, owner included. 2-8. Invalid = 5, with a WARN.
+        max-members: 5
+        # RESTART_REQUIRED. Invitation lifetime, 1-1440 minutes; judged at commit time.
+        invite-expiry-minutes: 5
+        # RESTART_REQUIRED. Policy types whose solo profile may be converted to co-op. Checked at conversion
+        # only, together with the type's registry rule coop.convert (Build 54). The engine does not enforce
+        # trade/auction/bazaar, so widening this gives those types co-op with only engine-owned rules applied.
+        allowed-types: ["classic"]
+        # RESTART_REQUIRED (Build 56). Default false = OD-1 (Builds 53-55.1): one node per co-op, WRONG_NODE
+        # elsewhere. true = members of one co-op may be on different nodes at once (spawn + island). Needs
+        # mode: distributed and repository: redis (otherwise MultiProfile refuses to start and the server runs
+        # without it). Member saves are fenced by the
+        # member's own session claim Q; bank, collections, membership and label by the transaction claim P and
+        # revision CAS; the node claim then only marks the node hosting the co-op's bound worlds (world-host).
+        cross-node: false
+        # RESTART_REQUIRED (Build 56, read with cross-node: true only). true = this node hosts the bound worlds of
+        # co-op profiles (Build 55.1 behaviour; a second world host is WRONG_NODE). false = a satellite (spawn or
+        # lobby): no node claim, no bound world prepared, no WRONG_NODE; needs switching.enabled: false. A satellite
+        # applies restores with location off and stores the head's respawn/return point unchanged: keep isolation.*
+        # identical on both nodes.
+        world-host: true
+        kick-vote:
+          # RESTART_REQUIRED. Kick-vote lifetime, 1-1440 minutes. Approval is unanimous among the members other
+          # than the target (owner included); the starter's approval counts.
+          expiry-minutes: 10
+          # RESTART_REQUIRED. Two-member co-op only: days the other member must have been inactive before a
+          # vote may start against them. 1-3650. Build 52 records activity at join time and membership changes
+          # only, not from gameplay.
+          inactive-days: 35
+      shutdown:
+        # RESTART_REQUIRED (Build 53). At shutdown MultiProfile captures and saves the online players before the
+        # server removes them, then closes. This is how long it waits for those captures, 1000-60000 ms
+        # (invalid = 10000, with a WARN). When it passes, a player whose save has not finished keeps the last
+        # committed snapshot and any pending intent for recovery at their next join, and shutdown continues.
+        # A longer value delays process exit by up to that long.
+        capture-deadline-ms: 10000
+      login:
+        # RESTART_REQUIRED (Build 53). auto | true | false. auto = authoritative exactly when coop.enabled is
+        # true, so a server without co-op joins exactly as Build 52 did. true = on join the committed state of
+        # the active profile (the member head in a co-op) is restored instead of whatever vanilla playerdata
+        # loaded; every vanilla player save (autosave) and the quit publish a profile snapshot; a head that
+        # cannot be read or restored refuses the join (HEAD_UNREADABLE and other codes); after a crash or the
+        # upgrade from Build 52 a vanilla playerdata newer than the profile's snapshot is adopted into the active
+        # profile once (PROFILE-LIFECYCLE.md "Authoritative login"). false = Build 52 behaviour: the join keeps
+        # vanilla playerdata, and co-op members cannot switch into a co-op. Invalid = auto, with a WARN.
+        authoritative: auto
+      adapters:
+        # RESTART_REQUIRED (Build 53). Profile state adapter ids to treat as REQUIRED whatever their descriptor
+        # says, a list or comma-separated string, [a-z0-9_.:-]{1,64}, at most 32. REQUIRED: the capture is
+        # durable before the target profile becomes active, the apply is verified, a failure refuses the switch
+        # (ADAPTER_REQUIRED_FAILED) and an adapter that holds data for the profile but is not registered here
+        # refuses it (ADAPTER_MISSING). Can only raise strictness. A malformed entry is dropped with a WARN.
+        required: []
+        # RESTART_REQUIRED (Build 55.1). Adapter ids whose stored REQUIRED data passes through this node unchanged
+        # while no plugin registers them here: not applied, not captured, never dropped, no ADAPTER_MISSING. For a
+        # node that by design runs without the plugin that owns the data (a lobby without the island plugin's
+        # economy adapter: [economy]). A registered id is not affected.
+        preserve-unregistered: []
+      bank:
+        # RESTART_REQUIRED (Build 54). The co-op bank policy, read once at start; used only with coop.enabled.
+        # Amounts are long minor units. A bank record keeps the currency and shared capacity it was first
+        # written with: a changed currency refuses changes to banks kept in the old one (INVALID_REQUEST, reads
+        # still work, no conversion); a changed shared-capacity applies to new bank records only. The purse is
+        # not here: it stays per profile through its REQUIRED adapter (OD-4), purse<->bank transfers are refused
+        # (PURSE_TRANSFER_UNSUPPORTED). docs/awf/multiprofile/CONFIGURATION.md.
+        currency:
+          # RESTART_REQUIRED (Build 54). [a-z0-9_.-]{1,64}. Invalid = aurora / coins + WARN.
+          provider: "aurora"
+          id: "coins"
+          # RESTART_REQUIRED (Build 54). Decimal places of one minor unit, 0-9 (0 = whole coins). Invalid = 0 + WARN.
+          scale: 0
+        # RESTART_REQUIRED (Build 54). Shared bank cap in minor units, 0 = no cap. Invalid = 0 + WARN.
+        shared-capacity: 0
+        # RESTART_REQUIRED (Build 54). Personal bank cap, % of the shared capacity, 0-100 (no cap when either is 0).
+        personal-cap-percent: 20
+        # RESTART_REQUIRED (Build 54). Interest one posting credits, 0-100. The server schedules none: the owner
+        # posts it (AuroraProfiles.applyInterest, /awf multiprofile coop bank interest); every posting credits again,
+        # no sooner than interest-interval-hours after the previous one.
+        interest-percent: 10
+        # RESTART_REQUIRED (Build 54). Least hours between two interest postings of one co-op, on the store clock
+        # (the bank record remembers its last posting; a sooner posting is INVALID_REQUEST). 0 = no minimum.
+        interest-interval-hours: 24
+      audit:
+        # RESTART_REQUIRED (Build 55). The audit log: immutable entries recorded after the durable outcome of each
+        # switch (and each switch refusal), create, delete, lock, archive, co-op membership change, bank posting and
+        # salvage delivery; newest 4096 in memory (/awf multiprofile audit <profile>, AuroraProfiles.audit), daily files
+        # <directory>/audit/<date>.log on the storage lane. Recording never changes an outcome. false = nothing recorded.
+        enabled: true
+        # RESTART_REQUIRED (Build 55). Days a daily audit file is kept, 1-3660.
+        retention-days: 30
+      io:
+        # RESTART_REQUIRED (Build 55, PM-091). Partitions of the profile I/O queue, 1-64. 1 = one profile step at a
+        # time, FIFO over all accounts, exactly as Build 54. Above 1, per-account steps (switch, save, login, session) of
+        # accounts in different partitions may run at once (each holding one storage lane slot) while every account's
+        # own steps stay FIFO; store-wide steps are barriers. Shows an effect only with aurora.scheduler.storage-threads > 1.
+        # Unqualified above 1 until the owner's soak.
+        partitions: 1
+    redis:
+      fabric:
+        # RESTART_REQUIRED, read early (every fabric key). Aurora Redis Fabric. Default false: no socket,
+        # no thread, no key. Reuses aurora.awf.redis.uri, key-prefix, timeout-ms and TLS/ACL credentials.
+        enabled: false
+        services:
+          sessions: true
+          coordination: true
+          events: false    # off until a consumer is deployed; see docs/awf/multiprofile/REDIS-FABRIC.md
+          cache: false    # off until a consumer uses it
+          routing: true
+          telemetry: true
+        pools:
+          storage: 8
+          coordination: 4
+          events: 2
+          control: 2
+        cache:
+          max-entries: 10000
+          ttl-seconds: 60
+        sessions:
+          heartbeat-seconds: 10
+          ttl-seconds: 45
+        events:
+          retention: 10000
+          batch-size: 32
+          max-deliveries: 5
+          read-block-ms: 500
+        coordination:
+          claim-seconds: 45
   abysslink:
     # RESTART_REQUIRED. Default false. Optional native Leviathan control client; failure never blocks startup.
     enabled: false

@@ -19,8 +19,9 @@ import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.time.YearMonth;
+import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.zip.GZIPInputStream;
 
 /**
@@ -29,11 +30,14 @@ import java.util.zip.GZIPInputStream;
  * never leaves the server (privacy requirement).
  *
  * <p>The database is the keyless, free db-ip.com "IP to City Lite" file
- * (CC-BY-4.0). It is lazy-downloaded on first geo use into {@code cache/geoip/}
- * and the reader is kept open for the process lifetime. {@link DatabaseReader}
- * is thread-safe for concurrent lookups, which matters on Folia (no single main
- * thread). If the DB cannot be fetched (offline / 404) every call degrades to
- * {@code null} so {@code /ping} keeps working and just omits the location.
+ * (CC-BY-4.0). The first geo use without a local file starts one background download
+ * into {@code cache/geoip/} and answers {@code null} at once, so a {@code /ping}
+ * never waits for it; lookups after the download open the file, and the reader is
+ * kept open for the process lifetime. {@link DatabaseReader} is thread-safe for
+ * concurrent lookups, which matters on Folia (no single main thread). A failed
+ * download or open is retried after {@link #RETRY_AFTER} rather than never; until
+ * then every call degrades to {@code null} so {@code /ping} keeps working and just
+ * omits the location.
  */
 public final class GeoUtil {
 
@@ -58,13 +62,25 @@ public final class GeoUtil {
     static final long MAX_COMPRESSED_BYTES = 512L * 1024 * 1024;
     static final long MAX_DATABASE_BYTES = 1024L * 1024 * 1024;
 
-    private static final Map<String, String> cache = new ConcurrentHashMap<>();
+    /** IP to location, least recently used evicted past {@link #MAX_CACHE}; every access holds its monitor. */
+    private static final Map<String, String> cache = new LinkedHashMap<>(16, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(final Map.Entry<String, String> eldest) {
+            return size() > MAX_CACHE;
+        }
+    };
 
-    /** Guards one-time reader init / download. */
+    /** How long after a failed download or open the next lookup may try again. */
+    private static final Duration RETRY_AFTER = Duration.ofHours(1);
+
+    /** Guards reader init and the download state below. */
     private static final Object INIT_LOCK = new Object();
     private static volatile DatabaseReader reader;
-    /** True once init has been attempted and failed, so we don't retry the download every call. */
-    private static volatile boolean initFailed;
+    /** A download task is running; lookups answer {@code null} meanwhile. Guarded by {@link #INIT_LOCK}. */
+    private static boolean downloading;
+    /** Whether a failure is backing off, and until when ({@link System#nanoTime()}). Guarded by {@link #INIT_LOCK}. */
+    private static boolean backingOff;
+    private static long retryAtNanos;
     /** Set once a per-lookup DB read error has been logged, so a corrupt DB doesn't spam WARN per IP. */
     private static final java.util.concurrent.atomic.AtomicBoolean dbErrorWarned =
         new java.util.concurrent.atomic.AtomicBoolean(false);
@@ -90,7 +106,10 @@ public final class GeoUtil {
             }
 
             String ip = addr.getHostAddress();
-            String cached = cache.get(ip);
+            String cached;
+            synchronized (cache) {
+                cached = cache.get(ip);
+            }
             if (cached != null) return cached;
 
             DatabaseReader db = readerOrNull();
@@ -124,16 +143,11 @@ public final class GeoUtil {
             }
             if (loc.isEmpty()) return null;
 
-            if (cache.size() >= MAX_CACHE) {
-                // Evict half, not all: a full clear converts every active player's next /ping into
-                // a fresh DB lookup burst. Hash-order is fine for an IP->location cache.
-                var it = cache.keySet().iterator();
-                for (int i = 0, target = cache.size() / 2; i < target && it.hasNext(); i++) {
-                    it.next();
-                    it.remove();
-                }
+            // removeEldestEntry drops the least recently used entry past the cap; the monitor keeps
+            // the cap exact under concurrent lookups.
+            synchronized (cache) {
+                cache.put(ip, loc);
             }
-            cache.put(ip, loc);
             return loc;
         } catch (Exception e) {
             SourbyLogger.warn("Geo lookup failed: " + e.getMessage());
@@ -141,25 +155,74 @@ public final class GeoUtil {
         }
     }
 
-    /** Lazy-init the reader; returns {@code null} (and never retries) if the DB can't be obtained. */
+    /**
+     * The reader, or {@code null} while there is none. With the database on disk it is opened here,
+     * a local read on the caller's I/O thread. Without it, one background download starts and this
+     * returns {@code null} at once. After a failed download or open, lookups return {@code null}
+     * until {@link #RETRY_AFTER} has passed; the first lookup after that tries again.
+     */
     private static DatabaseReader readerOrNull() {
         DatabaseReader r = reader;
         if (r != null) return r;
-        if (initFailed) return null;
         synchronized (INIT_LOCK) {
             if (reader != null) return reader;
-            if (initFailed) return null;
+            if (downloading || backingOff && System.nanoTime() - retryAtNanos < 0) return null;
+            backingOff = false;
             try {
-                ensureDbPresent();
+                if (!Files.isRegularFile(DB_PATH) || Files.size(DB_PATH) == 0) {
+                    startDownload();
+                    return null;
+                }
                 reader = new DatabaseReader.Builder(DB_PATH.toFile()).build();
                 SourbyLogger.info("GeoIP database ready (" + DB_PATH + ")");
                 return reader;
             } catch (Exception e) {
-                initFailed = true;
-                SourbyLogger.warn("GeoIP unavailable, /ping location disabled: " + e.getMessage());
+                backOff("GeoIP database could not be opened: " + e.getMessage());
                 return null;
             }
         }
+    }
+
+    /**
+     * Under {@link #INIT_LOCK}: hands the download to {@link VirtualExecutor}. None starts once
+     * shutdown has begun or startup failed ({@link dev.iyanz.sourbycraft.core.AuroraRuntime#stopping()});
+     * a full executor leaves no state behind, so the next lookup tries again.
+     */
+    private static void startDownload() {
+        if (dev.iyanz.sourbycraft.core.AuroraRuntime.stopping()) return;
+        downloading = true;
+        try {
+            VirtualExecutor.run(GeoUtil::downloadInBackground);
+        } catch (RejectedExecutionException busy) {
+            downloading = false;
+        }
+    }
+
+    /** On an I/O thread; clears {@link #downloading} on every exit, backing off unless the file arrived. */
+    private static void downloadInBackground() {
+        boolean downloaded = false;
+        String why = "unexpected error";
+        try {
+            ensureDbPresent();
+            downloaded = true;
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            why = "interrupted";
+        } catch (Exception e) {
+            why = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+        } finally {
+            synchronized (INIT_LOCK) {
+                downloading = false;
+                if (!downloaded) backOff("GeoIP database download failed: " + why);
+            }
+        }
+    }
+
+    /** Under {@link #INIT_LOCK}: no attempt before {@link #RETRY_AFTER} has passed. */
+    private static void backOff(final String why) {
+        backingOff = true;
+        retryAtNanos = System.nanoTime() + RETRY_AFTER.toNanos();
+        SourbyLogger.warn(why + "; /ping shows no location until the next attempt in " + RETRY_AFTER.toMinutes() + " min");
     }
 
     /** Ensure the decompressed .mmdb exists on disk, downloading + gunzipping it if needed. */
@@ -213,6 +276,8 @@ public final class GeoUtil {
 
     /** Memory-pressure hook: drop the IP->location cache; entries rebuild on next lookup. */
     public static void trimForMemoryPressure() {
-        cache.clear();
+        synchronized (cache) {
+            cache.clear();
+        }
     }
 }

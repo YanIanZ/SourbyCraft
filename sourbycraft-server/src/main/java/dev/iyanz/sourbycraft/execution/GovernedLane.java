@@ -90,6 +90,11 @@ public final class GovernedLane implements Executor {
         return this.pool.isShutdown();
     }
 
+    /** The lane's thread budget (its most concurrent tasks). */
+    public int threads() {
+        return this.threads;
+    }
+
     /** Threads the lane holds right now (idle threads time out, so this can be below the budget). */
     public int poolSize() {
         return this.pool.getPoolSize();

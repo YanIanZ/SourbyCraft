@@ -28,6 +28,16 @@ class UpdateApplierSwapTest {
 
     private static final byte[] OLD = "old build".getBytes();
     private static final byte[] NEW = "new build".getBytes();
+    /** The release digest swapInPlace re-checks the copy against. */
+    private static final String NEW_SHA = sha256(NEW);
+
+    private static String sha256(byte[] data) {
+        try {
+            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(data));
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
 
     @BeforeEach
     void setUp() throws IOException {
@@ -38,7 +48,7 @@ class UpdateApplierSwapTest {
     @Test
     void aSwapIsRecordedAndItsFailedFirstBootIsRestored() throws IOException {
         UpdateRollbackGuard guard = new UpdateRollbackGuard(root.resolve("auto_update"));
-        assertEquals(SwapResult.SWAPPED, UpdateApplier.swapInPlace("v26.2-r49", stagedJar, launchJar, guard));
+        assertEquals(SwapResult.SWAPPED, UpdateApplier.swapInPlace("v26.2-r49", stagedJar, NEW_SHA, launchJar, guard));
         assertArrayEquals(NEW, Files.readAllBytes(launchJar));
         assertEquals(Phase.APPLIED, guard.state().orElseThrow().phase());
         assertEquals(BootDecision.AWAIT_READY, guard.onBoot());
@@ -51,7 +61,7 @@ class UpdateApplierSwapTest {
         // The state directory cannot be created (a regular file sits at its path): recordApplied fails.
         Path blocked = Files.write(root.resolve("auto_update"), new byte[0]);
         UpdateRollbackGuard guard = new UpdateRollbackGuard(blocked);
-        assertEquals(SwapResult.ABORTED, UpdateApplier.swapInPlace("v26.2-r49", stagedJar, launchJar, guard));
+        assertEquals(SwapResult.ABORTED, UpdateApplier.swapInPlace("v26.2-r49", stagedJar, NEW_SHA, launchJar, guard));
         assertArrayEquals(OLD, Files.readAllBytes(launchJar), "the launch jar still holds the old build");
         assertArrayEquals(NEW, Files.readAllBytes(stagedJar), "the staged jar stays for a later attempt");
     }
@@ -68,7 +78,7 @@ class UpdateApplierSwapTest {
         assertEquals(Phase.OK, guard.state().orElseThrow().phase());
         // The state file can no longer be rewritten (its temp sibling is a directory): recordApplied fails.
         Files.createDirectory(dir.resolve(UpdateRollbackGuard.STATE_FILE + ".part"));
-        assertEquals(SwapResult.ABORTED, UpdateApplier.swapInPlace("v26.2-r49", stagedJar, launchJar, guard));
+        assertEquals(SwapResult.ABORTED, UpdateApplier.swapInPlace("v26.2-r49", stagedJar, NEW_SHA, launchJar, guard));
         assertArrayEquals(OLD, Files.readAllBytes(launchJar));
         assertEquals(Phase.OK, guard.state().orElseThrow().phase());
     }
@@ -76,8 +86,8 @@ class UpdateApplierSwapTest {
     @Test
     void aFailedRenameLeavesTheEarlierStateAsItWas() throws IOException {
         UpdateRollbackGuard guard = new UpdateRollbackGuard(root.resolve("auto_update"));
-        Files.delete(stagedJar); // the rename has nothing to move
-        assertEquals(SwapResult.SWAP_FAILED, UpdateApplier.swapInPlace("v26.2-r49", stagedJar, launchJar, guard));
+        Files.delete(stagedJar); // nothing to copy beside the launch jar: aborted before any record
+        assertEquals(SwapResult.ABORTED, UpdateApplier.swapInPlace("v26.2-r49", stagedJar, NEW_SHA, launchJar, guard));
         assertArrayEquals(OLD, Files.readAllBytes(launchJar));
         assertTrue(guard.state().isEmpty(), "no APPLIED record for a swap that did not happen");
         assertEquals(BootDecision.NONE, guard.onBoot());

@@ -1,9 +1,12 @@
 # Network security guards
 
-SEC-1 adds SourbyCraft-owned observation in `dev.iyanz.sourbycraft.security` and a
-Minecraft feature patch `0034-SourbyCraft-security-guard-hooks.patch`. SEC-11 adds a
-separate `SourbyCraft - connection rate limit hook` commit; the integrator must export
-that commit as a feature patch before rematerializing sources.
+SEC-1 adds SourbyCraft-owned observation in `dev.iyanz.sourbycraft.security` and the
+Minecraft feature patch `0034-SourbyCraft-security-guard-hooks.patch`. SEC-11's hooks are committed
+Minecraft feature patches too: `0036-SourbyCraft-connection-rate-limit-hook.patch` (TCP accept and
+Login Hello) and `0041-SourbyCraft-proxy-aware-admission-keys.patch` (forwarded-address keying, the
+Velocity hook, the startup proxy policy). The SEC-1 review fixes are `0038-SourbyCraft-separate-NBT-depth-from-codec-bias.patch`
+and `0040-SourbyCraft-consume-rejected-network-frames.patch`. (The 2026-10-20 text asked the integrator to export
+the SEC-11 commit as a patch; that is done.)
 
 Every leaf of `sourbycraft-security.yml` has a Java consumer. Each guard group defaults
 to `mode: LOG`: count violations and emit at most one log per limit per 30 seconds across
@@ -56,9 +59,10 @@ existing files are preserved, and missing new keys use defaults. Installing thes
 Minecraft hooks initially is **RESTART_REQUIRED**.
 
 Tests cover every limit, LOG/OFF/KICK, per-channel time windows, scope cleanup, invalid
-reload retention, and complete shipped YAML leaf coverage. Build/test/boot evidence is
-recorded in the current Codex block of `AGENT-COORDINATION.md`; these checks do not
-establish adversarial soak or production qualification.
+reload retention, and complete shipped YAML leaf coverage. The build/test/boot evidence of the
+2026-10-20 change was kept in the untracked `AGENT-COORDINATION.md` and is not retained in the
+repository; the tests run in CI on every push. These checks do not establish adversarial soak or
+production qualification.
 
 ## TCP and login admission (SEC-11)
 
@@ -149,8 +153,8 @@ overflow" attack, which fails 0/900 with insertion order), out-of-order timestam
 concurrent updates and withholding global charges on per-address KICK. Bytecode tests
 (`AdmissionHookBytecodeTest`) pin the native accept, Hello and Velocity-forwarding hooks,
 their ordering, that the login hooks pass `Connection.getRemoteAddress()`, and the startup
-proxy-policy call; they do not prove live socket behavior. Exact
-runs and native commits are recorded in `AGENT-COORDINATION.md`.
+proxy-policy call; they do not prove live socket behavior. The exact runs of that change were
+kept in the untracked `AGENT-COORDINATION.md` (not retained); the native hooks are patches 0036 and 0041.
 
 ## SEC-1 review corrections and operating limits
 
@@ -176,11 +180,13 @@ these guards do not reproduce the historical drop/clamp behavior or silent creat
 cancellation.
 
 The relative path `sourbycraft-security.yml` resolves against the server working directory.
-Security loading is part of the utility TOML config apply path. If utility initialization
-cannot produce a configuration and returns early, that loader is not invoked and the
-built-in LOG defaults remain; investigate the utility initialization error first. If a
-security file is deleted, a later reload can seed a fresh one. Source defaults and a file
-successfully loaded at runtime are distinct states.
+Security loading is part of the configuration apply step (`SourbyCraftConfig.applyLiveConfig`) at boot and on
+`/sourbycraft reload`. Since Build 50 (PR #62; code written and statically reviewed; not built; not tested by
+the owner) a global file (`sourbycraft_global_config.yml`) that cannot be opened no longer skips it: `init()`
+still applies `aurora.yml`, the security limits and the updater settings, and a reload opens the file again. In
+earlier builds the security loader was not invoked in that case and the built-in LOG defaults stayed. If a
+security file is deleted, a later reload can seed a fresh one. Source defaults and a file successfully loaded at
+runtime are distinct states.
 
 NBT accounting hooks also run on storage/region threads; outside network decode they
 perform a ThreadLocal lookup and return without counting/logging. The separate actual

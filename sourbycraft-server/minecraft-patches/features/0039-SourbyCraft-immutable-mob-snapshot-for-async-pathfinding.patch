@@ -329,7 +329,7 @@ index e55558448f91410f6174548edc88327191358825..54dfe3839a094ccbb7170c6f4bfca7f0
      @Override
      public PathType getPathType(final PathfindingContext context, final int x, final int y, final int z) {
 -        return this.getPathTypeOfMob(context, x, y, z, this.mob);
-+        return this.getPathTypeOfMob(context, x, y, z, this.subject()); // SourbyCraft - async pathfinding
++        return this.getPathTypeOfMob(context, x, y, z, this.subject); // SourbyCraft - async pathfinding: the swim evaluator's getPathTypeOfMob never reads the mob, so the field (null outside a solve) is passed instead of subject(), keeping this callable without prepare as vanilla's this.mob was
      }
  
      @Override

@@ -42,7 +42,8 @@ Do not automatically parallelize plugin onLoad/onEnable, service registration, e
 - `DependencyGraph`: missing hard dependencies, cycles (Tarjan), and a consistent order. A name
   another plugin `provides` satisfies a dependency on it, as in Paper's loader (FastAsyncWorldEdit
   `provides: [WorldEdit]` satisfies WorldGuard's `depend: [WorldEdit]`); a real plugin of that name wins.
-  Diagnostic only; the plugin manager's order is unchanged.
+  Diagnostic only; the plugin manager's order is unchanged. The graph itself is not cached: the
+  boot stage recomputes it every boot from the (cached) descriptors (`StartupIndexStage`).
 - `StartupTimeline`/`StartupProfile`: boot-stage and index phase timings, and JVM start to
   `ServerLoadEvent(STARTUP)`. The profile is compared with the previous boot only when both have
   the same start class.
@@ -53,8 +54,12 @@ Do not automatically parallelize plugin onLoad/onEnable, service registration, e
 
 Not implemented: caching AWF indexes. There is no transform output to cache: SourbyCraft rewrites
 no plugin bytecode (the only class reader is the read-only constant-pool scan, already cached as the
-compatibility scan; the Aurora Bridge routes at runtime through patched scheduler/provider classes;
-the Cherry mixin engine is external and off by default). Whether a transform is intended is an owner
+compatibility scan; the Aurora Bridge routes at runtime through patched scheduler/provider classes).
+The Cherry mixin engine is not in this repository (no Cherry code in the server sources or
+patches): per AGENTS.md and README it is provided by the SourbyClip launcher (private
+`YanIanZ/SourbyClip`, pinned by `build-data/private-toolchain.lock.json`), so neither its
+transforms nor its documented default (off unless `-Dcherry.enable.mixin=true`) are visible to, or
+verified by, this repository's code and tests. Whether a server-side transform is intended is an owner
 decision; a cache needs a producer first. No cold/warm startup measurement has been taken, so no
 startup-time improvement is claimed.
 

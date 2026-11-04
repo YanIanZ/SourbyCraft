@@ -38,7 +38,7 @@ import java.util.regex.Pattern;
  * written to a temporary generation, verified by reading it back, and only then published by
  * replacing the {@code CURRENT} manifest pointer. That replacement is the single commit point. A
  * crash at any earlier step leaves the previous generation authoritative, and leftovers are removed
- * the next time the store is opened.</p>
+ * the next time the store is opened by a role that accepts commits.</p>
  *
  * <p>On disk: {@code CURRENT} holds {@code "<N>\t<sha256 of N's manifest>"}; {@code generations/N/}
  * holds the blobs and {@code manifest}. A manifest is UTF-8 lines. Format 1 is blob lines only,
@@ -67,6 +67,8 @@ import java.util.regex.Pattern;
  *
  * <p>Retention: the newest {@code retainedGenerations} committed generations are kept, plus every
  * generation one of them is chained to, transitively; everything else is deleted after a commit.
+ * That deletion runs past the commit point, so when it fails the commit still succeeds: the
+ * failure is logged (at most once a minute per store) and the next commit deletes again.
  * {@link #readRetained} returns the retained ones only, never a chain-only ancestor.</p>
  *
  * <p>Scope: this commits whole snapshots of small blobs. {@link AwfWorldStore} builds the FILE
@@ -122,14 +124,45 @@ public final class GenerationStore {
         }
     }
 
+    private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger("SourbyCraft/AWF");
+
+    /**
+     * A warning for cleanup that failed after a commit point, at most one line a minute per store
+     * with the failures counted in between. Logging only: the next commit retries the cleanup.
+     * Guarded by the owning store's monitor.
+     */
+    static final class AfterCommitWarning {
+        private static final long INTERVAL_NANOS = 60_000_000_000L;
+        private boolean logged;
+        private long loggedAt;
+        private long failures;
+
+        /** Counts a failure; logs it with its stack unless a line was logged within the interval. */
+        void failed(final String message, final Throwable failure) {
+            this.failures++;
+            final long now = System.nanoTime();
+            if (this.logged && now - this.loggedAt < INTERVAL_NANOS) return;
+            LOGGER.warn("{} ({} failure(s) since the last such warning)", message, this.failures, failure);
+            this.logged = true;
+            this.loggedAt = now;
+            this.failures = 0;
+        }
+    }
+
     private final Path root;
     private final WorldRole role;
     private final int retainedGenerations;
     private final StageHook hook;
     private final Durability durability;
+    /** Failed prunes after a commit; guarded by this. */
+    private final AfterCommitWarning pruneWarning = new AfterCommitWarning();
 
     /**
-     * Opens a store, removing anything an interrupted commit left behind.
+     * Opens a store. A role that accepts commits removes what an interrupted commit left behind;
+     * any other role ({@link WorldRole#READ_ONLY}, {@link WorldRole#TEMPLATE}) changes nothing on
+     * disk, so it cannot delete a generation a live writer of the same directory has published but
+     * not committed yet. Such a reader ignores those leftovers: it reads only what {@code CURRENT}
+     * names.
      *
      * @param root the world's storage directory
      * @param role the world's role; roles that do not accept commits make {@link #commit} refuse
@@ -150,7 +183,7 @@ public final class GenerationStore {
                                 final StageHook hook, final Durability durability) throws IOException {
         refuseRegionThread();
         final GenerationStore store = new GenerationStore(root, role, retainedGenerations, hook, durability);
-        store.recover();
+        if (role.acceptsCommits()) store.recover();
         return store;
     }
 
@@ -256,7 +289,16 @@ public final class GenerationStore {
         this.durability.forceDirectory(this.root);
         this.hook.reached(Stage.COMMITTED);
 
-        prune(next);
+        // Past the commit point: the generation is current and durable whatever happens below. A
+        // failed prune must not report the commit as failed, or the caller retries and commits yet
+        // another generation; it is logged, and the next commit prunes everything unretained again.
+        try {
+            prune(next);
+        } catch (final IOException | UncheckedIOException | java.nio.file.DirectoryIteratorException pruneFailed) {
+            this.pruneWarning.failed("AWF store " + this.root + " committed generation " + next + ", but deleting the"
+                + " generations it no longer retains failed; the commit stands, old generations stay on disk until a"
+                + " later commit deletes them", pruneFailed);
+        }
         return next;
     }
 

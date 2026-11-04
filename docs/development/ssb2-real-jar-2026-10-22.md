@@ -267,3 +267,12 @@ Raw: `/Volumes/Ext/Sourby/agent-testservers/opus-harness-modules-{1,2}/` (`logs/
 
 The engine finding of section "Findings" 2 (plugin `Bukkit.shutdown()` during enable) did not reproduce, because the
 plugin no longer fails to enable; it is still open.
+
+**Status 2026-10-25 (PR #62).** Findings 2 is fixed in the code: Minecraft feature patch 0076 ("hold a stop
+requested during startup until startup ends", `StartupStopGate`) marks a stop the server thread requests before
+startup has ended and lets startup finish without the startup save, the listeners or the `Done (` line; it is in
+every published build since `v26.2-r48`. It was not re-run with SSB2. The runs above used Build 48 base `6176d517`,
+whose region-ownership checks behave like today's `aurora.bridge.thread-checks = enforced` (thread checks became a
+setting in Build 49, default `relaxed`), and predate the PR #62 bridge changes (code written and statically
+reviewed; not built; not tested by the owner); a rerun on that tree is NEEDS RETEST. The `aurora.toml` named above
+is `aurora.yml` since Build 49.

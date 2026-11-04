@@ -41,8 +41,11 @@ import java.util.TreeSet;
  * ({@code HSCAN ... NOVALUES}); a chunk's bytes are fetched the first time the engine asks for it.</p>
  *
  * <p><b>Durability</b> is Redis's: with {@code wait-for-aof} a commit returns only after Redis has
- * written it to its append-only file; otherwise it is acknowledged from memory. Redis keeps no
- * older generations, so {@code retained-generations} does not apply.</p>
+ * written it to its append-only file — the script and {@code WAITAOF} go out as one pipeline, so
+ * both run on one connection and {@code WAITAOF} waits for that commit — and a commit Redis applied
+ * but did not confirm in time (half of {@code timeout-ms}, less near the shutdown deadline) throws;
+ * otherwise it is acknowledged from memory. Redis keeps no older generations, so
+ * {@code retained-generations} does not apply.</p>
  */
 final class RedisStore implements AwfStore {
 
@@ -222,11 +225,20 @@ final class RedisStore implements AwfStore {
         }
         for (final ChunkKey key : removed) command.add(field(key));
         for (final ChunkKey key : deleted) command.add(field(key));
-        final List<?> reply = (List<?>) this.backend.client().eval(COMMIT_SCRIPT, command.toArray());
+        final Object[] keysAndArgs = command.toArray();
+        // With wait-for-aof, WAITAOF follows the script in its pipeline: it waits only for the last
+        // write of the connection it runs on, and on another pooled connection it could confirm a
+        // write offset that does not include this commit.
+        final int aofWaitMillis = this.backend.aofWaitMillis();
+        final List<Object> replies = aofWaitMillis > 0
+            ? this.backend.client().evalThen(COMMIT_SCRIPT, keysAndArgs, RedisBackend.waitAof(aofWaitMillis))
+            : null;
+        final List<?> reply = (List<?>) (replies != null ? replies.getFirst()
+            : this.backend.client().eval(COMMIT_SCRIPT, keysAndArgs));
         final long generation = (Long) reply.get(0);
         this.knownGeneration = generation;
         if (reply.get(1) instanceof Long retaken && retaken == 1) this.backend.retaken(this);
-        this.backend.awaitDurable();
+        if (replies != null) this.backend.confirmDurable(replies.get(1), aofWaitMillis);
 
         final Set<ChunkKey> nextLive = new HashSet<>(this.live);
         final Set<ChunkKey> nextDeleted = new HashSet<>(this.tombstones);

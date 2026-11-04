@@ -46,6 +46,7 @@ jobs:
           import json
           release = json.load(open('release.json'))
           print('published=' + release['published_at'])
+          print('upstream_release_id=' + str(release['id']))
           for asset in release['assets']:
               if asset['name'] == '${{ steps.pinned.outputs.asset_name }}':
                   print('upstream_asset_id=' + str(asset['id']))
@@ -61,11 +62,13 @@ jobs:
             "${{ steps.pinned.outputs.download_url }}" -o probe.jar
           actual_sha=$(sha256sum probe.jar | cut -d' ' -f1)
           actual_size=$(wc -c < probe.jar)
-          echo "expected sha=${{ steps.pinned.outputs.expected_sha }} size=${{ steps.pinned.outputs.expected_size }} asset_id=${{ steps.pinned.outputs.asset_id }}"
-          echo "actual   sha=${actual_sha} size=${actual_size} asset_id=${{ steps.upstream.outputs.upstream_asset_id }}"
+          echo "expected sha=${{ steps.pinned.outputs.expected_sha }} size=${{ steps.pinned.outputs.expected_size }} asset_id=${{ steps.pinned.outputs.asset_id }} release_id=${{ steps.pinned.outputs.release_id }}"
+          echo "actual   sha=${actual_sha} size=${actual_size} asset_id=${{ steps.upstream.outputs.upstream_asset_id }} release_id=${{ steps.upstream.outputs.upstream_release_id }}"
           test "${actual_size}" = "${{ steps.pinned.outputs.expected_size }}" || { echo "size drift"; exit 1; }
           test "${actual_sha}" = "${{ steps.pinned.outputs.expected_sha }}" || { echo "digest drift"; exit 1; }
           test "${{ steps.upstream.outputs.upstream_asset_id }}" = "${{ steps.pinned.outputs.asset_id }}" || { echo "asset_id drift"; exit 1; }
+          # A release deleted and re-created under the same tag gets a new id even when the asset bytes match.
+          test "${{ steps.upstream.outputs.upstream_release_id }}" = "${{ steps.pinned.outputs.release_id }}" || { echo "release_id drift"; exit 1; }
 
       - name: List newer tagged releases (informational; never auto-updates)
         env:

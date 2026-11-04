@@ -312,8 +312,13 @@ public final class SourbyServerConfigProvider extends ServerConfigProvider {
             // names the engine only through config/upstream/UpstreamConfigBridge (independence policy).
             files.put("aurora-server.yml", configDir.resolve("aurora-server.yml"));
             files.put("aurora-worlds.yml", configDir.resolve("aurora-worlds.yml"));
+            // The patch file the engine merges for that world: its dimension storage folder, as the engine's
+            // WorldConfig.patchFile resolves it (same expression, spelled here for the reason above). The
+            // world's Bukkit folder (getWorldFolder) can be a different folder, e.g. for a non-overworld dimension.
             for (final World world : Bukkit.getWorlds()) {
-                files.put(world.getName() + ".yml", world.getWorldFolder().toPath().resolve("canvas-patch.yml"));
+                files.put(world.getName() + ".yml", net.minecraft.server.MinecraftServer.getServer().storageSource
+                    .getDimensionPath(((org.bukkit.craftbukkit.CraftWorld) world).getHandle().dimension())
+                    .resolve("canvas-patch.yml"));
             }
             return files;
         }

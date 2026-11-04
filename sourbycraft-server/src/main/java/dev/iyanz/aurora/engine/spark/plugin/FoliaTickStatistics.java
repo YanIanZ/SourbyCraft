@@ -83,7 +83,18 @@ public class FoliaTickStatistics implements TickStatistics {
         // SourbyCraft - worst region, matching MSPT above and the headline figure /tps, /perf
         // and the bars all show. A mean across regions reads healthy while one region is not.
         final PerformanceSnapshot snapshot = this.metrics.snapshot();
-        return snapshot.window(window).worstTps();
+        final double worst = snapshot.window(window).worstTps();
+        if (!Double.isNaN(worst) || snapshot.activeRegionCount() > 0) {
+            // NaN with active regions: none of them completed a tick in this window, which is a stalled
+            // (or just created) region; Spark shows it as 0.0 rather than the global tick's healthy rate.
+            return worst;
+        }
+        // No active region at all (empty server, or metrics not collected yet). Spark renders NaN as
+        // 0.0, which reads as a stalled server while /tps says "unavailable": report the global tick,
+        // which runs without any region, and only while that has no sample either the target, as the
+        // profiling branch above does (audit PM-275).
+        final double global = snapshot.globalWindow(window).worstTps();
+        return Double.isNaN(global) ? this.gameTargetTps() : global;
     }
 
     private DoubleAverageInfo duration(final MetricWindow window) {
@@ -109,7 +120,7 @@ public class FoliaTickStatistics implements TickStatistics {
     }
 
     private record AverageInfo(double mean, double min, double max, double median,
-                               double percentile95th) implements DoubleAverageInfo {
+                               double percentile95th, double percentile99th) implements DoubleAverageInfo {
 
         private static AverageInfo from(final WindowMetrics window) {
             // SourbyCraft - report the worst region's average, not the mean across regions.
@@ -121,22 +132,41 @@ public class FoliaTickStatistics implements TickStatistics {
             // region-threaded server there is no single tick duration, and players in the
             // slowest region feel that region, not the average.
             return new AverageInfo(window.worstAverageMspt(), window.minimumMspt(), window.maximumMspt(),
-                window.medianMspt(), window.estimatedP95Mspt());
+                window.medianMspt(), atMost(window.estimatedP95Mspt(), window.maximumMspt()),
+                atMost(window.estimatedP99Mspt(), window.maximumMspt()));
         }
 
         private static AverageInfo from(final RegionTickMetrics.WindowSnapshot window) {
             if (window.sampleCount() == 0L) {
-                return new AverageInfo(Double.NaN, Double.NaN, Double.NaN, Double.NaN, Double.NaN);
+                return new AverageInfo(Double.NaN, Double.NaN, Double.NaN, Double.NaN, Double.NaN, Double.NaN);
             }
+            // RegionTickMetrics already bounds its histogram estimates by the window's exact extremes.
             return new AverageInfo(window.mspt(), window.minimumNanos() * 1.0E-6,
                 window.maximumNanos() * 1.0E-6, window.medianNanos() * 1.0E-6,
-                window.estimatedP95Mspt());
+                window.estimatedP95Mspt(), window.estimatedP99Mspt());
         }
 
+        /**
+         * A histogram percentile estimate bounded by the exact maximum observed: the estimate is a bin's
+         * upper edge, and across regions it could read above any tick that actually ran (audit PM-275).
+         */
+        private static double atMost(final double estimate, final double maximum) {
+            return Double.isNaN(estimate) || Double.isNaN(maximum) ? estimate : Math.min(estimate, maximum);
+        }
+
+        /**
+         * The median, the 95th and 99th percentile estimates, and the minimum (0) and maximum (1) as
+         * {@link #min()} and {@link #max()} report them.
+         * The windows keep no other percentile, so any other argument is {@link Double#NaN}: not
+         * measured, rather than a value interpolated from what is kept.
+         */
         @Override
         public double percentile(final double percentile) {
+            if (percentile == 0.0) return this.min;
             if (percentile == 0.5) return this.median;
             if (percentile == 0.95) return this.percentile95th;
+            if (percentile == 0.99) return this.percentile99th;
+            if (percentile == 1.0) return this.max;
             return Double.NaN;
         }
     }

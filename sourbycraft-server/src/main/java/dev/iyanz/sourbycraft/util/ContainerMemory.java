@@ -217,14 +217,22 @@ public final class ContainerMemory {
     /**
      * Host/container swap TOTAL bytes. Prefers the cgroup v2 swap cap ({@code memory.swap.max};
      * {@code "max"} = unlimited, falls through) since that is the figure that actually bounds this
-     * container's swap; otherwise the platform bean's total. -1 unknown.
+     * container's swap; an explicit {@code 0} at any level is a real cap and returns 0 (no swap, which
+     * callers hide). Otherwise the platform bean's total. -1 unknown. Reads files: not for a tick thread
+     * (the HUD reads {@link #lastSwapSample()}).
      */
     public static long swapTotalBytes() {
         return swapTotalBytes(Cgroup.SYSTEM);
     }
 
     static long swapTotalBytes(final Cgroup cg) {
-        final Limited capped = findLimit(chainV2(cg), "memory.swap.max", 0L);
+        final List<Path> chain = chainV2(cg);
+        // Unlike memory.max, where findLimit skips 0 as "no data", memory.swap.max = 0 is a finite cap:
+        // the container may not swap at all, whatever the host's swap total says.
+        for (final Path dir : chain) {
+            if (parseLimit(dir.resolve("memory.swap.max")) == 0L) return 0L;
+        }
+        final Limited capped = findLimit(chain, "memory.swap.max", 0L);
         if (capped != null) return capped.limit();
         try {
             var os = java.lang.management.ManagementFactory.getOperatingSystemMXBean();
@@ -268,6 +276,31 @@ public final class ContainerMemory {
         return UNKNOWN;
     }
 
+    /** One swap reading: {@link #swapTotalBytes()} and the matching {@link #swapUsedBytes(long)}; -1 = unknown. */
+    public record SwapSample(long totalBytes, long usedBytes) {}
+
+    private static volatile SwapSample lastSwap;
+
+    /**
+     * Reads swap total and used now (cgroup files, platform bean) and keeps the result for
+     * {@link #lastSwapSample()}. File I/O: the metrics collector calls it once per second on its own
+     * thread; a tick thread must not.
+     */
+    public static SwapSample sampleSwap() {
+        final long total = swapTotalBytes();
+        final SwapSample sample = new SwapSample(total, swapUsedBytes(total));
+        lastSwap = sample;
+        return sample;
+    }
+
+    /**
+     * The newest {@link #sampleSwap()} result, or {@code null} before the first (metrics collection not
+     * running). One volatile read and no I/O, so the HUD may call it on the global region tick.
+     */
+    public static SwapSample lastSwapSample() {
+        return lastSwap;
+    }
+
     /** True when the JVM was launched with an explicit -Xmx. */
     public static boolean explicitXmx() {
         try {
@@ -281,11 +314,14 @@ public final class ContainerMemory {
         return false;
     }
 
-    /** Human-readable size: {@code "1.5G"} above 1 GiB, otherwise whole megabytes; {@code "?"} for {@code <= 0}. */
+    /**
+     * Human-readable size: {@code "1.50G"} (two decimals, about 10 MiB resolution) from 1 GiB up,
+     * otherwise whole megabytes; {@code "?"} for {@code <= 0}.
+     */
     public static String fmt(long bytes) {
         if (bytes <= 0) return "?";
         double g = bytes / (1024.0 * 1024 * 1024);
-        return g >= 1.0 ? String.format(java.util.Locale.ROOT, "%.1fG", g)
+        return g >= 1.0 ? String.format(java.util.Locale.ROOT, "%.2fG", g)
             : (bytes / (1024 * 1024)) + "M";
     }
 }

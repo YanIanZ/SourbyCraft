@@ -18,7 +18,8 @@ import org.bukkit.plugin.Plugin;
  * {@link StartupProfile}: logged against the previous boot of the same start class, then saved.
  *
  * <p>Total time is measured from JVM start (the runtime MXBean) to {@link ServerLoadEvent} with
- * type STARTUP, which fires after worlds and plugins are up.</p>
+ * type STARTUP, which fires after worlds and plugins are up. A boot whose stop was asked for during
+ * startup ({@link StartupStopGate}) never opens: it logs no Ready summary and saves no profile.</p>
  */
 public final class StartupTimeline {
 
@@ -67,9 +68,18 @@ public final class StartupTimeline {
             @EventHandler(priority = EventPriority.MONITOR)
             public void onLoad(final ServerLoadEvent event) {
                 if (event.getType() != ServerLoadEvent.LoadType.STARTUP) return;
+                // A stop asked for during startup (MC patch 0076): the server never opens, so this is not a
+                // ready time; no Ready summary, and no profile for the next boot to compare against.
+                if (stopHeldDuringStartup()) return;
                 complete(ManagementFactory.getRuntimeMXBean().getStartTime(), System.currentTimeMillis(), PROFILE_FILE);
             }
         }, owner);
+    }
+
+    /** Whether a stop requested during startup is being held until startup ends ({@link StartupStopGate}). */
+    private static boolean stopHeldDuringStartup() {
+        final net.minecraft.server.MinecraftServer server = net.minecraft.server.MinecraftServer.getServer();
+        return server != null && server.startupStopGate.stopHeld();
     }
 
     static StartupProfile complete(final long jvmStartMillis, final long nowMillis, final Path file) {

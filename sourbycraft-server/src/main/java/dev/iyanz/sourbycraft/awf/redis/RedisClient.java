@@ -59,18 +59,28 @@ public class RedisClient implements AutoCloseable {
             if (database < 0) throw new IllegalArgumentException("database " + database);
         }
 
+        /**
+         * Parses a Redis URI. The exception message says what is wrong but never repeats any part
+         * of the text: a malformed URI cannot be redacted reliably (an unencoded {@code @} or
+         * {@code /} in a password moves the boundaries), so callers may log the message as is.
+         */
         public static Endpoint parse(final String text) {
+            if (text == null) throw new IllegalArgumentException("no Redis URI");
             final URI uri;
             try {
                 uri = new URI(text.trim());
             } catch (final java.net.URISyntaxException malformed) {
-                throw new IllegalArgumentException("not a Redis URI: " + redact(text));
+                throw new IllegalArgumentException("not a valid URI (percent-encode special characters in the"
+                    + " user name and password)");
             }
             final String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(java.util.Locale.ROOT);
             if (!scheme.equals("redis") && !scheme.equals("rediss")) {
-                throw new IllegalArgumentException("a Redis URI starts with redis:// or rediss://, not " + redact(text));
+                throw new IllegalArgumentException("a Redis URI starts with redis:// or rediss://");
             }
-            if (uri.getHost() == null) throw new IllegalArgumentException("no host in " + redact(text));
+            if (uri.getHost() == null) {
+                throw new IllegalArgumentException("no host (or a port that is not a number, or an unencoded"
+                    + " special character in the user name or password)");
+            }
             String username = null;
             String password = null;
             final String info = uri.getRawUserInfo();
@@ -89,7 +99,7 @@ public class RedisClient implements AutoCloseable {
                 try {
                     database = Integer.parseInt(path.substring(1));
                 } catch (final NumberFormatException notNumber) {
-                    throw new IllegalArgumentException("database in " + redact(text) + " is not a number");
+                    throw new IllegalArgumentException("the database (the path after the host) is not a number");
                 }
             }
             return new Endpoint(uri.getHost(), uri.getPort() < 0 ? 6379 : uri.getPort(), scheme.equals("rediss"),
@@ -97,12 +107,27 @@ public class RedisClient implements AutoCloseable {
         }
 
         private static String decode(final String part) {
-            return URLDecoder.decode(part, StandardCharsets.UTF_8);
+            try {
+                return URLDecoder.decode(part, StandardCharsets.UTF_8);
+            } catch (final IllegalArgumentException badEscape) {
+                // URLDecoder's own message quotes the text around the bad escape: part of the secret.
+                throw new IllegalArgumentException("the user name or password has an invalid %-escape");
+            }
         }
 
-        /** The URI with any credentials removed, for logs. */
+        /**
+         * The URI with any credentials removed, for logs: everything between {@code ://} and the
+         * last {@code @} is masked. The last {@code @} anywhere, not the first one after the host,
+         * because a password may contain an unencoded {@code @}, {@code /}, {@code ?} or {@code #};
+         * a Redis URI has no other place for an {@code @}, so at worst a host is masked too.
+         */
         public static String redact(final String text) {
-            return text == null ? "null" : text.replaceAll("//[^@/]*@", "//***@");
+            if (text == null) return "null";
+            final int at = text.lastIndexOf('@');
+            if (at < 0) return text;
+            final int scheme = text.indexOf("://");
+            final int start = scheme >= 0 && scheme < at ? scheme + 3 : 0;
+            return text.substring(0, start) + "***" + text.substring(at);
         }
 
         @Override
@@ -125,6 +150,7 @@ public class RedisClient implements AutoCloseable {
     private final Semaphore permits;
     /** Idle connections; never more than the pool size, since only that many are ever out. */
     private final ArrayBlockingQueue<Connection> idle;
+    private volatile Observer observer;
     private volatile boolean closed;
     /** Connections handed to a caller right now, so a deadline or {@link #close()} can abort them. */
     private final java.util.Set<Connection> checkedOut = java.util.concurrent.ConcurrentHashMap.newKeySet();
@@ -145,6 +171,35 @@ public class RedisClient implements AutoCloseable {
 
     public Endpoint endpoint() {
         return this.endpoint;
+    }
+
+    /** The configured socket timeout, before any shutdown deadline cuts it. */
+    public int timeoutMillis() {
+        return this.timeoutMillis;
+    }
+
+    /** Optional per-call instrumentation; the fabric attaches one to its pools. */
+    public void observer(final Observer observer) {
+        this.observer = observer;
+    }
+
+    /** Receives one event per finished call and, separately, per timeout or saturated pool. */
+    public interface Observer {
+        void call(long nanos, boolean ok);
+
+        default void timeout() {}
+
+        default void poolSaturation() {}
+    }
+
+    /** Connections this pool may open at once. */
+    public int poolSize() {
+        return this.idle.size() + this.idle.remainingCapacity();
+    }
+
+    /** Connections currently checked out by callers. */
+    public int inUse() {
+        return this.checkedOut.size();
     }
 
     /**
@@ -233,15 +288,54 @@ public class RedisClient implements AutoCloseable {
     }
 
     /**
+     * {@link #call} with a bulk-reply bound for this one call: a bulk string longer than
+     * {@code maxBulkBytes} fails the read with an {@link IOException} <em>before</em> it is allocated
+     * (its RESP length is checked first), and the connection is closed rather than drained, so a value
+     * that grew past the caller's record limit is never returned truncated and never read into memory.
+     * The default cap ({@link Connection#MAX_BULK}) still applies on top; this can only lower it.
+     */
+    public Object callBounded(final int maxBulkBytes, final Object... args) throws IOException {
+        final Object reply = pipelineBounded(maxBulkBytes, List.<Object[]>of(args)).getFirst();
+        if (reply instanceof RedisError error) throw new RedisError(error.getMessage());
+        return reply;
+    }
+
+    /**
      * Sends every command before reading any reply. Replies come back in order; an error reply is
      * a {@link RedisError} in the list, so one failed command does not hide the others' results.
      */
     public List<Object> pipeline(final List<Object[]> commands) throws IOException {
+        return pipelineBounded(Connection.MAX_BULK, commands);
+    }
+
+    /** {@link #pipeline} with the bulk-reply bound of {@link #callBounded} applied to every reply of the pipeline. */
+    public List<Object> pipelineBounded(final int maxBulkBytes, final List<Object[]> commands) throws IOException {
+        if (maxBulkBytes < 1) throw new IllegalArgumentException("maxBulkBytes " + maxBulkBytes);
+        final Observer observer = this.observer;
+        final long began = System.nanoTime();
+        boolean ok = false;
+        try {
+            final List<Object> replies = pipelineOnce(commands, Math.min(maxBulkBytes, Connection.MAX_BULK));
+            ok = true;
+            return replies;
+        } catch (final IOException failed) {
+            if (observer != null && (failed instanceof dev.iyanz.sourbycraft.awf.AwfDeadlineExceeded
+                || failed instanceof java.net.SocketTimeoutException)) {
+                observer.timeout();
+            }
+            throw failed;
+        } finally {
+            if (observer != null) observer.call(System.nanoTime() - began, ok);
+        }
+    }
+
+    private List<Object> pipelineOnce(final List<Object[]> commands, final int maxBulkBytes) throws IOException {
         if (this.closed) throw new IOException("Redis client is closed");
         final int waitMillis = stepTimeoutMillis(false);
         try {
             if (!this.permits.tryAcquire(waitMillis, TimeUnit.MILLISECONDS)) {
                 if (pastDeadline()) throw deadlinePassed(false, null);
+                if (this.observer != null) this.observer.poolSaturation();
                 throw new IOException("no free Redis connection within " + waitMillis + " ms");
             }
         } catch (final InterruptedException interrupted) {
@@ -251,12 +345,16 @@ public class RedisClient implements AutoCloseable {
         Connection connection = null;
         boolean sent = false;
         try {
+            // close()/deadline() may have run while this thread waited for a permit; never open a
+            // socket after that, or it would be offered to a pool nobody owns any more.
+            if (this.closed || this.expired) throw new IOException("Redis client is closed");
             connection = this.idle.poll();
             if (connection == null) connection = connect(stepTimeoutMillis(false));
             this.checkedOut.add(connection);
             if (this.expired) throw deadlinePassed(false, null);     // aborted before it was registered
             final int stepMillis = stepTimeoutMillis(false);
             connection.timeout(stepMillis);
+            connection.bulkLimit(maxBulkBytes);
             final WriteWatch watch = new WriteWatch(connection, TimeUnit.MILLISECONDS.toNanos(stepMillis));
             try {
                 sent = true;          // from the first byte on, Redis may receive and run the request
@@ -280,7 +378,12 @@ public class RedisClient implements AutoCloseable {
                 throw failed;
             }
             this.checkedOut.remove(connection);
-            if (this.idle.offer(connection)) connection = null;      // else closed below
+            if (this.closed || this.expired || !this.idle.offer(connection)) {
+                connection.close();
+            }
+            // Pooled or closed either way: the finally block must not close it a second time, and a
+            // pooled connection must not be closed there at all.
+            connection = null;
             if (this.expired) abortAll();                              // offered after the abort swept the pool
             return replies;
         } catch (final IOException failed) {
@@ -329,6 +432,31 @@ public class RedisClient implements AutoCloseable {
     }
 
     /**
+     * {@link #evalThen} with the bulk-reply bound of {@link #callBounded} on both replies: for a
+     * script that may return a stored record (a replayed receipt, an intent) whose size is bounded by
+     * its record type.
+     */
+    public List<Object> evalThenBounded(final int maxBulkBytes, final String script, final Object[] keysAndArgs,
+                                        final Object[] then) throws IOException {
+        List<Object> replies = pipelineBounded(maxBulkBytes, List.<Object[]>of(command("EVALSHA", sha1(script), keysAndArgs), then));
+        if (noScript(replies.getFirst())) {
+            replies = pipelineBounded(maxBulkBytes, List.<Object[]>of(command("EVAL", script, keysAndArgs), then));
+        }
+        if (replies.getFirst() instanceof RedisError error) throw new RedisError(error.getMessage());
+        return replies;
+    }
+
+    /** {@link #eval} with the bulk-reply bound of {@link #callBounded}. */
+    public Object evalBounded(final int maxBulkBytes, final String script, final Object... keysAndArgs) throws IOException {
+        List<Object> replies = pipelineBounded(maxBulkBytes, List.<Object[]>of(command("EVALSHA", sha1(script), keysAndArgs)));
+        if (noScript(replies.getFirst())) {
+            replies = pipelineBounded(maxBulkBytes, List.<Object[]>of(command("EVAL", script, keysAndArgs)));
+        }
+        if (replies.getFirst() instanceof RedisError error) throw new RedisError(error.getMessage());
+        return replies.getFirst();
+    }
+
+    /**
      * {@link #eval} for many calls of one script in one pipeline: one round trip while Redis has
      * the script cached; when it does not, the calls Redis refused with {@code NOSCRIPT} (they did
      * not run) are sent again with {@code EVAL} in a second pipeline. Replies are in order; error
@@ -349,6 +477,29 @@ public class RedisClient implements AutoCloseable {
             final List<Object> retried = pipeline(byText);
             for (int j = 0; j < missing.size(); j++) replies.set(missing.get(j), retried.get(j));
         }
+        return replies;
+    }
+
+    /**
+     * {@link #eval} followed by one more command in the same pipeline, so both run on one
+     * connection, in that order: for a command about that connection's own writes, such as
+     * {@code WAITAOF}, which waits only for the last write of the connection it runs on. When Redis
+     * does not have the script cached ({@code NOSCRIPT}: the script did not run, so the follow-up
+     * concerned none of it), both are sent again with {@code EVAL} in a second pipeline. An error
+     * reply of the script is thrown as {@link RedisError}; the follow-up's reply is returned as a
+     * value, an error reply included.
+     *
+     * @param keysAndArgs {@code numkeys}, the keys, then the arguments, as for {@code EVAL}
+     * @param then the follow-up command, as for {@link #call}
+     * @return the script's reply, then the follow-up's
+     */
+    public List<Object> evalThen(final String script, final Object[] keysAndArgs, final Object[] then)
+        throws IOException {
+        List<Object> replies = pipeline(List.<Object[]>of(command("EVALSHA", sha1(script), keysAndArgs), then));
+        if (noScript(replies.getFirst())) {
+            replies = pipeline(List.<Object[]>of(command("EVAL", script, keysAndArgs), then));
+        }
+        if (replies.getFirst() instanceof RedisError error) throw new RedisError(error.getMessage());
         return replies;
     }
 
@@ -464,16 +615,33 @@ public class RedisClient implements AutoCloseable {
         }
     }
 
-    /** One socket speaking RESP2. Not thread safe; the pool hands it to one caller at a time. */
+    /**
+     * One socket speaking RESP2. Not thread safe; the pool hands it to one caller at a time.
+     *
+     * <p>Replies are bounded, so a broken or hostile server cannot exhaust the heap: one bulk string
+     * holds at most the largest chunk AWF stores plus a margin, and one reply (with everything nested
+     * in it) at most {@link #MAX_REPLY_ELEMENTS} values and {@link #MAX_REPLY_BYTES} bytes, which
+     * still fits {@code HKEYS} over a store of {@code AwfFile.MAX_CHUNKS} chunks. Any framing error,
+     * a length or integer that is not a number included, is an {@link IOException}, and the caller
+     * closes the connection.</p>
+     */
     static final class Connection {
         private static final byte[] CRLF = {'\r', '\n'};
-        private static final int MAX_BULK = 512 * 1024 * 1024;
+        /** {@code AwfFile.MAX_CHUNK_BYTES} (64 MiB, the largest chunk AWF writes) plus 1 MiB. */
+        static final int MAX_BULK = 65 * 1024 * 1024;
+        static final long MAX_REPLY_ELEMENTS = 8L * 1024 * 1024;
+        static final long MAX_REPLY_BYTES = 256L * 1024 * 1024;
         private static final int MAX_DEPTH = 8;
         private final Socket socket;
         private final InputStream in;
         private final OutputStream out;
         /** When the last slice of a write reached the socket; read by {@link WriteWatch}. */
         volatile long progressNanos;
+        /** Values and bytes of the reply being read; reset for every top-level reply. */
+        private long replyElements;
+        private long replyBytes;
+        /** The bulk bound of the current call ({@link RedisClient#callBounded}); {@link #MAX_BULK} by default. */
+        private int bulkLimit = MAX_BULK;
 
         Connection(final Socket socket) throws IOException {
             this.socket = socket;
@@ -528,37 +696,75 @@ public class RedisClient implements AutoCloseable {
             this.socket.setSoTimeout(millis);
         }
 
+        /** Sets the bulk-reply bound for the next call; never above {@link #MAX_BULK}. */
+        void bulkLimit(final int bytes) {
+            this.bulkLimit = Math.min(Math.max(1, bytes), MAX_BULK);
+        }
+
         Object read() throws IOException {
+            this.replyElements = 0L;
+            this.replyBytes = 0L;
             return read(0);
         }
 
         private Object read(final int depth) throws IOException {
             if (depth > MAX_DEPTH) throw new IOException("Redis reply nested too deeply");
+            if (++this.replyElements > MAX_REPLY_ELEMENTS) {
+                throw new IOException("Redis reply has more than " + MAX_REPLY_ELEMENTS + " values");
+            }
             final int type = this.in.read();
             if (type < 0) throw new EOFException("Redis closed the connection");
             final String line = line();
             return switch (type) {
                 case '+' -> line;
                 case '-' -> new RedisError(line);
-                case ':' -> Long.parseLong(line);
+                case ':' -> number(line);
                 case '$' -> {
-                    final int length = Integer.parseInt(line);
-                    if (length < 0) yield null;
-                    if (length > MAX_BULK) throw new IOException("Redis bulk reply of " + length + " bytes");
-                    final byte[] data = this.in.readNBytes(length);
+                    final long length = number(line);
+                    if (length == -1L) yield null;
+                    if (length < 0L) throw new IOException("Redis reply framing: bulk length " + length);
+                    if (length > this.bulkLimit) {
+                        // Checked before any allocation; the caller closes this connection, so the
+                        // oversized value is neither read nor returned truncated.
+                        throw new IOException("Redis bulk reply of " + length + " bytes exceeds the " + this.bulkLimit
+                            + "-byte bound of this read");
+                    }
+                    charge(length + 2L);
+                    final byte[] data = this.in.readNBytes((int) length);
                     if (data.length != length) throw new EOFException("Redis reply truncated");
                     if (this.in.read() != '\r' || this.in.read() != '\n') throw new IOException("Redis reply framing");
                     yield data;
                 }
                 case '*' -> {
-                    final int count = Integer.parseInt(line);
-                    if (count < 0) yield null;
-                    final List<Object> items = new ArrayList<>(Math.min(count, 1 << 16));
-                    for (int i = 0; i < count; i++) items.add(read(depth + 1));
+                    final long count = number(line);
+                    if (count == -1L) yield null;
+                    if (count < 0L) throw new IOException("Redis reply framing: array length " + count);
+                    if (count > MAX_REPLY_ELEMENTS - this.replyElements) {
+                        throw new IOException("Redis array reply of " + count + " values");
+                    }
+                    final List<Object> items = new ArrayList<>((int) Math.min(count, 1 << 16));
+                    for (long i = 0; i < count; i++) items.add(read(depth + 1));
                     yield items;
                 }
                 default -> throw new IOException("unexpected Redis reply type '" + (char) type + "'");
             };
+        }
+
+        /** An integer reply or a length; anything else is a framing error, never a runtime exception. */
+        private static long number(final String line) throws IOException {
+            try {
+                return Long.parseLong(line);
+            } catch (final NumberFormatException malformed) {
+                throw new IOException("Redis reply framing: expected a number");
+            }
+        }
+
+        /** Counts bytes against {@link #MAX_REPLY_BYTES} before they are read. */
+        private void charge(final long bytes) throws IOException {
+            this.replyBytes += bytes;
+            if (this.replyBytes > MAX_REPLY_BYTES) {
+                throw new IOException("Redis reply is larger than " + MAX_REPLY_BYTES + " bytes");
+            }
         }
 
         private String line() throws IOException {
@@ -568,6 +774,7 @@ public class RedisClient implements AutoCloseable {
                 if (b < 0) throw new EOFException("Redis closed the connection");
                 if (b == '\r') {
                     if (this.in.read() != '\n') throw new IOException("Redis reply framing");
+                    charge(buffer.size() + 3L);         // the type byte and CRLF included
                     return buffer.toString(StandardCharsets.UTF_8);
                 }
                 if (buffer.size() > 64 * 1024) throw new IOException("Redis reply line too long");

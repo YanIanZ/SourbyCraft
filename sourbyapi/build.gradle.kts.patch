@@ -98,8 +98,8 @@
 +            url.set("https://github.com/YanIanZ/SourbyCraft")
 +            licenses {
 +                license {
-+                    // Paper API is MIT; the region-threading API additions are GPL-3.0.
-+                    name.set("GPL-3.0")
++                    // Paper API (from Bukkit) and the SourbyCraft additions are distributed under GPL-3.0-only (LICENSE.md).
++                    name.set("GPL-3.0-only")
 +                    url.set("https://www.gnu.org/licenses/gpl-3.0.html")
 +                    distribution.set("repo")
 +                }
@@ -140,7 +140,7 @@
  abstract class Services {
      @get:Inject
      abstract val fileSystemOperations: FileSystemOperations
-@@ -200,7 +_,9 @@
+@@ -200,21 +_,14 @@
  
  tasks.withType<Javadoc>().configureEach {
      val options = options as StandardJavadocDocletOptions
@@ -150,7 +150,24 @@
 +    options.overview = "../paper-api/src/main/javadoc/overview.html"
      options.use()
      options.isDocFilesSubDirs = true
-     options.links(
+-    options.links(
+-        "https://guava.dev/releases/33.6.0-jre/api/docs/",
+-        "https://www.javadocs.dev/org.yaml/snakeyaml/2.2/",
+-        "https://www.javadocs.dev/org.jetbrains/annotations/$annotationsVersion/",
+-        "https://www.javadocs.dev/org.joml/joml/1.10.8/",
+-        "https://www.javadocs.dev/com.google.code.gson/gson/2.14.0",
+-        "https://jspecify.dev/docs/api/",
+-        "https://jd.papermc.io/adventure/$adventureVersion/",
+-        "https://www.javadocs.dev/org.slf4j/slf4j-api/$slf4jVersion/",
+-        "https://logging.apache.org/log4j/2.x/javadoc/log4j-api/",
+-        "https://www.javadocs.dev/org.apache.maven.resolver/maven-resolver-api/1.7.3",
+-    )
++    // SourbyCraft (Build 55 review P3-15): no external javadoc links. The API javadoc jar is built on every CI push and
++    // javadoc fetches each linked site's element-list at build time, so an outage of guava.dev, javadocs.dev,
++    // jd.papermc.io or logging.apache.org turned a push red. Types from those libraries render unlinked instead.
+     options.tags(projectCustomJavadocTags.map { it.toOptionString() })
+ 
+     inputs.files(javadocSourcepath).ignoreEmptyDirectories().withPropertyName(javadocSourcepath.name + "-configuration")
 @@ -227,11 +_,11 @@
      }
  

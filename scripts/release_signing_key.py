@@ -8,6 +8,10 @@ commands the CI signing step in docs/development/AUTO-UPDATER.md uses, so a key 
 signs and verifies there.
 
 Nothing is uploaded: setting the GitHub secret is printed as a command for the owner to run.
+
+`--add-pub` appends the new public key to the resource as an additional trusted key instead of
+refusing because a different key is already there (ReleaseSignatureVerifier accepts a signature
+from any block). That is step one of a key rotation; the rotation itself needs owner approval.
 """
 import argparse
 import hashlib
@@ -74,6 +78,17 @@ def fingerprint(openssl, pub):
     return hashlib.sha256(der).hexdigest()
 
 
+def key_blocks(text):
+    """Every PEM public-key block in a key file, armour included, in file order."""
+    return re.findall(r'-----BEGIN PUBLIC KEY-----\s.*?-----END PUBLIC KEY-----', text, flags=re.S)
+
+
+def fingerprints(openssl, path):
+    """The fingerprint of every PEM public key in a trusted-key file (it may hold several)."""
+    return [hashlib.sha256(run(openssl, 'pkey', '-pubin', '-outform', 'DER', data=block.encode())).hexdigest()
+            for block in key_blocks(Path(path).read_text())]
+
+
 def self_test(openssl, key, pub):
     """Sign and verify a random blob exactly as the CI step does; return the signature length."""
     with tempfile.TemporaryDirectory() as scratch:
@@ -115,14 +130,26 @@ def generate(out_dir, openssl, root=ROOT):
     return key, pub
 
 
-def install_pub(pub, openssl, root=ROOT):
-    """Copy the public key to the jar resource; refuse to replace a different key."""
+def install_pub(pub, openssl, root=ROOT, add=False):
+    """Copy the public key to the jar resource; refuse to replace a different key.
+
+    With add=True a key the resource does not hold yet is appended as an additional trusted key
+    (the old ones stay first) instead of being refused. Returns (target, changed).
+    """
     target = root / PUB_RESOURCE
     if target.exists():
-        if fingerprint(openssl, target) == fingerprint(openssl, pub):
+        if fingerprint(openssl, pub) in fingerprints(openssl, target):
             return target, False
-        raise SigningKeyError(f'{target} already holds a different public key; replacing it would make '
-                              'servers that already enforce reject every future release')
+        if not add:
+            raise SigningKeyError(f'{target} already holds a different public key; replacing it would make '
+                                  'servers that already enforce reject every future release '
+                                  '(--add-pub trusts it in addition, for an owner-approved key rotation)')
+        blocks = key_blocks(pub.read_text())
+        if len(blocks) != 1:
+            raise SigningKeyError(f'{pub} must hold exactly one PEM public key, found {len(blocks)}')
+        text = target.read_text()
+        target.write_text(text + ('' if text.endswith('\n') else '\n') + blocks[0] + '\n')
+        return target, True
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(pub, target)
     return target, True
@@ -135,6 +162,9 @@ def main(argv=None):
     parser.add_argument('--openssl', help='OpenSSL 3+ binary to use (default: first one found)')
     parser.add_argument('--install-pub', action='store_true',
                         help=f'also copy the public key to {PUB_RESOURCE}')
+    parser.add_argument('--add-pub', action='store_true',
+                        help=f'append the public key to {PUB_RESOURCE} as an additional trusted key '
+                             '(key rotation; needs owner approval)')
     args = parser.parse_args(argv)
     try:
         openssl = find_openssl(args.openssl)
@@ -143,14 +173,25 @@ def main(argv=None):
         print(f'public key  : {pub}')
         print(f'fingerprint : sha256:{fingerprint(openssl, pub)}')
         print('self-test   : signed and verified a probe with the CI commands; tampered bytes rejected')
-        if args.install_pub:
-            target, copied = install_pub(pub, openssl)
-            print(f'installed   : {target}' if copied else f'unchanged   : {target} already holds this key')
+        rotating = False
+        if args.install_pub or args.add_pub:
+            rotating = args.add_pub and (ROOT / PUB_RESOURCE).exists()
+            target, copied = install_pub(pub, openssl, add=args.add_pub)
+            print((f'added       : {target} (additional trusted key)' if rotating else f'installed   : {target}')
+                  if copied else f'unchanged   : {target} already holds this key')
+            rotating = rotating and copied
         print('\nNext (owner):')
         print(f'  1. Back up {key} somewhere safe (password manager); a lost key cannot be replaced '
               'for servers that already enforce, except by a manual update.')
+        if rotating:
+            print('  2. Keep the CI secret on the OLD key and ship at least one release built with both keys.')
+            print(f'  3. Only then: gh secret set {SECRET_NAME} --repo YanIanZ/SourbyCraft < {key}. Moving the new '
+                  'block first in the resource is optional (the release job, like servers, accepts a signature '
+                  'from any block).')
+            print('  Servers that never ran a build trusting the new key need a manual update after the switch.')
+            return 0
         print(f'  2. gh secret set {SECRET_NAME} --repo YanIanZ/SourbyCraft < {key}')
-        if not args.install_pub:
+        if not (args.install_pub or args.add_pub):
             print(f'  3. Re-run with --install-pub, or copy {pub} to {PUB_RESOURCE}')
         print('  Then ship the public key and the CI signing step in the same release '
               '(docs/development/AUTO-UPDATER.md, "Turning it on").')

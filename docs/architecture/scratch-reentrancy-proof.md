@@ -2,11 +2,13 @@
 
 Status: **every entity-owned row is SAFE with the evidence and limits stated below, after three
 fixes (F1 publication, F1 threshold, F3 validity); the task owner decides whether that closes
-`docs/DEVELOPMENT-TASKS.md:32` / `docs/TODO.md:245`.** What is NOT covered is listed in §3. Written
+the `docs/TODO.md` item "Bukti reentrancy scratch milik entity (DEV-A)"** (`docs/DEVELOPMENT-TASKS.md`,
+cited here originally, no longer exists). What is NOT covered is listed in §3. Written
 2026-10-20 by fable-fsync against feature patches `0001`–`0043` (F1 fix = patch 0044); revised the
 same day by opus-q after an independent Codex review found four problems (§4), fixed in MC feature
 patches **0046** (MC `ae724d6`, F1) and **0047** (MC `6d0eabb`, F3; amended after a Codex
-re-review, §4), all three regenerated as feature patches.
+re-review, §4), all three regenerated as feature patches. Re-checked 2026-10-25 against the Build 50
+branch (feature patches up to 0087, static reading only; see the end of §1, §2.3 and §3).
 Predecessors: [threading.md](threading.md) (collection scratch, 2026-09) and
 [reuse-audit.md](reuse-audit.md) §6 ("reachability, not proof"). The collection scratches those
 reviewed (`collisionScratch*`, `itemEntitiesScratch`, `effectParticlesScratch`) were removed (SPEC
@@ -47,8 +49,8 @@ on objects a region owns; they are listed so the inventory is complete.
 | F1b | `lastKnownMovedHorizontally` (`volatile boolean`; replaces 0044's plain `double lastKnownSpeedHorizontalSq`) | 0046 | `Entity` | `computeSpeed()` on the owner: `Math.sqrt(x*x + z*z) > 1.0E-5F` (upstream's arithmetic and **float** threshold), stored only when the value changes | `hasMovedHorizontallyRecently()` — one `getfield`, no call; cross-region from `FollowPlayerRiddenEntityGoal` (Dolphin) | R1: as F1. R2: a single volatile boolean cannot tear and is visible to the reader; the reader sees the predicate of the latest or an earlier tick, never a mixture — the guarantee upstream's `Vec3` reference gave | **SAFE** | `theCrossRegionReaderReadsASingleField` (bytecode: exactly one `getfield lastKnownMovedHorizontally:Z`), `theCrossRegionPredicateIsVolatile` (reflection: `volatile`, and the old plain-double field gone), `theMovementThresholdIsUpstreamsFloatAtTheBoundary`, `theMovementPredicateMatchesUpstreamOverManyDisplacements` (2,000 random displacements vs upstream's formula) |
 | F2 | `isInWallScratch` (`BlockPos.MutableBlockPos`) | 0012 | `Entity` | `isInWall()` (`Entity:3142`) — `setY/setZ/setX` per iteration | `isInWall()` only: `isSuffocating(world, scratch)`, `getCollisionShape(world, scratch)` | R1: the 28 calls the loop makes are scalar getters, section lookups and block-state queries with no entity and no `CollisionContext` (direct-call guard); the only user code reachable is a block's `isSuffocating` predicate (`Blocks::always`, `Blocks::never`, `NOT_CLOSED_SHULKER`, `NOT_EXTENDED_PISTON`, default `blocksMotion && isCollisionShapeFullBlock`) and `getCollisionShape(level,pos)` overrides — none ticks an entity or fires an event (manual audit, §2.2). On every control-flow path from the method entry, X, Y and Z are each set before every scratch read (must-analysis over the CFG). R2: sole caller `LivingEntity.baseTick:486` via `LivingEntity.isInWall:4790`, owner thread only; no other caller in the tree | **SAFE** (R1 by direct-call guard + callee audit + CFG must-analysis; R2 by single owner-thread caller) | `isInWallCallsNothingThatCanReenterWhileItsScratchIsLive`, `everyPathSetsAllThreeScratchCoordinatesBeforeEachRead` (+ control `theMustAnalysisRejectsAPathThatSkipsASetter`), `theScratchPositionIsAnOwnerConfinedInstanceField`; `ScratchBufferConfinementTest.remainingPositionScratchIsAnOwnerConfinedInstanceField` |
 | F3 | `sourbyAsyncPathPending` (`volatile boolean`) and, from 0047, `sourbyNavigationGeneration` (plain `int`) | 0006, 0047 | `PathNavigation` (per mob) | flag: owner (`true` before submit, `false` on refused submit) and the `AsyncPathCompletion.deliver` release callback, which runs on the owner on acceptance but **on the completing (worker) thread** when the handoff is refused (retired scheduler) — the flag is volatile, so that store is safe. Generation: owner only — `stop()` (always, even when the path is already null), `moveTo` assigning or clearing a path, `createPath` computing a new request (where it sets `targetPos`/`reachRange`), the synchronous recompute, an applied delivery | flag: owner `recomputePath`; generation: the delivery lambda, on the owner | R1: `EntityPathfindEvent.callEvent()` runs before the token and generation are taken. Before 0047 a listener's `stop()` made the token `null`, and a **later** `stop()` left it `null`, so `stillRequested(null, null)` passed and the result undid the later stop (Codex finding 2, §2.3). 0047: the delivery also requires the generation to be unchanged. R2: delivery is handed to the owner by `RegionOwnerHandoff`; a refused handoff never runs the apply | **SAFE for the invalidations enumerated in §2.3** after 0047, argued from the source and exercised on a model, not on the patched code; equivalent to upstream for a stop inside the event | `AsyncPathCancellationTest.aStopInsideThePathfindEventThenALaterStopIsNotUndoneByTheResult`, `aStopInsideThePathfindEventAloneIsOverwrittenByTheResultAsUpstreamDoes`, `aMoveToNullAfterAnEventStopAlsoInvalidatesTheResult`, `aRetargetWhoseRouteHasTheSameNodesStillMakesTheOldResultStale` (on `AsyncPathNavigationModel`, a model of the glue); `AsyncPathPatchShapeTest` pins 0047's text (generation taken with the token, checked after the path and before the content, six bumps incl. `stop()` and `createPath`); `AsyncPathValidityTest` |
-| F4 | `NodeEvaluator.mob` (now `@Nullable`), `NodeEvaluator.subject` (`MobPathSnapshot`) | 0039 | `NodeEvaluator` (one per navigation, plus one per off-thread solve) | `prepare(level, Mob)` / `prepare(level, snapshot)` / `done()`; `subject()` lazily | the evaluator's own `getPathType*` during a solve | R1: a sync solve is `PathFinder.findPath` → `prepare` … `done` with no event inside; `onPathfindingStart/Done` are the only mob callbacks and the mobs that override them refuse the offload (`sourbyPathfindingMutatesMob`). R2: the off-thread solve uses an **isolated** evaluator built on the owner (`sourbyIsolatedPathFinder`), published to the worker by the executor submission; the live evaluator never leaves the owner | **SAFE** | `AsyncPathEvaluatorIsolationTest` (ENG-2: live evaluator restored, isolated one distinct, flags copied); `MobPathSnapshotTest` |
-| F5 | `HomeNodeEvaluator.sourbyHomePos`, `sourbySnapshotSolve` | 0042 | `Creaking.HomeNodeEvaluator` | `createPathFinder` (owner) writes the home; `prepare(level, snapshot)` / `done()` toggle the flag | `getPathType` | R1: owner-thread `getPathType` queries without `prepare` (e.g. `MoveControl.isWalkable`) read the live home because the flag is explicit, not `mob == null`. R2: the flag and home live on the isolated evaluator for an off-thread solve; the live evaluator's flag is never set | **SAFE**, with the open Codex P2 on the same file noted in §2.4 | `AsyncPathEvaluatorIsolationTest` (ENG-8 Creaking cases) |
+| F4 | `NodeEvaluator.mob` (now `@Nullable`), `NodeEvaluator.subject` (`MobPathSnapshot`) | 0039 | `NodeEvaluator` (one per navigation, plus one per off-thread solve) | `prepare(level, Mob)` / `prepare(level, snapshot)` / `done()`; `subject()` lazily | the evaluator's own `getPathType*` during a solve | R1: a sync solve is `PathFinder.findPath` → `prepare` … `done` with no event inside; `onPathfindingStart/Done` are the only mob callbacks and the mobs that override them refuse the offload (`sourbyPathfindingMutatesMob`; since 2026-10-22 `AsyncPathRecompute.solveWritesMob`). R2: the off-thread solve uses an **isolated** evaluator built on the owner (`sourbyIsolatedPathFinder`), published to the worker by the executor submission; the live evaluator never leaves the owner | **SAFE** | `AsyncPathEvaluatorIsolationTest` (ENG-2: live evaluator restored, isolated one distinct, flags copied); `MobPathSnapshotTest` |
+| F5 | `HomeNodeEvaluator.sourbyHomePos`, `sourbySnapshotSolve` | 0042 | `Creaking.HomeNodeEvaluator` | `createPathFinder` (owner) writes the home; `prepare(level, snapshot)` / `done()` toggle the flag | `getPathType` | R1: owner-thread `getPathType` queries without `prepare` (e.g. `MoveControl.isWalkable`) read the live home because the flag is explicit, not `mob == null`. R2: the flag and home live on the isolated evaluator for an off-thread solve; the live evaluator's flag is never set | **SAFE** (the Codex P2 on the same file, §2.4, is resolved by the explicit flag) | `AsyncPathEvaluatorIsolationTest` (ENG-8 Creaking cases) |
 | A1 *adjacent* | `sourbySkipComputedBits`, `sourbySkipBits` (two longs) | 0003 | `NaturalSpawner.SpawnState` (one per region per spawn pass; retained in `RegionizedWorldData.lastSpawnState` by 0014) | `sourbyCanCategorySpawnAnywhere` (lazy, once per category per state) | same method | R1: computed from `level.getLocalPlayers()` + `ChunkMap.getMobCountNear` — no event, no callback; the spawn pass that uses the state fires `PreCreatureSpawnEvent`/`CreatureSpawnEvent` **after** the bits are read, and a listener cannot re-enter `NaturalSpawner.spawnForChunk` for the same region tick. R2: `SpawnState` is created and read on the region tick thread; 0014 keeps the previous state only for `/debug`-style reads on that same thread | **SAFE** (not entity-owned; listed for completeness) | patch text; `0014` hunk `lastSpawnState` |
 | A2 *out of scope* | `generationQueuedAt`, `measuredGeneration` | 0026 | `ChunkUpgradeGenericStatusTask` | task constructor / `run` | `run` | Chunk-system task object, written at schedule and read at run on the scheduler's threads; not entity scratch | not assessed here | — |
 | A3 *out of scope* | `sourbycraft$nbtDepth` | 0038 | `NbtAccounter` | decoder | decoder | per-connection Netty state | not assessed here | — |
@@ -57,6 +59,14 @@ on objects a region owns; they are listed so the inventory is complete.
 
 Patches without any such field: 0007 (elytra: locals only), 0011, 0017 and 0018 (six hoisted
 `double` locals each), 0005 (immutable `SnapshotPathRegion`), 0015, 0016.
+
+Re-check 2026-10-25 (same grep over feature patches 0044–0087, static reading): the entity-owned fields
+found are those of 0044, 0046 and 0047, already rows F1, F1b and F3. The other added fields belong to
+region, connection, command or server state, not to an entity: 0045 and 0049 (region task queue), 0050
+(region file), 0052 (`RegionizedWorldData.sourbyEntityTicks`, written and zeroed on the region tick),
+0055 (command-block execution), 0058 (`PrepareSpawnTask` join state), 0067 (persistent ticket storage), 0069
+(data-command accessor), 0074 (server tick state), 0083 (global tick counter) and 0084 (relaxed thread
+checks). No new entity-owned row.
 
 ## 2. Arguments
 
@@ -173,8 +183,11 @@ still holds for the same consumers. **SAFE.**
 
 ### 2.3 F3 — `sourbyAsyncPathPending`, the validity token and the navigation generation
 
-`recomputePath` calls `sourbyKickAsyncRecompute` only when `path != null && !path.isDone() &&
-!sourbyAsyncPathPending`. Inside, `EntityPathfindEvent.callEvent()` runs first; `requested =
+`recomputePath` calls `sourbyKickAsyncRecompute` (since 2026-10-22 `perf/AsyncPathRecompute.offload`,
+called from patch 0006) only when `path != null && !path.isDone() && !sourbyAsyncPathPending`. Since
+*PR #62* (Build 50 branch; code written and statically reviewed, not built, not tested by the owner)
+`offload` first returns `false` unless the calling thread owns the mob, so with relaxed thread checks a
+foreign-thread recompute never writes the flag or takes the token; it runs the synchronous recompute. Inside, `EntityPathfindEvent.callEvent()` runs first; `requested =
 this.path` and (0047) `requestedGeneration = this.sourbyNavigationGeneration` are taken **after** it,
 then the flag is set and the solve submitted. On delivery (on the owner) the result is applied only
 if the subject is the same entity, `this.path == requested`, **and** the generation is unchanged.
@@ -225,24 +238,36 @@ the token and generation are taken, the check order, the bump count and the `sto
 bumps); it does not prove that no other invalidating path exists. The enumeration of navigation
 writers (`stop`, `moveTo`, `createPath`, `recomputePath`, the delivery; no subclass assigns
 `path`) is a source read of this branch. The patched lambda itself is not executed (it needs a
-bootstrapped server and a real `Mob`). **SAFE for the enumerated invalidations**, with "equivalent
+bootstrapped server and a real `Mob`). Since the move to `AsyncPathRecompute` (2026-10-22),
+`AsyncPathRecomputeTest` runs `AsyncPathRecompute.deliver` and the live-evaluator restore on the real
+`PathNavigation` methods (Mockito `CALLS_REAL_METHODS`, no world); the submit-and-complete lambda in
+`offload` is still not executed. **SAFE for the enumerated invalidations**, with "equivalent
 to upstream" as the standard; not a proof against writers added later.
 
 ### 2.4 F4/F5 — evaluator state and the Creaking home
 
 Covered by `AsyncPathEvaluatorIsolationTest` and the 0039/0042 design (an isolated evaluator per
 off-thread solve, the live one never leaving the owner, the home captured on the owner at
-`createPathFinder`). The Codex review of patch 0042 (AGENT-COORDINATION.md, 2026-10-20: "P2 sync
-getPathType after done() uses stale snapshot (Creaking.java:617)") is tracked by the patch's owner
-and is a staleness question on the live evaluator, not a re-entry or cross-thread write; it does
-not change the verdict here but is why the row is not called "closed by this document".
+`createPathFinder`). The Codex review of patch 0042 (2026-10-20, recorded in the untracked agent
+coordination file, which is not in the repository: "P2 sync getPathType after done() uses stale
+snapshot (Creaking.java:617)") was a staleness question on the live evaluator, not a re-entry or
+cross-thread write. **Resolved** in the current 0042: `HomeNodeEvaluator` reads the captured home only
+while an explicit `sourbySnapshotSolve` flag is set, which only `prepare(region, MobPathSnapshot)` sets
+and `done()` clears, so an owner-thread `getPathType` after `done()` reads the live home (spec, "What the
+snapshot holds"; `AsyncPathEvaluatorIsolationTest`, whose last two cases fail when the discriminator is
+reverted to `this.mob == null`).
 
 ## 3. What this document does not establish
 
-* Anything about scratch state in the engine baseline (`minecraft-patches/sources/`): only
-  SourbyCraft feature patches were inventoried, per the task.
+* Anything about scratch state in the engine baseline (`minecraft-patches/sources/`, about 113
+  entity patches): only SourbyCraft feature patches were inventoried, per the task. Still open (PM-251).
 * Runtime behaviour under a live server, a teleport or a region split: the R2 arguments are from
-  Folia's ownership rules and the regionizer's merge radius, not from a soak.
+  Folia's ownership rules and the regionizer's merge radius, not from a soak. A soak is owner work.
+* R2 with relaxed thread checks: the R2 arguments place readers and writers with
+  `TickThread.ensureTickThread` and the regionizer's ownership. With `aurora.bridge.mode = safe` and
+  `aurora.bridge.thread-checks = relaxed` (the owner's default since 2026-10-22) or `bridged`, those
+  checks are advisory: a plugin thread can reach an entity it does not own, and nothing here
+  establishes R2 for that caller. Only the enforced mode (or the bridge off) keeps the R2 premise.
 * Rows A2/A3 (chunk-system task and NBT accounting fields) are not entity scratch and were not
   assessed.
 * Mockito-instantiated `Entity` objects have no level; the behavioural tests exercise

@@ -16,11 +16,13 @@ package dev.iyanz.sourbycraft.bridge;
  * was scheduled with, so {@code runTaskAsynchronously(() -> ... runTask(...))} from a player's
  * command (DeluxeMenus) or {@code PlayerJoinEvent -> async -> callEvent -> runTaskLater}
  * (EssentialsX/EssentialsXSpawn) still ends on that player's owner. An explicit global request's body
- * publishes nothing. Nothing here touches the server: the entity is an opaque object.</p>
+ * and a repeating async task's body publish nothing. Nothing here touches the server: the entity is an
+ * opaque object.</p>
  *
  * <p>Thread-confined; nesting restores the outer value. {@link #enter(Object)} with {@code null}
  * keeps the outer context (an event that names no player, fired inside a player's frame, must not
- * erase that frame's player).</p>
+ * erase that frame's player); {@link #clear()} hides it (an event about a leaving player, see
+ * {@link EventAnchors}).</p>
  */
 public final class SchedulingContext {
 
@@ -61,6 +63,11 @@ public final class SchedulingContext {
         final Object previous = CURRENT.get();
         CURRENT.set(entity);
         return new Scope(previous, true);
+    }
+
+    /** Publishes no anchor until the scope closes, hiding the outer value; closing restores it. */
+    static Scope clear() {
+        return body(null);
     }
 
     /**

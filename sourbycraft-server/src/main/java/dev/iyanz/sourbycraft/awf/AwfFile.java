@@ -161,7 +161,9 @@ public final class AwfFile implements ChunkSource, AutoCloseable {
                 final int raw = in.readInt();
                 final byte[] sha = new byte[32];
                 in.readFully(sha);
-                if (offset < 0 || stored < 0 || raw < 0 || raw > MAX_CHUNK_BYTES || offset + stored > size) {
+                // offset > size - stored, not offset + stored > size: the sum overflows for an offset
+                // near Long.MAX_VALUE, and reading the chunk would then allocate its stored length.
+                if (offset < 0 || stored < 0 || raw < 0 || raw > MAX_CHUNK_BYTES || offset > size - stored) {
                     throw new CorruptAwfException("index entry " + key + " points outside the file");
                 }
                 if (index.put(key, new Slot(offset, stored, raw, sha)) != null) {

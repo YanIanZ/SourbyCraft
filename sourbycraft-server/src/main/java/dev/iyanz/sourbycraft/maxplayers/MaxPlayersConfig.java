@@ -9,12 +9,12 @@ import org.bukkit.Bukkit;
  *
  * <p>Relocated out of the {@code perf} package when the engine became Aurora's — {@code /maxp} is a kept utility command, not part of the deferred self-tuning
  * perf-engine, so it gets its own small package instead of sitting inside the (now perf-engine-only)
- * {@code perf.*} tree. Reads/writes the same {@code sourbycraft.max-players} key in the unified
- * TOML via {@link SourbyCraftConfig}.
+ * {@code perf.*} tree. Reads/writes the {@code players.max-players} key in
+ * {@code sourbycraft_config/sourbycraft_global_config.yml} via {@link SourbyCraftConfig}.
  */
 public final class MaxPlayersConfig {
 
-    /** Dotted key in the unified TOML. */
+    /** Dotted key in {@code sourbycraft_global_config.yml}: {@code players.max-players}. */
     public static final String KEY = dev.iyanz.sourbycraft.config.UtilityKeys.MAX_PLAYERS.path();
 
     // Sane upper bound: Bukkit stores max-players as an int; a slot count in the hundreds of
@@ -23,7 +23,7 @@ public final class MaxPlayersConfig {
 
     private MaxPlayersConfig() {}
 
-    /** Persist {@code n} into {@code sourbycraft.max-players}. Never throws. */
+    /** Persist {@code n} into {@code players.max-players}. Never throws. */
     public static boolean persist(int n) {
         if (n <= 0 || n > MAX_ALLOWED) return false;
         return SourbyCraftConfig.setAndSave(KEY, n,
@@ -31,7 +31,7 @@ public final class MaxPlayersConfig {
     }
 
     /**
-     * If a persisted {@code sourbycraft.max-players} value {@code > 0} exists, apply it live via
+     * If a persisted {@code players.max-players} value {@code > 0} exists, apply it live via
      * {@link org.bukkit.Server#setMaxPlayers(int)} so it survives restart and overrides
      * {@code server.properties}. No-op when absent, zero, or out of range. Never throws.
      */

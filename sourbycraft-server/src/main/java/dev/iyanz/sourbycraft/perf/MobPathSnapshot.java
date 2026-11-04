@@ -117,15 +117,21 @@ public final class MobPathSnapshot {
      * so the worker never touches the mob's own, non-thread-safe source.
      */
     public static MobPathSnapshot captureDetached(final Mob mob) {
-        // Per-type /perf async counters. Forget whatever an earlier capture left on this thread, build
-        // the snapshot, and only once that succeeded note its type for the submit that follows (the
-        // unchanged navigation patch hands the snapshot to a lambda, not to trySubmit; see
-        // AsyncPathTypeStats). The snapshot also carries the key for trySubmit(MobPathSnapshot, ..).
+        // Per-type /perf async counters. The snapshot carries the key for
+        // trySubmit(MobPathSnapshot, ..), which AsyncPathRecompute uses and which clears the
+        // per-thread note. The note serves trySubmit(Supplier) callers, which pass no snapshot:
+        // forget whatever an earlier capture left on this thread, build the snapshot, and only once
+        // that succeeded note its type (see AsyncPathTypeStats).
         AsyncPathTypeStats.clearSubject();
-        final String typeKey = BuiltInRegistries.ENTITY_TYPE.getKey(mob.getType()).toString();
+        final String typeKey = typeKey(mob);
         final MobPathSnapshot snapshot = capture(mob, RandomSource.create(mob.getRandom().nextLong()), typeKey);
         AsyncPathTypeStats.noteSubject(typeKey);
         return snapshot;
+    }
+
+    /** Registry key of the mob's type ({@code minecraft:zombie}), the per-type {@code /perf async} bucket. */
+    static String typeKey(final Mob mob) {
+        return BuiltInRegistries.ENTITY_TYPE.getKey(mob.getType()).toString();
     }
 
     /**

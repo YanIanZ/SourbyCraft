@@ -122,8 +122,10 @@ public final class AwfWorldFile implements AutoCloseable {
                 for (int i = 0; i < count; i++) {
                     final ChunkKey key = new ChunkKey(in.readInt(), in.readInt());
                     final Slot slot = new Slot(in.readLong(), in.readInt(), in.readInt(), in.readByte(), in.readInt());
+                    // Subtracted, not added: offset + stored overflows for an offset near Long.MAX_VALUE
+                    // and would pass, and reading the chunk would then allocate its stored length.
                     if (slot.offset() < 8 || slot.stored() < 0 || slot.raw() < 0 || slot.raw() > AwfFile.MAX_CHUNK_BYTES
-                        || slot.offset() + slot.stored() > indexOffset) {
+                        || slot.offset() > indexOffset - slot.stored()) {
                         throw new AwfFile.CorruptAwfException(name + " chunk " + key + " points outside the chunk data");
                     }
                     if (index.put(key, slot) != null) throw new AwfFile.CorruptAwfException("duplicate " + name + " chunk " + key);

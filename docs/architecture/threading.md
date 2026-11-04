@@ -121,26 +121,49 @@ nothing in the code states the invariant. That is the section 20 hidden-dependen
 
 ## Regression test
 
-`dev.iyanz.sourbycraft.entity.ScratchBufferConfinementTest` pins both rules:
+> Rewritten 2026-10-25 from the current test methods. The tests this section first described
+> (private/final entity buffers, the `List.copyOf` guard, the mutation-checked
+> `effectParticlesAreNotPublishedFromTheScratchBuffer`) went away with the buffers when old patches
+> 0009, 0014 and the `Mob` half of 0016 were removed (build-45 numbers, see the box above); their
+> recorded results are kept under *History* below and the code is in git history.
 
-* `ServerLevel` declares no field whose name contains "scratch"
-* the entity-owned buffers are private, final and non-static
-* `LivingEntity#updateSynchronizedMobEffectParticles` invokes `List.copyOf` and
-  `SynchedEntityData#get`, so the copy-and-compare guard cannot be dropped silently
+`dev.iyanz.sourbycraft.entity.ScratchBufferConfinementTest` now pins what is left:
 
-The test was mutation-checked: restoring the original `entityData.set(…, scratch)` makes
-`effectParticlesAreNotPublishedFromTheScratchBuffer` fail.
+* `serverLevelHoldsNoScratchBuffer` — `ServerLevel` declares no field whose name contains
+  "scratch" (rule 1: it spans concurrently ticking regions).
+* `collisionQueriesDoNotRetainTheirLastResultsOnTheEntity`,
+  `pickupsDoNotRetainRemovedItemsWhenThePickupGateCloses` and
+  `effectPublicationCannotAliasAnEntityScratchList` — the removed buffers
+  (`collisionScratchVoxels`, `collisionScratchAabbs`, `collisionScratchEntityAabbs`,
+  `Mob.itemEntitiesScratch`, `LivingEntity.effectParticlesScratch`) stay removed.
+* `remainingPositionScratchIsAnOwnerConfinedInstanceField` — the one remaining scratch,
+  `Entity.isInWallScratch` (current feature patch 0012, old 0017; a `BlockPos.MutableBlockPos`),
+  is private, final and non-static.
+* `publishedCallerOwnedQueryOverloadRemainsBinaryCompatible` — the `Level#getEntitiesOfClass`
+  overload that takes a caller-owned list (current feature patch 0011, the surviving half of old
+  0016) stays public and `void`.
 
-A fourth test that tried to prove the scratch field is never the stored argument by
-tracking the last field read before the `set` call was written and then **removed** — it
-did not fail under the same mutation, because the compiler loads the field into a local
-first. It would have been a test that looked stronger than it was.
+These are reflection checks on the compiled classes; none is a behavioural or mutation test.
+
+History (build-45 review, kept as recorded): the first version of the test was mutation-checked —
+restoring the original `entityData.set(…, scratch)` made
+`effectParticlesAreNotPublishedFromTheScratchBuffer` fail. A fourth test that tried to prove the
+scratch field is never the stored argument, by tracking the last field read before the `set`
+call, was written and then **removed**: it did not fail under the same mutation, because the
+compiler loads the field into a local first, so it would have looked stronger than it was.
 
 ## What this review did not establish
 
 * No benchmark was run. The removals are justified on correctness and on the absence of
   any evidence for the optimizations, not on a measured regression.
 * Reentrancy for 0009, 0012 and 0016 was argued by inspection, not proven. An assertion
-  that the buffer is empty on entry would convert the argument into a check.
+  that the buffer is empty on entry would convert the argument into a check. (Status
+  2026-10-25: never added, and no longer applicable as written. The collection buffers it was
+  meant for are gone; the remaining `Entity.isInWallScratch` is a position whose three
+  coordinates are set before each read inside the loop and which holds no object reference, so
+  "empty on entry" has no meaning for it. Its reentrancy is covered, within the limits stated
+  there, by [scratch-reentrancy-proof.md](scratch-reentrancy-proof.md) (2026-10-20): a bytecode
+  direct-call guard, a callee audit and a control-flow must-analysis that every path sets X, Y
+  and Z before each read, pinned by `ScratchReentrancyTest`.)
 * Only these six patches were reviewed. Other reused state — object pools, `ThreadLocal`s
   (PRD sections 53 and 54) — is a separate audit.

@@ -31,9 +31,9 @@ public class AuroraConfigTest {
         assertTrue(result.deprecatedKeys().isEmpty());
     }
 
-    @Test void legacyOnlyRemainsReadableAndReportsDeprecation() {
+    @Test void legacyOnlyIsIgnoredSinceBuild50AndReported() {
         var result = parse(Map.of(AuroraConfig.LEGACY_ASYNC_PATH_KEY, true));
-        assertTrue(result.config().entity().asyncPathfinding());
+        assertFalse(result.config().entity().asyncPathfinding());
         assertEquals(List.of(AuroraConfig.LEGACY_ASYNC_PATH_KEY), result.deprecatedKeys());
     }
 
@@ -57,14 +57,15 @@ public class AuroraConfigTest {
     @Test void invalidLegacySettingRemainsOff() {
         var result = parse(Map.of(AuroraConfig.LEGACY_ASYNC_PATH_KEY, "yes"));
         assertFalse(result.config().entity().asyncPathfinding());
-        assertEquals(List.of(AuroraConfig.LEGACY_ASYNC_PATH_KEY), result.invalidKeys());
+        assertTrue(result.invalidKeys().isEmpty(), "an ignored name is not type-checked");
+        assertEquals(List.of(AuroraConfig.LEGACY_ASYNC_PATH_KEY), result.deprecatedKeys());
     }
 
     @Test void typedValuesAndDiagnosticsCannotAliasParserInput() {
         var input = new HashMap<String, Object>();
-        input.put(AuroraConfig.LEGACY_ASYNC_PATH_KEY, true);
+        input.put(AuroraConfig.ASYNC_PATH_KEY, true);
         var result = parse(input);
-        input.put(AuroraConfig.LEGACY_ASYNC_PATH_KEY, false);
+        input.put(AuroraConfig.ASYNC_PATH_KEY, false);
         assertTrue(result.config().entity().asyncPathfinding());
         assertThrows(UnsupportedOperationException.class, () -> result.deprecatedKeys().clear());
     }
@@ -79,7 +80,7 @@ public class AuroraConfigTest {
         assertTrue(enabled.reloadSummary(AuroraConfig.DEFAULT).contains("restart required: none"));
     }
 
-    @Test void newFilesSeedAuroraWhileExistingLegacyFilesKeepFallback(@TempDir Path dir) throws Exception {
+    @Test void newFilesSeedAuroraWhileExistingLegacyFilesAreLeftAlone(@TempDir Path dir) throws Exception {
         var flag = SourbyCraftConfig.class.getDeclaredField("newFile");
         flag.setAccessible(true);
         boolean previous = flag.getBoolean(null);
@@ -94,7 +95,8 @@ public class AuroraConfigTest {
                 file.load();
                 seed.invoke(null, file);
                 assertFalse(file.contains(AuroraConfig.ASYNC_PATH_KEY));
-                assertTrue(AuroraConfig.parse(ConfigSnapshot.copyOf(file)).config().entity().asyncPathfinding());
+                assertFalse(AuroraConfig.parse(ConfigSnapshot.copyOf(file)).config().entity().asyncPathfinding(),
+                    "the pre-49 name is not read since Build 50");
                 assertEquals(original, Files.readString(existing));
             }
             flag.setBoolean(null, true);
@@ -155,15 +157,15 @@ public class AuroraConfigTest {
         try (var file = CommentedFileConfig.of(path)) {
             file.load();
             load.invoke(null, file, null);
-            assertTrue(SourbyCraftConfig.aurora().entity().asyncPathfinding());
-            assertTrue(AsyncPathProcessor.isEnabled());
+            assertFalse(SourbyCraftConfig.aurora().entity().asyncPathfinding(), "the pre-49 name is not read since Build 50");
+            assertFalse(AsyncPathProcessor.isEnabled());
             assertEquals(legacy, Files.readString(path));
-            String modern = legacy + "\n[aurora.entity]\nasync-pathfinding = false\n";
+            String modern = legacy + "\n[aurora.entity]\nasync-pathfinding = true\n";
             Files.writeString(path, modern);
             file.load();
             load.invoke(null, file, null);
-            assertFalse(SourbyCraftConfig.aurora().entity().asyncPathfinding());
-            assertFalse(AsyncPathProcessor.isEnabled());
+            assertTrue(SourbyCraftConfig.aurora().entity().asyncPathfinding());
+            assertTrue(AsyncPathProcessor.isEnabled());
             assertEquals(modern, Files.readString(path));
         } finally {
             AsyncPathProcessor.shutdown();

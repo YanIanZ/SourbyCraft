@@ -75,7 +75,10 @@ public final class LaunchLines {
                 // keep the fallbacks
             }
         }
-        first.append(style.unicode() ? identity : identity.replace('—', '-'))
+        final String identityLine = style.unicode() ? identity : identity.replace('—', '-');
+        final String paintedIdentity = info != null && style.color()
+            ? style.paint(identityLine, ReadySummary.stageColor(identityLine)) : identityLine;
+        first.append(paintedIdentity)
             .append(" for Minecraft ").append(orUnknown(minecraftVersion, "?"));
         if (!built.isEmpty()) {
             first.append(", built ").append(built);

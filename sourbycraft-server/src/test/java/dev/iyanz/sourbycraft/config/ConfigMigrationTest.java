@@ -18,8 +18,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * The Build 49 relayout of the two SourbyCraft TOML files: old names resolve on read, the files are
- * rewritten once with a {@code .migrated} copy, values never change, and a file that already has the
+ * The Build 49 relayout of the two SourbyCraft TOML files: old names are ignored on read since Build 50, the
+ * files are rewritten once with a {@code .migrated} copy, values never change, and a file that already has the
  * new layout is left alone.
  */
 class ConfigMigrationTest {
@@ -85,35 +85,33 @@ class ConfigMigrationTest {
         }
     }
 
-    // ------------------------------------------------------------------------------- normalize
+    // ------------------------------------------------------------------------------- reading
 
     @Test
-    void oldNamesResolveToTheCurrentOnesOnRead() {
-        final ConfigMigration.Normalized n = ConfigMigration.normalize(new ConfigSnapshot(Map.of(
+    void oldNamesAreIgnoredOnReadSinceBuild50() {
+        final ConfigMigration.Stripped n = ConfigMigration.stripLegacyNames(new ConfigSnapshot(Map.of(
             "ui.console-style", "plain", "misc.auto_update.apply_mode", "auto", "messages.join", List.of("x"))));
-        assertEquals("plain", n.values().values().get("console.style"));
-        assertEquals("auto", n.values().values().get("updater.apply-mode"));
+        assertNull(n.values().values().get("console.style"), "an old name no longer fills the current key");
+        assertNull(n.values().values().get("updater.apply-mode"));
         assertEquals(List.of("x"), n.values().values().get("messages.join"));
         assertFalse(n.values().values().containsKey("ui.console-style"), "the old name is gone from the snapshot");
-        assertEquals(List.of("ui.console-style", "misc.auto_update.apply_mode"), n.deprecatedUsed());
-        assertTrue(n.staleIgnored().isEmpty());
+        assertEquals(List.of("ui.console-style", "misc.auto_update.apply_mode"), n.ignored());
     }
 
     @Test
-    void theCurrentNameWinsWhenBothArePresent() {
-        final ConfigMigration.Normalized n = ConfigMigration.normalize(new ConfigSnapshot(Map.of(
+    void theCurrentNameIsReadWhenBothArePresent() {
+        final ConfigMigration.Stripped n = ConfigMigration.stripLegacyNames(new ConfigSnapshot(Map.of(
             "ui.plugins-page-size", 3, "console.plugins-page-size", 9)));
         assertEquals(9, n.values().values().get("console.plugins-page-size"));
-        assertEquals(List.of("ui.plugins-page-size"), n.staleIgnored());
-        assertTrue(n.deprecatedUsed().isEmpty());
+        assertEquals(List.of("ui.plugins-page-size"), n.ignored());
     }
 
     @Test
     void aCurrentLayoutSnapshotIsUntouched() {
         final ConfigSnapshot current = new ConfigSnapshot(Map.of("console.style", "auto", "updater.enabled", false));
-        final ConfigMigration.Normalized n = ConfigMigration.normalize(current);
+        final ConfigMigration.Stripped n = ConfigMigration.stripLegacyNames(current);
         assertEquals(current.values(), n.values().values());
-        assertTrue(n.deprecatedUsed().isEmpty() && n.staleIgnored().isEmpty());
+        assertTrue(n.ignored().isEmpty());
     }
 
     // ------------------------------------------------------------------------------- plan + apply
@@ -183,8 +181,7 @@ class ConfigMigrationTest {
         assertTrue(Files.readString(aurora).contains("LIVE. Default false. Aurora async pathfinding"), Files.readString(aurora));
 
         // what the parsers see is what they saw before (minus the dropped loser)
-        final ConfigMigration.Normalized normalized = ConfigMigration.normalize(new ConfigSnapshot(after));
-        assertTrue(normalized.deprecatedUsed().isEmpty() && normalized.staleIgnored().isEmpty());
+        assertTrue(ConfigMigration.stripLegacyNames(new ConfigSnapshot(after)).ignored().isEmpty());
         final AuroraConfig config = AuroraConfig.parse(ConfigSnapshot.layered(new ConfigSnapshot(after), new ConfigSnapshot(auroraAfter))).config();
         assertEquals(2, config.cpu().cores());
         assertEquals(AuroraConfig.BridgeMode.SAFE, config.bridge().mode());

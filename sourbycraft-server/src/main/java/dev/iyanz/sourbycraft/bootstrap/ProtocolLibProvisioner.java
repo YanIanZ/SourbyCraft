@@ -18,9 +18,14 @@ final class ProtocolLibProvisioner {
     private ProtocolLibProvisioner() {}
 
     static void provision(Path plugins, Path config, LibDownloader.Transport transport) {
-        boolean enabled = BootstrapPluginSettings.enabled(config, "protocollib", true);
+        BootstrapPluginSettings.Setting setting = BootstrapPluginSettings.setting(config, "protocollib", true);
+        if (setting == BootstrapPluginSettings.Setting.SKIP) {
+            BootLog.warn("ProtocolLib auto-provision skipped this boot: the setting could not be used (see the line "
+                + "above); nothing downloaded, installed or quarantined.");
+            return;
+        }
         try {
-            if (enabled) PluginProvisioner.ensureJar(PIN, plugins, transport);
+            if (setting == BootstrapPluginSettings.Setting.ENABLED) PluginProvisioner.ensureJar(PIN, plugins, transport);
             else PluginProvisioner.quarantineProvisionedJars(plugins, java.util.List.of(PIN));
         } catch (IOException failure) {
             BootLog.warn("ProtocolLib installation failed: " + failure.getMessage()

@@ -31,6 +31,15 @@ balancing them. None of this is a defect in either program; it is a gap between 
 Without a join key the two sets of documents cannot contradict or confirm each other. They
 describe different servers.
 
+> **Status 2026-10-25:** two of the gaps above have code now. Per-plugin `onLoad`/`onEnable` wall
+> time is recorded (Paper feature 0013, `PluginTimings`, `PluginTimingsTest`; committed 2026-10-07),
+> and the bridge times each bridged plugin's task bodies (count, total, max, recent window;
+> `BridgeTelemetry`), shown by `/plugins <name>` and `/perf plugins`. That attributes time to
+> *bridged* plugins only; native plugins' tick cost is still not attributed. A `plugins-10` workload
+> exists in `scripts/baseline_workloads.py`, with one uncertified Sourby Demo run
+> ([BASELINE.md, *The plugin workload*](../BASELINE.md#the-plugin-workload)). The analysis above is the
+> 2026-10-07 text; §6 has the per-item status.
+
 ## 2. Compatibility work lands on the serial thread
 
 Region threading parallelises **across space**. [region-parallelism.md](region-parallelism.md)
@@ -48,7 +57,11 @@ lifecycle work, no throughput claim."*
 The same shape appears outside the bridge:
 
 - `/awf create` waits for `setInitialSpawn` → `syncLoadNonFull` on the global tick (TODO P0;
-  Spark `RyP3FlAYME`).
+  Spark `RyP3FlAYME`). *Status 2026-10-25: fixed 2026-10-13 by staged world creation (MC feature
+  patch 0029, Paper feature patch 0014, `AuroraWorldsService`): the spawn search's first chunk loads
+  asynchronously and the unchanged spawn setup runs on the next global tick. One local run per case,
+  no players, uncertified: the longest global-tick pause during `/awf create` went from 2.19–3.29 s to
+  0.06–0.14 s ([docs/TODO.md](../TODO.md), AWF section).*
 - SuperiorSkyblock2's `SpawnIsland` read the spawn biome from a global-tick task and was counted
   as a bridge violation on every boot ([SUPERIORSKYBLOCK-BRIDGE.md](../development/SUPERIORSKYBLOCK-BRIDGE.md)).
 
@@ -66,6 +79,7 @@ the general outcome: **full compatibility was reached by leaving the compatibili
 bridge is a safety and diagnosis mechanism — it admits, routes, counts violations and quarantines
 — and neither it nor any adapter can supply the region knowledge the plugin's author did not
 write. The bridge documents do not yet say this as a design limit; §6 below asks for it.
+*Status 2026-10-25: they do now ([aurora-plugin-bridge.md, *What the bridge is not*](aurora-plugin-bridge.md#what-the-bridge-is-not)).*
 
 ## 4. The evidence standard retracts more than it admits
 
@@ -120,3 +134,12 @@ both are true, because the limit is one thread or one pool, which averages hide.
    compatibility means a native port.
 
 Items 1, 2 and 4 are work; item 3 is a decision.
+
+Status 2026-10-25 (read from code and [docs/TODO.md](../TODO.md); nothing re-measured):
+
+| Item | Status | Evidence |
+| --- | --- | --- |
+| 1. Representative workload with plugins | **Partial** | `plugins-10` is defined in `scripts/baseline_workloads.py` with its tests (2026-10-07); one uncertified run on Sourby Demo (2026-10-06: TPS median 20, MSPT 4.93 ms, p99 12.7 ms, 10 regions; bridged body totals Essentials 84.8 ms, Vault 7.69 ms) in [BASELINE.md, *The plugin workload*](../BASELINE.md#the-plugin-workload). No certified run or reference pair |
+| 2. Joining metric (bridged task time per plugin) | **Implemented, not validated with real players** | `BridgeTelemetry` (count, total, max, recent window) in `/plugins <name>` and `/perf plugins`, committed 2026-10-07 with the bridge tests; validation with real player traffic is still open in TODO.md. Native plugins are not covered |
+| 3. Owner decision on the product workload | **Open** | TODO.md "Workload produk yang representatif" (`[!]`); the chunk-worker recommendation still depends on it |
+| 4. Bridge limit stated | **Done** | [aurora-plugin-bridge.md, *What the bridge is not*](aurora-plugin-bridge.md#what-the-bridge-is-not) |

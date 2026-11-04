@@ -31,13 +31,14 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>The files are YAML ({@code config.yaml.YamlFormat}: SnakeYAML values, comments kept). An
  * existing {@code *.toml} is converted once at boot by {@link ConfigFormatMigration} and renamed
- * {@code *.toml.migrated}; a {@code *.yml} always wins, and an unparseable old file is left alone and
- * named with file + near-line. Build 49 relaid the utility file ({@code console}, {@code players},
- * {@code messages}, {@code plugins.*}, {@code updater}). {@link ConfigMigration} rewrites an older file once at
- * boot, after copying it to {@code *.migrated}, and resolves old key names on every read until Build
- * 50 (one WARN per old key per load). The Aurora file is still layered <em>over</em> the unified one
- * for Aurora keys, so a deployment whose migration could not run (read-only directory) keeps the
- * value it had; where both files set the same Aurora key, aurora.yml wins and
+ * {@code *.toml.migrated}; a {@code *.yml} always wins (a {@code *.toml} left beside it is named in a
+ * WARN), and an unparseable old file is left alone and named with file + near-line. Build 49 relaid the
+ * utility file ({@code console}, {@code players}, {@code messages}, {@code plugins.*}, {@code updater}).
+ * {@link ConfigMigration} rewrites an older file once at boot, after copying it to {@code *.migrated}.
+ * Since Build 50 an old key name that rewrite could not remove is not read, and neither is a key no
+ * table documents: each gets one WARN per load. The Aurora file is still layered <em>over</em> the
+ * unified one for Aurora keys, so a deployment whose migration could not run (read-only directory) keeps
+ * the value it had; where both files set the same Aurora key, aurora.yml wins and
  * {@link #shadowedAuroraKeys} reports the copy that decides nothing.</p>
  *
  * <p>Both files use their own {@code nightconfig} {@link CommentedFileConfig} with a format chosen by
@@ -78,9 +79,14 @@ public final class SourbyCraftConfig {
     private static boolean newAuroraFile;
     /** Set while {@link #init} rewrites an old-layout file, so the seeded defaults are written into it too. */
     private static boolean migratedUtilityFile;
-    private record LoadedConfig(ConfigSnapshot utility, AuroraConfig aurora) {}
-    private static volatile LoadedConfig loaded = new LoadedConfig(
-        new ConfigSnapshot(java.util.Map.of()), AuroraConfig.DEFAULT);
+    /**
+     * One published load: the utility snapshot (old key names left out), the parsed Aurora settings, and the
+     * flattened Aurora layer they were parsed from (the utility file under the Aurora file), which the restart
+     * report compares key by key.
+     */
+    private record LoadedConfig(ConfigSnapshot utility, AuroraConfig aurora, ConfigSnapshot auroraLayer) {}
+    private static final ConfigSnapshot EMPTY = new ConfigSnapshot(java.util.Map.of());
+    private static volatile LoadedConfig loaded = new LoadedConfig(EMPTY, AuroraConfig.DEFAULT, EMPTY);
 
     private static volatile LoadedConfig bootConfig;
 
@@ -90,22 +96,73 @@ public final class SourbyCraftConfig {
 
     /** Restart changes remain pending across repeated reloads until a new process starts. */
     public static List<String> pendingRestartKeys() {
-        LoadedConfig boot = bootConfig;
+        final LoadedConfig boot = bootConfig;
         if (boot == null) return List.of();
-        return restartChanges(boot.utility(), boot.aurora(), loaded.utility(), loaded.aurora());
+        final LoadedConfig now = loaded;
+        return restartChanges(boot.utility(), boot.aurora(), boot.auroraLayer(),
+            now.utility(), now.aurora(), now.auroraLayer());
     }
 
-    /** The utility keys whose change is only noticed by a new process; compared against the boot snapshot. */
-    private static final List<String> RESTART_TRACKED_UTILITY_KEYS = List.of(
-        UtilityKeys.CONSOLE_STYLE.path(), UtilityKeys.GC_ADVISOR.path(),
-        UtilityKeys.MAX_PLAYERS.path(), UtilityKeys.FULL_SERVER_BYPASS.path(),
-        UtilityKeys.VIAVERSION_AUTO_PROVISION.path(), UtilityKeys.PROTOCOLLIB_AUTO_PROVISION.path(),
-        "messages.motd",
-        UtilityKeys.UPDATER_ENABLED.path(), UtilityKeys.UPDATER_CHECK_TIMES.path(),
-        UtilityKeys.UPDATER_CHECK_INTERVAL_MINUTES.path());
+    /**
+     * The utility keys whose change is only noticed by a new process: every RESTART_REQUIRED key of
+     * {@link UtilityKeys}, plus the MOTD (picked once at boot; its key belongs to SourbyMessages).
+     */
+    private static final List<String> RESTART_TRACKED_UTILITY_KEYS = restartTrackedUtilityKeys();
+    /**
+     * The RESTART_REQUIRED Aurora keys compared on their value in the flattened Aurora layer: every such key of
+     * {@link AuroraKeys} and the unseeded Redis backend keys, except those {@link #restartChanges} compares on the
+     * parsed settings.
+     */
+    private static final List<String> RESTART_TRACKED_AURORA_KEYS = restartTrackedAuroraKeys();
 
+    private static List<String> restartTrackedUtilityKeys() {
+        final List<String> keys = new java.util.ArrayList<>();
+        for (final ConfigKey key : UtilityKeys.KEYS) {
+            if (key.lifecycle() == AuroraConfig.Lifecycle.RESTART_REQUIRED) keys.add(key.path());
+        }
+        keys.add("messages.motd");
+        return List.copyOf(keys);
+    }
+
+    private static List<String> restartTrackedAuroraKeys() {
+        final List<String> keys = new java.util.ArrayList<>();
+        for (final ConfigKey key : AuroraKeys.KEYS) {
+            if (key.lifecycle() == AuroraConfig.Lifecycle.RESTART_REQUIRED) keys.add(key.path());
+        }
+        keys.addAll(AuroraKeys.UNSEEDED_PATHS);
+        keys.removeIf(SourbyCraftConfig::comparedOnParsedSettings);
+        return List.copyOf(keys);
+    }
+
+    /**
+     * The keys {@link #restartChanges} compares on the parsed {@link AuroraConfig}: there a typo that falls back to
+     * the default value is not reported as a change.
+     */
+    private static boolean comparedOnParsedSettings(final String key) {
+        return key.equals(AuroraConfig.CPU_CORES_KEY) || key.equals(AuroraConfig.BRIDGE_MODE_KEY)
+            || key.equals(AuroraConfig.BRIDGE_THREAD_CHECKS_KEY) || key.startsWith("aurora.scheduler.")
+            || key.startsWith("aurora.diagnostics.stall-recorder.");
+    }
+
+    /**
+     * The restart-only changes on the parsed Aurora settings and the utility snapshots alone, without the
+     * flattened Aurora layers (so neither chunk-generation metrics nor any AWF, MultiProfile, Redis or
+     * AbyssLink key is compared).
+     */
     static List<String> restartChanges(ConfigSnapshot before, AuroraConfig beforeAurora,
                                        ConfigSnapshot after, AuroraConfig afterAurora) {
+        return restartChanges(before, beforeAurora, EMPTY, after, afterAurora, EMPTY);
+    }
+
+    /**
+     * The RESTART_REQUIRED keys that differ between two loads, sorted. The CPU budget, bridge mode and thread
+     * checks, scheduler budgets and stall recorder are compared on their parsed values; every other
+     * RESTART_REQUIRED Aurora key (chunk-generation metrics, AWF, MultiProfile, the Redis Fabric and backend,
+     * AbyssLink) on its value in the flattened Aurora layer; the utility keys on the utility snapshot.
+     */
+    static List<String> restartChanges(final ConfigSnapshot before, final AuroraConfig beforeAurora,
+                                       final ConfigSnapshot beforeLayer, final ConfigSnapshot after,
+                                       final AuroraConfig afterAurora, final ConfigSnapshot afterLayer) {
         java.util.Set<String> keys = new java.util.TreeSet<>();
         if (!beforeAurora.cpu().equals(afterAurora.cpu())) keys.add(AuroraConfig.CPU_CORES_KEY);
         if (beforeAurora.bridge().mode() != afterAurora.bridge().mode()) keys.add(AuroraConfig.BRIDGE_MODE_KEY);
@@ -113,6 +170,9 @@ public final class SourbyCraftConfig {
         if (!beforeAurora.scheduler().equals(afterAurora.scheduler())) keys.add("aurora.scheduler.*");
         if (!beforeAurora.diagnostics().stallRecorder().equals(afterAurora.diagnostics().stallRecorder())) {
             keys.add("aurora.diagnostics.stall-recorder.*");
+        }
+        for (final String key : RESTART_TRACKED_AURORA_KEYS) {
+            if (!java.util.Objects.equals(beforeLayer.values().get(key), afterLayer.values().get(key))) keys.add(key);
         }
         for (String key : RESTART_TRACKED_UTILITY_KEYS) {
             if (!java.util.Objects.equals(before.values().get(key), after.values().get(key))) keys.add(key);
@@ -130,32 +190,33 @@ public final class SourbyCraftConfig {
      * made this method depend on a file its caller had not named, which is how a test handed a
      * temporary file quietly picked up the real one.</p>
      *
-     * @param file       the unified utility file
+     * @param file       the unified utility file, or {@code null} when it could not be opened (its keys then
+     *                   take their defaults; the Aurora file still applies)
      * @param auroraFile Aurora's own file, or {@code null} when there is none to read
      */
     private static AuroraConfig.Parsed loadSnapshot(final CommentedFileConfig file,
                                                     final CommentedFileConfig auroraFile) {
-        // Old key names resolve to the current ones on every read (until Build 50), whether or not
-        // the file on disk has been rewritten; the operator hears about each one once per load.
-        final ConfigMigration.Normalized normalized = ConfigMigration.normalize(ConfigSnapshot.copyOf(file));
-        for (final String old : normalized.deprecatedUsed()) {
-            SourbyLogger.warn("Deprecated config key '" + old + "' in " + UtilityKeys.FILE + " is read as '"
-                + UtilityKeys.legacyToCurrent().get(old) + "' until " + ConfigMigration.DEPRECATION_END
-                + "; rename it (the Build 49 migration does this when it can write the file).");
+        // Since Build 50 an old key name is not read. The boot migration renames it when it can write
+        // the file; one it could not is left out of the snapshot, and the operator hears about it once per load.
+        final ConfigMigration.Stripped stripped =
+            ConfigMigration.stripLegacyNames(file == null ? EMPTY : ConfigSnapshot.copyOf(file));
+        final ConfigSnapshot utility = stripped.values();
+        for (final String old : stripped.ignored()) {
+            // No "is the current key set?" here: seedDefaults has already put every current key in memory.
+            SourbyLogger.warn("Config key '" + old + "' in " + activeUtilityPath + " is ignored since "
+                + ConfigMigration.LEGACY_READS_REMOVED + "; only its current name '" + UtilityKeys.legacyToCurrent().get(old)
+                + "' is read (its default applies when the file does not set it). Rename the key; the configuration "
+                + "migration does this at boot when it can write the file.");
         }
-        for (final String old : normalized.staleIgnored()) {
-            SourbyLogger.warn("Config key '" + old + "' in " + UtilityKeys.FILE + " is ignored: its current name '"
-                + UtilityKeys.legacyToCurrent().get(old) + "' is set too and wins. Remove the old key.");
-        }
-        final ConfigSnapshot utility = normalized.values();
-        // Legacy first, Aurora's own file over it: a server that has never seen aurora.toml keeps
+        // Legacy first, Aurora's own file over it: a server that has never seen aurora.yml keeps
         // the value it already had, and one that has takes the new file's.
         final ConfigSnapshot aurora = auroraFile == null ? null : ConfigSnapshot.copyOf(auroraFile);
+        warnUnknownKeys(utility, aurora);
         if (aurora != null) {
             warnShadowedAuroraKeys(utility, aurora);
         }
-        final AuroraConfig.Parsed parsed = AuroraConfig.parse(aurora == null ? utility
-            : ConfigSnapshot.layered(utility, aurora));
+        final ConfigSnapshot auroraLayer = aurora == null ? utility : ConfigSnapshot.layered(utility, aurora);
+        final AuroraConfig.Parsed parsed = AuroraConfig.parse(auroraLayer);
         // Apply before publication: a failed runtime activation must not report success.
         dev.iyanz.sourbycraft.perf.AsyncPathProcessor.setEnabled(parsed.config().entity().asyncPathfinding());
         dev.iyanz.sourbycraft.execution.LaneCpuSampler.setEnabled(parsed.config().diagnostics().laneSampling());
@@ -163,15 +224,16 @@ public final class SourbyCraftConfig {
         dev.iyanz.sourbycraft.perf.NetworkCounters.GLOBAL.setEnabled(parsed.config().network().counters());
         dev.iyanz.sourbycraft.commandblock.CommandBlockPolicy.setEnabled(parsed.config().world().commandBlocks());
         dev.iyanz.sourbycraft.world.DatapackFunctions.setTickFunctions(parsed.config().world().tickFunctions());
-        loaded = new LoadedConfig(utility, parsed.config());
+        loaded = new LoadedConfig(utility, parsed.config(), auroraLayer);
         for (final String key : parsed.deprecatedKeys()) {
-            SourbyLogger.warn("Deprecated config key '" + key + "' is read as '" + AuroraConfig.ASYNC_PATH_KEY
-                + "' until " + ConfigMigration.DEPRECATION_END + "; move it to " + AuroraKeys.FILE
-                + " under that name. Operator file was not modified.");
+            SourbyLogger.warn("Config key '" + key + "' is ignored since " + ConfigMigration.LEGACY_READS_REMOVED
+                + "; set '" + AuroraKeys.currentPath(key) + "' in " + activeAuroraPath + " instead (the configuration "
+                + "migration moves it at boot when it can write the files). Runtime fallback: that key's default. "
+                + "Operator file was not modified.");
         }
         for (final String key : parsed.invalidKeys()) {
             SourbyLogger.warn("Aurora config key '" + key
-                + "' is invalid for its type (see the comment beside it in aurora.toml). Runtime fallback: "
+                + "' is invalid for its type (see the comment beside it in " + activeAuroraPath + "). Runtime fallback: "
                 + "that key's default. "
                 + "Operator file was not modified.");
         }
@@ -179,11 +241,56 @@ public final class SourbyCraftConfig {
     }
 
     /**
+     * One WARN per key, per load, that no table documents: a misspelled or misplaced key is otherwise dropped
+     * without a word while its default runs. Old key names are reported separately (above, and through
+     * {@link AuroraConfig.Parsed#deprecatedKeys}).
+     *
+     * @param utility the utility snapshot without the old utility names
+     * @param aurora  the Aurora file's snapshot, or {@code null}
+     */
+    private static void warnUnknownKeys(final ConfigSnapshot utility, final ConfigSnapshot aurora) {
+        final java.util.Set<String> auroraKnown = new java.util.HashSet<>(AuroraKeys.paths());
+        auroraKnown.addAll(AuroraKeys.UNSEEDED_PATHS);
+        for (final ConfigKey key : AuroraKeys.KEYS) auroraKnown.addAll(key.legacyPaths());
+        // The utility file is read for its own keys and, under the Aurora file, for Aurora keys.
+        final java.util.Set<String> utilityKnown = new java.util.HashSet<>(auroraKnown);
+        utilityKnown.addAll(UtilityKeys.paths());
+        for (final String message : dev.iyanz.sourbycraft.lang.SourbyMessages.keys()) {
+            utilityKnown.add(dev.iyanz.sourbycraft.lang.SourbyMessages.SECTION + "." + message);
+        }
+        for (final String key : unknownKeys(utility, utilityKnown)) {
+            SourbyLogger.warn("Config key '" + key + "' in " + activeUtilityPath + " is not a setting SourbyCraft "
+                + "reads (misspelled or misplaced?) and is ignored. Keys: docs/AURORA-CONFIG.md.");
+        }
+        if (aurora == null) return;
+        for (final String key : unknownKeys(aurora, auroraKnown)) {
+            SourbyLogger.warn("Config key '" + key + "' in " + activeAuroraPath + " is not a setting SourbyCraft "
+                + "reads (misspelled or misplaced?) and is ignored. Keys: docs/AURORA-CONFIG.md.");
+        }
+    }
+
+    /**
+     * The keys of a flattened snapshot that are not in {@code known}, sorted. A key that names a table of a known
+     * key (a value where that table belongs) is left to the parser that owns the table.
+     */
+    static List<String> unknownKeys(final ConfigSnapshot snapshot, final java.util.Set<String> known) {
+        final java.util.Set<String> tables = new java.util.HashSet<>();
+        for (final String path : known) {
+            for (int dot = path.indexOf('.'); dot > 0; dot = path.indexOf('.', dot + 1)) tables.add(path.substring(0, dot));
+        }
+        final java.util.Set<String> unknown = new java.util.TreeSet<>();
+        for (final String key : snapshot.values().keySet()) {
+            if (!known.contains(key) && !tables.contains(key)) unknown.add(key);
+        }
+        return List.copyOf(unknown);
+    }
+
+    /**
      * Reports an Aurora key that two files both set, where only one of them decides anything.
      *
      * <p>Giving Aurora its own file did not remove the keys already sitting in the unified one.
      * The Build 49 migration moves them, but a deployment whose file could not be rewritten still
-     * holds the same key twice; aurora.toml wins, and an operator who edits the copy they happened
+     * holds the same key twice; aurora.yml wins, and an operator who edits the copy they happened
      * to open watches nothing happen -- with no error to explain why, because neither value is
      * wrong on its own.</p>
      *
@@ -194,9 +301,9 @@ public final class SourbyCraftConfig {
                                                final ConfigSnapshot aurora) {
         for (final String key : shadowedAuroraKeys(utility, aurora)) {
             SourbyLogger.warn("Config key '" + key + "' is set in both "
-                + CONFIG_PATH + " (" + utility.values().get(key) + ") and " + AURORA_PATH
-                + " (" + aurora.values().get(key) + "); " + AURORA_PATH.getFileName()
-                + " wins. Remove the key from " + CONFIG_PATH.getFileName()
+                + activeUtilityPath + " (" + utility.values().get(key) + ") and " + activeAuroraPath
+                + " (" + aurora.values().get(key) + "); " + activeAuroraPath.getFileName()
+                + " wins. Remove the key from " + activeUtilityPath.getFileName()
                 + " so the value you edit is the value that runs. Neither file was modified.");
         }
     }
@@ -230,23 +337,28 @@ public final class SourbyCraftConfig {
     // --------------------------------------------------------------------------------- lifecycle
 
     /**
-     * Load (creating on first boot) the unified TOML, bring an older layout to the Build 49 one
+     * Load (creating on first boot) the utility file, bring an older layout to the Build 49 one
      * (once, with a {@code *.migrated} copy), seed every operator-facing key that is still absent,
      * and push the loaded values into the small set of consumers that cache them in static fields
      * ({@link dev.iyanz.sourbycraft.update.AutoUpdateSettings}). Idempotent-ish: safe to call once
      * at boot; use {@link #reload()} afterwards.
+     *
+     * <p>A utility file that cannot be opened ({@link #file()} logs it with file and line) costs only its
+     * own keys, which take their defaults: aurora.yml, the security limits and the updater settings are
+     * still applied, and {@code /sourbycraft reload} opens the file again once it is fixed.</p>
      */
     public static synchronized void init() {
-        CommentedFileConfig f = file();
-        if (f == null) return;
-        try {
-            migrateLayout(f, auroraFile());
-        } catch (Throwable t) {
-            SourbyLogger.error("configuration layout migration failed; the files were not changed and the old "
-                + "key names are still read (one WARN each)", t);
+        final CommentedFileConfig f = file();
+        if (f != null) {
+            try {
+                migrateLayout(f, auroraFile());
+            } catch (Throwable t) {
+                SourbyLogger.error("configuration layout migration failed; the files were not changed, so old "
+                    + "key names in them are ignored (one WARN each)", t);
+            }
         }
         try {
-            seedDefaults(f);
+            if (f != null) seedDefaults(f);
             seedAurora();          // Aurora's own file, seeded beside it rather than inside it.
         } catch (Throwable t) {
             SourbyLogger.error("seedDefaults failed; SourbyCraft will use hardcoded defaults", t);
@@ -271,7 +383,7 @@ public final class SourbyCraftConfig {
     }
 
     /**
-     * Re-read the unified TOML from disk and re-apply it live ({@code /sourbycraft reload}).
+     * Re-read both files from disk and re-apply them live ({@code /sourbycraft reload}).
      * Returns a short human summary.
      */
     public static synchronized String reload() {
@@ -279,26 +391,41 @@ public final class SourbyCraftConfig {
         return (report.successful() ? "reloaded — " : "reload FAILED/PARTIAL — ") + String.join("; ", report.lines());
     }
 
+    /**
+     * {@code /sourbycraft reload}: re-reads the utility and Aurora files (opening a utility file that could
+     * not be opened at boot), the security limits and the engine files, then publishes one snapshot.
+     * Blocking file I/O on the calling thread.
+     */
     public static synchronized ReloadReport reloadDetailed() {
-        CommentedFileConfig f = FILE;
-        if (f == null) return new ReloadReport(false, List.of("Utility config is not available."));
+        // file() reopens a utility file that boot could not open, and logs why when it still cannot.
+        final boolean utilityWasOpen = FILE != null;
+        final CommentedFileConfig f = file();
+        if (f == null) return new ReloadReport(false, List.of("Could not open " + utilityPath
+            + " (the log names the file and line); no new config snapshot published."));
         List<String> errors = new java.util.ArrayList<>();
         try {
             f.load();
         } catch (Throwable t) {
-            return new ReloadReport(false, List.of("Could not read " + ConfigParseErrors.describe(CONFIG_PATH, t)));
+            return new ReloadReport(false, List.of("Could not read " + ConfigParseErrors.describe(activeUtilityPath, t)));
         }
         // A reload never writes defaults back to an existing file, including after a failed initial save.
         newFile = false;
         migratedUtilityFile = false;
+        final boolean auroraWasOpen = AURORA_FILE != null;
         final CommentedFileConfig engineFile = auroraFile();
         if (engineFile == null) errors.add("Aurora file unavailable; using the utility layer and defaults.");
         else try {
             engineFile.load();
         } catch (Throwable t) {
-            return new ReloadReport(false, List.of("Could not read " + ConfigParseErrors.describe(AURORA_PATH, t),
+            return new ReloadReport(false, List.of("Could not read " + ConfigParseErrors.describe(activeAuroraPath, t),
                 "No new config snapshot published; runtime retains its previously loaded settings."));
         }
+        // A .toml left beside a .yml is never read; said on every reload, as at boot. A file this reload had to
+        // reopen was already named by ConfigFormatMigration.choose().
+        if (utilityWasOpen && utilityPath.equals(CONFIG_PATH)) {
+            ConfigFormatMigration.warnIgnoredLegacy(CONFIG_PATH, LEGACY_CONFIG_PATH);
+        }
+        if (auroraWasOpen) ConfigFormatMigration.warnIgnoredLegacy(AURORA_PATH, LEGACY_AURORA_PATH);
         // Missing utility defaults are seeded in memory exactly as at boot; existing disk bytes stay unchanged.
         seedDefaults(f);
         AuroraConfig previous = aurora();
@@ -315,7 +442,7 @@ public final class SourbyCraftConfig {
         lines.add("LIVE: messages read on use, plugin page size and supported Aurora toggles.");
         lines.add("Updater fields re-read; an already scheduled interval requires restart.");
         lines.add("RESTART_REQUIRED (changes since boot): " + (pendingRestartKeys().isEmpty() ? "none in tracked keys" : String.join(", ", pendingRestartKeys())));
-        lines.add("AWF settings and construction-cached engine options require restart; this report does not enumerate every engine key.");
+        lines.add("Engine options in config/aurora-server.yml and config/aurora-worlds.yml that are read once at startup are not enumerated here.");
         if (!parsed.invalidKeys().isEmpty()) errors.add("Invalid Aurora keys (default fallback): " + parsed.invalidKeys());
         lines.addAll(errors);
         SourbyLogger.info("config reload " + (errors.isEmpty() ? "completed" : "partial; inspect reported errors"));
@@ -445,22 +572,24 @@ public final class SourbyCraftConfig {
      * Production code never calls it, so every production path keeps {@link #CONFIG_PATH}.
      *
      * <p>The utility file handle is dropped, so the next {@link #setAndSave} (or {@link #init})
-     * opens {@code path}. The Aurora layer and the boot snapshot are left alone. Closing the
-     * returned handle restores everything it replaced, including the previous file handle.</p>
+     * opens {@code path}. The Aurora layer and the boot snapshot are left alone (a {@link #setAndSave}
+     * under the seam may update the boot snapshot). Closing the returned handle restores everything it
+     * replaced, including the previous file handle and boot snapshot.</p>
      *
      * @param utility the snapshot {@link #cfgGet} and its siblings should read
-     * @param path    the utility TOML file {@link #setAndSave} should write
+     * @param path    the utility file {@link #setAndSave} should write
      * @return a handle that restores the previous state; use it in try-with-resources
      */
     static synchronized AutoCloseable installForTesting(final ConfigSnapshot utility, final Path path) {
         final LoadedConfig previousLoaded = loaded;
+        final LoadedConfig previousBoot = bootConfig;
         final CommentedFileConfig previousFile = FILE;
         final Path previousPath = utilityPath;
         final boolean previousNewFile = newFile;
         utilityPath = path;
         FILE = null;
         newFile = false;
-        loaded = new LoadedConfig(utility, previousLoaded.aurora());
+        loaded = new LoadedConfig(utility, previousLoaded.aurora(), previousLoaded.auroraLayer());
         return () -> {
             synchronized (SourbyCraftConfig.class) {
                 final CommentedFileConfig opened = FILE;
@@ -468,6 +597,7 @@ public final class SourbyCraftConfig {
                     opened.close();
                 }
                 loaded = previousLoaded;
+                bootConfig = previousBoot;
                 FILE = previousFile;
                 utilityPath = previousPath;
                 newFile = previousNewFile;
@@ -477,7 +607,7 @@ public final class SourbyCraftConfig {
 
     // -------------------------------------------------------------------------------- typed reads
 
-    /** Read a value from the unified TOML by dotted path. Falls back to {@code defaultValue}. */
+    /** Read a value from the utility file's published snapshot by dotted path. Falls back to {@code defaultValue}. */
     @SuppressWarnings("unchecked")
     public static <T> T cfgGet(String dottedPath, T defaultValue) {
         Object v = lookup(dottedPath);
@@ -540,22 +670,52 @@ public final class SourbyCraftConfig {
     /**
      * Set + persist a single key (e.g. {@code /maxp <n>}). Never throws. Returns {@code true} on a
      * successful write+save.
+     *
+     * <p>The file is re-read first, so an edit the operator saved since the last load or reload is kept and
+     * only what is on disk plus this key is written (defaults seeded in memory are never written back); a
+     * file that cannot be read is not written at all. Only this key changes in the published snapshot:
+     * other edits on disk still wait for {@code /sourbycraft reload}. The caller applies the value live
+     * ({@code /maxp} sets the slot count before persisting it), so the boot snapshot takes it too and
+     * {@link #pendingRestartKeys} does not list the key as waiting for a restart. Blocking file I/O: a
+     * caller on a region or the global tick thread hands this to an I/O executor.</p>
      */
     public static synchronized boolean setAndSave(String dottedPath, Object value, String commentIfNew) {
         CommentedFileConfig f = file();
         if (f == null) return false;
+        try {
+            f.load();
+        } catch (Throwable t) {
+            SourbyLogger.warn("could not persist " + dottedPath + ": " + ConfigParseErrors.describe(activeUtilityPath, t)
+                + "; the file was not written");
+            return false;
+        }
+        final Object written;
         try {
             f.set(dottedPath, value);
             if (commentIfNew != null && f.getComment(dottedPath) == null) {
                 f.setComment(dottedPath, commentIfNew);
             }
             f.save();
-            loaded = new LoadedConfig(ConfigMigration.normalize(ConfigSnapshot.copyOf(f)).values(), loaded.aurora());
-            return true;
+            written = ConfigSnapshot.copyOf(f).values().get(dottedPath);
         } catch (Throwable t) {
             SourbyLogger.warn("could not persist " + dottedPath + ": " + t.getMessage());
             return false;
         }
+        final LoadedConfig current = loaded;
+        loaded = new LoadedConfig(withValue(current.utility(), dottedPath, written), current.aurora(), current.auroraLayer());
+        final LoadedConfig boot = bootConfig;
+        if (boot != null) {
+            bootConfig = new LoadedConfig(withValue(boot.utility(), dottedPath, written), boot.aurora(), boot.auroraLayer());
+        }
+        return true;
+    }
+
+    /** {@code snapshot} with {@code key} set to {@code value}, or without it when {@code value} is {@code null}. */
+    private static ConfigSnapshot withValue(final ConfigSnapshot snapshot, final String key, final Object value) {
+        final java.util.Map<String, Object> values = new java.util.LinkedHashMap<>(snapshot.values());
+        if (value == null) values.remove(key);
+        else values.put(key, value);
+        return new ConfigSnapshot(values);
     }
 
     // ------------------------------------------------------------------------------------ seeding

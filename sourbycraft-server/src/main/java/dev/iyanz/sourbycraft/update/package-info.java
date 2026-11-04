@@ -7,8 +7,8 @@
  * and hands off to {@link dev.iyanz.sourbycraft.update.UpdateApplier} to swap the jar and restart
  * when {@code apply-mode=auto}. {@link dev.iyanz.sourbycraft.update.UpdateNotifier} renders the
  * hex-coloured "update available" banner to console + operators, and
- * {@link dev.iyanz.sourbycraft.update.ViaAutoUpdate} keeps the auto-provisioned ViaVersion /
- * ViaBackwards jars current on the same cadence. Settings are plain static fields in
+ * {@link dev.iyanz.sourbycraft.update.ViaAutoUpdate} reinstalls a missing reviewed ViaVersion /
+ * ViaBackwards pin on the same cadence (it never upgrades them). Settings are plain static fields in
  * {@link dev.iyanz.sourbycraft.update.AutoUpdateSettings}, seeded into and read back from the
  * unified TOML.
  */

@@ -161,23 +161,27 @@ public class ConfigurationProvider {
 
             // build and apply diff
             NodeDiff nodeDiff = NodeDiff.compute(fileRepresentation, objectRepresentation, defaultObj.getClass(), wrapLimit);
+            final boolean changed = nodeDiff.hasNext();
             while (nodeDiff.hasNext()) {
                 nodeDiff.applyNext(resolver::onDiffAdd, resolver::onDiffRemove);
             }
 
             // with the diff applied to the file representation now, we need to write it
-            // after writing, we need to rebuild the config file based off the new file
+            // after writing, we need to rebuild the config file based off the new file.
+            // SourbyCraft - only when the diff added or removed a key: a load or reload that changes nothing
+            // leaves the operator's file (formatting and comments included) exactly as it was
+            if (changed) {
+                // we need to set this, or it will include a global tag
+                fileRepresentation.setTag(Tag.MAP);
 
-            // we need to set this, or it will include a global tag
-            fileRepresentation.setTag(Tag.MAP);
-
-            try {
-                write(absolutePath, fileRepresentation, true, header);
-            } catch (final IOException ioe) {
-                throw new RuntimeException("Couldn't save config", ioe);
+                try {
+                    write(absolutePath, fileRepresentation, true, header);
+                } catch (final IOException ioe) {
+                    throw new RuntimeException("Couldn't save config", ioe);
+                }
             }
 
-            // we load the file that was just written, since with the diff applied this should
+            // we load the file (just written when the diff changed it), since with the diff applied this should
             // parse pretty perfectly now too, with no extra or missing keys
 
             //noinspection unchecked

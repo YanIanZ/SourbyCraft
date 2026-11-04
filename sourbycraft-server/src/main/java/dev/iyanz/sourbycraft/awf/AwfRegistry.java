@@ -6,8 +6,10 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * The loaded AWF worlds, for the "loaded worlds" metric and for anything that needs to enumerate
- * them. Registration is explicit; a world that is never registered is never counted.
+ * A name-keyed set of {@link AwfWorld}s. Not used by the runtime: nothing in the server registers
+ * a world here, and no metric or command reads it (the engine tracks its attached storages
+ * itself, and AWF-managed worlds are listed by {@code AuroraWorldRegistry}). Only
+ * {@code AwfWorldTest} exercises it.
  */
 public final class AwfRegistry {
 

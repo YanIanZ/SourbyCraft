@@ -19,7 +19,7 @@ import java.util.function.IntSupplier;
  * counted as rejected (not as a violation) if the entity is removed first. A sync task with an
  * explicit target region runs on that region. A sync task naming nothing takes the player of the
  * {@link SchedulingContext} (the player whose event or command is being handled, carried through
- * bridged async bodies) as its entity anchor, with the same contract as a named entity, except that a
+ * bridged one-shot async bodies) as its entity anchor, with the same contract as a named entity, except that a
  * player already gone at scheduling time simply yields no anchor. Otherwise a sync task
  * scheduled while a region is ticking runs on that region (anchored on a chunk it owned;
  * {@code aurora.bridge.sync-route = "caller-region"}, the default); from anywhere else, or with
@@ -42,7 +42,11 @@ import java.util.function.IntSupplier;
  * the server itself) is not the bridge's business and keeps the engine's own log line.</p>
  *
  * <p>BRIDGE_IO saturation: a one-shot async task the lane refuses is cancelled; a repeating one
- * skips that run (counted as a skipped run) and stays scheduled for its next period.</p>
+ * skips that run (counted as a skipped run) and stays scheduled for its next period. A repeating
+ * async task has at most one run waiting in the lane's queue: a period that fires while the previous
+ * run has not started yet is skipped the same way instead of queued behind it, and so is a run that
+ * would exceed {@code max-running-async-tasks-per-plugin}; only a one-shot task over that limit is
+ * cancelled. Runs that have started may still overlap, as on Paper.</p>
  */
 public final class BridgeRuntime {
 
@@ -54,13 +58,23 @@ public final class BridgeRuntime {
         default Handle async(Object owner, Runnable body, long delayTicks, long periodTicks, Runnable rejected) {
             return async(owner, body, delayTicks, periodTicks);
         }
+        /**
+         * As above; {@code claim} is asked each time the timer fires, before that run is handed to the I/O lane,
+         * and {@code false} drops the run without handing it over (and without calling {@code rejected}).
+         */
+        default Handle async(Object owner, Runnable body, long delayTicks, long periodTicks, Runnable rejected,
+                             java.util.function.BooleanSupplier claim) {
+            return async(owner, body, delayTicks, periodTicks, rejected);
+        }
         /** On whichever region owns the anchor's chunk when the work comes due. */
         Handle region(Object owner, dev.iyanz.sourbycraft.execution.region.RegionAnchor anchor, Runnable body,
                       long delayTicks, long periodTicks);
         /**
          * On whichever region owns the entity when the work comes due. {@code retired} runs instead
          * of any further body when the entity is removed first (Folia's entity scheduler contract),
-         * including when it was already removed at scheduling time.
+         * including when it was already removed at scheduling time, and after a run of a repeating
+         * task whose own body removed the entity (Folia drops that task without its retired callback).
+         * It may run more than once; the bridge ignores every call after the first.
          */
         Handle entity(Object owner, Object entity, Runnable body, long delayTicks, long periodTicks, Runnable retired);
     }
@@ -98,12 +112,15 @@ public final class BridgeRuntime {
     /**
      * {@code world}: the anchor's world for {@link BridgeRouter.Route#REGION_OWNER}, else {@code null}.
      * {@code context}: what the body publishes as {@link SchedulingContext} (the entity it is anchored to,
-     * or the frame an async task was scheduled from), else {@code null}. {@code inferred}: the entity
+     * or the frame a one-shot async task was scheduled from), else {@code null}. {@code inferred}: the entity
      * anchor came from the scheduling context, not from the plugin. {@code untargeted}: nothing named an
-     * owner and the task fell through to the global region.
+     * owner and the task fell through to the global region. {@code queued}: for a repeating
+     * {@link BridgeRouter.Route#IO_LANE} task, whether a run of it waits in the lane's queue and has not
+     * started yet (see {@link #claimRun}); {@code null} for every other task.
      */
     private record Scheduled(String plugin, Object owner, Handle handle, Task task, BridgeRouter.Route route,
-                             Object world, Object context, boolean inferred, boolean untargeted) {}
+                             Object world, Object context, boolean inferred, boolean untargeted,
+                             java.util.concurrent.atomic.AtomicBoolean queued) {}
 
     /** The bridged body running on this thread, if any; see {@link GuardViolations}. */
     private static final ThreadLocal<Invocation> CURRENT = new ThreadLocal<>();
@@ -128,6 +145,8 @@ public final class BridgeRuntime {
 
     /** How long one (plugin, reason) log line suppresses the next. */
     static final long LOG_WINDOW_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(60L);
+    /** (plugin, reason) log windows kept; past this, new pairs share one overflow window. */
+    static final int MAX_LOG_WINDOWS = 1024;
 
     /** A running async callback, including bodies draining after task cancellation. */
     public record AsyncWorker(int taskId, Object owner, Thread thread) {
@@ -154,13 +173,6 @@ public final class BridgeRuntime {
         boolean quarantineAdmitReported;
     }
 
-    /** Rate-limited log state per (plugin, reason): last logged time and lines suppressed since. */
-    private static final class LogWindow {
-        long lastNanos;
-        long suppressed;
-        boolean logged;
-    }
-
     private final BridgeMode mode;
     private final IntSupplier quarantineAfter;
     private final Executor executor;
@@ -182,8 +194,12 @@ public final class BridgeRuntime {
     private final java.util.function.Supplier<dev.iyanz.sourbycraft.config.AuroraConfig.SyncRoute> syncRoute;
     private final IntSupplier maxPendingTasks;
     private final IntSupplier maxRunningAsyncTasks;
-    /** Bounded by plugins times the engine's fixed set of guard reasons (plus one lane reason). */
-    private final Map<String, LogWindow> logWindows = new ConcurrentHashMap<>();
+    /**
+     * Rate-limit windows per (plugin, reason), the reason without its per-hit context
+     * ({@link dev.iyanz.sourbycraft.guards.LogWindows#baseReason}); at most {@link #MAX_LOG_WINDOWS}.
+     */
+    private final dev.iyanz.sourbycraft.guards.LogWindows logWindows =
+        new dev.iyanz.sourbycraft.guards.LogWindows(LOG_WINDOW_NANOS, MAX_LOG_WINDOWS);
     /** Test seam for the log rate limit and the body-time measurement. */
     java.util.function.LongSupplier nanoClock = System::nanoTime;
     /**
@@ -324,8 +340,8 @@ public final class BridgeRuntime {
      * <p>Owner precedence for a sync task: explicit {@code EntityTask} entity, explicit
      * {@code RegionTask} (or adapter) region, the player of the current {@link SchedulingContext}
      * (inferred entity anchor), the caller's region ({@code sync-route = caller-region}), the global
-     * region. An explicit global request takes none of them; an async task takes the I/O lane and
-     * only carries the context for the tasks its body schedules.</p>
+     * region. An explicit global request takes none of them; an async task takes the I/O lane, and a
+     * one-shot one carries the context for the tasks its body schedules (a repeating one carries none).</p>
      *
      * @return {@code false} when the task was rejected; it has then been marked cancelled
      */
@@ -360,9 +376,13 @@ public final class BridgeRuntime {
 
     private Resolution resolve(final Task task) {
         if (!task.sync()) {
-            // The I/O lane owns nothing; the body publishes the frame it came from (DeluxeMenus: a
-            // player's command -> async build -> sync open; EssentialsX: join -> async -> callEvent).
-            return new Resolution(null, null, false, SchedulingContext.current(), false);
+            // The I/O lane owns nothing; a one-shot body publishes the frame it came from (DeluxeMenus: a
+            // player's command -> async build -> sync open; EssentialsX: join -> async -> callEvent). A
+            // repeating body publishes nothing: a timer started from a player's command (a save loop
+            // restarted by an op's reload) is not that player's work, and holding the player for every
+            // later run would route the timer's sync tasks to that player and keep them reachable after
+            // they leave.
+            return new Resolution(null, null, false, task.period() > 0 ? null : SchedulingContext.current(), false);
         }
         if (task.global()) return Resolution.none();
         Object entity = task.targetEntity();
@@ -421,7 +441,8 @@ public final class BridgeRuntime {
         final LateHandle handle = new LateHandle();
         final Scheduled entry = new Scheduled(plugin, owner, handle, task, route,
             route == BridgeRouter.Route.REGION_OWNER ? anchor.world() : null, resolved.context(),
-            resolved.inferred(), resolved.untargeted());
+            resolved.inferred(), resolved.untargeted(),
+            route == BridgeRouter.Route.IO_LANE && period > 0 ? new java.util.concurrent.atomic.AtomicBoolean() : null);
         final PluginTasks tasks = this.admitted.get(plugin);
         final int pendingLimit = this.maxPendingTasks.getAsInt();
         boolean capacityRejected = false;
@@ -460,15 +481,20 @@ public final class BridgeRuntime {
         // the entity scheduler reports that synchronously (Folia returns no task), and the task then
         // takes the route it would have taken without the inference. Nothing has run yet, so this is
         // a routing decision, not a retry. After scheduling, retirement cancels it like an EntityTask.
-        final java.util.concurrent.atomic.AtomicBoolean handed = new java.util.concurrent.atomic.AtomicBoolean();
+        // "Already gone" is only the synchronous report: retired running on this thread inside the executor
+        // call. A retirement on another thread, even one racing the call (an async body scheduling while the
+        // player's region removes them), is the player leaving after scheduling: cancelled, never re-routed.
+        final Thread schedulingThread = Thread.currentThread();
+        final java.util.concurrent.atomic.AtomicBoolean inExecutorCall = new java.util.concurrent.atomic.AtomicBoolean(true);
         final java.util.concurrent.atomic.AtomicBoolean goneAtSchedule = new java.util.concurrent.atomic.AtomicBoolean();
         final Runnable retired = !resolved.inferred() ? () -> retired(entry) : () -> {
-            if (handed.get()) retiredInferred(entry);
-            else goneAtSchedule.set(true);
+            if (Thread.currentThread() == schedulingThread && inExecutorCall.get()) goneAtSchedule.set(true);
+            else retiredInferred(entry);
         };
         try {
             handle.bind(Objects.requireNonNull(switch (route) {
-                case IO_LANE -> this.executor.async(owner, body, delay, period, () -> rejectedIo(entry, period > 0));
+                case IO_LANE -> this.executor.async(owner, body, delay, period, () -> rejectedIo(entry, period > 0),
+                    () -> claimRun(entry));
                 case REGION_OWNER -> this.executor.region(owner, anchor, body, delay, period);
                 case ENTITY_OWNER -> this.executor.entity(owner, entity, body, delay, period, retired);
                 default -> this.executor.global(owner, body, delay, period);
@@ -478,8 +504,9 @@ public final class BridgeRuntime {
             this.telemetry.failure(plugin, failed.toString());
             this.warn.accept("Aurora Bridge could not schedule task " + task.id() + " for " + plugin, failed);
             return false;
+        } finally {
+            inExecutorCall.set(false);
         }
-        handed.set(true);
         if (goneAtSchedule.get()) {
             if (!remove(entry)) return !task.cancelled();
             handle.cancel();
@@ -506,13 +533,19 @@ public final class BridgeRuntime {
     }
 
     /**
-     * The entity scheduler retired the task: its entity was removed before the body could run.
-     * Expected gameplay, not a fault: rejected, never a violation, and not logged per task.
+     * The entity scheduler retired the task: its entity was removed before the body could run (again,
+     * for a repeating task, including one whose own body removed the entity; see the executor's
+     * {@link Executor#entity} contract). Expected gameplay, not a fault: rejected, never a violation,
+     * and not logged per task.
      */
     private void retired(final Scheduled entry) {
         if (!rejected(entry)) return;
         this.telemetry.failure(entry.plugin(), "task " + entry.task().id()
-            + " cancelled: its target entity was removed before it ran (retired)");
+            + " cancelled: its target entity was removed before " + nextRun(entry) + " (retired)");
+    }
+
+    private static String nextRun(final Scheduled entry) {
+        return entry.task().period() > 0 ? "its next run" : "it ran";
     }
 
     /**
@@ -524,7 +557,7 @@ public final class BridgeRuntime {
     private void retiredInferred(final Scheduled entry) {
         if (!rejected(entry)) return;
         this.telemetry.failure(entry.plugin(), "task " + entry.task().id()
-            + " cancelled: the player it was scheduled for (from their event or command) left before it ran");
+            + " cancelled: the player it was scheduled for (from their event or command) left before " + nextRun(entry));
     }
 
     /**
@@ -556,50 +589,72 @@ public final class BridgeRuntime {
      * A repeating task only loses this run: it stays scheduled, the run is counted as skipped, and
      * the log line is rate-limited -- one plugin filling the lane must not cancel another plugin's
      * timer for good. While the server stops the lane is shut down on purpose, so that is one quiet
-     * line per plugin instead of a WARN with a stack trace per skipped run.
+     * line per plugin instead of a WARN with a stack trace per skipped run. A cancelled one-shot task
+     * is logged rate-limited per (plugin, reason) too, without a stack trace: the trace of the
+     * refusal shows the timer thread, never the plugin.
      */
     private void rejectedIo(final Scheduled entry, final boolean repeating) {
-        final String reason = "BRIDGE_IO lane is full or stopping";
+        // The run never reached the queue, so the next period may queue one again.
+        if (entry.queued() != null) entry.queued().set(false);
         if (repeating) {
             if (this.scheduled.get(entry.task().id()) != entry || entry.task().cancelled()) return;
-            this.telemetry.skipped(entry.plugin());
-            final boolean stopping = laneStopping.getAsBoolean();
-            final String acceptedReason = stopping ? "BRIDGE_IO lane is stopping" : reason;
-            this.telemetry.failure(entry.plugin(), "run of repeating task " + entry.task().id() + " skipped: " + acceptedReason);
-            final long suppressed = admitLog(entry.plugin(), acceptedReason);
-            if (suppressed >= 0) {
-                this.warn.accept("Aurora Bridge skipped a run of repeating async task " + entry.task().id() + " for "
-                    + entry.plugin() + ": " + acceptedReason + "; the task stays scheduled" + suppressedNote(suppressed),
-                    null);
-            }
+            skippedRun(entry, laneRefusal());
             return;
         }
         if (!rejected(entry)) return;
-        final var failure = new java.util.concurrent.RejectedExecutionException(reason);
-        this.telemetry.failure(entry.plugin(), failure.getMessage());
-        this.warn.accept("Aurora Bridge cancelled async task " + entry.task().id() + " for " + entry.plugin()
-            + ": " + failure.getMessage(), failure);
+        final String reason = laneRefusal();
+        this.telemetry.failure(entry.plugin(), reason);
+        final long suppressed = admitLog(entry.plugin(), reason);
+        if (suppressed >= 0) {
+            this.warn.accept("Aurora Bridge cancelled async task " + entry.task().id() + " for " + entry.plugin()
+                + ": " + reason + suppressedNote(suppressed), null);
+        }
+    }
+
+    /** Why the lane refused a run: stopping (shut down on purpose while the server stops) or full. */
+    private static String laneRefusal() {
+        return laneStopping.getAsBoolean() ? "BRIDGE_IO lane is stopping" : "BRIDGE_IO lane is full or stopping";
     }
 
     /**
-     * Whether a (plugin, reason) line may be logged now.
+     * The timer of a repeating BRIDGE_IO task fired. At most one run of it waits in the lane's queue: while
+     * the previous run has not started, this one is skipped (counted, rate-limited line) instead of queued
+     * behind it, so a slow or blocked timer cannot fill the shared queue with its own backlog and get other
+     * plugins' one-shot tasks refused. The flag is cleared when the queued run starts ({@link #runGuarded})
+     * or when the lane refuses it ({@link #rejectedIo}). A run the lane drops at shutdown without starting it
+     * leaves the flag set, so the timer's later periods are skipped as "lane is stopping".
+     *
+     * @return whether this run may be handed to the lane
+     */
+    private boolean claimRun(final Scheduled entry) {
+        final java.util.concurrent.atomic.AtomicBoolean queued = entry.queued();
+        if (queued == null || queued.compareAndSet(false, true)) return true;
+        if (this.scheduled.get(entry.task().id()) != entry || entry.task().cancelled()) return false;
+        skippedRun(entry, laneStopping.getAsBoolean() ? "BRIDGE_IO lane is stopping"
+            : "its previous run is still queued on the BRIDGE_IO lane");
+        return false;
+    }
+
+    /** One run of a repeating async task is not run; the task stays scheduled for its next period. */
+    private void skippedRun(final Scheduled entry, final String reason) {
+        this.telemetry.skipped(entry.plugin());
+        this.telemetry.failure(entry.plugin(), "run of repeating task " + entry.task().id() + " skipped: " + reason);
+        final long suppressed = admitLog(entry.plugin(), reason);
+        if (suppressed >= 0) {
+            this.warn.accept("Aurora Bridge skipped a run of repeating async task " + entry.task().id() + " for "
+                + entry.plugin() + ": " + reason + "; the task stays scheduled" + suppressedNote(suppressed), null);
+        }
+    }
+
+    /**
+     * Whether a (plugin, reason) line may be logged now. The window is keyed by the reason without its
+     * per-hit context, so a relaxed ownership check repeated at many positions shares one window.
      *
      * @return {@code -1} to suppress it, otherwise how many lines the window suppressed before it
      */
     private long admitLog(final String plugin, final String reason) {
-        final LogWindow window = this.logWindows.computeIfAbsent(plugin + '|' + reason, ignored -> new LogWindow());
-        final long now = this.nanoClock.getAsLong();
-        synchronized (window) {
-            if (window.logged && now - window.lastNanos < LOG_WINDOW_NANOS) {
-                window.suppressed++;
-                return -1L;
-            }
-            final long suppressed = window.suppressed;
-            window.logged = true;
-            window.lastNanos = now;
-            window.suppressed = 0L;
-            return suppressed;
-        }
+        return this.logWindows.admit(plugin + '|' + dev.iyanz.sourbycraft.guards.LogWindows.baseReason(reason),
+            this.nanoClock.getAsLong());
     }
 
     private static String suppressedNote(final long suppressed) {
@@ -724,6 +779,8 @@ public final class BridgeRuntime {
     private void runGuarded(final Scheduled entry, final boolean repeating) {
         final String plugin = entry.plugin();
         final Task task = entry.task();
+        // This run has left the lane's queue (see claimRun), whatever happens to it below.
+        if (entry.queued() != null) entry.queued().set(false);
         if (this.scheduled.get(task.id()) != entry) return;
         final PluginTasks tasks = this.admitted.get(plugin);
         final boolean async = !task.sync();
@@ -754,7 +811,13 @@ public final class BridgeRuntime {
             return;
         }
         if (capacityRejected) {
-            if (rejected(entry)) capacityFailure(plugin, task.id(), "running async callback limit", asyncLimit);
+            // A repeating task only loses this overlapping run; a one-shot task has no later run and is cancelled.
+            if (repeating) {
+                skippedRun(entry, "running async callback limit " + asyncLimit
+                    + " (aurora.bridge.max-running-async-tasks-per-plugin)");
+            } else if (rejected(entry)) {
+                capacityFailure(plugin, task.id(), "running async callback limit", asyncLimit);
+            }
             return;
         }
         final Invocation previous = CURRENT.get();
@@ -840,20 +903,26 @@ public final class BridgeRuntime {
 
     /** Cancels current tasks without closing admission (Bukkit cancelTasks semantics). */
     public int cancelAll(final String plugin) {
-        return cancelAll(plugin, false, false);
+        return cancelAll(plugin, false, null);
     }
 
     /** Cancels only this plugin's tasks backed by the global region scheduler. */
     public int cancelGlobal(final String plugin) {
-        return cancelAll(plugin, false, true);
+        return cancelAll(plugin, false, BridgeRouter.Route.GLOBAL_REGION);
+    }
+
+    /** Cancels only this plugin's tasks backed by the async scheduler (the BRIDGE_IO timers). */
+    public int cancelAsync(final String plugin) {
+        return cancelAll(plugin, false, BridgeRouter.Route.IO_LANE);
     }
 
     /** Closes admission before cancelling, so racing or later submissions cannot outlive disable. */
     public int disable(final String plugin) {
-        return cancelAll(plugin, true, false);
+        return cancelAll(plugin, true, null);
     }
 
-    private int cancelAll(final String plugin, final boolean disable, final boolean globalOnly) {
+    /** @param only the route whose tasks are cancelled, or {@code null} for every task */
+    private int cancelAll(final String plugin, final boolean disable, final BridgeRouter.Route only) {
         final PluginTasks tasks = this.admitted.get(plugin);
         if (tasks == null) return 0;
         final java.util.List<Scheduled> removed;
@@ -861,7 +930,7 @@ public final class BridgeRuntime {
             if (disable) tasks.disabled = true;
             removed = new java.util.ArrayList<>();
             for (final Scheduled entry : tasks.tasks.values()) {
-                if (globalOnly && entry.route() != BridgeRouter.Route.GLOBAL_REGION) continue;
+                if (only != null && entry.route() != only) continue;
                 removed.add(entry);
             }
             for (final Scheduled entry : removed) {

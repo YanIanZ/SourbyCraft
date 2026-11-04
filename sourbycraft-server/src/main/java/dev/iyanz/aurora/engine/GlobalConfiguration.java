@@ -79,7 +79,7 @@ public class GlobalConfiguration extends Part {
     public static final int ERROR = 2;
 
     @UnknownNullability("nonnull after reload is called")
-    private static GlobalConfiguration INSTANCE;
+    private static volatile GlobalConfiguration INSTANCE; // SourbyCraft - volatile: a reload replaces it while region threads read it
     private static boolean ENABLE_FASTER_RANDOM = true;
 
     static {
@@ -151,17 +151,20 @@ public class GlobalConfiguration extends Part {
             // this is only for startup-specific things, and should not contain post actions
             // that should be run on reload too. anything for reload and startup should be below
 
+            // SourbyCraft - only what an unsupported VM throws (no such algorithm, a missing class) falls back, with
+            // its cause; a VirtualMachineError such as OutOfMemoryError propagates
             try {
                 RandomGeneratorFactory.of("Xoroshiro128PlusPlus");
-            } catch (final Throwable ignored) {
-                broadcast("Aurora's faster random implementation is not supported by your VM, falling back to legacy random", WARN);
+            } catch (final IllegalArgumentException | LinkageError unsupported) {
+                broadcast("Aurora's faster random implementation is not supported by your VM, falling back to legacy random ("
+                    + unsupported + ")", WARN);
                 ENABLE_FASTER_RANDOM = false;
             }
 
             // SIMD actions
             try {
                 SIMDDetection.isEnabled = SIMDDetection.canEnable(LOGGER);
-            } catch (final Throwable thrown) {
+            } catch (final RuntimeException | LinkageError thrown) {
                 LOGGER.warn("Couldn't enable SIMD", thrown);
             }
 

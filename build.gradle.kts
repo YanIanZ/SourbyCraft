@@ -285,7 +285,6 @@ subprojects {
         }
         mavenCentral()
         maven(paperMavenPublicUrl)
-        maven { url = uri("${rootDir}/sourby-maven") }
     }
 
     dependencies {
@@ -348,12 +347,15 @@ subprojects {
         val outFile = layout.buildDirectory.file("generated-resources/META-INF/sourbycraft-build.properties")
 
         val engineCodename = providers.gradleProperty("codename").getOrElse("dev")
+        // "true" = normal release, "pre" = GitHub prerelease, "false"/absent = development only.
+        val releaseMode = providers.gradleProperty("release").getOrElse("false").trim()
         inputs.property("internalVersion", internalVersionProvider)
         inputs.property("gitBranch", sourbycraftBranchProvider)
         inputs.property("mcVersion", mcVersion)
         inputs.property("codename", engineCodename)
         inputs.property("sourbyBuild", sourbyBuild)
         inputs.property("rawBuild", rawBuild)
+        inputs.property("releaseMode", releaseMode)
         outputs.file(outFile)
         // The branch provider is captured into the doLast closure below, which the
         // config-cache layer cannot serialise. Opting THIS task out is cheap and does
@@ -387,6 +389,7 @@ subprojects {
                 version=$resolved
                 build=$buildLabel
                 buildNumber=$rawBuild
+                prerelease=${releaseMode == "pre"}
                 gitCommit=${identity["commit"]}
                 gitBranch=${sourbycraftBranchProvider.get()}
                 treeHash=${identity["treeHash"]}

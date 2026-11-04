@@ -101,6 +101,8 @@ class AuroraKeysTest {
             AwfSettings.COMMIT_INTERVAL_KEY, AwfSettings.RESIDENT_CHUNKS_KEY, AwfSettings.RETAINED_GENERATIONS_KEY,
             AwfSettings.COMMIT_ATTEMPTS_KEY, AwfSettings.DELTA_GENERATIONS_KEY, AwfSettings.COMMIT_DIRTY_BYTES_KEY,
             AwfSettings.SHUTDOWN_DEADLINE_KEY));
+        for (final ConfigKey key : AuroraKeys.AWF_MULTIPROFILE_KEYS) expected.add(key.path());
+        for (final ConfigKey key : AuroraKeys.AWF_REDIS_FABRIC_KEYS) expected.add(key.path());
         for (final ConfigKey key : AuroraKeys.ABYSSLINK_KEYS) expected.add(key.path());
         assertEquals(expected, paths);
         assertEquals(List.of(AuroraConfig.LEGACY_ASYNC_PATH_KEY), AuroraKeys.ASYNC_PATHFINDING.legacyPaths());

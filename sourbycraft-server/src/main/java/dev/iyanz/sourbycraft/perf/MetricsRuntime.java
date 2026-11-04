@@ -24,9 +24,12 @@ public final class MetricsRuntime {
      * stopped with metrics so shutdown keeps its order (stopped before the storage lane shuts
      * down and long before {@code AwfEngine.closeAll()}'s final commit), but independent of the
      * collector: a metrics startup failure leaves it running, and a stalled collection cannot
-     * delay it. Guarded by the class lock.
+     * delay it. Written under the class lock; volatile so the collector thread reads it without
+     * that lock ({@link #watchAwfMaintenance()}).
      */
-    private static dev.iyanz.sourbycraft.awf.AwfMaintenanceDriver awfMaintenance;
+    private static volatile dev.iyanz.sourbycraft.awf.AwfMaintenanceDriver awfMaintenance;
+    /** Whether a stall of {@link #awfMaintenance} is being reported; read and written on the collector thread. */
+    private static volatile boolean awfMaintenanceStalled;
     private static java.util.function.Supplier<dev.iyanz.sourbycraft.awf.AwfMaintenanceDriver> awfMaintenanceFactory =
         dev.iyanz.sourbycraft.awf.AwfMaintenanceDriver::standard;
 
@@ -69,7 +72,12 @@ public final class MetricsRuntime {
 
         PROVIDER.publish(ImmutablePerformanceSnapshot.warming());
         final PerformanceCollector candidate = new PerformanceCollector(
-            PROVIDER, RegionMetricsRegistry.INSTANCE, PerformanceCollector::runtimeSnapshot);
+            PROVIDER, RegionMetricsRegistry.INSTANCE, () -> {
+                // Once per collection, on the collector's thread: the other thread that runs every
+                // second, so it can tell when the AWF maintenance thread has stopped.
+                watchAwfMaintenance();
+                return PerformanceCollector.runtimeSnapshot();
+            });
         try {
             registeredWith = services;
             cleanupNeeded = true;
@@ -148,6 +156,30 @@ public final class MetricsRuntime {
             stopping.close();
         } catch (final Throwable failure) {
             SourbyLogger.error("Aurora World Fabric maintenance did not stop cleanly", failure);
+        }
+    }
+
+    /**
+     * WARNs once when the running AWF maintenance driver has not finished a pass for
+     * {@link dev.iyanz.sourbycraft.awf.AwfMaintenanceDriver#STALL_NANOS}: periodic AWF commits are not
+     * being started, so what a crash would lose grows past the commit interval. INFOs once when it
+     * passes again. Called by the collector each second; never takes the class lock, which
+     * {@link #close} holds while it joins the collector thread.
+     */
+    static void watchAwfMaintenance() {
+        final dev.iyanz.sourbycraft.awf.AwfMaintenanceDriver driver = awfMaintenance;
+        final long idle = driver == null ? 0L : driver.nanosSinceLastPass();
+        if (idle >= dev.iyanz.sourbycraft.awf.AwfMaintenanceDriver.STALL_NANOS) {
+            if (!awfMaintenanceStalled) {
+                awfMaintenanceStalled = true;
+                SourbyLogger.warn("Aurora World Fabric maintenance (" + dev.iyanz.sourbycraft.awf.AwfMaintenanceDriver.THREAD_NAME
+                    + ") has not finished a pass for " + java.util.concurrent.TimeUnit.NANOSECONDS.toSeconds(idle)
+                    + " s: periodic AWF commits are not being started, so writes since the last commit stay only in"
+                    + " memory (the final commit at shutdown does not depend on this thread)");
+            }
+        } else if (awfMaintenanceStalled) {
+            awfMaintenanceStalled = false;
+            SourbyLogger.info("Aurora World Fabric maintenance is finishing its passes again; periodic AWF commits resumed");
         }
     }
 

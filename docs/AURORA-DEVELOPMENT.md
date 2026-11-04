@@ -1,12 +1,12 @@
 # Aurora Development Continuation
 
-> **Role:** the continuation brief that opened the Aurora phase. **Status:** Historical — its immediate tasks (config model, key migration, typed snapshots) are done. Current state: [AURORA.md](architecture/AURORA.md) *Current state*; open work: [TODO.md](TODO.md) and AURORA-TASKS.md.
+> **Role:** the continuation brief that opened the Aurora phase. **Status:** Historical — its immediate tasks (config model, key migration, typed snapshots) are done. Current state: [AURORA.md](architecture/AURORA.md) *Current state*; open work: [TODO.md](TODO.md) and the owner's build plan [releases/ROADMAP-47-50.md](releases/ROADMAP-47-50.md). AURORA-TASKS.md, `PRD.md`, `SPEC.md`, `PLAN.md` and `DEVELOPMENT-TASKS.md`, which this brief cites, left git in `c86b3be` (2026-10-22) and are kept outside the repository (`docs/README.md`). Status notes added 2026-10-25 in §3 and §4 where the code went another way.
 >
 > Entry point: [docs/architecture/AURORA.md](architecture/AURORA.md).
 
 ## Purpose
 
-This document extends the existing `PRD.md`, `SPEC.md`, `PLAN.md`, `docs/DEVELOPMENT.md`, and `docs/DEVELOPMENT-TASKS.md` without replacing their completed work.
+This document extends the existing `PRD.md`, `SPEC.md`, `PLAN.md`, `docs/DEVELOPMENT.md`, and `docs/DEVELOPMENT-TASKS.md` without replacing their completed work. (Of these only `docs/DEVELOPMENT.md` is still in the repository; the others are internal planning documents kept outside it since `c86b3be`, 2026-10-22.)
 
 Its job is to deepen the next phase requested for SourbyCraft 26.2:
 
@@ -70,6 +70,12 @@ The next development phase must stop adding SourbyCraft-specific behavior to ups
 
 ## 3.1 Immediate target
 
+> **Status 2026-10-25 (annotated).** Not what the code does: the Aurora namespaces live in their
+> own file, `sourbycraft_config/aurora.yml` (`config/AuroraKeys.FILE`), layered over the global
+> file; both are YAML since Build 49. Sections exist only where a key has a consumer (`aurora.entity`,
+> `diagnostics`, `cpu`, `bridge`, `scheduler`, `network`, `world`, `awf`, `abysslink`); there is no
+> `aurora.performance`, `aurora.chunk` or `aurora.memory`. See [AURORA-CONFIG.md](AURORA-CONFIG.md).
+
 Continue using:
 
 ```text
@@ -89,6 +95,19 @@ but add explicit logical namespaces:
 ```
 
 ## 3.2 Migration rule
+
+> **Status 2026-10-25 (superseded in part by owner decisions for Builds 49 and 50).** A reload
+> never rewrites a SourbyCraft file, as this rule asks. But boot now rewrites files once:
+> `config/ConfigFormatMigration` converts an old `*.toml` to `*.yml`, `config/ConfigMigration`
+> brings a pre-49 layout to the Build 49 one (Aurora keys move to `aurora.yml`), and
+> `aurora/engine/configuration/EngineConfigFiles` renames `canvas-*.yml` to `aurora-*.yml`; each
+> keeps the old file as `*.migrated` and leaves values unchanged. Step 4 below ("never save the
+> migrated value automatically") is therefore not followed. Since PR #62 (Build 50 source, not in the
+> published `v26.2-r50` prerelease; code written and statically reviewed, not built, not tested
+> by the owner) step 2 is gone too: the old names
+> are not read any more, only rewritten once at boot, and a leftover old name is ignored with one
+> WARN. The persisted readers (`Canvas.Distance`, `data/canvas/pearls.dat`, the `canvas-*.yml`
+> migration) are kept pending owner decision PM-179.
 
 Do not automatically rewrite existing operator values.
 
@@ -133,11 +152,25 @@ IMMUTABLE_FOR_RUN
 
 `/sourbycraft reload` must report when changed settings require restart.
 
+(Status 2026-10-25: `AuroraConfig.Lifecycle` has only `LIVE` and `RESTART_REQUIRED`;
+`IMMUTABLE_FOR_RUN` is a design category, declared `RESTART_REQUIRED` in code. The reload reports
+changed RESTART_REQUIRED keys as pending, and since PR #62 it runs off the tick thread on the I/O
+executor.)
+
 ---
 
 # 4. First Aurora Config Candidates
 
 Only introduce keys for implemented behavior.
+
+> **Status 2026-10-25 (annotated).** Of the candidates below only `aurora.entity.async-pathfinding`
+> exists (LIVE, default `false`). The others were deliberately not added, by the rule above: no
+> consumer needs them. `aurora.performance.telemetry-enabled` and `runtime-sample-interval-ms`
+> (the collector always runs, once a second), `incident-history-size` (`perf/IncidentLog` keeps a
+> fixed ring of 20, with no key on purpose), `aurora.diagnostics.hud-refresh-ticks` and
+> `spark-include-sourby-config` do not exist. The diagnostics keys that do exist are
+> `lane-sampling`, `chunk-generation-metrics` and `stall-recorder.*`
+> ([AURORA-CONFIG.md](AURORA-CONFIG.md)).
 
 Recommended first candidates based on current branch work:
 
@@ -257,7 +290,7 @@ Required work:
 - test queue saturation
 - benchmark sync vs async pathfinding
 - measure worker queue latency/depth
-- verify external I/O never blocks region threads
+- verify external I/O never blocks region threads (status 2026-10-25: answered "not established; known not to hold in every path" by [region-io-audit.md](architecture/region-io-audit.md); summary in [executor-inventory.md](architecture/executor-inventory.md) §3)
 
 Aurora should own Sourby worker lifecycle while upstream region scheduling remains authoritative until a replacement is justified.
 
@@ -311,7 +344,11 @@ Required:
 - ensure secret redaction remains correct
 - add Sourby runtime metadata cheaply
 - improve region-thread classification
-- add slow-region context where supported
+- add slow-region context where supported — status 2026-10-25: PR #62 adds it to every spark
+  report's metadata as `sourbycraft.slowestRegion` (`spark/SourbyMetadataProvider`: the metrics
+  collector's last pick over a 5 s window, world/region/generation ids, mean and maximum MSPT,
+  sample count; region coordinates and world names are not tracked). Code written and statically
+  reviewed; not built; not tested by the owner, so not qualified
 - align all TPS/MSPT numbers with Sourby metrics
 - document upstream Spark update procedure
 
@@ -471,7 +508,7 @@ Reduce hard Canvas coupling without adding hot-path abstraction cost.
 The next development iteration should prioritize:
 
 1. **Aurora config model** in Sourby-owned code.
-2. Migrate `perf.ai.async-pathfinding` toward `aurora.entity.async-pathfinding` with read-only legacy fallback.
+2. Migrate `perf.ai.async-pathfinding` toward `aurora.entity.async-pathfinding` with read-only legacy fallback. (Done; since PR #62, not in any published build, the old name is no longer read: the one-time boot migration renames it and a leftover is ignored with one WARN.)
 3. Add typed config snapshots consumed by runtime services.
 4. Verify Spark displays the Aurora/Sourby config group correctly.
 5. Complete certified baseline and JFR ranking.

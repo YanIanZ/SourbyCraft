@@ -117,11 +117,12 @@ jobs:
       # The exact Temurin build, not "25": the major alone floats with the runner image, and the
       # provenance Jdk string (vendor + runtime version) and the deflate output depend on it. The
       # rebuild job pins the same value; bump both together (scripts/test_reproducible_build.py
-      # fails when they differ). 25.0.4+1 is what the 2026-10-21 runs resolved.
-      - name: Setup Java 25 (Temurin 25.0.4+1)
+      # fails when they differ). It must be a version Adoptium lists (api.adoptium.net release_versions):
+      # 25.0.4+1 was only the runner image's preinstalled JDK and stopped resolving on 2026-11-03.
+      - name: Setup Java 25 (Temurin 25.0.5+8)
         uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6 (v6.1.0)
         with:
-          java-version: 25.0.4+1
+          java-version: 25.0.5+8
           distribution: temurin
 
       - name: Set git identity (paperweight applies patches as commits)
@@ -176,7 +177,7 @@ jobs:
           SOURBY_REQUIRE_REDIS: "1"
           # zstd-dependent AWF/Slime tests must fail instead of silently skipping (OBS-9).
           SOURBY_REQUIRE_ZSTD: "1"
-        run: ./gradlew -PincludeTestPlugin=true :sourbyapi:test :sourbycraft-server:test :test-plugin:test :test-plugin:jar :legacy-test-plugin:jar --no-daemon --stacktrace
+        run: ./gradlew -PincludeTestPlugin=true :sourbyapi:test :sourbycraft-server:test :test-plugin:test :test-plugin:jar :legacy-test-plugin:jar :sourbyapi-example:jar --no-daemon --stacktrace
 
       - name: Validate release identity and profiling scripts
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
@@ -301,6 +302,24 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      # Build 55: the plugin API ships with every release as three jars in one zip (the sourbyapi module's own
+      # jar, sourcesJar and javadocJar tasks). Built on every push so a javadoc or packaging break
+      # shows before a release, staged and handed over only when this run publishes. They do not
+      # enter the slim jar and the rebuild job does not compare them (it compares the server jar only).
+      # The test step above ran before relnum and without -PsourbyChannel=REL, so sourbyapi/build/libs already
+      # holds sourbyapi-26.2-DEV.jar from the server tests' classpath; it is removed first so the directory
+      # holds the one channel this run publishes, and the staging step below selects the jars by exact name.
+      - name: Build the sourbyapi jars (binary, sources, javadoc)
+        run: |
+          rm -f sourbyapi/build/libs/*.jar
+          ./gradlew :sourbyapi:jar :sourbyapi:sourcesJar :sourbyapi:javadocJar --no-daemon --stacktrace -PsourbyBuild=${{ steps.relnum.outputs.number }} ${{ steps.relnum.outputs.publish == 'true' && '-PsourbyChannel=REL' || '' }}
+          ls -l sourbyapi/build/libs
+          channel=${{ steps.relnum.outputs.channel }}
+          for suffix in "" -sources -javadoc; do
+            test -f "sourbyapi/build/libs/sourbyapi-26.2-$channel$suffix.jar" \
+              || { echo "sourbyapi/build/libs/sourbyapi-26.2-$channel$suffix.jar was not built" >&2; exit 1; }
+          done
+
       - name: Show build info
         run: |
           jar=release/SourbyCraft-26.2-${{ steps.relnum.outputs.channel }}.jar
@@ -327,9 +346,10 @@ jobs:
           echo "eula=true" > eula.txt
           # keep the console-log short and offline so CI runs deterministically
           printf 'online-mode=false\nmax-players=1\nlevel-type=minecraft\\:normal\nspawn-protection=0\n' > server.properties
-          # no plugin provisioning or auto-update during CI boots (provisioning has its own probe test)
+          # no plugin provisioning or auto-update during CI boots (provisioning has its own probe test), in the
+          # Build 49 YAML layout: Build 50 reads no older key name
           mkdir -p sourbycraft_config
-          printf '[viaversion]\nauto-provision = false\n[protocollib]\nauto-provision = false\n[misc.auto_update]\nenabled = false\n' > sourbycraft_config/sourbycraft_global_config.toml
+          printf 'plugins:\n  viaversion:\n    auto-provision: false\n  protocollib:\n    auto-provision: false\nupdater:\n  enabled: false\n' > sourbycraft_config/sourbycraft_global_config.yml
           echo "Booting $jar ..."
           mkfifo stdin.pipe
           # sourby.testplugin.probes enables the test plugin's unload fixture (UnloadFixtureProbe): it
@@ -556,7 +576,11 @@ jobs:
           me=$(id -un)
           echo "eula=true" > eula.txt
           printf 'online-mode=false\nmax-players=1\nlevel-type=minecraft\\:flat\n' > server.properties
-          # no plugin provisioning or auto-update during CI boots (provisioning has its own probe test)
+          # no plugin provisioning or auto-update during CI boots (provisioning has its own probe test).
+          # Deliberately the pre-Build-49 TOML layout: the one CI boot directory that feeds the configuration
+          # migration. Build 50 does not read the old names: the online boot skips provisioning for a group whose
+          # only key is the old one, converts the file to YAML and renames the keys before the updater reads
+          # them, and the cached offline boot below then runs from the rewritten file.
           mkdir -p sourbycraft_config
           printf '[viaversion]\nauto-provision = false\n[protocollib]\nauto-provision = false\n[misc.auto_update]\nenabled = false\n' > sourbycraft_config/sourbycraft_global_config.toml
 
@@ -646,8 +670,8 @@ jobs:
           cp ../fixture/legacy-test-plugin-1.0.0.jar plugins/
           echo "eula=true" > eula.txt
           printf 'online-mode=false\nmax-players=1\nlevel-type=minecraft\\:flat\nspawn-protection=0\n' > server.properties
-          printf '[aurora.bridge]\nmode = "safe"\n' > sourbycraft_config/aurora.toml
-          printf '[viaversion]\nauto-provision = false\n[protocollib]\nauto-provision = false\n[misc.auto_update]\nenabled = false\n' > sourbycraft_config/sourbycraft_global_config.toml
+          printf 'aurora:\n  bridge:\n    mode: "safe"\n' > sourbycraft_config/aurora.yml
+          printf 'plugins:\n  viaversion:\n    auto-provision: false\n  protocollib:\n    auto-provision: false\nupdater:\n  enabled: false\n' > sourbycraft_config/sourbycraft_global_config.yml
           mkfifo stdin.pipe
           java -Xmx2G -XX:+UseG1GC -jar "$jar" --nogui < stdin.pipe > server.log 2>&1 &
           PID=$!
@@ -863,8 +887,10 @@ jobs:
           if grep -q 'LEGACY_DISABLE_UNLOADED_BLOCK_WRITE_ACCEPTED' server.log; then
             echo "a block write to an unloaded chunk from onDisable was accepted after the scheduler halted"; exit 1
           fi
-          grep -q 'region scheduler has halted' server.log \
-            || { echo "the onDisable chunk-load refusal did not name the halted scheduler"; exit 1; }
+          # MC 0087 (PR #62) no longer claims the scheduler halted: a WorldShutdownThread unloading one
+          # world also refuses, while the scheduler keeps running.
+          grep -q 'LEGACY_DISABLE_UNLOADED_BLOCK_WRITE_REFUSED .*Chunk load refused on a region shutdown thread' server.log \
+            || { echo "the onDisable chunk-load refusal did not carry the shutdown-thread message (MC 0087)"; exit 1; }
           if grep -q 'Polling tasks from non-owned region' server.log; then
             grep -B2 -A6 'Polling tasks from non-owned region' server.log
             echo "the shutdown thread pumped the main-thread queue (feature patch 0087 regressed)"
@@ -893,8 +919,8 @@ jobs:
           test -n "$jar"
           echo "eula=true" > eula.txt
           printf 'online-mode=false\nmax-players=1\nlevel-type=minecraft\\:flat\nspawn-protection=0\n' > server.properties
-          printf '[aurora.awf]\nworlds = ["world"]\ncommit-interval-seconds = 5\n' > sourbycraft_config/aurora.toml
-          printf '[viaversion]\nauto-provision = false\n[protocollib]\nauto-provision = false\n[misc.auto_update]\nenabled = false\n' > sourbycraft_config/sourbycraft_global_config.toml
+          printf 'aurora:\n  awf:\n    worlds: ["world"]\n    commit-interval-seconds: 5\n' > sourbycraft_config/aurora.yml
+          printf 'plugins:\n  viaversion:\n    auto-provision: false\n  protocollib:\n    auto-provision: false\nupdater:\n  enabled: false\n' > sourbycraft_config/sourbycraft_global_config.yml
 
           boot() {
             # $2 runs right after Done; $3 runs 10 s later, then stop.
@@ -957,8 +983,9 @@ jobs:
           set -- $reads
           test "${1:-0}" -gt "${2:-0}" || { echo "the second boot read no chunk back from AWF"; exit 1; }
 
-          # Third boot: export the world back to region files.
-          printf '[aurora.awf]\nworlds = []\nexport = ["world"]\n' > sourbycraft_config/aurora.toml
+          # Third boot: export the world back to region files. The change goes into the same
+          # aurora.yml (a .toml beside it would be ignored, with a WARN: *.yml always wins).
+          printf 'aurora:\n  awf:\n    worlds: []\n    export: ["world"]\n' > sourbycraft_config/aurora.yml
           boot third.log ''
           echo "----- AWF export boot -----"
           grep -E 'Aurora World Fabric' third.log || true
@@ -1004,6 +1031,67 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Release asset sourbyapi-<sourbyBuild>.zip: the three API jars and a README.txt in ONE archive. Not three
+      # loose .jar assets: SourbyUpdater of Builds 51-54 (already in the field) takes the first asset ending in
+      # .jar as the server jar, so a release must carry no .jar asset besides the server jar. The Gradle file
+      # names carry the channel version (26.2-REL); the archive's names carry the build number so a plugin can
+      # pin the build it compiled against.
+      - name: Stage the sourbyapi release asset (one zip, no extra .jar asset)
+        if: steps.relnum.outputs.publish == 'true'
+        env:
+          RELEASE_NUMBER: ${{ steps.relnum.outputs.number }}
+          RELEASE_CHANNEL: ${{ steps.relnum.outputs.channel }}
+        run: |
+          set -eu
+          # Exact names, never a glob: the Gradle version is 26.2-<channel> and the test step earlier in this job
+          # left a 26.2-DEV copy in the same directory before the API build step removed it.
+          libs=sourbyapi/build/libs
+          binary="$libs/sourbyapi-26.2-$RELEASE_CHANNEL.jar"
+          sources="$libs/sourbyapi-26.2-$RELEASE_CHANNEL-sources.jar"
+          javadoc="$libs/sourbyapi-26.2-$RELEASE_CHANNEL-javadoc.jar"
+          for f in "$binary" "$sources" "$javadoc"; do
+            test -f "$f" || { echo "missing $f; the API build step did not produce the $RELEASE_CHANNEL jars:" >&2; ls -l "$libs" >&2; exit 1; }
+          done
+          stage="$RUNNER_TEMP/sourbyapi-$RELEASE_NUMBER"
+          rm -rf "$stage"
+          mkdir -p "$stage"
+          cp "$binary" "$stage/sourbyapi-$RELEASE_NUMBER.jar"
+          cp "$sources" "$stage/sourbyapi-$RELEASE_NUMBER-sources.jar"
+          cp "$javadoc" "$stage/sourbyapi-$RELEASE_NUMBER-javadoc.jar"
+          cat > "$stage/README.txt" <<README
+          SourbyCraft Build $RELEASE_NUMBER plugin API (sourbyapi)
+
+          Extract the archive and compile against the binary jar; do not shade it, the server provides it:
+
+              dependencies {
+                  compileOnly(files("libs/sourbyapi-$RELEASE_NUMBER.jar"))
+              }
+
+          sourbyapi-$RELEASE_NUMBER-sources.jar and sourbyapi-$RELEASE_NUMBER-javadoc.jar are for your IDE.
+          Guide: docs/guides/developing-with-sourbyapi.md in the SourbyCraft repository.
+          README
+          (cd "$stage" && python3 -c "import sys,zipfile; z=zipfile.ZipFile(sys.argv[1],'w',zipfile.ZIP_DEFLATED); [z.write(n) for n in sys.argv[2:]]; z.close()" \
+            "$GITHUB_WORKSPACE/release/sourbyapi-$RELEASE_NUMBER.zip" \
+            "sourbyapi-$RELEASE_NUMBER.jar" "sourbyapi-$RELEASE_NUMBER-sources.jar" "sourbyapi-$RELEASE_NUMBER-javadoc.jar" README.txt)
+          zip_file="release/sourbyapi-$RELEASE_NUMBER.zip"
+          # Verify the archive itself: exactly the four members, and the content checks on each jar inside it.
+          listing=$(unzip -Z1 "$zip_file" | sort)
+          expected=$(printf '%s\n' README.txt "sourbyapi-$RELEASE_NUMBER-javadoc.jar" "sourbyapi-$RELEASE_NUMBER-sources.jar" "sourbyapi-$RELEASE_NUMBER.jar" | sort)
+          test "$listing" = "$expected" || { echo "unexpected members in $zip_file:" >&2; echo "$listing" >&2; exit 1; }
+          unzip -tq "$zip_file"
+          check="$RUNNER_TEMP/sourbyapi-check"
+          rm -rf "$check"
+          mkdir -p "$check"
+          unzip -q "$zip_file" -d "$check"
+          # The entry point and the Build 55 scheduler facade are in the binary jar, the sources jar carries the
+          # SourbyCraft packages, the javadoc jar has a front page.
+          unzip -l "$check/sourbyapi-$RELEASE_NUMBER.jar" | grep -q 'dev/iyanz/sourbycraft/api/SourbyAPI.class'
+          unzip -l "$check/sourbyapi-$RELEASE_NUMBER.jar" | grep -q 'dev/iyanz/sourbycraft/api/scheduler/AuroraScheduler.class'
+          unzip -l "$check/sourbyapi-$RELEASE_NUMBER-sources.jar" | grep -q 'dev/iyanz/sourbycraft/api/SourbyAPI.java'
+          unzip -l "$check/sourbyapi-$RELEASE_NUMBER-javadoc.jar" | grep -q 'index.html'
+          grep -q "libs/sourbyapi-$RELEASE_NUMBER.jar" "$check/README.txt"
+          ls -l release/sourbyapi-*
+
       - name: Hand the verified jar to the release job
         if: steps.relnum.outputs.publish == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7 (v7.0.2)
@@ -1012,6 +1100,7 @@ jobs:
           path: |
             release/SourbyCraft-26.2-${{ steps.relnum.outputs.channel }}.jar
             release/SourbyCraft-26.2-${{ steps.relnum.outputs.channel }}.cdx.json
+            release/sourbyapi-${{ steps.relnum.outputs.number }}.zip
           if-no-files-found: error
           retention-days: 1
 
@@ -1053,10 +1142,10 @@ jobs:
         uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6 (v6.4.0)
 
       # Must equal the build job's pin (scripts/test_reproducible_build.py).
-      - name: Setup Java 25 (Temurin 25.0.4+1)
+      - name: Setup Java 25 (Temurin 25.0.5+8)
         uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6 (v6.1.0)
         with:
-          java-version: 25.0.4+1
+          java-version: 25.0.5+8
           distribution: temurin
 
       - name: Set git identity (paperweight applies patches as commits)
@@ -1238,9 +1327,24 @@ jobs:
           # rollout % from gradle.properties, yank list from build-data/yanked-releases.txt.
           python3 scripts/release_manifest.py generate --tag "$RELEASE_TAG" --jar "$jar" -o "$manifest"
           python3 scripts/release_manifest.py check "$manifest" --tag "$RELEASE_TAG" --jar "$jar"
+          # The key file may hold several trusted keys (a rotation); servers accept a signature that any of them
+          # verifies (ReleaseSignatureVerifier). openssl reads only the first PEM block of a file, so each block is
+          # split out and tried on its own.
+          pubs="$RUNNER_TEMP/release-pub"
+          mkdir -p "$pubs"
+          awk -v dir="$pubs" '/-----BEGIN PUBLIC KEY-----/ { n++; out = sprintf("%s/key-%d.pem", dir, n) } out { print > out } /-----END PUBLIC KEY-----/ { close(out); out = "" }' "$RELEASE_PUBLIC_KEY"
+          ls "$pubs"/key-*.pem > /dev/null || { echo "no PEM public key block in $RELEASE_PUBLIC_KEY" >&2; exit 1; }
           for file in "$jar" "$manifest"; do
             openssl pkeyutl -sign -rawin -inkey "$key" -in "$file" -out "$file.sig"
-            openssl pkeyutl -verify -rawin -pubin -inkey "$RELEASE_PUBLIC_KEY" -in "$file" -sigfile "$file.sig"
+            verified=
+            for pub in "$pubs"/key-*.pem; do
+              if openssl pkeyutl -verify -rawin -pubin -inkey "$pub" -in "$file" -sigfile "$file.sig" > /dev/null 2>&1; then
+                verified=$pub
+                break
+              fi
+            done
+            test -n "$verified" || { echo "$file.sig does not verify under any key in $RELEASE_PUBLIC_KEY" >&2; exit 1; }
+            echo "$(basename "$file").sig verifies under $(basename "$verified") of $RELEASE_PUBLIC_KEY"
             test "$(wc -c < "$file.sig")" -eq 64
           done
 
@@ -1254,6 +1358,7 @@ jobs:
           subject-path: |
             release/SourbyCraft-26.2-${{ needs.build.outputs.channel }}.jar
             release/SourbyCraft-26.2-${{ needs.build.outputs.channel }}.cdx.json
+            release/sourbyapi-${{ needs.build.outputs.number }}.zip
 
       - name: Create GitHub release
         env:
@@ -1287,9 +1392,13 @@ jobs:
           if [ -n "$RELEASE_BASE" ] && [ "$mode" = true ] && [ "${RELEASE_NUMBER%%.*}" -lt "${last:-0}" ]; then
             publish_flags="--latest=false"
           fi
-          title="$(TZ=Asia/Jakarta date '+%A, %d %B %Y, %H:%M') (GMT+7) — 26.2-r$next $codename [$(git log -1 --format=%s | cut -c1-80)]"
+          # Display identity: a prerelease is Build 50@<short-commit>PR! (shown red in-game), a normal
+          # release is Build 50 (green). Keep the two in lockstep with BuildInfo#formatReleaseIdentity.
+          short=$(git rev-parse --short=7 HEAD)
+          if [ "$mode" = pre ]; then identity="Build $next@${short}PR!"; else identity="Build $next"; fi
+          title="$(TZ=Asia/Jakarta date '+%A, %d %B %Y, %H:%M') (GMT+7) — 26.2-r$next $codename [$identity] [$(git log -1 --format=%s | cut -c1-80)]"
           {
-            echo "**SourbyCraft 26.2 Build ${next}** — \`$(basename "$jar")\` (sha256 \`$sha\`)"
+            echo "**SourbyCraft 26.2 ${identity}** — \`$(basename "$jar")\` (sha256 \`$sha\`)"
             echo
             echo "Auto-published from \`$GITHUB_REF_NAME\` after a green build + boot test."
             echo
@@ -1313,6 +1422,12 @@ jobs:
           sbom=release/SourbyCraft-26.2-$RELEASE_CHANNEL.cdx.json
           test -f "$sbom" || { echo "the build job did not hand over $sbom"; exit 1; }
           assets=("$jar" "$jar.sha256" "$sbom")
+          # Build 55: the plugin API (binary, sources and javadoc jars and a README) in one archive named by build
+          # number. It is a .zip on purpose: SourbyUpdater of Builds 51-54 takes the first asset ending in .jar as
+          # the server jar, so no other .jar may be attached to a release.
+          api_zip="release/sourbyapi-$next.zip"
+          test -f "$api_zip" || { echo "the build job did not hand over $api_zip"; exit 1; }
+          assets+=("$api_zip")
           if [ "$HAS_RELEASE_SIGNING_KEY" = true ]; then
             # Asset names are what SourbyUpdater matches: <jar>.sig, sourbycraft-release-manifest.json(.sig).
             assets+=("$jar.sig" release/sourbycraft-release-manifest.json release/sourbycraft-release-manifest.json.sig)

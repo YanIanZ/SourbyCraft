@@ -4,10 +4,11 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * One documented TOML key: its path, default, lifecycle, the explanation written beside it in the
- * file, and the paths it had before (read until Build 50, rewritten once by {@link ConfigMigration}).
+ * One documented configuration key: its path, default, lifecycle, the explanation written beside it in
+ * the file, and the paths it had before (rewritten to the current path once at boot by
+ * {@link ConfigMigration}; not read since Build 50).
  *
- * @param path         dotted TOML path in the current layout
+ * @param path         dotted path in the current layout
  * @param defaultValue the value a fresh file gets and a missing key resolves to
  * @param lifecycle    {@link AuroraConfig.Lifecycle#LIVE} when {@code /sourbycraft reload} applies it,
  *                     {@link AuroraConfig.Lifecycle#RESTART_REQUIRED} when only a new process reads it

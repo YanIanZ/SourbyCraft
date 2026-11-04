@@ -14,6 +14,13 @@ still describes r47. F2: `/sys` now prints `Process RSS: <VmRSS>` and `Cgroup me
 instead of `RSS: x%`. F3: `/sys` `RAM:` is now `Heap used:` and the HUD `RAM` bar text is `Heap` (command names
 `/rambar`, `/perf` HUD keys and toggles keep their names). F4 to F6 unchanged.
 
+**Status 2026-10-25 (PR #62):** F1 to F3 were committed in `530ebc9` (2026-10-21) and are in every release tag
+from `v26.2-r48` on; they were still not re-run on Linux with a new jar. PR #62 (`e7a27c8`; code written and
+statically reviewed; not built; not tested by the owner) addresses F4 (`ContainerMemory.fmt` prints two decimals
+above 1 GiB), F5 (the `/perf cpu` label says "live Java threads"; the OS thread count is not shown) and the swap
+observation in the Task 1 verdict (`memory.swap.max` = `0` now gives a swap total of 0, and the HUD hides the
+swap segment). F6 is an observation, not a defect. The findings and numbers below are unchanged.
+
 ## 1. Environment
 
 | Item | Value |

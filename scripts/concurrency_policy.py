@@ -26,11 +26,14 @@ from pathlib import Path
 # Roots that are SourbyCraft-owned. The engine package is included: the region-threading
 # engine has been SourbyCraft's own code since the 2026-10-05 migration (AGENTS.md).
 # SourbyClip is no longer here -- it lives in the private YanIanZ/SourbyClip repository and
-# its old root under this tree was being skipped silently.
+# its old root under this tree was being skipped silently. The spark classes kept in this tree
+# (me/lucko/spark, edited copies of Paper's bundled spark) schedule async work of their own,
+# so they are held to the same rule (audit PM-246).
 SOURCE_ROOTS = (
     "sourbycraft-server/src/main/java/dev/iyanz/sourbycraft",
     "sourbyapi/src/main/java/dev/iyanz/sourbycraft",
     "sourbycraft-server/src/main/java/dev/iyanz/aurora/engine",
+    "sourbycraft-server/src/main/java/me/lucko/spark",
 )
 
 # Code SourbyCraft adds to Minecraft and Paper (AGENTS.md, "Patch application"). The

@@ -41,7 +41,7 @@ public final class IncidentLog {
         GC_TIME("GC time per second", "ms"),
         HEAP_PRESSURE("heap pressure", "%"),
         LANE_REJECTED("governed lane rejected work", "rejected"),
-        ASYNC_PATH_REFUSED("async path pool refused work", "refused"),
+        ASYNC_PATH_REFUSED("async path pool refused or declined work", "refused/declined"),
         STORAGE_BACKLOG("storage I/O backlog", "tasks"),
         AWF_COMMIT_FAILURE("AWF commit/read failure", "failures"),
         BRIDGE_FATAL_VIOLATION("bridged plugin ownership violation", "violations");

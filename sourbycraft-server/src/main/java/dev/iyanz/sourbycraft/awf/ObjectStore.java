@@ -16,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * Content-addressed chunk storage: each object is a chunk's deflated bytes, named by the SHA-256
@@ -29,7 +30,7 @@ import java.util.Set;
  * shard and keeps it pending; {@link #sync} then forces every pending file in one pass, moves each
  * into place under its name, and forces each touched directory once. So an object either exists
  * whole under its name — forced before it was renamed, exactly as when every object was forced on
- * its own — or is a temporary file that the next open removes. The caller forces nothing that
+ * its own — or is a temporary file that the next writable open removes. The caller forces nothing that
  * references an object before {@link #sync} has returned. Objects no retained generation
  * references are removed by {@link #retainOnly}; that runs after a commit, so a crash before it
  * only leaves garbage.</p>
@@ -38,8 +39,12 @@ final class ObjectStore {
 
     private static final int RAW_LENGTH_BYTES = 4;
     private static final String TEMP_SUFFIX = ".tmp";
+    /** What {@link #name} produces: lower-case SHA-256 hex. Nothing else is ever resolved to a path. */
+    static final Pattern NAME = Pattern.compile("[0-9a-f]{64}");
     private final Path root;
     private final Durability durability;
+    /** Whether this store may create, write or delete anything; false for roles that take no commits. */
+    private final boolean writable;
     /** Objects written since the last {@link #sync}: name to its temporary file. Guarded by this. */
     private final Map<String, Path> pending = new LinkedHashMap<>();
     /**
@@ -55,9 +60,22 @@ final class ObjectStore {
         this(root, Durability.DISK);
     }
 
+    /** A writable store; see {@link #ObjectStore(Path, Durability, WorldRole)}. */
     ObjectStore(final Path root, final Durability durability) throws IOException {
+        this(root, durability, WorldRole.VANILLA);
+    }
+
+    /**
+     * Opens the object directory for a world of {@code role}. A role that accepts commits creates
+     * the directory and removes the temporary files a crash left; any other role changes nothing on
+     * disk (it would otherwise delete the pending objects of a live writer of the same store) and
+     * refuses {@link #put}, {@link #delete} and {@link #retainOnly}.
+     */
+    ObjectStore(final Path root, final Durability durability, final WorldRole role) throws IOException {
         this.root = root;
         this.durability = durability;
+        this.writable = role.acceptsCommits();
+        if (!this.writable) return;
         // A fresh store: the entries naming the root and any ancestor it needed are made durable
         // now, before any commit can depend on them.
         durability.createDirectoriesDurably(root);
@@ -76,8 +94,17 @@ final class ObjectStore {
         return HexFormat.of().formatHex(AwfFile.sha256(raw));
     }
 
+    /**
+     * Where an object lives. Refuses anything but an object name, so a damaged or hostile index
+     * can never make this store read or delete a file outside its directory.
+     */
     private Path path(final String name) {
+        if (!NAME.matcher(name).matches()) throw new IllegalArgumentException("not an AWF object name: " + name);
         return this.root.resolve(name.substring(0, 2)).resolve(name);
+    }
+
+    private void requireWritable() {
+        if (!this.writable) throw new IllegalStateException("this AWF object store was opened read-only");
     }
 
     /** Whether an object is in place under its name; a pending one is not yet. */
@@ -93,9 +120,13 @@ final class ObjectStore {
      * @return the object's name and the bytes written, 0 when it already existed or is pending
      */
     synchronized Written put(final byte[] raw, final boolean rewrite) throws IOException {
+        requireWritable();
         final String name = name(raw);
-        if (this.pending.containsKey(name)) {
-            return new Written(name, 0L);
+        final Path pendingTemp = this.pending.get(name);
+        if (pendingTemp != null) {
+            if (Files.isRegularFile(pendingTemp)) return new Written(name, 0L);
+            // Its temporary file was removed under us (a temp cleaner, antivirus): written again below.
+            this.pending.remove(name);
         }
         final Path target = path(name);
         if (!rewrite && Files.isRegularFile(target)) {
@@ -128,13 +159,22 @@ final class ObjectStore {
      * Returns how many objects were synced. On failure everything not yet done stays pending or
      * dirty, so a later sync finishes it — including the directory of an object the failed
      * attempt had already renamed; nothing referencing a pending object may be forced until this
-     * returns.
+     * returns. A pending object whose temporary file has disappeared (removed by something outside
+     * the server) is dropped from the batch and the sync fails, so the commit fails once and its
+     * retry writes the object again ({@link #put} no longer finds it pending).
      */
     synchronized int sync() throws IOException {
         if (this.pending.isEmpty() && this.dirtyShards.isEmpty() && !this.rootDirty) return 0;
-        for (final Path temp : this.pending.values()) {
-            this.durability.forceFile(temp);
+        NoSuchFileException vanished = null;
+        for (final Iterator<Path> it = this.pending.values().iterator(); it.hasNext();) {
+            try {
+                this.durability.forceFile(it.next());
+            } catch (final NoSuchFileException missing) {
+                it.remove();
+                if (vanished == null) vanished = missing;
+            }
         }
+        if (vanished != null) throw vanishedTemp(vanished);
         int synced = 0;
         for (final Iterator<Map.Entry<String, Path>> it = this.pending.entrySet().iterator(); it.hasNext();) {
             final Map.Entry<String, Path> object = it.next();
@@ -142,6 +182,10 @@ final class ObjectStore {
             this.dirtyShards.add(target.getParent());
             try {
                 this.durability.moveAtomically(object.getValue(), target);
+            } catch (final NoSuchFileException missing) {
+                // Gone between its force and its rename: dropped like above.
+                it.remove();
+                throw vanishedTemp(missing);
             } catch (final AtomicMoveNotSupportedException notAtomic) {
                 // The temporary file sits in the target's own shard, so a refusal here means the
                 // filesystem cannot rename atomically at all: an object must appear whole under
@@ -162,6 +206,12 @@ final class ObjectStore {
             this.rootDirty = false;
         }
         return synced;
+    }
+
+    private static IOException vanishedTemp(final NoSuchFileException missing) {
+        return new IOException("a pending AWF object's temporary file " + missing.getFile() + " disappeared before it was"
+            + " made durable (removed outside the server?); it was dropped from the batch and the next commit attempt"
+            + " writes it again", missing);
     }
 
     /** Directories whose entries still need a force; non-empty only after a failed {@link #sync}. */
@@ -208,6 +258,7 @@ final class ObjectStore {
 
     /** Deletes one object, pending or in place, if it exists; returns whether it did. */
     synchronized boolean delete(final String name) throws IOException {
+        requireWritable();
         final Path temp = this.pending.remove(name);
         if (temp != null) {
             Files.deleteIfExists(temp);
@@ -221,6 +272,7 @@ final class ObjectStore {
      * Pending objects are left alone: they are this store's own unfinished batch.
      */
     synchronized int retainOnly(final Set<String> live) throws IOException {
+        requireWritable();
         int removed = 0;
         try (DirectoryStream<Path> shards = Files.newDirectoryStream(this.root)) {
             for (final Path shard : shards) {

@@ -124,6 +124,14 @@ Offline world scan after stop (on-1): `minecraft:gold_block`, `lapis_block`, `di
 - Harness: `agent_testserver.py --rebuild-jar` is broken (points at the removed scratchpad `gradle_locked.sh`); `cmd` without `--raw` returns exit 1 for commands whose output is logged by a region thread.
 - Inherited, outside this change: console `data get block` NPE; console `execute if block` always "cross-region".
 
+**Status 2026-10-25 (PR #62 docs pass).** Follow-ups landed after this run, which used a jar without them: MC
+feature patch 0069 (data-command threading, in every tag since `v26.2-r48`) builds the console `data … block`
+accessor without touching the block entity and hands the command to the owning region, so the console NPE above is
+gone in the code (not re-run). A region caller (player, command block) now gets 0069's own error for a foreign block
+(`Cannot access block data outside the owning region; …`) instead of the engine's `Target not in same region` seen
+in case 22. The case-60 entity route and the E1-E3 observations are now in
+[command-blocks.md](../architecture/command-blocks.md). PR #62 changed no command-block code.
+
 ## Reproduce
 
 ```sh

@@ -67,7 +67,7 @@ class TickDataBinaryCompatibilityTest {
     }
 
     @Test
-    void truncatedShortCompatibilityViewsReturnNullInsteadOfPartialRawArrays() {
+    void truncatedShortCompatibilityViewsReportTheRetainedSamplesInsteadOfNull() {
         final RegionTickMetrics owner = new RegionTickMetrics();
         // More than the sized cap, so the raw ring wraps and the short views report truncation.
         final int total = RegionTickMetrics.MAX_RAW_CAPACITY + 1;
@@ -83,9 +83,10 @@ class TickDataBinaryCompatibilityTest {
         assertTrue(owner.refreshSnapshot(now).fifteenSeconds().truncated());
         for (final long window : new long[] {5L, 15L}) {
             final TickData view = RegionTickDataView.of(owner, TimeUnit.SECONDS.toNanos(window));
-            assertNull(view.generateTickReport(null, now, MILLISECOND));
-            assertNull(view.getMSPTData(null, MILLISECOND));
-            assertNull(view.getTPSAverage(null, MILLISECOND));
+            // Null crashed region-thread callers such as the TPS bar (audit PM-102).
+            assertEquals(RegionTickMetrics.MAX_RAW_CAPACITY, view.generateTickReport(null, now, MILLISECOND).collectedTicks());
+            assertNotNull(view.getMSPTData(null, MILLISECOND));
+            assertEquals(1_000.0, view.getTPSAverage(null, MILLISECOND), 1.0E-9);
         }
     }
 

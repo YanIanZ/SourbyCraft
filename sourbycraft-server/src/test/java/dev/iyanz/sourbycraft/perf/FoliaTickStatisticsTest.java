@@ -63,12 +63,13 @@ class FoliaTickStatisticsTest {
 
         assertTrue(statistics.isDurationSupported());
         // Mean is the worst region's average, not the aggregate: the fixture builds
-        // aggregateAverageMspt as worstAverageMspt + 0.25, so these are 0.25 lower.
-        assertDuration(statistics.duration10Sec(), 11.0, 12.0, 13.0, 14.0, 15.0);
+        // aggregateAverageMspt as worstAverageMspt + 0.25, so these are 0.25 lower. The fixture's
+        // p95 lies above its maximum; Spark gets it bounded by the maximum (audit PM-275).
+        assertDuration(statistics.duration10Sec(), 11.0, 12.0, 13.0, 14.0, 13.0);
         assertEquals(1, reads.get());
-        assertDuration(statistics.duration1Min(), 61.0, 62.0, 63.0, 64.0, 65.0);
+        assertDuration(statistics.duration1Min(), 61.0, 62.0, 63.0, 64.0, 63.0);
         assertEquals(2, reads.get());
-        assertDuration(statistics.duration5Min(), 301.0, 302.0, 303.0, 304.0, 305.0);
+        assertDuration(statistics.duration5Min(), 301.0, 302.0, 303.0, 304.0, 303.0);
         assertEquals(3, reads.get());
     }
 

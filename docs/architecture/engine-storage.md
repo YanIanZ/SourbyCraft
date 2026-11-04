@@ -1,6 +1,6 @@
 # Aurora Storage Engine — Ownership
 
-> **Role:** T5 ownership document for Storage. **Status:** Active; AWF-wiring sentences corrected on 2026-10-07. AWF itself is documented in [aurora-world-fabric.md](aurora-world-fabric.md).
+> **Role:** T5 ownership document for Storage. **Status:** Active; AWF-wiring sentences corrected on 2026-10-07; summary, §1, §3, §5 and §7 brought in line with the feature patches on 26.2 on 2026-10-25. AWF itself is documented in [aurora-world-fabric.md](aurora-world-fabric.md); who saves what, and when, is ledgered in [persistence-save-paths.md](persistence-save-paths.md).
 >
 > Entry point: [docs/architecture/AURORA.md](AURORA.md).
 
@@ -8,17 +8,22 @@ T5 deliverable for §11.6 of `docs/AURORA-FULL-TRANSITION.md`.
 
 ## Summary
 
-**Aurora owns no world-persistence policy for the running server today.** The AWF library
-(`dev.iyanz.sourbycraft.awf`, see [aurora-world-fabric.md](aurora-world-fabric.md)) implements
-atomic, verified persistence and its metrics. Since feature patches 0019 and 0021 the engine's
-chunk, entity and POI storage goes through AWF for worlds an operator lists in `aurora.awf.worlds`
-or manages with `/awf` (EXPERIMENTAL, default off); every other world keeps the region-file path.
-The Resource Governor's `STORAGE` lane (`SourbyCraft-Storage-`, attributed to `WORLD_IO`) runs
-those AWF commits and is idle when no world uses AWF. (Corrected 2026-10-07; this summary
-previously said the save path did not use AWF.) It measures the world I/O lane, and it owns
-one executor that is explicitly *not* world persistence. The distinction matters enough to be
-the first thing this document says, because the thread-name prefix invites the opposite
-conclusion.
+**Aurora's runtime services (the Resource Governor, the execution lanes) own no
+world-persistence policy.** The persistence policy SourbyCraft does own lives elsewhere, in two
+places. The AWF library (`dev.iyanz.sourbycraft.awf`, see
+[aurora-world-fabric.md](aurora-world-fabric.md)) implements atomic, verified persistence, its
+shutdown commit and deadline (`aurora.awf.shutdown-deadline-ms`) and its metrics; since feature
+patches 0019 and 0021 the engine's chunk, entity and POI storage goes through AWF for worlds an
+operator lists in `aurora.awf.worlds` or manages with `/awf` (EXPERIMENTAL, default off), and every
+other world keeps the region-file path. The feature patches of §1 change when Folia's save paths
+write global-owned data and what `save-all` and a stop report; [persistence-save-paths.md](persistence-save-paths.md)
+is the per-data ledger. The Resource Governor's `STORAGE` lane (`SourbyCraft-Storage-`, attributed
+to `WORLD_IO`) runs the AWF commits (and MultiProfile's profile I/O) and is idle when neither is
+used. (Corrected 2026-10-07; this summary previously said the save path did not use AWF. Corrected
+again 2026-10-25; it said Aurora owned no persistence policy at all.) The governor measures the
+world I/O lane, and it owns one executor that is explicitly *not* world persistence. The
+distinction matters enough to be the first thing this document says, because the thread-name
+prefix invites the opposite conclusion.
 
 ## 1. What Aurora owns
 
@@ -36,12 +41,31 @@ Unix Domain Socket loops, under `NETWORK`) are attributed to their lanes instead
 `/perf lanes` and JFR/spark lane shares are not comparable with earlier recordings
 (`ExecutionLaneTest` 13).
 
-**Three feature patches touch storage:** 0019 commits AWF stores at shutdown
-(`MinecraftServer`), 0021 counts chunk-system storage traffic and routes AWF worlds in
-`RegionFileStorage`, and 0027 adds the global-owned world metadata to the global-tick autosave
-selection (§6). No patch changes chunk serialization or the save queue. (Corrected
-2026-10-07 from "none of the 16 feature patches"; the metadata patch, numbered 0028 until the
-2026-10-13 renumbering, was added the same day.)
+**Feature patches that touch persistence** (MC feature patches on 26.2, all in `v26.2-r50`;
+re-check with `ls sourbycraft-server/minecraft-patches/features/`):
+
+| Patch | What it changes |
+|---|---|
+| 0019, 0071 | `MinecraftServer.stopServer` commits and closes every AWF storage after the chunk I/O drain; 0071 makes an unconfirmed storage fail the stop (exit status 70) |
+| 0021 | `/perf storage` counters and the AWF routing in `RegionFileStorage` (`RegionFileStorageHooks`) |
+| 0027 | `PaperLevelOverrides` (game time, spawn, …) on the global-tick autosave and `save-all` (§6) |
+| 0030, 0033 | a world unload always completes its callback (`WorldUnloadCompletion`); the unload drains region work and closes the world's storages |
+| 0031 | save tickets (`save-all`, an AWF world save) survive region merge and split |
+| 0053 | structure scans read AWF once and fail fast while a store is failing |
+| 0056 | world border, random sequences, `/data storage` containers and `level.dat` on the global-tick autosave (§7) |
+| 0065 | the `/schedule` queue is ticked and changed only on the global tick (still saved only at a clean stop) |
+| 0067 | detached persistent tickets (forced chunks) saved by the global-tick autosave |
+| 0068 | wandering trader timers kept as one global-owned saved data per world, saved by the global autosave |
+| 0072 | `save-all flush` reports AWF durability instead of an unconditional "Saved the game" |
+| 0077 | the periodic `level.dat` write runs on its own thread, off the global tick |
+| 0081 | SourbyCraft services close inside `stopServer`, where the AWF shutdown budget starts |
+
+None changes chunk serialization (AWF stores vanilla's uncompressed NBT, `AwfChunkNbt`) or
+Moonrise's chunk save queue. Evidence differs per patch (some have kill tests, 0067 and 0068 were
+source-only when written); see [persistence-save-paths.md](persistence-save-paths.md) and
+[aurora-world-fabric.md](aurora-world-fabric.md). (Corrected 2026-10-07 from "none of the 16
+feature patches", and 2026-10-25 from "three feature patches touch storage"; the metadata patch
+was numbered 0028 until the 2026-10-13 renumbering.)
 
 ## 2. Metrics
 
@@ -52,13 +76,16 @@ selection (§6). No patch changes chunk serialization or the save queue. (Correc
 
 ## 3. What Aurora does not own
 
-Everything §11.6 lists:
+Of what §11.6 lists, Aurora's runtime services still own none:
 
-- save queue behavior
-- serialization handoff
-- region-file write policy
-- shutdown flush
-- persistence validation
+- save queue behavior (Moonrise's chunk save queue, unchanged)
+- serialization handoff (unchanged; AWF takes the vanilla bytes)
+- region-file write policy (unchanged for worlds not in AWF)
+- shutdown flush: the region-file flush is upstream's (`RegionShutdownThread`); the AWF shutdown
+  commit (0019/0071) and its deadline are AWF's, not the runtime services'
+- persistence validation: done per change (the kill tests in
+  [persistence-save-paths.md](persistence-save-paths.md) §4, the AWF crash and backend-failure
+  runs), not by a standing service
 
 ## 4. The rule that governs this domain
 
@@ -85,10 +112,10 @@ fifth dropped 217 MB.
 |---|---|
 | Ownership document | this file |
 | Metrics | world I/O lane CPU, RSS + drift |
-| Implementation boundary | §1 — measurement plus administrative I/O only, no persistence policy |
+| Implementation boundary | §1 — the runtime services do measurement plus administrative I/O only; persistence policy is in AWF and the feature patches of §1 |
 
-Honest status: unowned, instrumented, and gated behind durability validation rather than a
-performance target.
+Honest status: unowned by the runtime services, instrumented, and gated behind durability
+validation rather than a performance target.
 
 ## 6. World metadata on autosave and `save-all` (2026-10-07, feature patch 0027, formerly 0028)
 
@@ -132,7 +159,9 @@ storage is not. Local slim jar, flat world, no players, 2026-10-07: `save-all fl
 the clean-stop value of boot 1, about 119; a jar without this patch was not re-run locally); autosave only (span set to 20 s, no `save-all`):
 start 699, SIGKILL at 1709, restored **1479**. Clean stops exited 0; no corruption or error lines
 on the restarts. Not yet re-run on Sourby Demo (`verify_crash_panel.py`), with players, or with
-AWF worlds.
+AWF worlds. (Of the "Not covered" list above, feature patch 0056 later added the world border and
+`level.dat`, §7; the world PDC is still not saved periodically, only by a clean stop or that
+world's unload.)
 
 ## 7. Save-path ledger and feature patch 0056 (2026-10-21)
 
@@ -141,6 +170,12 @@ AWF worlds.
 per kind of data, who mutates it, who writes it and when. Feature patch 0056 adds the world border,
 random sequences, `/data storage` containers and `level.dat` to the global-tick autosave (one
 `saveSpecific` per type, `WorldMetadataAutosave.saveContained`; `level.dat` synchronously as vanilla);
-before it they were written only at a clean stop. Still shutdown-only: raids, forceload tickets, the
-world PDC; never persisted: wandering trader timers; never ticked: `/schedule`. The kill-test evidence
-is in that document's §4.
+before it they were written only at a clean stop. The kill-test evidence is in that document's §4.
+Later patches (state 2026-10-25, see the ledger for each one's evidence): forceload tickets are
+saved by the global autosave since 0067 (source only when written, no compile or runtime
+evidence recorded); wandering trader timers are saved by the global autosave since 0068 (Java
+tests and server validation not run); the `/schedule` queue is ticked on the global tick since 0065
+but still saved only at a clean stop; the periodic `level.dat` file write runs on its own writer
+thread since 0077 (the tag is still built on the global tick; `save-all` still writes it
+synchronously). Still shutdown-only: raids and the world PDC (a world's unload also writes that
+world's saved data; see the note under the ledger's §1).

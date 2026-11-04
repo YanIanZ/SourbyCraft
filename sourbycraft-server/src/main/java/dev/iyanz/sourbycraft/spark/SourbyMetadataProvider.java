@@ -10,7 +10,8 @@ import me.lucko.spark.paper.common.platform.MetadataProvider;
  * Aurora runtime metadata attached to every spark report, under one {@code sourbycraft} key.
  *
  * <p>Cheap by construction: every value is an in-memory read of state the runtime already keeps
- * (build identity, lifecycle state, bridge and governor counters, switches, the startup profile).
+ * (build identity, lifecycle state, bridge and governor counters, switches, the startup profile,
+ * the slowest region of the last metrics collection).
  * Nothing here touches disk, the network, a region or a lock held by gameplay. No configuration
  * values that could carry secrets are included; the config files are reported separately, with
  * secret filtering, by {@link SourbyServerConfigProvider}.</p>
@@ -73,7 +74,31 @@ public final class SourbyMetadataProvider implements MetadataProvider {
             o.addProperty("totalMillis", profile.totalMillis());
             o.addProperty("startClass", profile.startClass());
         });
+        section(root, "slowestRegion", o -> {
+            // The metrics collector's last pick over the five-second window, the row /perf region shows:
+            // one volatile read, no region scan. Ids are Aurora's registry ids; region coordinates and
+            // world names are not tracked there.
+            final var slow = dev.iyanz.sourbycraft.perf.MetricsRuntime.slowestRegion();
+            if (slow == null) {
+                o.addProperty("state", "none-measured");
+                return;
+            }
+            o.addProperty("window", "5s");
+            o.addProperty("worldId", slow.worldId());
+            o.addProperty("regionId", slow.regionId());
+            o.addProperty("generationId", slow.generationId());
+            finite(o, "averageMspt", slow.averageMspt());
+            finite(o, "maximumMspt", slow.maximumMspt());
+            o.addProperty("samples", slow.samples());
+        });
         return root;
+    }
+
+    /** Adds {@code value} only when finite: JSON has no NaN or infinity, and a missing key reads as unavailable. */
+    private static void finite(final JsonObject section, final String key, final double value) {
+        if (Double.isFinite(value)) {
+            section.addProperty(key, value);
+        }
     }
 
     private static void section(final JsonObject root, final String name, final Consumer<JsonObject> fill) {
