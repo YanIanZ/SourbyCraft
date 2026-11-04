@@ -88,16 +88,26 @@ Since Build 57 (MC feature patch 0088 "world-wide player snapshot for off-region
 
 | caller | thread ticks a region of that world | thread owns no region of that world |
 | --- | --- | --- |
-| a bridged plugin's task body (any `thread-checks` value) | the region's local players, unchanged | an **immutable world-wide copy** of `ServerLevel.players()` |
+| a bridged plugin's task body while `thread-checks` is `relaxed` or `bridged` | the region's local players, unchanged | an **immutable world-wide copy** of `ServerLevel.players()` |
 | any caller while `thread-checks = relaxed` | unchanged | the same copy (LightingLuminol parity: every caller) |
-| everyone else (`bridged`/`enforced`, Folia-native plugins, the server) | unchanged | the base's exception, unchanged |
+| everyone else (`enforced` -- bridged bodies included, the operator chose fail-fast; Folia-native plugins and the server under `bridged`) | unchanged | the base's exception, unchanged |
+
+The on-region branch is in the patch; the guard class names no engine type (dependency ledger 1.2) and answers
+`null` for a caller it does not serve. "Bridged body" is the thread marker the bridge sets for the duration of a
+bridged task body, so it also covers code that body calls on the same thread (a Folia-native plugin's listener
+fired inside it, say), as every other relaxed-check attribution does.
 
 The copy is `List.copyOf` of the world's `CopyOnWriteArrayList` the login/logout paths maintain for every region:
-consistent, read-only, one array copy, no lock on region state, never blocks. Each served snapshot is counted
-(`/perf plugins`, "Off-region player snapshots") and announced by one WARN per (plugin or thread, world) per 60 s
-naming the plugin, task and world (`guards/LogWindows`, 256 keys). It is a snapshot: a player who logs in after it
-is not in it, and a plugin that iterates it is still a plugin on the wrong thread -- nothing here makes the caller
-region-safe. Audit of the Bukkit `World` accessors reached the same way: `World#getPlayers()`/`getPlayerCount()`
+consistent, one array copy, no lock on region state; taking it never blocks and touches no region structure. Each
+served snapshot is counted (`/perf plugins`, "Off-region player snapshots") and announced by one WARN per (plugin or
+thread, world) per 60 s naming the plugin, task and world (`guards/LogWindows`, 256 keys; the line is built only
+when admitted). **What it does not make safe:** the caller is still on the wrong thread, and not every caller of
+`getLocalPlayers` only reads -- the entity tracker's add/clear (`Entity.EntityTreeNode`), `Raid`,
+`BeaconBlockEntity` and `EnderDragonFight` iterate it to touch player-side state. Off their region they used to
+fail fast on the NPE; while relaxed they now proceed on the wrong thread, which is one more of the accepted
+LightingLuminol races (data races on player containers and tracking state). Shopkeepers' own path
+(`getNearestPlayer`) is read-only distance arithmetic over the copy: racy, harmless. A relaxed server stays unsafe
+and unqualified. Audit of the Bukkit `World` accessors reached the same way: `World#getPlayers()`/`getPlayerCount()`
 read `ServerLevel.players()` (world-wide already); `getEntities()`, `getLivingEntities()`, `getEntitiesByClass(es)`
 go through Moonrise's `EntityLookup.getAll()`, which copies the world-wide list under its own lock; `getEntity(UUID)`
 is a lookup in the same structure. None of them dereferences `getCurrentWorldData()`, so they need no snapshot.
