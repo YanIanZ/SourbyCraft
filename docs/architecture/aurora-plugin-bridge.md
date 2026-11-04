@@ -69,6 +69,58 @@ being commented out as upstream did:
 - Supporting pieces LightingLuminol needs so a relaxed server does not fail at once, all gated on the `static final` `ThreadChecks.RELAXED_SCOPE` (folded away on an enforced server): the cross-region world-data pool (`compat/luminol/RegionizedWorldDataPool`, LightingLuminol's `ReferenceCountedRegionizedWorldDataPool`; `WorldDataAccess` leases at ~50 Minecraft sites route an off-thread entity/chunk/block-event/neighbour/scheduled-tick write to the region that owns the chunk, holding a ticket while it runs), Moonrise's entity-section reentrancy guards skipped only for a caller that does not own the entity (the owning thread is still refused a reentrant add, remove or section-status change, as upstream; MC 0084, *PR #62*) and entity slices locked during add/remove, `NearbyPlayers`, `ReferenceList` and `IteratorSafeOrderedReferenceSet` locked, the `RegionizedWorldData` block-entity ticker hand-off, block events, broadcast set and explosion cache locked at their cross-thread touch points (LightingLuminol swapped the containers for synchronized or concurrent ones; the upstream containers stay, so the policy that pins upstream defaults is satisfied and the capture maps keep the insertion order Paper's replay needs -- they are **not** locked: a foreign thread writing into another region's capture map while that region captures is one of the accepted races), the global tick allowed to load a chunk synchronously while pumping global chunk tasks (a non-owning *region* thread is still refused, as in LightingLuminol: its wait could need its own tick, Folia#280).
 - `Entity#teleport` on the `ASYNC` route waits for the move (LightingLuminol's `teleportAsync(location, cause).join()`), bounded (30 s on a tick thread, 60 s elsewhere): threads that tick nothing always wait; a tick thread waits only when it owns the entity and the destination is loaded in a region it does not own -- an unloaded destination is scheduled and returns `false` as before, because its region may be merged into the blocked one. The global tick thread owns no entity, so it schedules and returns `false` instead of waiting; LightingLuminol's global tick waits (`TeleportRoute.joinsWhenRelaxed`, pinned by `TeleportRouteTest`: "a tick thread that does not own the entity never blocks").
 
+### Off-region world reads (Build 57)
+
+The relaxation above removes refusals; it does not give an off-region thread the data a region keeps. A thread
+that ticks no region of a world -- the global tick thread an untargeted bridged task runs on, an async thread, a
+region thread of another world -- has no `RegionizedWorldData` for it, and the base's `Level.getLocalPlayers()`
+(what `ServerLevel.getNearestPlayer`, `getRandomLocalPlayer`, `sendParticles`, `EntityGetter.hasNearbyAlivePlayer`
+and every AI sensor read) threw a `NullPointerException` ("the return value of `Level.getCurrentWorldData()` is
+null") or, on another world's region, an `IllegalStateException` ("World mismatch"). Evidence: WuretaMC Hub, Build
+56, `aurora.bridge.mode: safe`, `thread-checks: relaxed`, 2026-11-04: 646 lines of that NPE from Shopkeepers 2.28.1
+task 8 in one log. Its `EntityAI` task calls no Bukkit world accessor for this; it ticks each shop mob's
+`Sensing` and `GoalSelector` through NMS (`compat.v26_2_R1.CompatProviderImpl.tickAI`, read with `javap`), and
+`LookAtPlayerGoal` asks the level for the nearest player. The exception then killed the task mid-run, which is why
+Shopkeepers' own "Error during ticking!" / "Cannot remove entities while the AI task is running!" followed.
+
+Since Build 57 (MC feature patch 0088 "world-wide player snapshot for off-region readers",
+`guards/OffRegionWorldReads`): both `getLocalPlayers` sites ask `OffRegionWorldReads.localPlayers(level)`.
+
+| caller | thread ticks a region of that world | thread owns no region of that world |
+| --- | --- | --- |
+| a bridged plugin's task body (any `thread-checks` value) | the region's local players, unchanged | an **immutable world-wide copy** of `ServerLevel.players()` |
+| any caller while `thread-checks = relaxed` | unchanged | the same copy (LightingLuminol parity: every caller) |
+| everyone else (`bridged`/`enforced`, Folia-native plugins, the server) | unchanged | the base's exception, unchanged |
+
+The copy is `List.copyOf` of the world's `CopyOnWriteArrayList` the login/logout paths maintain for every region:
+consistent, read-only, one array copy, no lock on region state, never blocks. Each served snapshot is counted
+(`/perf plugins`, "Off-region player snapshots") and announced by one WARN per (plugin or thread, world) per 60 s
+naming the plugin, task and world (`guards/LogWindows`, 256 keys). It is a snapshot: a player who logs in after it
+is not in it, and a plugin that iterates it is still a plugin on the wrong thread -- nothing here makes the caller
+region-safe. Audit of the Bukkit `World` accessors reached the same way: `World#getPlayers()`/`getPlayerCount()`
+read `ServerLevel.players()` (world-wide already); `getEntities()`, `getLivingEntities()`, `getEntitiesByClass(es)`
+go through Moonrise's `EntityLookup.getAll()`, which copies the world-wide list under its own lock; `getEntity(UUID)`
+is a lookup in the same structure. None of them dereferences `getCurrentWorldData()`, so they need no snapshot.
+Other `getCurrentWorldData()` reads in `ServerLevel` (`isHandlingTick`, the block/fluid tick lists, the path-type
+cache, the wire handler, the lag-compensation tick) are routed by MC 0082/0085 or, as far as this audit went (grep of
+`paper-server` callers), not reached from the Bukkit API; they are unchanged.
+
+### Bridged exception log (Build 57)
+
+`Bridged plugin X generated an exception while executing task N` is deduplicated by **signature** -- plugin, class of
+the plugin's task body (Paper feature patch 0030 names the `Runnable`/`Consumer` class; a task naming none is keyed by
+its own class), exception class and the top stack frame; the message is not part of it
+(`bridge/ExceptionSignatures`). The first occurrence of a signature is logged with its stack trace; repeats inside
+60 s are counted and not logged; the first repeat after the window is one line without a trace
+(`... repeated 312 time(s) in the last 60 s (313 in total); the first occurrence was logged with its stack trace`),
+which opens the next window. A signature that stops throwing logs no closing line. At most 256 signatures are kept
+per bridge runtime, least recently seen evicted (an evicted signature that returns is logged in full again).
+`/plugins <name>` shows "Task exceptions (total / signatures)" and the three most frequent signatures;
+`/perf plugins` shows one line per plugin with the total, the signature count and the most frequent one. The
+quarantine path (`ViolationClassifier`, `GuardViolations`, relaxed hits) is untouched: a region violation still logs
+and counts as before, and an ordinary exception still never quarantines. Before Build 57 every run of a failing
+repeating task logged its full trace.
+
 Independent of the setting (safe techniques, all modes): `Bukkit.getCurrentTick()`/`MinecraftServer.getTickCount()` return the global tick counter off every region instead of throwing; `Entity#teleportAsync` fires `PlayerTeleportEvent` for players (cancel aborts, `getTo()` is honoured, never twice for one call) and the portal route fires `PlayerPortalEvent` once the exit is known (cancel places the player back where it stood) -- `entity/teleport/AsyncTeleportEvents`, escape hatch `-Daurora.compat.async-teleport-events=false`.
 
 Not ported, deliberately: running every Bukkit sync task on the global tick (the bridge routes by owner instead), redirecting a legacy plugin's Folia region/entity scheduler calls to Bukkit, admitting every plugin (`mode = off` stays the default), `AsyncCatcher.catchOp` (LightingLuminol leaves it too), the `CraftScoreboard` changes.
@@ -168,6 +220,7 @@ online. Fixture run `fable-routing-fixture1`: 22 `LEGACY_*_OK`, 0 `_WRONG`, 36 r
 ## Telemetry
 Per-plugin compatibility state, scheduler redirects, owner handoffs, rejected operations, fatal violations, quarantine, startup duration/cache state and last failure. Relaxed ownership hits are shown by `/plugins <name>` while the checks are relaxed and by `/perf plugins`. Skipped runs of repeating async tasks are counted (`skippedRuns` in `BridgeTelemetry`) but neither `/plugins` nor `/perf plugins` displays them yet; each skip becomes the plugin's last failure and is logged through a WARN rate-limited per (plugin, reason).
 
+- **Exception signatures** (Build 57, LIVE, no setting): exceptions thrown by bridged task bodies, deduplicated by (plugin, body class, exception class, top frame), with the total and the occurrences since the last logged line per signature (`BridgeRuntime.exceptionSignatures`, at most 256 per runtime); `/plugins <name>` lists the three most frequent, `/perf plugins` one line per plugin. `OffRegionWorldReads.playerSnapshots()` counts the world-wide player snapshots served off a region (`/perf plugins`, shown once any was served).
 - **Task body time** (IMPLEMENTED, LIVE, no setting): per plugin and lane, `/plugins <name>` shows "Sync body time (region / global)" and "Async body time" (count, mean, p50, p99, max; percentiles over the last 256 bodies) and `/perf plugins` shows sync body total / p99. This is the wall time of the task body on the thread that ran it, including bodies that threw; queue wait is not included.
 
 ## Implementation status (26.2 branch)
