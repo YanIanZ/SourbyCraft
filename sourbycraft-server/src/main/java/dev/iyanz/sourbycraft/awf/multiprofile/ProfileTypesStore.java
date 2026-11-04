@@ -40,6 +40,9 @@ public abstract class ProfileTypesStore {
     public static final int MAX_RECORD_BYTES = 256 * 1024;
     private static final int MAGIC = 0x41575054; // "AWPT"
     private static final int VERSION = 1;
+    /** Build 55: version 1 plus one flags byte after {@code creatable}; written only when a flag is set (seasonal). */
+    private static final int VERSION_FLAGS = 2;
+    private static final int FLAG_SEASONAL = 1;
     private static final String SUFFIX = ".awpt";
 
     /** A stored definition and the plugin name that registered it. */
@@ -86,13 +89,15 @@ public abstract class ProfileTypesStore {
             final ByteArrayOutputStream bytes = new ByteArrayOutputStream(512);
             final DataOutputStream out = new DataOutputStream(bytes);
             out.writeInt(MAGIC);
-            out.writeShort(VERSION);
+            // A definition without a Build 55 flag keeps the version 1 shape, so a Build 54 server reads it unchanged.
+            out.writeShort(definition.seasonal() ? VERSION_FLAGS : VERSION);
             out.writeUTF(owner);
             out.writeUTF(definition.id());
             out.writeUTF(definition.displayName());
             out.writeUTF(definition.description());
             out.writeBoolean(definition.coopAllowed());
             out.writeBoolean(definition.creatable());
+            if (definition.seasonal()) out.writeByte(FLAG_SEASONAL);
             out.writeByte(definition.maxMembers() == null ? 0 : definition.maxMembers());
             out.writeByte(definition.naming().policy().ordinal());
             out.writeShort(definition.naming().pool().size());
@@ -129,11 +134,18 @@ public abstract class ProfileTypesStore {
         final DataInputStream in = new DataInputStream(new ByteArrayInputStream(record, 0, record.length - 8));
         if (in.readInt() != MAGIC) throw new IOException(where + ": not a profile type record");
         final int version = in.readUnsignedShort();
-        if (version != VERSION) throw new IOException(where + ": record version " + version + " is not known to this build");
+        if (version != VERSION && version != VERSION_FLAGS) {
+            throw new IOException(where + ": record version " + version + " is not known to this build");
+        }
         try {
             final String owner = in.readUTF();
             final ProfileTypeDefinition.Builder builder = ProfileTypeDefinition.builder(in.readUTF())
                 .displayName(in.readUTF()).description(in.readUTF()).coopAllowed(in.readBoolean()).creatable(in.readBoolean());
+            if (version == VERSION_FLAGS) {
+                final int flags = in.readUnsignedByte();
+                if ((flags & ~FLAG_SEASONAL) != 0) throw new IOException(where + ": unknown definition flags " + flags);
+                builder.seasonal((flags & FLAG_SEASONAL) != 0);
+            }
             final int members = in.readUnsignedByte();
             builder.maxMembers(members == 0 ? null : members);
             final int policy = in.readUnsignedByte();

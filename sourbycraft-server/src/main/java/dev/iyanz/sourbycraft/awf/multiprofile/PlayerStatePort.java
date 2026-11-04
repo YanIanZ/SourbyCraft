@@ -1,6 +1,7 @@
 package dev.iyanz.sourbycraft.awf.multiprofile;
 
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.BooleanSupplier;
@@ -57,6 +58,17 @@ public interface PlayerStatePort {
 
     /** Applies the categories the isolation setting enables, on the entity thread. */
     CompletableFuture<Void> apply(UUID playerId, ProfileState state, ProfileIsolation isolation);
+
+    /**
+     * {@link #apply(UUID, ProfileState, ProfileIsolation)} where the adapters named in {@code untouchedAdapterIds} are
+     * not reset for data missing from {@code state} (Build 55 review P2-4: {@code state} is, or was merged from, a
+     * capture in which those best-effort adapters failed, so the player holds their only copy). This default, for ports
+     * without an adapter registry, applies the state as it is.
+     */
+    default CompletableFuture<Void> apply(final UUID playerId, final ProfileState state, final ProfileIsolation isolation,
+                                          final Set<String> untouchedAdapterIds) {
+        return apply(playerId, state, isolation);
+    }
 
     /**
      * Applies like {@link #apply(UUID, ProfileState, ProfileIsolation)}, except that the entity task

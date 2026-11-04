@@ -415,6 +415,32 @@ public final class ProfileStateAdapters {
      * remaining adapters ran. Runs on the player's owning thread; callers {@link #validateApply} first.
      */
     void apply(final Player player, final Map<String, byte[]> state) {
+        apply(player, state, Set.of());
+    }
+
+    /**
+     * The adapter ids of a capture's {@link Capture#preserved() preserved} keys: best-effort adapters whose capture
+     * failed, whose live state on the player is therefore the only copy. An apply of a state merged from that capture (a
+     * salvage destination) must leave them alone (review P2-4): see {@link #apply(Player, Map, Set)}. A switch rollback
+     * does not use it (review N1): it runs after the target apply already replaced those adapters' live state, so it
+     * restores them from the carried stored entry or resets them.
+     */
+    public static Set<String> preservedIds(final Capture capture) {
+        final Set<String> ids = new LinkedHashSet<>();
+        for (final String key : capture.preserved()) {
+            final String id = idOf(key);
+            if (id != null) ids.add(id);
+        }
+        return Set.copyOf(ids);
+    }
+
+    /**
+     * {@link #apply(Player, Map)} where the adapters named in {@code untouched} (ids) are never told
+     * {@link ProfileStateAdapter#applyAbsent}: their data is missing from {@code state} because their capture failed,
+     * not because the profile holds none, so a reset would overwrite the player's only copy with "nothing" and the
+     * next capture would store it. An entry of {@code state} under such an id is still applied.
+     */
+    void apply(final Player player, final Map<String, byte[]> state, final Set<String> untouched) {
         final Set<String> recorded = requiredIds(state);
         final List<String> requiredFailures = new ArrayList<>();
         state.forEach((key, stored) -> {
@@ -467,6 +493,28 @@ public final class ProfileStateAdapters {
                 }
             }
         });
+        // Build 55: a registered adapter with no entry of its id in the state (any version) is told so, on the same thread
+        // and after the others applied, so per-profile plugin state never follows the player into a profile that holds none.
+        final Set<String> present = new java.util.HashSet<>();
+        for (final String key : state.keySet()) {
+            final String id = idOf(key);
+            if (id != null) present.add(id);
+        }
+        for (final Map.Entry<String, Registered> entry : this.adapters.entrySet()) {
+            final String id = entry.getKey();
+            final Registered registered = entry.getValue();
+            if (!registered.captured() || present.contains(id) || untouched.contains(id)) continue;
+            try {
+                registered.adapter().applyAbsent(player);
+            } catch (final Exception failed) {
+                if (registered.required() || this.forcedRequired.contains(id)) {
+                    requiredFailures.add(id + " (applyAbsent: " + failed.getMessage() + ")");
+                } else {
+                    dev.iyanz.sourbycraft.util.SourbyLogger.warn("AWF MultiProfile: adapter '" + id
+                        + "' failed to reset for a profile without its data (applyAbsent): " + failed.getMessage());
+                }
+            }
+        }
         if (!requiredFailures.isEmpty()) {
             throw new ProfileOperationException(ProfileErrorCode.ADAPTER_REQUIRED_FAILED, "required adapter(s) failed to apply: "
                 + requiredFailures + "; the apply is reported as failed, not skipped");

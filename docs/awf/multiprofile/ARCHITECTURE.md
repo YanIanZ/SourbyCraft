@@ -119,6 +119,32 @@ one node.
 - No claim of split-brain safety beyond the fenced Redis commits, which are unqualified; distributed mode
   is EXPERIMENTAL until a multi-node qualification (MP-010) passes.
 
+## Profile I/O queue (Build 55, PM-091)
+
+Every repository and ownership step of the engine goes through `ProfileIoQueue` on the Resource Governor storage
+lane. Build 51 gave the steps one FIFO holding one lane slot. Build 55 keeps that shape and adds **partitions**
+(`io.partitions`, default 1 = unchanged): a step is keyed by the account and profile ids it touches, each id hashes
+to a partition, and a step is handed to the lane when none of its partitions is held by a running step and no
+earlier waiting step shares one (FIFO per partition, so per account; a later unrelated step may pass a blocked one).
+Steps that touch unknown or many records — create, delete, lock/archive, every co-op, bank and salvage step,
+recovery, startup, the heartbeat — are **barriers**: they wait for every running step and block every later one.
+Keyed today: listing/reading, the switch run (player, target, previous profile), save and the autosave/quit capture,
+admission, login restore, session release.
+
+No deadlock: partitions are acquired all-or-nothing at dispatch under the queue lock; a running step never waits for
+another (outcomes publish after its partitions are released); the oldest waiting step is shadowed by nothing, so it
+runs once the running steps that hold its partitions finish, and by induction every step does. Bounded: 4096 waiting
+steps (refused beyond), at most one running step per partition and never more in flight than the storage lane has
+threads (`aurora.scheduler.storage-threads`; review P2-6: a step handed to the lane beyond its threads would only queue
+in front of AWF world commits). A step the lane rejects is completed as refused and the dispatch loop continues without
+recursing (review P3-13). Queue wait is sampled per dispatch for
+`/perf multiprofile`. With one storage lane thread the partitions change nothing observable; the relief appears with
+`aurora.scheduler.storage-threads` above 1 and `io.partitions` above 1, which is unqualified until the owner's soak.
+
+Other Build 55 components: `ProfileAudit` (ring + daily files, its own single-slot queue on the lane),
+`ProfileSwitchGuards` (guards and cooldown, in memory), `ProfileMetrics` (fixed rings and counters). None of them is
+consulted by recovery or persists anything the store format knows.
+
 ## Known gaps
 
 - A player's live state does not follow them between servers. While authoritative login applies (Build 53;

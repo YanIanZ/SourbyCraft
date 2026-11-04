@@ -20,7 +20,10 @@ import org.jspecify.annotations.Nullable;
  * <p><b>Action ids</b> are free strings {@code [a-z0-9][a-z0-9_.:-]{0,63}}. The server enforces the ids it owns
  * ({@link ProfileTypeRegistry#BANK_DEPOSIT} and the other constants there) at its own action boundaries; every other id
  * ({@code trade}, {@code auction}, {@code island-bank}, ...) is the consumer's to enforce, using
- * {@link ProfileTypeRegistry#allows}. An action without its own rule uses {@link #defaultRule()}.</p>
+ * {@link ProfileTypeRegistry#allows}. An action without its own rule uses {@link #defaultRule()}, except the Build 55
+ * ids {@link ProfileTypeRegistry#PROFILE_SWITCH}, {@link ProfileTypeRegistry#COOP_KICK} and
+ * {@link ProfileTypeRegistry#COOP_LABEL}, which are allowed unless {@link #rules()} names them
+ * ({@link ProfileTypeRegistry#allowedUnlessNamed}).</p>
  *
  * @param id {@code [a-z0-9_-]{1,32}}; the stable key stored with a profile
  * @param displayName 1-{@value #MAX_DISPLAY_NAME} characters, no control characters
@@ -33,12 +36,22 @@ import org.jspecify.annotations.Nullable;
  *     {@code coop.max-members}
  * @param naming how profiles of this type are named
  * @param rules at most {@value #MAX_RULES} action rules; iteration order is the action id order
- * @param defaultRule the rule of an action that has none in {@link #rules()}
+ * @param defaultRule the rule of an action that has none in {@link #rules()} (not of the Build 55 ids named above)
  */
 @NullMarked
 public record ProfileTypeDefinition(String id, String displayName, String description, boolean coopAllowed,
                                     boolean creatable, @Nullable Integer maxMembers, ProfileNaming naming,
-                                    Map<String, ProfileRule> rules, ProfileRule defaultRule) {
+                                    Map<String, ProfileRule> rules, ProfileRule defaultRule, boolean seasonal) {
+
+    /**
+     * The Build 54 shape: {@code seasonal} false. Kept so code compiled against Build 54 still links and so
+     * existing calls compile unchanged.
+     */
+    public ProfileTypeDefinition(final String id, final String displayName, final String description, final boolean coopAllowed,
+                                 final boolean creatable, final @Nullable Integer maxMembers, final ProfileNaming naming,
+                                 final Map<String, ProfileRule> rules, final ProfileRule defaultRule) {
+        this(id, displayName, description, coopAllowed, creatable, maxMembers, naming, rules, defaultRule, false);
+    }
 
     /** Longest display name. */
     public static final int MAX_DISPLAY_NAME = 32;
@@ -91,10 +104,15 @@ public record ProfileTypeDefinition(String id, String displayName, String descri
         return action != null && ACTION.matcher(action).matches();
     }
 
-    /** The rule of an action: its own rule, else {@link #defaultRule()}. Ignores {@link #coopAllowed()}. */
+    /**
+     * The rule of an action: its own rule, else {@link ProfileRule#ALLOW} for an id
+     * {@link ProfileTypeRegistry#allowedUnlessNamed} (Build 55 review N2: a Build 54 type's default rule never covered
+     * them), else {@link #defaultRule()}. Ignores {@link #coopAllowed()}.
+     */
     public ProfileRule rule(final String action) {
         final ProfileRule own = this.rules.get(action);
-        return own != null ? own : this.defaultRule;
+        if (own != null) return own;
+        return ProfileTypeRegistry.allowedUnlessNamed(action) ? ProfileRule.ALLOW : this.defaultRule;
     }
 
     /**
@@ -116,7 +134,7 @@ public record ProfileTypeDefinition(String id, String displayName, String descri
     public Builder toBuilder() {
         final Builder builder = new Builder(this.id).displayName(this.displayName).description(this.description)
             .coopAllowed(this.coopAllowed).creatable(this.creatable).maxMembers(this.maxMembers).naming(this.naming)
-            .defaultRule(this.defaultRule);
+            .defaultRule(this.defaultRule).seasonal(this.seasonal);
         this.rules.forEach(builder::rule);
         return builder;
     }
@@ -129,6 +147,7 @@ public record ProfileTypeDefinition(String id, String displayName, String descri
         private String description = "";
         private boolean coopAllowed = true;
         private boolean creatable = true;
+        private boolean seasonal;
         private @Nullable Integer maxMembers;
         private ProfileNaming naming = ProfileNaming.SERVER;
         private final Map<String, ProfileRule> rules = new LinkedHashMap<>();
@@ -151,6 +170,19 @@ public record ProfileTypeDefinition(String id, String displayName, String descri
 
         public Builder coopAllowed(final boolean value) {
             this.coopAllowed = value;
+            return this;
+        }
+
+        /**
+         * Added in Build 55. A seasonal type (the built-in {@code bingo}) is one whose profiles are meant to be
+         * archived read-only when its event ends: the consumer that runs the event archives them through
+         * {@link AuroraProfiles#archiveProfile(java.util.UUID)}; the server never deletes or archives them on its own.
+         * The flag is informational for the server (shown in {@link ProfileDetails#seasonal()} and the registry) and
+         * changes no rule. A definition with the flag is stored in a Build 55 record shape; a Build 54 server reads
+         * such a stored definition as unknown (deny), never as a classic type.
+         */
+        public Builder seasonal(final boolean value) {
+            this.seasonal = value;
             return this;
         }
 
@@ -193,7 +225,7 @@ public record ProfileTypeDefinition(String id, String displayName, String descri
         /** @throws IllegalArgumentException when a field is out of its bounds */
         public ProfileTypeDefinition build() {
             return new ProfileTypeDefinition(this.id, this.displayName, this.description, this.coopAllowed, this.creatable,
-                this.maxMembers, this.naming, this.rules, this.defaultRule);
+                this.maxMembers, this.naming, this.rules, this.defaultRule, this.seasonal);
         }
     }
 }

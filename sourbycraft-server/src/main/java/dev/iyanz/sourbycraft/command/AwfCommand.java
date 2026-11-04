@@ -590,8 +590,12 @@ public class AwfCommand extends Command {
                         + (store.unresolvedIntents().isEmpty() ? "" : ", " + store.unresolvedIntents().size()
                             + " intent(s) pending")));
                 s.sendMessage(UiPanel.row("switching", settings.switching().enabled()
-                    ? settings.switching().timeoutMillis() + " ms budget"
+                    ? settings.switching().timeoutMillis() + " ms budget" + (settings.switching().cooldownSeconds() == 0 ? ", no cooldown"
+                        : ", cooldown " + settings.switching().cooldownSeconds() + " s") + ", " + engine.switchGuards().guardCount() + " guard(s)"
                     : "disabled"));
+                s.sendMessage(UiPanel.row("audit", engine.audit() == null ? "off" : "on, " + engine.audit().recorded() + " recorded, "
+                    + engine.audit().dropped() + " dropped, files under " + engine.audit().directory()));
+                s.sendMessage(UiPanel.row("I/O queue", settings.io().partitions() + " partition(s); /perf multiprofile for wait percentiles"));
                 s.sendMessage(UiPanel.row("isolation", isolationSummary(settings.isolation())));
                 s.sendMessage(UiPanel.row("worlds", "idle unload " + (settings.worlds().idleUnloadSeconds() == 0
                     ? "off" : settings.worlds().idleUnloadSeconds() + " s")));
@@ -826,6 +830,73 @@ public class AwfCommand extends Command {
                         + " freeze of a save that was refused in the current session", SourbyCraftColors.WARNING));
                 }
             }
+            case "archive", "unarchive" -> {
+                // Build 55: read-only archive (a seasonal profile at its event's end, or any inactive profile); data kept.
+                if (!s.hasPermission("sourbycraft.command.awf.multiprofile.admin")) {
+                    s.sendMessage(text("You do not have sourbycraft.command.awf.multiprofile.admin",
+                        SourbyCraftColors.DANGER));
+                    return;
+                }
+                final java.util.UUID profile = profileId(s, args);
+                if (profile == null) return;
+                final boolean archive = action.equals("archive");
+                engine.setArchived(profile, archive).whenComplete((ignored, failed) -> this.reply.accept(s, () -> {
+                    if (failed != null) {
+                        profileFail(s, failed);
+                        return;
+                    }
+                    s.sendMessage(text((archive ? "Archived " : "Unarchived ") + profile + (archive
+                        ? "; it is read-only: listed and readable, not switchable into, joinable or changeable until unarchived"
+                        : "; it is ACTIVE again"), SourbyCraftColors.SUCCESS));
+                }));
+            }
+            case "audit" -> {
+                // Build 55: the node-local audit entries about a profile (newest first), from memory; the files hold the rest.
+                final java.util.UUID profile = profileId(s, args);
+                if (profile == null) return;
+                final String cursor = args.length > 3 ? args[3] : null;
+                engine.auditPage(profile, cursor).whenComplete((page, failed) -> this.reply.accept(s, () -> {
+                    if (failed != null) {
+                        profileFail(s, failed);
+                        return;
+                    }
+                    s.sendMessage(UiPanel.header("Audit of " + profile + " (this node, in memory)"));
+                    if (page.items().isEmpty()) {
+                        s.sendMessage(text("  no entry since this node started" + (engine.audit() == null ? ""
+                            : "; the retained log is under " + engine.audit().directory()), SourbyCraftColors.DIM));
+                    }
+                    for (final dev.iyanz.sourbycraft.api.profile.ProfileAuditEntry entry : page.items()) {
+                        s.sendMessage(text("  #" + entry.sequence() + "  " + java.time.Instant.ofEpochMilli(entry.atMillis()) + "  "
+                            + entry.kind() + (entry.success() ? "" : " " + entry.errorCode()) + "  actor "
+                            + (entry.actorId() == null ? "-" : entry.actorId()) + (entry.operationId() == null ? "" : "  op " + entry.operationId())
+                            + (entry.detail().isEmpty() ? "" : "  " + entry.detail()),
+                            entry.success() ? SourbyCraftColors.DIM : SourbyCraftColors.WARNING));
+                    }
+                    if (page.nextCursor() != null) {
+                        s.sendMessage(text("  more: /awf multiprofile audit " + profile + " " + page.nextCursor(), SourbyCraftColors.DIM));
+                    }
+                }));
+            }
+            case "cooldown" -> {
+                // Build 55: the player's switch cooldown; "reset" (admin) forgets it on this node.
+                final java.util.UUID player = playerId(s, args);
+                if (player == null) return;
+                if (args.length > 3 && args[3].equalsIgnoreCase("reset")) {
+                    if (!s.hasPermission("sourbycraft.command.awf.multiprofile.admin")) {
+                        s.sendMessage(text("You do not have sourbycraft.command.awf.multiprofile.admin",
+                            SourbyCraftColors.DANGER));
+                        return;
+                    }
+                    final boolean cleared = engine.switchGuards().clearCooldown(player);
+                    s.sendMessage(text(cleared ? "Switch cooldown of " + player + " cleared on this node"
+                        : "No switch cooldown was remembered for " + player, SourbyCraftColors.SUCCESS));
+                    return;
+                }
+                final long remaining = engine.switchGuards().cooldownRemainingMillis(player);
+                s.sendMessage(UiPanel.row("switch cooldown of " + player, engine.switchGuards().cooldownMillis() == 0L
+                    ? "off (switching.cooldown-seconds: 0)" : remaining == 0L ? "none; may switch now"
+                    : ((remaining + 999L) / 1000L) + " s remaining"));
+            }
             case "lock", "unlock" -> {
                 if (!s.hasPermission("sourbycraft.command.awf.multiprofile.admin")) {
                     s.sendMessage(text("You do not have sourbycraft.command.awf.multiprofile.admin",
@@ -1006,7 +1077,8 @@ public class AwfCommand extends Command {
             }
             default -> s.sendMessage(text("Usage: /awf multiprofile <status|list <player>|create <player> [namespace]"
                 + " [type=<type>] [name=<name>]|switch <player> <profile-uuid>|bind <profile> <world> [template]|"
-                + "unbind <profile>|inspect|info <profile>|lock <profile>|unlock <profile>|slots <player> <n>|"
+                + "unbind <profile>|inspect|info <profile>|lock <profile>|unlock <profile>|archive <profile>|unarchive <profile>|"
+                + "audit <profile> [cursor]|cooldown <player> [reset]|slots <player> <n>|"
                 + "recover <transition>|session <player> <reset-marker|clear-refusal>|owner <profile>|reclaim <profile> <epoch>|"
                 + "migrate-repository confirm|format|"
                 + "migrate <dry-run|apply>|coop <convert|invite|accept|decline|cancel|leave|kick|vote|members|invites|info|label> ...>",

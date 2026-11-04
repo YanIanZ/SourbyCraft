@@ -285,6 +285,12 @@ public final class ProfileRuntime {
             events);
         // Build 54: the bank policy (aurora.awf.multiprofile.bank.*, RESTART_REQUIRED) is set once, before any operation.
         engine.bankPolicy(settings.bank().policy());
+        // Build 55: the audit log (aurora.awf.multiprofile.audit.*, RESTART_REQUIRED): node-local daily files below the profile
+        // directory, written on the storage lane after each durable outcome; off = nothing is recorded and audit() fails DISABLED.
+        if (settings.audit().enabled()) {
+            engine.audit(new ProfileAudit(Path.of(settings.directory()), settings.audit().retentionDays(),
+                ResourceGovernor.GLOBAL.lane(ResourceGovernor.Lane.STORAGE)));
+        }
         // Build 54: the profile type registry opens before the store is read, so the stored type definitions (and their
         // name pools) are known before any profile record decodes; it is the ProfileTypeRegistry service from here on.
         final ProfileTypes types;
@@ -336,6 +342,12 @@ public final class ProfileRuntime {
         engine.onLedgerEvent(event -> Bukkit.getPluginManager().callEvent(bankEvent(event)));
         engine.onSalvageDelivered(delivery -> Bukkit.getPluginManager().callEvent(
             new dev.iyanz.sourbycraft.api.profile.ProfileSalvageDeliveredEvent(deliveryResult(delivery))));
+        // Build 55: profile lifecycle events (sourbyapi dev.iyanz.sourbycraft.api.profile.event), same event thread, after the
+        // durable outcome (ProfilePreSwitchEvent: after admission, type rules, guards and cooldown, before the state changes).
+        engine.onProfileEvent(event -> {
+            final org.bukkit.event.Event bukkit = profileEvent(event);
+            if (bukkit != null) Bukkit.getPluginManager().callEvent(bukkit);
+        });
         ScheduledExecutorService sweeper = null;
         if (settings.worlds().idleUnloadSeconds() > 0) {
             sweeper = Executors.newSingleThreadScheduledExecutor(task -> {
@@ -1086,13 +1098,17 @@ public final class ProfileRuntime {
                 });
         }
 
-        /** A disabled plugin's adapters must not keep being called. */
+        /** A disabled plugin's adapters and switch guards must not keep being called. */
         @EventHandler(priority = EventPriority.MONITOR)
         public void onPluginDisable(final org.bukkit.event.server.PluginDisableEvent event) {
             final int removed = ProfileRuntime.this.adapters.unregisterAll(event.getPlugin());
             if (removed > 0) {
                 SourbyLogger.info("AWF MultiProfile: removed " + removed + " state adapter(s) of "
                     + event.getPlugin().getName());
+            }
+            final int guards = ProfileRuntime.this.engine.switchGuards().unregisterAll(event.getPlugin().getName());
+            if (guards > 0) {
+                SourbyLogger.info("AWF MultiProfile: removed " + guards + " switch guard(s) of " + event.getPlugin().getName());
             }
         }
 
@@ -1293,6 +1309,42 @@ public final class ProfileRuntime {
             this.adapters.unregister(owner, adapterId);
         }
 
+        // ---- operations (Build 55)
+
+        @Override
+        public CompletableFuture<dev.iyanz.sourbycraft.api.profile.CoopPage<dev.iyanz.sourbycraft.api.profile.ProfileAuditEntry>> audit(
+                final UUID profileId, final String cursor) {
+            return this.engine.auditPage(profileId, cursor);
+        }
+
+        @Override
+        public void registerSwitchGuard(final Plugin plugin, final dev.iyanz.sourbycraft.api.profile.ProfileSwitchGuard guard) {
+            if (plugin == null || !plugin.isEnabled()) {
+                throw new ProfileOperationException(ProfileErrorCode.INVALID_REQUEST, "the registering plugin is not enabled");
+            }
+            this.engine.switchGuards().register(plugin.getName(), guard);
+        }
+
+        @Override
+        public void unregisterSwitchGuard(final Plugin plugin, final dev.iyanz.sourbycraft.api.profile.ProfileSwitchGuard guard) {
+            if (plugin != null && guard != null) this.engine.switchGuards().unregister(plugin.getName(), guard);
+        }
+
+        @Override
+        public long switchCooldownRemainingMillis(final UUID playerId) {
+            return this.engine.switchGuards().cooldownRemainingMillis(playerId);
+        }
+
+        @Override
+        public CompletableFuture<Void> archiveProfile(final UUID profileId) {
+            return this.engine.setArchived(profileId, true);
+        }
+
+        @Override
+        public CompletableFuture<Void> unarchiveProfile(final UUID profileId) {
+            return this.engine.setArchived(profileId, false);
+        }
+
         // ---- co-op membership (Build 52): every call goes to the engine, which refuses COOP_DISABLED while
         // coop.enabled is false and MIGRATION_REQUIRED on a format-1 store.
 
@@ -1367,6 +1419,14 @@ public final class ProfileRuntime {
         }
 
         // ---- co-op bank, collections, salvage (Build 54): 1:1 onto the engine
+
+        /** Build 55: the configured policy, mapped without I/O (RESTART_REQUIRED, so it never changes while the runtime is open). */
+        @Override
+        public Optional<dev.iyanz.sourbycraft.api.profile.ProfileBankPolicy> bankPolicy() {
+            final ProfileBank.Policy policy = this.engine.bankPolicy();
+            return Optional.of(new dev.iyanz.sourbycraft.api.profile.ProfileBankPolicy(currency(policy.currency()), policy.sharedCapacity(),
+                policy.personalCapPercent(), policy.interestPercent(), policy.interestIntervalMillis()));
+        }
 
         @Override
         public CompletableFuture<ProfileBankInfo> bank(final UUID viewerId, final UUID profileId) {
@@ -1530,6 +1590,18 @@ public final class ProfileRuntime {
         entries.sort(java.util.Comparator.comparingLong(ProfileCollectionInfo.Contribution::amount).reversed()
             .thenComparing(ProfileCollectionInfo.Contribution::playerId));
         return new ProfileCollectionInfo(collection, collections.totals().getOrDefault(collection, 0L), entries);
+    }
+
+    /** Build 55: the Bukkit event of an engine profile event; {@code null} for a kind this build has no event class for. */
+    static org.bukkit.event.Event profileEvent(final ProfileEngine.ProfileEvent event) {
+        return switch (event.kind()) {
+            case PRE_SWITCH -> new dev.iyanz.sourbycraft.api.profile.event.ProfilePreSwitchEvent(event.playerId(), event.fromProfileId(),
+                event.toProfileId(), event.transitionId());
+            case SWITCHED -> new dev.iyanz.sourbycraft.api.profile.event.ProfileSwitchedEvent(event.playerId(), event.fromProfileId(),
+                event.result());
+            case CREATED -> new dev.iyanz.sourbycraft.api.profile.event.ProfileCreatedEvent(event.profile());
+            case DELETED -> new dev.iyanz.sourbycraft.api.profile.event.ProfileDeletedEvent(event.toProfileId(), event.playerId());
+        };
     }
 
     static SalvageDeliveryResult deliveryResult(final ProfileEngine.SalvageDelivery delivery) {

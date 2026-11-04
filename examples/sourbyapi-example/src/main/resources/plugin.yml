@@ -1,0 +1,18 @@
+# Example plugin for docs/guides/developing-with-sourbyapi.md.
+# folia-supported: true declares that every world, entity and player access in this plugin goes through the
+# region, entity or global schedulers (SourbyAPI.scheduler()), so the server runs it natively. Without the key the
+# plugin is a legacy plugin and is enabled only through the Aurora Bridge (aurora.bridge.mode).
+name: SourbyApiExample
+version: '${version}'
+main: dev.iyanz.sourbycraft.example.SourbyApiExamplePlugin
+api-version: '${api_version}'
+folia-supported: true
+description: Example of the SourbyAPI entry point, worlds, profiles, profile types, scheduler and events.
+commands:
+  sbexample:
+    description: "SourbyAPI example: worlds, instance <template>, profile, types, tick, async."
+    usage: /sbexample <worlds|instance <template>|profile|types|tick|async>
+    permission: sourbyapiexample.use
+permissions:
+  sourbyapiexample.use:
+    default: op

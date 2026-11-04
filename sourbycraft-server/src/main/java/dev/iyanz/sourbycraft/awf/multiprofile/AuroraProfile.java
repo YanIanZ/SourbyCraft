@@ -70,6 +70,24 @@ public record AuroraProfile(UUID id, UUID accountId, String type, dev.iyanz.sour
     public static final int MAX_MEMBERS = 64;
     /** Longest shared display label (characters). */
     public static final int MAX_DISPLAY_LABEL = 32;
+    /**
+     * Build 55: metadata key of an archived (read-only) profile; the value is the store clock of the archive. An archived
+     * profile is stored {@link ProfileStatus#LOCKED} plus this key, so a Build 54 server reads it as locked.
+     */
+    public static final String ARCHIVED_METADATA_KEY = "aurora:archived";
+    /**
+     * Build 55 (review P3-14): set beside {@link #ARCHIVED_METADATA_KEY} when the profile was {@link ProfileStatus#LOCKED}
+     * by an operator before it was archived, so that unarchiving restores the lock instead of lifting it.
+     */
+    public static final String ARCHIVED_FROM_LOCKED_METADATA_KEY = "aurora:archived-from-locked";
+    /**
+     * Build 55 (review N4): metadata keys only the engine writes (archive and unarchive). A create request that carries
+     * one is refused ({@code INVALID_REQUEST}, {@link ProfileTypes#planCreate}), so no plugin can create a profile that
+     * reads as archived while its status is {@link ProfileStatus#ACTIVE}. ({@code aurora:type} is not here: a request
+     * sets it through {@code ProfileRequest.withTypeId} and the create plan validates it.)
+     */
+    public static final java.util.Set<String> ENGINE_METADATA_KEYS =
+        java.util.Set.of(ARCHIVED_METADATA_KEY, ARCHIVED_FROM_LOCKED_METADATA_KEY);
 
     public AuroraProfile {
         Objects.requireNonNull(id, "id");
@@ -296,6 +314,58 @@ public record AuroraProfile(UUID id, UUID accountId, String type, dev.iyanz.sour
 
     public boolean usable() {
         return this.status == ProfileStatus.ACTIVE;
+    }
+
+    /** Build 55: whether the profile is archived read-only ({@link #ARCHIVED_METADATA_KEY}). */
+    public boolean archived() {
+        return this.metadata.containsKey(ARCHIVED_METADATA_KEY);
+    }
+
+    /** Build 55: the store clock the profile was archived at, or {@code null}. */
+    public Long archivedAtMillis() {
+        final String value = this.metadata.get(ARCHIVED_METADATA_KEY);
+        if (value == null) return null;
+        try {
+            return Long.parseLong(value);
+        } catch (final NumberFormatException notAClock) {
+            return 0L;
+        }
+    }
+
+    /** The status the API reports: {@code ARCHIVED} for an archived profile, else the stored status name. */
+    public String apiStatus() {
+        return archived() ? "ARCHIVED" : this.status.name();
+    }
+
+    /**
+     * Build 55: the archived marker set ({@code archivedAt} the store clock) or cleared ({@code null}) together with the
+     * matching status: archiving stores {@link ProfileStatus#LOCKED} (and remembers a prior operator lock under
+     * {@link #ARCHIVED_FROM_LOCKED_METADATA_KEY}); unarchiving restores {@link ProfileStatus#LOCKED} when that marker is
+     * present, else {@link ProfileStatus#ACTIVE} (review P3-14: an unarchive never lifts an operator's lock). A
+     * committed metadata mutation, so {@code M} advances. Format-1 callers use {@link #withArchivedHold}.
+     */
+    public AuroraProfile withArchived(final Long archivedAt) {
+        return copyWithMetadata(CoopWriteGuard.next(this.revision, "profile " + this.id), archivedAt);
+    }
+
+    /** Format-1 compatibility of {@link #withArchived}: no revision bump (see {@link #withHold}). */
+    public AuroraProfile withArchivedHold(final Long archivedAt) {
+        return copyWithMetadata(this.revision, archivedAt);
+    }
+
+    private AuroraProfile copyWithMetadata(final long revision, final Long archivedAt) {
+        final Map<String, String> next = new LinkedHashMap<>(this.metadata);
+        final ProfileStatus status;
+        if (archivedAt == null) {
+            next.remove(ARCHIVED_METADATA_KEY);
+            status = next.remove(ARCHIVED_FROM_LOCKED_METADATA_KEY) != null ? ProfileStatus.LOCKED : ProfileStatus.ACTIVE;
+        } else {
+            next.put(ARCHIVED_METADATA_KEY, Long.toString(archivedAt));
+            if (!archived() && this.status == ProfileStatus.LOCKED) next.put(ARCHIVED_FROM_LOCKED_METADATA_KEY, "true");
+            status = ProfileStatus.LOCKED;
+        }
+        return new AuroraProfile(this.id, this.accountId, this.type, this.profileType, this.name, next, this.createdAtMillis,
+            revision, status, this.members, this.bindingRevision, this.pendingIntent, this.kind, this.displayLabel);
     }
 
     public boolean coop() {

@@ -63,12 +63,14 @@ for (name in listOf("sourbyapi", "sourbycraft-server")) {
 
 // Opt-in projects, Paper-style: each has a git-ignored <name>.settings.gradle.kts, generated
 // commented out on first configuration; uncomment its include to keep it on locally.
-// -PincludeTestPlugin=true (what CI passes) includes both regardless of those local files.
+// -PincludeTestPlugin=true (what CI passes) includes all three regardless of those local files.
 // legacy-test-plugin is a Bukkit plugin without folia-supported that CI boots with
 // aurora.bridge.mode = "safe".
 val includeTestPlugins = providers.gradleProperty("includeTestPlugin").map(String::toBoolean).getOrElse(false)
 optionalInclude("test-plugin", includeTestPlugins)
 optionalInclude("legacy-test-plugin", includeTestPlugins)
+// Example plugin for docs/guides/developing-with-sourbyapi.md; lives under examples/, so it needs the directory.
+optionalInclude("sourbyapi-example", includeTestPlugins) { projectDir = file("examples/sourbyapi-example") }
 
 fun optionalInclude(name: String, forced: Boolean = false, op: (ProjectDescriptor.() -> Unit)? = null) {
     val settingsFile = file("$name.settings.gradle.kts")

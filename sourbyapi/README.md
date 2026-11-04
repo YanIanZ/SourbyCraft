@@ -52,7 +52,7 @@ would against upstream Paper and may also use the SourbyCraft services below.
 | `dev.iyanz.sourbycraft.api.profile` | `AuroraProfiles` (AWF MultiProfile: durable player profiles), its requests, results, error codes, `ProfileStateAdapter`, since Build 51 `ProfileDetails` and `ProfileType`, since Build 52 the `Coop*` types, three async `Coop*Event`s and the co-op methods, and since Build 53 the adapter contract (`ProfileAdapterDescriptor`, `ProfileDataCriticality`, `ProfileDataScope`) | [MultiProfile API](../docs/awf/multiprofile/API.md) |
 | `dev.iyanz.sourbycraft.api.profile` (co-op bank and salvage, Build 54) | `AuroraProfiles` bank, collections and salvage methods, `ProfileBankInfo`, `ProfileCurrency`, `ProfileBankAccount`, `ProfileCollectionInfo`, `ProfileSalvageInfo`, `SalvageDeliveryResult`, `ProfileBankTransactionEvent`, `ProfileSalvageDeliveredEvent` | [MultiProfile API](../docs/awf/multiprofile/API.md#co-op-bank-collections-and-salvage-build-54) |
 | `dev.iyanz.sourbycraft.api.profile` (profile types, Build 54) | `ProfileTypeRegistry` (a Bukkit service, registered only while MultiProfile runs; also `AuroraProfiles.typeRegistry()` and `SourbyAPI.profileTypes()`), `ProfileTypeDefinition`, `ProfileRule`, `ProfileRuleSet`, `ProfileNaming`, `ProfileTypeSource` | [PROFILE-TYPES.md](../docs/awf/multiprofile/PROFILE-TYPES.md) |
-| `dev.iyanz.sourbycraft.api.scheduler` | `RegionTask`, `EntityTask`: markers that name the owning chunk or entity of a sync Bukkit scheduler callback for the Aurora Bridge | [aurora-plugin-bridge.md](../docs/architecture/aurora-plugin-bridge.md) |
+| `dev.iyanz.sourbycraft.api.scheduler` | `RegionTask`, `EntityTask`: markers that name the owning chunk or entity of a sync Bukkit scheduler callback for the Aurora Bridge; since Build 55 `AuroraScheduler` (`SourbyAPI.scheduler()`) and its `TaskHandle` | [aurora-plugin-bridge.md](../docs/architecture/aurora-plugin-bridge.md), [developing-with-sourbyapi.md](../docs/guides/developing-with-sourbyapi.md) |
 
 `AuroraWorlds` and `AuroraProfiles` are obtained from Bukkit's `ServicesManager` (since Build 54 also
 through `SourbyAPI`, below); both are optional (a server without the feature has no registration, and
@@ -67,10 +67,10 @@ Since Build 54 a plugin reaches every SourbyCraft service through one class,
 
 ```kotlin
 dependencies {
-    // From Build 55: the sourbyapi jar attached to the SourbyCraft GitHub release (the release step that
-    // attaches it is Build 55 work; Build 54 and earlier attach no such jar).
-    compileOnly(files("libs/sourbyapi.jar"))
-    // Until then: build it from this repository with ./gradlew :sourbyapi:publishToMavenLocal
+    // From Build 55 every v26.2-r<N> release carries sourbyapi-<N>.zip (Build 54 and earlier attach none) with
+    // sourbyapi-<N>.jar, -sources.jar, -javadoc.jar and a README.txt: extract it and put the first jar in your project.
+    compileOnly(files("libs/sourbyapi-55.jar"))
+    // Alternatively build it from this repository with ./gradlew :sourbyapi:publishToMavenLocal
     // (needs the private toolchain, see "Artifact coordinates") and use
     // compileOnly("dev.iyanz.sourbycraft:sourbyapi:26.2-REL") with mavenLocal().
 }
@@ -107,6 +107,7 @@ public final class IslandPlugin extends JavaPlugin {
 | `profiles()` / `findProfiles()` | `AuroraProfiles`, only while `isEnabled()` | `aurora.awf.multiprofile.enabled` is false (the default) or its start failed |
 | `profileTypes()` / `findProfileTypes()` | `ProfileTypeRegistry` ([PROFILE-TYPES.md](../docs/awf/multiprofile/PROFILE-TYPES.md)) | MultiProfile is not running (`aurora.awf.multiprofile.enabled`) |
 | `metrics()` / `findMetrics()` | `SourbyMetrics` | the metrics service did not start |
+| `scheduler()` / `findScheduler()` (Build 55) | `AuroraScheduler`, the region/entity/global/async scheduler facade | not SourbyCraft, or a server older than Build 55 |
 
 The throwing form raises `FeatureUnavailableException` (unchecked), whose message and `configKey()` name the
 setting that enables the feature where one does. On a server that is not SourbyCraft every `find…` method returns
@@ -114,9 +115,33 @@ empty. The accessors may be called from any thread; lookups go to Bukkit's threa
 cached until a service is registered or unregistered. A service's own methods keep their own thread rules (for
 `AuroraWorlds`: never join its futures on a region, entity or global-tick thread).
 
-The developer guide and an example plugin are Build 55 work; until then see
-[developing-awf.md](../docs/guides/developing-awf.md) and the
-[MultiProfile API](../docs/awf/multiprofile/API.md).
+The developer guide is [developing-with-sourbyapi.md](../docs/guides/developing-with-sourbyapi.md) (dependency,
+`plugin.yml`, worlds, profiles and types, the bank retry contract, the scheduler facade and events), with a compilable
+example plugin in [`examples/sourbyapi-example/`](../examples/sourbyapi-example/). Per service see also
+[developing-awf.md](../docs/guides/developing-awf.md) and the [MultiProfile API](../docs/awf/multiprofile/API.md).
+
+### API changes in Build 55
+
+Code written and compiled by an agent; not tested by the owner. Binary and source compatible: nothing existing was
+removed or changed. Written for this section by the developer-docs agent from the sources; the operations additions
+(audit log, switch guard) are described in the [MultiProfile API](../docs/awf/multiprofile/API.md).
+
+- New `SourbyAPI.scheduler()` / `findScheduler()` and `dev.iyanz.sourbycraft.api.scheduler.AuroraScheduler` and
+  `TaskHandle`: run on the region of a `Location` or chunk (`runAt*`), on an entity's scheduler (`runFor*`, optional
+  `retired` callback), on the global region (`runGlobal*`) or off every region (`runAsync*`), delayed and repeating,
+  with a cancellable handle and `isOwnedByCurrentRegion`. A layer over the server's public region-threading schedulers
+  ([developing-with-sourbyapi.md](../docs/guides/developing-with-sourbyapi.md#6-scheduler-facade)).
+- New asynchronous, non-cancellable events fired after the durable outcome: `api.world.event` (`AwfWorldCreatedEvent`,
+  `AwfWorldLoadedEvent`, `AwfWorldUnloadedEvent`, `AwfWorldDeletedEvent`, `AwfWorldSavedEvent`, `AwfInstanceDisposedEvent`,
+  base `AwfWorldEvent`) and `api.profile.event` (`ProfilePreSwitchEvent`, `ProfileSwitchedEvent`, `ProfileCreatedEvent`,
+  `ProfileDeletedEvent`); see their package descriptions and the guide's *Events* section.
+- Distribution: from Build 55 each `v26.2-r<N>` release carries one asset, `sourbyapi-<N>.zip`, holding
+  `sourbyapi-<N>.jar`, `-sources.jar`, `-javadoc.jar` (built without external `-link` targets since Build 55, so types
+  from Guava, Adventure and the other libraries render unlinked and a link host outage cannot fail a push) and a `README.txt` (a hotfix `v26.2-r<N>.<M>` names it
+  `sourbyapi-<N>.<M>.zip`). A zip, not loose jars: the auto-updater of Builds 51-54 takes the first `.jar` asset as the
+  server jar.
+- `SourbyUpdater` (Build 55) picks the server jar by name: never an asset starting with `sourbyapi-`, a `SourbyCraft-`
+  name first; a release with a single `.jar` asset selects what it always did.
 
 ### API changes in Build 54
 
@@ -401,5 +426,5 @@ api-version: '26.2'
   the Build 54 profile type registry.
 - `src/main/java/dev/iyanz/sourbycraft/api/SourbyAPI.java`, `SourbyBuild.java`, `FeatureUnavailableException.java` —
   the Build 54 entry point.
-- `src/main/java/dev/iyanz/sourbycraft/api/scheduler/` — `RegionTask` and `EntityTask`.
+- `src/main/java/dev/iyanz/sourbycraft/api/scheduler/` — `RegionTask` and `EntityTask`; since Build 55 `AuroraScheduler` and `TaskHandle`.
 - `src/test/` — API contract tests.

@@ -378,7 +378,28 @@ public final class AuroraKeys {
         restart("aurora.awf.multiprofile.bank.interest-interval-hours", 24,
             "Build 54. Least number of hours between two interest postings of one co-op, judged on the store clock (the "
                 + "record remembers its last posting); a sooner posting is refused (INVALID_REQUEST, naming the wait). 0 = no "
-                + "minimum, at most 8784. Invalid = 24 + WARN."));
+                + "minimum, at most 8784. Invalid = 24 + WARN."),
+        restart("aurora.awf.multiprofile.switching.cooldown-seconds", 0,
+            "Build 55. Seconds after a committed profile switch during which the player's next switch is refused "
+                + "(SWITCH_COOLDOWN, naming the wait). 0 (default) = no cooldown, the Build 54 behaviour; Hypixel parity is 90; "
+                + "at most 86400. Only a committed switch starts it: a refused, vetoed or failed switch does not. Kept in memory "
+                + "on this node (a restart clears it; /awf multiprofile cooldown <player> reset clears one). Invalid = 0 + WARN."),
+        restart("aurora.awf.multiprofile.audit.enabled", true,
+            "Build 55. The MultiProfile audit log: immutable entries recorded after the durable outcome of each switch, create, "
+                + "delete, lock, archive, co-op membership change, bank posting and salvage delivery (and each switch refusal), "
+                + "kept in memory (newest 4096, /awf multiprofile audit <profile>, AuroraProfiles.audit) and appended to daily "
+                + "files <directory>/audit/<date>.log on the storage lane. Recording never changes an outcome; a failed write is "
+                + "counted (/perf multiprofile). false = nothing is recorded and audit() fails DISABLED. Invalid = true + WARN."),
+        restart("aurora.awf.multiprofile.audit.retention-days", 30,
+            "Build 55. Days a daily audit file is kept, 1-3660; older files are deleted when a new day's file opens. "
+                + "Invalid = 30 + WARN."),
+        restart("aurora.awf.multiprofile.io.partitions", 1,
+            "Build 55 (PM-091). Partitions of the profile I/O queue, 1-64. 1 (default) = one profile step at a time, FIFO over "
+                + "all accounts, exactly as Build 54. Above 1, steps that name only their own account and profiles (switch, "
+                + "save, login, session) may run at once when they fall in different partitions, each holding one storage lane "
+                + "slot, while every account's own steps stay FIFO; store-wide steps (create, delete, co-op, bank, salvage, "
+                + "recovery) are barriers. Relief only shows with aurora.scheduler.storage-threads above 1. Unqualified above 1 until the "
+                + "owner's soak. Invalid = 1 + WARN."));
 
     // [aurora.awf.redis.fabric] — Aurora Redis Fabric (docs/awf/multiprofile/REDIS-FABRIC.md)
     public static final List<ConfigKey> AWF_REDIS_FABRIC_KEYS = List.of(

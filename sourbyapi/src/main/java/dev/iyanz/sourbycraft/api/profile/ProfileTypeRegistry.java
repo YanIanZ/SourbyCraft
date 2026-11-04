@@ -58,6 +58,29 @@ public interface ProfileTypeRegistry {
     /** Claiming salvage (engine-owned). */
     String SALVAGE_CLAIM = "salvage.claim";
     /**
+     * Added in Build 55. Switching into a profile of this type (engine-owned, checked on the target at admission). A
+     * type that denies it can still be created, read and administered; nobody plays it. Unlike the other engine-owned
+     * actions, a profile whose type has <em>no definition</em> on the server is not gated by this rule whatever
+     * {@code types.unknown-type-policy} says: Build 54 stores hold profiles with free-form type ids that were always
+     * playable, and a deny policy must not lock their owners out of them. Like {@link #COOP_KICK} and
+     * {@link #COOP_LABEL} it is allowed unless the definition names it in {@link ProfileTypeDefinition#rules()}: the
+     * definition's {@link ProfileTypeDefinition#defaultRule() defaultRule} does not apply to it
+     * ({@link #allowedUnlessNamed}).
+     */
+    String PROFILE_SWITCH = "profile.switch";
+    /**
+     * Added in Build 55. Opening a kick vote, or casting a ballot, in a co-op of this type (engine-owned; also refused
+     * when the type allows no co-op). Allowed unless the definition names it in {@link ProfileTypeDefinition#rules()};
+     * the definition's default rule does not apply to it ({@link #allowedUnlessNamed}).
+     */
+    String COOP_KICK = "coop.kick";
+    /**
+     * Added in Build 55. Setting the shared display label of a co-op of this type (engine-owned). Allowed unless the
+     * definition names it in {@link ProfileTypeDefinition#rules()}; the definition's default rule does not apply to it
+     * ({@link #allowedUnlessNamed}).
+     */
+    String COOP_LABEL = "coop.label";
+    /**
      * Adding to a co-op collection and its per-member contribution ledger (engine-owned since Build 54; allowed unless
      * the type denies it).
      */
@@ -75,9 +98,22 @@ public interface ProfileTypeRegistry {
         return java.util.Arrays.stream(ProfileType.values()).map(ProfileType::id).toList();
     }
 
-    /** Whether {@code action} is one of the engine-owned co-op actions ({@code coop.convert/invite/accept}). */
+    /**
+     * Added in Build 55. Whether {@code action} is one of the action ids added in Build 55 ({@link #PROFILE_SWITCH},
+     * {@link #COOP_KICK}, {@link #COOP_LABEL}) that a definition's {@link ProfileTypeDefinition#defaultRule()} does not
+     * decide: without an explicit entry in {@link ProfileTypeDefinition#rules()} they are allowed. A type written for
+     * Build 54 with a deny default rule never named them, and upgrading must not make its profiles unplayable or refuse
+     * its kick votes and labels; a type denies them by naming them. {@link ProfileTypeDefinition#coopAllowed()} false
+     * still denies the two co-op ids.
+     */
+    static boolean allowedUnlessNamed(final String action) {
+        return PROFILE_SWITCH.equals(action) || COOP_KICK.equals(action) || COOP_LABEL.equals(action);
+    }
+
+    /** Whether {@code action} is one of the engine-owned co-op actions ({@code coop.convert/invite/accept/kick/label}). */
     static boolean coopAction(final String action) {
-        return COOP_CONVERT.equals(action) || COOP_INVITE.equals(action) || COOP_ACCEPT.equals(action);
+        return COOP_CONVERT.equals(action) || COOP_INVITE.equals(action) || COOP_ACCEPT.equals(action)
+            || COOP_KICK.equals(action) || COOP_LABEL.equals(action);
     }
 
     /**

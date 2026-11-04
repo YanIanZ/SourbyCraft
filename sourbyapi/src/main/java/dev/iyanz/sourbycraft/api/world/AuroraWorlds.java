@@ -44,6 +44,16 @@ import org.jspecify.annotations.Nullable;
  * Conflicting lifecycle work fails with {@link WorldOperationBusyException}, and
  * cancelling its future does not stop engine work. World and template names are lower-case {@code [a-z0-9_-]}, 1 to 48
  * characters.</p>
+ *
+ * <p>Since Build 55 the outcomes of these operations are also announced as asynchronous Bukkit events, fired after
+ * the outcome is final (a save once it is durable) and independent of whether anyone holds the returned future:
+ * {@link dev.iyanz.sourbycraft.api.world.event.AwfWorldCreatedEvent},
+ * {@link dev.iyanz.sourbycraft.api.world.event.AwfWorldLoadedEvent},
+ * {@link dev.iyanz.sourbycraft.api.world.event.AwfWorldSavedEvent},
+ * {@link dev.iyanz.sourbycraft.api.world.event.AwfWorldUnloadedEvent},
+ * {@link dev.iyanz.sourbycraft.api.world.event.AwfWorldDeletedEvent} and
+ * {@link dev.iyanz.sourbycraft.api.world.event.AwfInstanceDisposedEvent}; see that package for their thread and
+ * delivery rules.</p>
  */
 @NullMarked
 public interface AuroraWorlds {

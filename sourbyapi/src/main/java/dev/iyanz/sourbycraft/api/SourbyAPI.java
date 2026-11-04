@@ -3,6 +3,7 @@ package dev.iyanz.sourbycraft.api;
 import dev.iyanz.sourbycraft.api.metrics.SourbyMetrics;
 import dev.iyanz.sourbycraft.api.profile.AuroraProfiles;
 import dev.iyanz.sourbycraft.api.profile.ProfileTypeRegistry;
+import dev.iyanz.sourbycraft.api.scheduler.AuroraScheduler;
 import dev.iyanz.sourbycraft.api.world.AuroraWorlds;
 import java.io.IOException;
 import java.io.InputStream;
@@ -24,8 +25,8 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * Added in Build 54. The one entry point to SourbyCraft's services for a plugin compiled against
- * {@code sourbyapi}: Aurora World Fabric worlds, AWF MultiProfile profiles and their types, and the
- * read-only metrics.
+ * {@code sourbyapi}: Aurora World Fabric worlds, AWF MultiProfile profiles and their types, the
+ * read-only metrics and (since Build 55) the {@linkplain #scheduler() Aurora scheduler facade}.
  *
  * <pre>{@code
  * if (SourbyAPI.isSourbyCraft()) {
@@ -219,6 +220,31 @@ public final class SourbyAPI {
     /** {@link #metrics()}, or empty where it would throw. */
     public static Optional<SourbyMetrics> findMetrics() {
         return Optional.ofNullable(lookup(SourbyMetrics.class));
+    }
+
+    /**
+     * Added in Build 55. The Aurora scheduler facade: run work on the region of a location or chunk, on an
+     * entity's region, on the global region, or off the regions, with delayed and repeating forms and a cancellable
+     * {@link dev.iyanz.sourbycraft.api.scheduler.TaskHandle}. See {@link AuroraScheduler}.
+     *
+     * <pre>{@code
+     * SourbyAPI.scheduler().runFor(plugin, player, () -> player.sendMessage("on your region"));
+     * }</pre>
+     *
+     * <p>Registered by the server before plugins load, independently of every optional feature (it needs no
+     * setting), so on SourbyCraft Build 55 or later it is always present.</p>
+     *
+     * @throws FeatureUnavailableException on a server that is not SourbyCraft, or on a SourbyCraft build before 55
+     */
+    public static AuroraScheduler scheduler() {
+        return findScheduler().orElseThrow(() -> new FeatureUnavailableException("Aurora scheduler (AuroraScheduler)",
+            null, isSourbyCraft() ? "the service is not registered (the server is older than Build 55, or the server"
+                + " log reports why it failed to register)" : notSourbyCraft()));
+    }
+
+    /** {@link #scheduler()}, or empty where it would throw. */
+    public static Optional<AuroraScheduler> findScheduler() {
+        return Optional.ofNullable(lookup(AuroraScheduler.class));
     }
 
     private static String notSourbyCraft() {

@@ -161,6 +161,11 @@ thread, creation/loading/cloning futures can complete on a later global tick (si
 `join()`/`get()` on an unfinished one there throws `IllegalStateException`, because the tick
 that would finish it is the one blocked. Continue with `thenAccept`/`whenComplete` instead.
 
+Since Build 55 `SourbyAPI.scheduler()` is the facade for that scheduling (`runAt`, `runFor`, `runGlobal`, `runAsync`), and
+AWF world lifecycle events (`AwfWorldCreatedEvent`, `AwfWorldLoadedEvent`, `AwfWorldUnloadedEvent`, `AwfWorldDeletedEvent`,
+`AwfWorldSavedEvent`, `AwfInstanceDisposedEvent`) report operations made through `AuroraWorlds`. See
+[developing-with-sourbyapi.md](developing-with-sourbyapi.md#6-scheduler-facade) and its *Events* section.
+
 Bridge `safe` mode is opt-in and RESTART_REQUIRED. At I/O saturation, a bridged one-shot async task
 is cancelled and diagnosed, and a repeating one skips that run and stays scheduled; an AWF operation
 rejected by the existing I/O executor fails its future. No extra plugin executors are needed for AWF

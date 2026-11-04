@@ -745,6 +745,9 @@ public final class CoopCommand extends Command {
             case PLAYER_OFFLINE -> " (the player must be online here with the profile active)";
             case RECOVERY_REQUIRED -> " (a pending operation is resolved at the next login or start)";
             case OWNERSHIP_CONFLICT -> " (the account or profile is busy on another server; retry later)";
+            case SWITCH_COOLDOWN -> " (only a committed switch starts the cooldown: aurora.awf.multiprofile.switching.cooldown-seconds)";
+            case SWITCH_VETOED -> " (a plugin's switch guard refused; nothing was changed)";
+            case PROFILE_ARCHIVED -> " (the profile is archived read-only; an operator can /awf multiprofile unarchive it)";
             default -> "";
         };
     }

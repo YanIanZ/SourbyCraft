@@ -146,13 +146,24 @@ public final class BukkitPlayerStatePort implements PlayerStatePort {
     @Override
     public CompletableFuture<Void> apply(final UUID playerId, final ProfileState state,
                                          final ProfileIsolation isolation, final BooleanSupplier abandoned) {
+        return apply(playerId, state, isolation, abandoned, java.util.Set.of());
+    }
+
+    @Override
+    public CompletableFuture<Void> apply(final UUID playerId, final ProfileState state, final ProfileIsolation isolation,
+                                         final java.util.Set<String> untouchedAdapterIds) {
+        return apply(playerId, state, isolation, () -> false, untouchedAdapterIds);
+    }
+
+    private CompletableFuture<Void> apply(final UUID playerId, final ProfileState state, final ProfileIsolation isolation,
+                                          final BooleanSupplier abandoned, final java.util.Set<String> untouchedAdapterIds) {
         final Player player = Bukkit.getPlayer(playerId);
         if (player == null) return CompletableFuture.failedFuture(new IllegalStateException("player is not online"));
         return onEntity(player, () -> {
             if (abandoned.getAsBoolean()) {
                 throw new IllegalStateException("the profile switch was abandoned before its apply ran");
             }
-            applyNow(player, state, isolation);
+            applyNow(player, state, isolation, untouchedAdapterIds);
             return null;
         }, "apply");
     }
@@ -236,7 +247,8 @@ public final class BukkitPlayerStatePort implements PlayerStatePort {
         }
     }
 
-    private void applyNow(final Player player, final ProfileState state, final ProfileIsolation isolation) {
+    private void applyNow(final Player player, final ProfileState state, final ProfileIsolation isolation,
+                          final java.util.Set<String> untouchedAdapterIds) {
         final PlayerInventory inventory = player.getInventory();
         // Snapshots written before Build 50 stored the whole inventory, armor and off-hand included, in
         // the inventory section (slots 36-39 armor, 40 off-hand); storage is slots 0-35.
@@ -298,7 +310,7 @@ public final class BukkitPlayerStatePort implements PlayerStatePort {
         }
         if (isolation.location()) applyRespawn(player, state.spawn());
         // Required adapters that fail throw ADAPTER_REQUIRED_FAILED after the others ran; the apply then fails.
-        this.adapters.apply(player, state.adapters());
+        this.adapters.apply(player, state.adapters(), untouchedAdapterIds);
     }
 
     /**

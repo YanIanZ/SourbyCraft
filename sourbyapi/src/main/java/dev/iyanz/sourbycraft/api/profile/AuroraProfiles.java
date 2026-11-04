@@ -75,6 +75,12 @@ import org.jspecify.annotations.Nullable;
  * playerdata, exactly as in Build 52, and co-op members cannot switch into a co-op
  * ({@link ProfileErrorCode#COOP_SWITCH_UNAVAILABLE}).</p>
  *
+ * <p><b>Operations (Build 55).</b> {@link #audit} reads the node-local audit log; {@link #registerSwitchGuard} lets a
+ * consumer veto a switch before the player's state is touched ({@link ProfileSwitchGuard}); a committed switch starts
+ * the configured cooldown ({@code switching.cooldown-seconds}, default 0 = off; {@link #switchCooldownRemainingMillis});
+ * {@link #archiveProfile} makes a profile read-only ({@link ProfileErrorCode#PROFILE_ARCHIVED}). Every switch, create and
+ * delete fires the {@code dev.iyanz.sourbycraft.api.profile.event} events after its durable outcome.</p>
+ *
  * <p>The service is optional: plugins must handle {@code isEnabled() == false} and a missing service
  * registration, which is what a server without MultiProfile looks like.</p>
  */
@@ -387,6 +393,15 @@ public interface AuroraProfiles {
     // requests itself.
 
     /**
+     * Added in Build 55. The bank policy this server runs ({@code aurora.awf.multiprofile.bank.*}: currency, caps,
+     * interest), readable without a co-op profile and without I/O. Empty on a service that has no bank (MultiProfile
+     * off, or an implementation built before Build 55).
+     */
+    default Optional<ProfileBankPolicy> bankPolicy() {
+        return Optional.empty();
+    }
+
+    /**
      * Added in Build 54. The bank of a co-op profile as {@code viewerId} sees it (a member; {@code null} = operator view,
      * {@link ProfileBankInfo#personalBalance()} 0). A profile with no committed bank change answers an empty bank in the
      * configured currency. Fails with {@link ProfileErrorCode#NOT_A_MEMBER} for a viewer who is not a member.
@@ -535,5 +550,72 @@ public interface AuroraProfiles {
      */
     default CompletableFuture<SalvageDeliveryResult> claimSalvage(UUID claimantId, UUID salvageId) {
         return CompletableFuture.failedFuture(new UnsupportedOperationException("co-op salvage unavailable"));
+    }
+
+    // ------------------------------------------------------------------ operations (Build 55)
+
+    /** Most {@link ProfileSwitchGuard}s one server registers; a further registration is refused. */
+    int MAX_SWITCH_GUARDS = 16;
+
+    /**
+     * Added in Build 55. One page (newest first, at most {@link CoopPage#MAX_PAGE_SIZE}) of the audit entries this
+     * node recorded about a profile: committed switches into or out of it, refusals and failures of such switches,
+     * its creation, deletion, lock, archive and co-op membership changes, bank postings and salvage deliveries.
+     * {@code cursor} is {@code null} for the first page, else the {@link CoopPage#nextCursor()} of the previous one.
+     *
+     * <p>The page is served from the entries this node keeps in memory since it started (a bounded ring, newest
+     * {@code 4096} entries over all profiles); the complete retained log is the append-only files under
+     * {@code <directory>/audit/} (one per day, kept {@code audit.retention-days}), which an operator reads from disk.
+     * Entries are node-local: on a multi-node setup each node records what it committed. Fails with
+     * {@link ProfileErrorCode#DISABLED} when the audit log is off ({@code audit.enabled: false}).</p>
+     */
+    default CompletableFuture<CoopPage<ProfileAuditEntry>> audit(UUID profileId, @Nullable String cursor) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("profile audit unavailable"));
+    }
+
+    /**
+     * Added in Build 55. Registers a {@link ProfileSwitchGuard}; it is consulted for every switch on this server from
+     * the next admission on. See the guard's contract for threading and bounds.
+     *
+     * @throws IllegalStateException when {@value #MAX_SWITCH_GUARDS} guards are already registered
+     * @throws UnsupportedOperationException on an implementation without guards
+     */
+    default void registerSwitchGuard(Plugin plugin, ProfileSwitchGuard guard) {
+        throw new UnsupportedOperationException("switch guards unavailable");
+    }
+
+    /** Added in Build 55. Removes a guard registered by {@code plugin}; a guard that is not registered is ignored. */
+    default void unregisterSwitchGuard(Plugin plugin, ProfileSwitchGuard guard) {
+        throw new UnsupportedOperationException("switch guards unavailable");
+    }
+
+    /**
+     * Added in Build 55. Milliseconds until the player may switch again, {@code 0} when they may switch now (also when
+     * {@code switching.cooldown-seconds} is 0). Only a switch committed on this node since it started counts; a
+     * refused, vetoed or failed switch starts no cooldown. In memory, any thread.
+     */
+    default long switchCooldownRemainingMillis(UUID playerId) {
+        return 0L;
+    }
+
+    /**
+     * Added in Build 55. Archives a profile read-only (owner decision: a seasonal profile is archived at the end of its
+     * event, never silently deleted; an operator may archive any inactive profile). An archived profile keeps every
+     * record (snapshots, bank, collections, salvage, members) and stays listed with status {@code ARCHIVED}; it cannot
+     * be switched into, converted, joined, labelled, locked or used for bank, collection or salvage mutations
+     * ({@link ProfileErrorCode#PROFILE_ARCHIVED}). It is not deleted; {@link #deleteProfile} still works on it.
+     * Refused for an account's active profile ({@link ProfileErrorCode#PROFILE_LOCKED}: switch away first) and for a
+     * deleted profile ({@link ProfileErrorCode#PROFILE_NOT_FOUND}). Archiving an archived profile is a no-op.
+     *
+     * <p>Stored as the profile's {@code LOCKED} status plus an {@code aurora:archived} metadata marker, so a Build 54
+     * server reads it as a locked profile: no store level is raised.</p>
+     */
+    default CompletableFuture<Void> archiveProfile(UUID profileId) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("profile archive unavailable"));
+    }
+
+    /** Added in Build 55. Reverses {@link #archiveProfile}: the profile becomes {@code ACTIVE} again. A no-op when not archived. */
+    default CompletableFuture<Void> unarchiveProfile(UUID profileId) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("profile archive unavailable"));
     }
 }

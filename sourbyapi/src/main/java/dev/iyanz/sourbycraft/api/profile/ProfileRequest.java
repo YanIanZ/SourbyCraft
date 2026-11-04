@@ -14,7 +14,10 @@ import org.jspecify.annotations.Nullable;
  *
  * @param accountId owning player
  * @param type consumer namespace; {@code [a-z0-9_-]{1,32}}. Not the {@linkplain ProfileType policy type}.
- * @param metadata optional bounded metadata
+ * @param metadata optional bounded metadata. Since Build 55 the keys {@code aurora:archived} and
+ *     {@code aurora:archived-from-locked} are written by the server only (archive and unarchive); a request carrying
+ *     either is refused with {@link ProfileErrorCode#INVALID_REQUEST}. {@link ProfileTypeRegistry#TYPE_METADATA_KEY} is
+ *     set through {@link #withTypeId}.
  * @param profileType policy type, or {@code null} for the server's {@code types.default}. Refused with
  *     {@link ProfileErrorCode#TYPE_NOT_ALLOWED} when it is not in {@code types.allowed}.
  * @param name requested profile name, or {@code null} to let the server roll one. With
