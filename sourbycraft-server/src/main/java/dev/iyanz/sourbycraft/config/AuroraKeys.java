@@ -239,6 +239,12 @@ public final class AuroraKeys {
                 + "rejected in distributed mode and with repository: redis."),
         restart("aurora.awf.multiprofile.coordination.single-active-session", true,
             "Refuse a second live session for a profile owned elsewhere (the joining player is rejected, not the holder)."),
+        restart("aurora.awf.multiprofile.coordination.handoff-wait-ms", 0,
+            "Build 55.1. A join whose session claim or active-profile claim is refused only because another live session "
+                + "still holds it (a proxy server switch: the previous server has not committed the quit save and released "
+                + "the claim yet) retries the claim with bounded backoff, off the tick threads, for up to this long before "
+                + "it is refused as before. The retry never takes a claim that is still live. 0 = one attempt (Build 51-55 "
+                + "behaviour); 5000 recommended behind Velocity; max 15000. Counted in /perf multiprofile."),
         restart("aurora.awf.multiprofile.directory", "awf/profiles",
             "Relative directory of the file repository (accounts, profiles, snapshots, transition journals). Created only "
                 + "when enabled. With repository: redis it is only read: while Redis is empty and this directory holds "
@@ -341,6 +347,11 @@ public final class AuroraKeys {
                 + "(ADAPTER_REQUIRED_FAILED), and an id that holds data for the profile but is not registered on this "
                 + "node refuses it (ADAPTER_MISSING). It can only raise strictness; an adapter that declares REQUIRED "
                 + "stays REQUIRED when not listed. A malformed entry is dropped with a WARN; the well-formed entries stay."),
+        restart("aurora.awf.multiprofile.adapters.preserve-unregistered", List.of(),
+            "Build 55.1. Adapter ids (same form, at most 32) whose stored REQUIRED data passes through this node unchanged "
+                + "while no plugin registers them here: not applied, not captured, never dropped, no ADAPTER_MISSING. For "
+                + "a node that by design runs without the plugin that owns the data (a lobby without the island plugin's "
+                + "economy adapter). A registered id is not affected."),
         restart("aurora.awf.multiprofile.types.registry.allow-override-builtins", true,
             "Build 54. Whether a plugin may register its own definition for a built-in profile type id (classic, "
                 + "ironman, stranded, bingo) through the ProfileTypeRegistry, replacing the built-in rules. false = such a "
