@@ -192,6 +192,14 @@ public final class ProfileEngine {
     private final PlayerSessionOwnership playerSessions;
     /** The admitted format-2 session of each player online on this node. */
     private final ConcurrentHashMap<UUID, PlayerSession> sessions = new ConcurrentHashMap<>();
+    /**
+     * Build 56: players whose join on this <em>satellite</em> node ({@code coop.cross-node: true},
+     * {@code coop.world-host: false}) recorded a session without a node claim: their active profile is played here
+     * under their own session claim {@code Q} only (every member save is fenced by it and the stream's revisions),
+     * the node claim stays with the world host. Counted by {@link #holdsSession} like a node claim, released by
+     * {@link #releaseSession}.
+     */
+    private final java.util.Set<UUID> satelliteSessions = ConcurrentHashMap.newKeySet();
     /** Players whose session claim was confirmed lost; frozen until they quit. */
     private final java.util.Set<UUID> lostSessions = ConcurrentHashMap.newKeySet();
     /** Pending intents {@link #open} could not resolve, by every player they name. */
@@ -1100,6 +1108,27 @@ public final class ProfileEngine {
         return null;
     }
 
+    /**
+     * Build 56: an operator lock of a co-op is refused ({@code PROFILE_LOCKED}, naming them) while any member other than
+     * the owner (checked by the caller) has it as their active profile, on this node, on another node or offline: a lock
+     * refuses every save of such a member, so a member playing it would lose their progress, and with cross-node co-op
+     * a member on a satellite holds no node claim an older check could see. The same rule an archive applies
+     * ({@link #requireNoMemberInside}). At most the member cap of account reads; runs inside an I/O step; nothing is written.
+     */
+    private void requireNoMemberActive(final AuroraProfile profile) throws IOException {
+        final List<UUID> active = new ArrayList<>();
+        for (final ProfileMember member : profile.members()) {
+            if (member.playerId().equals(profile.accountId())) continue;
+            final PlayerAccount account = this.repository.loadAccount(member.playerId(), this.settings.defaultSlots());
+            if (profile.id().equals(account.activeProfile())) active.add(member.playerId());
+        }
+        if (!active.isEmpty()) {
+            throw error(ProfileErrorCode.PROFILE_LOCKED, "co-op profile " + profile.id() + " cannot be locked: " + active
+                + " have it as their active profile (on this node, another node or offline); a lock would refuse their saves."
+                + " They must switch away or leave first. Nothing was written");
+        }
+    }
+
     private void releaseAdminClaim(final OwnerClaim claim) {
         if (claim == null) return;
         try {
@@ -1135,6 +1164,9 @@ public final class ProfileEngine {
             if (locked && profileId.equals(account.activeProfile())) {
                 throw error(ProfileErrorCode.PROFILE_LOCKED, "the active profile cannot be locked; switch away first");
             }
+            // Build 56: a lock refuses every save of a member who has the profile active, on any node (a satellite holds no
+            // node claim an older check could see): refused while any member has it active, as an archive is.
+            if (locked) requireNoMemberActive(profile);
             final ProfileStatus next = locked ? ProfileStatus.LOCKED : ProfileStatus.ACTIVE;
             if (profile.status() != next && format2()) {
                 // Format 2: a hold is a metadata mutation (M advances); freshness lives on the member heads.
@@ -1545,8 +1577,9 @@ public final class ProfileEngine {
         final MemberStateHead base = head.orElseGet(() -> MemberStateHead.uninitialized(profile.id(), member, epoch));
         final long expectedHead = head.isPresent() ? head.get().revision() : CoopWriteGuard.ABSENT;
         final CoopOperation op = operation(CoopOperation.Kind.SAVE_MEMBER, member, profile.id(), epoch, expectedHead);
-        final ProfileState carried = withCarriedAdapters(state, adapters, () -> head.isPresent() ? exactHeadSnapshot(head.get())
+        ProfileState carried = withCarriedAdapters(state, adapters, () -> head.isPresent() ? exactHeadSnapshot(head.get())
             : Optional.empty(), profile.id());
+        carried = withCarriedLocations(carried, head.isPresent() ? exactHeadSnapshot(head.get()) : Optional.empty());
         final byte[] encoded = encode(profile.id(), carried);
         final ProfileSnapshot snapshot = ProfileSnapshot.forMember(profile.id(), member, epoch,
             CoopWriteGuard.next(base.revision(), "member head " + base.describe()), encoded, op.operationId());
@@ -1819,6 +1852,13 @@ public final class ProfileEngine {
         // Claim and record in one I/O step: the lane may dispatch the next step before a completion callback runs, so a
         // quit or save queued right after would not yet see the recorded claim (review P2).
         return io(ProfileIoQueue.Key.of(playerId, profileId), () -> {
+            if (this.settings.satellite() && format2()) {
+                // Build 56: a satellite takes no node claim. The session is recorded without one: the player's saves
+                // are fenced by their own Q (publishMemberState), and the node claim stays the world host's marker. A
+                // format-1 store has no Q, so there the satellite claims like any node (writeAuthority needs the claim).
+                this.satelliteSessions.add(playerId);
+                return ClaimResult.granted(null);
+            }
             final ClaimResult claim = nodeClaim(profileId, UUID.randomUUID());
             if (claim.granted() && this.switches.containsKey(playerId)) {
                 // A switch started while this join was claiming the old profile; the switch's
@@ -1837,8 +1877,9 @@ public final class ProfileEngine {
      * run in one I/O step (review P2-6): a join adopting the same node claim in between cannot have it released under it.
      */
     public CompletableFuture<Boolean> releaseSession(final UUID playerId) {
+        final boolean satellite = this.satelliteSessions.remove(playerId);
         final OwnerClaim claim = this.sessionClaims.remove(playerId);
-        if (claim == null) return CompletableFuture.completedFuture(false);
+        if (claim == null) return CompletableFuture.completedFuture(satellite);
         // Keyed by the player and the claimed profile (review P2-6): a co-op member's join is keyed (member, profile), so
         // the release shares its partition and never runs beside a join adopting the same node claim.
         return io(ProfileIoQueue.Key.of(playerId, claimedProfile(claim)), () -> {
@@ -1912,9 +1953,17 @@ public final class ProfileEngine {
     }
 
 
-    /** Whether this node recorded a session claim for the player (claimed on join or adopted by a switch). */
+    /**
+     * Whether this node recorded a session claim for the player (claimed on join or adopted by a switch), or, on a
+     * satellite (Build 56), a session without a node claim.
+     */
     public boolean holdsSession(final UUID playerId) {
-        return this.sessionClaims.containsKey(playerId);
+        return this.sessionClaims.containsKey(playerId) || this.satelliteSessions.contains(playerId);
+    }
+
+    /** Build 56: whether the player's session on this satellite node holds no node claim (test and status use). */
+    public boolean satelliteSession(final UUID playerId) {
+        return this.satelliteSessions.contains(playerId);
     }
 
     /**
@@ -2412,6 +2461,8 @@ public final class ProfileEngine {
      */
     public CompletableFuture<Boolean> prepareActive(final UUID playerId, final String joinedWorld) {
         if (!this.settings.enabled() || this.closed) return CompletableFuture.completedFuture(false);
+        // Build 56: a satellite never prepares a bound world nor moves the player into one; the world host does.
+        if (this.settings.satellite()) return CompletableFuture.completedFuture(false);
         final AtomicBoolean ended = new AtomicBoolean();
         final String current = joinedWorld.toLowerCase(java.util.Locale.ROOT);
         return io(ProfileIoQueue.Key.of(playerId), () -> joinTarget(playerId, current))
@@ -2676,7 +2727,7 @@ public final class ProfileEngine {
                             + " is cleared by the apply");
                         return null;
                     });
-                return worlds.thenCompose(ignored -> this.players.apply(playerId, source.state(), this.settings.isolation(), abandon))
+                return worlds.thenCompose(ignored -> this.players.apply(playerId, source.state(), applyIsolation(), abandon))
                     .orTimeout(budget, TimeUnit.MILLISECONDS)
                     .thenCompose(applied -> source.initialise() ? io(ProfileIoQueue.Key.of(playerId), () -> {
                         requireCurrentLogin(playerId, abandon);
@@ -2780,12 +2831,15 @@ public final class ProfileEngine {
             return LoginSource.refused(profileId, ProfileErrorCode.HEAD_UNREADABLE, "the account names active profile " + profileId
                 + ", which is " + (profile == null ? "not stored" : "deleted") + "; nothing is restored and the join is refused");
         }
-        if (profile.coop()) {
+        if (profile.coop() && !this.settings.satellite()) {
+            // OD-1 on a world host (and with cross-node off): one node hosts the co-op's bound world. A satellite (Build 56)
+            // hosts no world and restores the member's own stream whoever holds the node claim.
             final OwnerClaim foreign = this.ownership.foreignHolder(profileId).join();
             if (foreign != null) {
                 return LoginSource.refused(profileId, ProfileErrorCode.WRONG_NODE, "co-op profile " + profileId + " is played on node "
-                    + foreign.node() + " (owner decision OD-1: one node per co-op, no routing); join that server, or switch to another"
-                    + " profile from there");
+                    + foreign.node() + " (owner decision OD-1: one node per co-op, no routing" + (this.settings.crossNodeCoop()
+                    ? "; this node is a world host too, and a co-op's bound worlds are hosted by one node" : "")
+                    + "); join that server, or switch to another profile from there");
             }
         }
         final UUID epoch = account.activeEpoch();
@@ -3261,6 +3315,7 @@ public final class ProfileEngine {
                 + messageOf(firstFailure) + "); " + this.sessionClaims.size() + " claim(s) expire on their own");
         }
         this.sessionClaims.clear();
+        this.satelliteSessions.clear();
         for (final PlayerSession session : this.sessions.values()) {
             try {
                 this.playerSessions.release(session.claim()).join();
@@ -3464,6 +3519,12 @@ public final class ProfileEngine {
             if (session != null && session.id().equals(profileId.toString()) && this.ownership.validate(session).join()) {
                 return session;
             }
+            if (this.settings.satellite() && format2()) {
+                // Build 56: a satellite takes no node claim, in recovery either. The format-2 recovery writes are fenced by
+                // the player's Q (actorClaim) and the revision CAS; the stale-fence comparison below (a Redis epoch that
+                // went back, an unsupported failover) is not made here. No journal originates on a satellite (switching is off).
+                return null;
+            }
             // The live node claim other members' sessions share is reused, never superseded by a new token (review P2-6).
             final ClaimResult claimed = nodeClaim(profileId, UUID.randomUUID());
             if (!claimed.granted()) {
@@ -3533,7 +3594,7 @@ public final class ProfileEngine {
             // pending for a node that has the adapter (ADAPTER_MISSING).
             this.players.validateApply(state);
             return state;
-        }).thenCompose(state -> this.players.apply(journal.playerId(), state, this.settings.isolation())
+        }).thenCompose(state -> this.players.apply(journal.playerId(), state, applyIsolation())
                 .orTimeout(budget, TimeUnit.MILLISECONDS)
                 .exceptionallyCompose(failed -> CompletableFuture.failedFuture(
                     unwrapCompletion(failed) instanceof TimeoutException
@@ -3652,6 +3713,7 @@ public final class ProfileEngine {
         this.runs.clear();
         this.frozen.clear();
         this.sessionClaims.clear();
+        this.satelliteSessions.clear();
         this.releaseOnSwitchEnd.clear();
         this.worldUse.clear();
         this.sessions.clear();
@@ -4584,6 +4646,33 @@ public final class ProfileEngine {
 
     private interface SnapshotRead {
         Optional<ProfileSnapshot> read() throws IOException;
+    }
+
+    /**
+     * Build 56: on a satellite the location fields of a snapshot (respawn point, return point) are the stored head's,
+     * carried forward unchanged, never this node's: the bound world is on the world host, so a point captured here
+     * would replace the member's island bed and return point in the store. A stream without a head stores none. Every
+     * other node returns {@code state} as it is. The head snapshot that cannot be read refuses the write (its caller's
+     * {@code STALE_STATE}); a location is never guessed.
+     */
+    private ProfileState withCarriedLocations(final ProfileState state, final Optional<ProfileSnapshot> previous) {
+        if (!this.settings.satellite()) return state;
+        if (previous.isEmpty()) return state.withLocations(null, null);
+        final ProfileState stored = ProfileStateCodec.decode(previous.get().state());
+        return state.withLocations(stored.spawn(), stored.returnPoint());
+    }
+
+    /**
+     * Build 56: the isolation an apply on this node uses: on a satellite the location category is off, so a restore
+     * never sets (or clears, for a world not loaded here) the member's respawn point; every other node applies
+     * {@code isolation} as configured. Captures keep the configured isolation; {@link #withCarriedLocations} discards
+     * what a satellite captured. Both nodes therefore run the same {@code isolation.*} keys.
+     */
+    private ProfileIsolation applyIsolation() {
+        final ProfileIsolation configured = this.settings.isolation();
+        if (!this.settings.satellite() || !configured.location()) return configured;
+        return new ProfileIsolation(configured.inventory(), configured.armor(), configured.enderChest(), configured.experience(),
+            configured.health(), configured.food(), configured.potionEffects(), false);
     }
 
     /**
@@ -6233,7 +6322,7 @@ public final class ProfileEngine {
             .thenCompose(capture -> this.<Delivered>coop(() -> deliverSalvage(claimant, prep, capture))))
             .thenCompose(delivered -> {
                 if (delivered.state() == null) return CompletableFuture.completedFuture(delivered.result());
-                return this.players.apply(claimant, delivered.state(), this.settings.isolation(), delivered.untouched())
+                return this.players.apply(claimant, delivered.state(), applyIsolation(), delivered.untouched())
                     .orTimeout(this.settings.switching().timeoutMillis(), TimeUnit.MILLISECONDS)
                     .handle((ignored, failed) -> {
                         if (failed == null) return delivered.result();
@@ -6326,8 +6415,9 @@ public final class ProfileEngine {
         if (head != null && head.pendingIntent() != null) {
             throw error(ProfileErrorCode.RECOVERY_REQUIRED, "member stream " + head.describe() + " is reserved by intent " + head.pendingIntent());
         }
-        final ProfileState carried = withCarriedAdapters(capture.state(), capture.adapters(),
-            () -> head == null ? Optional.empty() : exactHeadSnapshot(head), profile.id());
+        final ProfileState carried = withCarriedLocations(withCarriedAdapters(capture.state(), capture.adapters(),
+            () -> head == null ? Optional.empty() : exactHeadSnapshot(head), profile.id()),
+            head == null ? Optional.empty() : exactHeadSnapshot(head));
         final ProfileSalvageDelivery.Merged merged = ProfileSalvageDelivery.merge(carried, prep.items());
         if (!prep.items().isEmpty() && merged.placed().isEmpty()) {
             throw error(ProfileErrorCode.CAPACITY_EXCEEDED, "the inventory and ender chest of " + claimant + " have no free slot; salvage "
@@ -6492,6 +6582,11 @@ public final class ProfileEngine {
      * profile's claim (the owner playing it); refused {@code WRONG_NODE} while another node holds it.
      */
     private void requireProfileNode(final UUID profileId) {
+        if (this.settings.satellite()) {
+            // Build 56: a satellite hosts no bound world, so the node claim is not its concern. The shared records the
+            // caller mutates are fenced by the transaction claim P, the actor's Q and the revision CAS of the commit.
+            return;
+        }
         final OwnerClaim foreign = this.ownership.foreignHolder(profileId).join();
         if (foreign != null) {
             throw error(ProfileErrorCode.WRONG_NODE, "profile " + profileId + " is held by node " + foreign.node() + " (its bound world"

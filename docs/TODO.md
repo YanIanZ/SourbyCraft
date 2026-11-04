@@ -49,6 +49,11 @@ Rencana dan keputusan OD-1…4: [BUILD-51-55-PLAN.md](releases/BUILD-51-55-PLAN.
   mengambil claim yang masih hidup), baris `/perf multiprofile`. Kode ditulis, dikompilasi; belum diuji owner: TO-B55.1-01…04 di
   [catatan rilis Build 55.1](releases/26.2-build-55.1-aurora-nexus.md). B3: `adapters.preserve-unregistered` (default
   kosong) meneruskan data adapter REQUIRED yang tidak terdaftar di node itu tanpa diubah (lobby: `[economy]`).
+- [-] Build 56 (kandidat, keputusan owner 2026-11-04: B2 split-plan prioritas utama) — co-op lintas node:
+  `coop.cross-node` (default false = OD-1) + `coop.world-host` (false = node satelit: spawn/lobby tanpa node claim,
+  tanpa dunia terikat, tanpa WRONG_NODE; butuh `switching.enabled: false`); wajib `mode: distributed` + `repository: redis`.
+  Save anggota dipagari Q + revisi stream, rekaman bersama (bank, koleksi, keanggotaan, label) dipagari P + CAS. Kode
+  ditulis, dikompilasi; belum diuji owner: TO-B56-01…06 di [catatan rilis Build 56](releases/26.2-build-56-aurora-nexus.md).
 
 ---
 

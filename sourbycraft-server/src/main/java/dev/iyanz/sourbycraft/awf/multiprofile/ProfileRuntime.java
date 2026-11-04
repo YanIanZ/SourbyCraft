@@ -197,6 +197,7 @@ public final class ProfileRuntime {
      * @throws IllegalStateException naming the first setting that is refused
      */
     static void validate(final ProfileSettings settings, final boolean fabricEnabled) {
+        validateCrossNode(settings);
         if (!settings.distributed() && !settings.redisRepository()) return;
         final String what = settings.distributed() ? "mode: distributed" : "repository: redis";
         if (!fabricEnabled) {
@@ -214,6 +215,34 @@ public final class ProfileRuntime {
             throw new IllegalStateException("mode: distributed requires repository: redis: the file repository cannot"
                 + " atomically fence its writes with Redis ownership, so two servers must never share its directory."
                 + " Use mode: standalone with a directory exclusive to this server, or repository: redis.");
+        }
+    }
+
+    /**
+     * Build 56 ({@code coop.cross-node}, {@code coop.world-host}): cross-node co-op needs the Redis repository in
+     * distributed mode, because the file repository compares revisions in one process and cannot fence a second
+     * node's writes; a satellite (world-host false) needs switching off, because a switch takes the node claim and
+     * prepares the target's worlds, which a satellite never does; world-host false without cross-node is a
+     * misconfiguration (OD-1 has no satellite) and is refused rather than silently ignored.
+     */
+    static void validateCrossNode(final ProfileSettings settings) {
+        if (!settings.enabled()) return;
+        final ProfileSettings.Coop coop = settings.coop();
+        if (coop.crossNode()) {
+            if (!settings.distributed() || !settings.redisRepository()) {
+                throw new IllegalStateException(ProfileSettings.COOP_CROSS_NODE_KEY + ": true requires mode: distributed and"
+                    + " repository: redis: the file repository compares revisions in one process only and cannot fence another"
+                    + " node's member saves or shared-record writes (Build 56)");
+            }
+            if (!coop.worldHost() && settings.switching().enabled()) {
+                throw new IllegalStateException(ProfileSettings.COOP_WORLD_HOST_KEY + ": false (a satellite) requires "
+                    + ProfileSettings.SWITCHING_ENABLED_KEY + ": false: a switch takes the node claim and prepares the target's"
+                    + " bound worlds, which a satellite never does (Build 56)");
+            }
+        } else if (!coop.worldHost()) {
+            throw new IllegalStateException(ProfileSettings.COOP_WORLD_HOST_KEY + ": false requires "
+                + ProfileSettings.COOP_CROSS_NODE_KEY + ": true; with cross-node off every node is the one node of its co-ops"
+                + " (OD-1) and there is no satellite (Build 56)");
         }
     }
 
@@ -288,8 +317,19 @@ public final class ProfileRuntime {
                 + " passes through this node unchanged while no plugin registers them here (adapters.preserve-unregistered)");
         }
         final BukkitPlayerStatePort statePort = new BukkitPlayerStatePort(plugin, adapters);
-        final AwfProfileWorldPort worldPort = new AwfProfileWorldPort(
-            dev.iyanz.sourbycraft.awf.world.AuroraWorldsRuntime::service);
+        // Build 56: a satellite never prepares, loads or creates a bound world; its world port is the no-op one, so a
+        // binding of a profile a member plays here is read but never acted on (the world host does that).
+        final ProfileWorldPort worldPort = settings.satellite() ? ProfileWorldPort.NONE
+            : new AwfProfileWorldPort(dev.iyanz.sourbycraft.awf.world.AuroraWorldsRuntime::service);
+        if (settings.crossNodeCoop()) {
+            SourbyLogger.info("AWF MultiProfile: co-op across nodes is on (" + ProfileSettings.COOP_CROSS_NODE_KEY + "); this node is "
+                + (settings.satellite() ? "a satellite (" + ProfileSettings.COOP_WORLD_HOST_KEY + ": false): it takes no node claim,"
+                    + " prepares no bound world and refuses nothing as WRONG_NODE; members play their own stream here and shared"
+                    + " records are fenced by the transaction claim and revision CAS"
+                    : "a world host: it claims and hosts the bound worlds of the co-ops played here; members on satellites keep"
+                    + " their own session claims and are not seen by the node claim")
+                + ". EXPERIMENTAL and not qualified (owner tests TO-B56-01..06)");
+        }
         final EventFabric events = fabric != null && fabric.settings().services().events() ? fabric.events() : null;
         final ProfileEngine engine = new ProfileEngine(settings, repository, ownership, playerSessions, statePort, worldPort,
             nodeId, ResourceGovernor.GLOBAL.lane(ResourceGovernor.Lane.STORAGE), fabric == null ? null : fabric.metrics(),

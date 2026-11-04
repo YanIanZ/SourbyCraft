@@ -410,7 +410,25 @@ public final class AuroraKeys {
                 + "save, login, session) may run at once when they fall in different partitions, each holding one storage lane "
                 + "slot, while every account's own steps stay FIFO; store-wide steps (create, delete, co-op, bank, salvage, "
                 + "recovery) are barriers. Relief only shows with aurora.scheduler.storage-threads above 1. Unqualified above 1 until the "
-                + "owner's soak. Invalid = 1 + WARN."));
+                + "owner's soak. Invalid = 1 + WARN."),
+        restart("aurora.awf.multiprofile.coop.cross-node", false,
+            "Build 56. Members of one co-op on different nodes at once (a spawn node and an island node, or two members on "
+                + "the island together). false (default) = owner decision OD-1 of Builds 53-55.1: one node per co-op, a member's "
+                + "join, switch and every co-op operation elsewhere refused WRONG_NODE. true needs mode: distributed and "
+                + "repository: redis (otherwise MultiProfile refuses to start, ERROR + a boot-stage WARN, and the server runs without it "
+                + "on vanilla playerdata; the file repository has no cross-node fence): "
+                + "every member save is fenced by that member's own session claim Q and the stream's revisions, every shared "
+                + "record (bank, collections, membership, label) by the profile transaction claim P and its revision CAS, so "
+                + "the node claim only marks the node that hosts the co-op's bound worlds (coop.world-host). Same on both "
+                + "nodes. Not a boolean: WARN, false."),
+        restart("aurora.awf.multiprofile.coop.world-host", true,
+            "Build 56, read with coop.cross-node: true only. true (default) = this node hosts the bound worlds of co-op "
+                + "profiles: it takes the node claim and behaves as Build 55.1 (a second world host is WRONG_NODE). false = a "
+                + "satellite (spawn/lobby node): no node claim on any profile, no bound world prepared, loaded or created, no "
+                + "WRONG_NODE; a member plays their own stream there and bank, collection and membership operations run "
+                + "under P and CAS. Needs switching.enabled: false and cross-node: true (otherwise MultiProfile refuses to start, "
+                + "see cross-node). A satellite applies restores with the location category off and stores the head's "
+                + "respawn/return point unchanged, so isolation.* must be identical on both nodes. Not a boolean: WARN, true."));
 
     // [aurora.awf.redis.fabric] — Aurora Redis Fabric (docs/awf/multiprofile/REDIS-FABRIC.md)
     public static final List<ConfigKey> AWF_REDIS_FABRIC_KEYS = List.of(

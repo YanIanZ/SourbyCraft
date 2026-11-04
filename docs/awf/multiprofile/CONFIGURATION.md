@@ -147,6 +147,23 @@ once by the early reader, like every MultiProfile key). Accessors: `ProfileSetti
 | `audit.retention-days` | `30` | days a daily audit file is kept, `1` to `3660`; older files are deleted when the first entry of a new day is written. Outside the range: WARN, `30` |
 | `io.partitions` | `1` | partitions of the profile I/O queue ([ARCHITECTURE.md](ARCHITECTURE.md#profile-io-queue-build-55-pm-091)), `1` to `64`. `1` = one profile step at a time, FIFO over all accounts, exactly as Build 54. Above 1, steps that name only their own account and profiles (switch, save, login, session) may run at once when they fall in different partitions, one storage-lane slot each, while every account's own steps stay FIFO; store-wide steps (create, delete, lock/archive, co-op, bank, salvage, recovery, startup) are barriers; a quit save is keyed by player and the ticket's profile and a session release by player and claimed profile, so they stay FIFO with the profile's saves and a member's join (review P2-6). At most `aurora.scheduler.storage-threads` steps are in flight whatever the partition count, so an effect shows only with that key above 1. **Unqualified above 1** until the owner's soak. Outside the range: WARN, `1` |
 
+### Build 56: co-op across nodes
+
+Build 56 code written and compiled by an agent; not tested by the owner. Both keys are **RESTART_REQUIRED** and
+read with the rest. Accessors: `ProfileSettings.coop().crossNode()`, `coop().worldHost()`, and the resolved
+`crossNodeCoop()` / `satellite()` (both false while `enabled: false`). Design:
+[DISTRIBUTED-OWNERSHIP.md](DISTRIBUTED-OWNERSHIP.md#co-op-across-nodes-build-56-coopcross-node).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `coop.cross-node` | `false` | `false` = owner decision OD-1 of Builds 53–55.1: one node per co-op; a member's join, switch and every co-op operation on another node are `WRONG_NODE`. `true` = members of one co-op may be on different nodes at once. Needs `mode: distributed` and `repository: redis`: otherwise MultiProfile refuses to start (ERROR `AWF MultiProfile could not start: ...` and a WARN for the failed boot stage); the server keeps running **without MultiProfile**, on vanilla playerdata, as for every refused MultiProfile setting since Build 51 (the FILE repository has no cross-node fence). Every member save is fenced by that member's own session claim `Q` and the stream's revisions, every shared record (bank, collections, membership, label) by the transaction claim `P` and its revision CAS, so the node claim only marks the node that hosts the co-op's bound worlds (`world-host`). Same value on both nodes. Does not enable co-op operations by itself (`coop.enabled`). Not a boolean: WARN, `false` |
+| `coop.world-host` | `true` | read with `cross-node: true` only. `true` = this node hosts the bound worlds of co-op profiles: it takes the node claim and behaves as Build 55.1 (a second world host of the same co-op is `WRONG_NODE`). `false` = a **satellite** (spawn/lobby node): no node claim on any profile, no bound world prepared, loaded or created (the world port is the no-op one), no `WRONG_NODE`; a member plays their own stream there, and bank, collection, membership and label operations run under `P` and CAS. Needs `switching.enabled: false`, and `cross-node: true`; otherwise MultiProfile refuses to start as above. A satellite applies every restore with the location category off and stores the head's respawn/return point unchanged, so the `isolation.*` keys must be **identical on both nodes**. Not a boolean: WARN, `true` |
+
+WuretaMC shape: island `cross-node: true` (world host, switching on); spawn `cross-node: true`, `world-host: false`,
+`switching.enabled: false`, `adapters.preserve-unregistered: [economy]` (Build 55.1); the same `isolation.*` on both;
+both `mode: distributed`, `repository: redis`, `coop.enabled: true`, `login.authoritative: true`,
+`coordination.handoff-wait-ms: 5000`.
+
 ## `aurora.awf.redis.fabric.*`
 
 | Key | Default | Meaning |
