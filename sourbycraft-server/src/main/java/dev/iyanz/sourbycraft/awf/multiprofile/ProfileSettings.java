@@ -314,7 +314,8 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
      *     profile may be converted to co-op; never empty. Checked at conversion only.
      * @param crossNode Build 56: members of one co-op may be on different nodes at once. {@code false} (default) is
      *     owner decision OD-1 of Builds 53–55.1: one node per co-op, {@code WRONG_NODE} elsewhere. {@code true}
-     *     needs {@code mode: distributed} and {@code repository: redis} (refused at start otherwise): every member
+     *     needs {@code mode: distributed} and {@code repository: redis} (otherwise MultiProfile refuses to start and
+     *     the server runs without it, {@code ProfileRuntime.validateCrossNode}): every member
      *     save is fenced by the member's own session claim {@code Q} and the stream's revisions, and every shared
      *     record (bank, collections, membership, label) by the profile transaction claim {@code P} and its
      *     revision CAS, so the node claim is only the marker of the node that hosts the profile's bound worlds.
@@ -322,8 +323,10 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
      *     worlds of co-op profiles. {@code true} (default) = a world host, which behaves exactly as Build 55.1 (one
      *     world host per co-op, {@code WRONG_NODE} on a second). {@code false} = a <em>satellite</em> (a spawn or
      *     lobby node): it takes no node claim, never prepares, loads or creates a bound world, refuses no join or
-     *     shared operation as {@code WRONG_NODE}, and needs {@code switching.enabled: false} (refused at start
-     *     otherwise). {@code false} with {@code crossNode} off is refused at start.
+     *     shared operation as {@code WRONG_NODE}, applies restores with the location category off and stores the
+     *     head's respawn/return point unchanged (so {@code isolation.*} must match on both nodes), and needs
+     *     {@code switching.enabled: false} (else MultiProfile refuses to start). {@code false} with {@code crossNode}
+     *     off refuses the start too.
      */
     public record Coop(boolean enabled, int maxMembers, int inviteExpiryMinutes, int kickVoteExpiryMinutes,
                        int kickVoteInactiveDays, Set<dev.iyanz.sourbycraft.api.profile.ProfileType> allowedTypes,

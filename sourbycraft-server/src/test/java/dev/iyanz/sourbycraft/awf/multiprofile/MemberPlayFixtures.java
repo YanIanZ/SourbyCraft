@@ -237,6 +237,8 @@ final class MemberPlayFixtures {
         final AtomicReference<CountDownLatch> applyEntered = new AtomicReference<>();
         /** Held applies that found themselves cancelled when they finally ran, and did nothing. */
         final AtomicInteger cancelledApplies = new AtomicInteger();
+        /** The isolation the last apply was asked to use (Build 56: a satellite applies with location off). */
+        final AtomicReference<ProfileIsolation> lastApplyIsolation = new AtomicReference<>();
         /** When set, the next apply fails with it (the player state is not changed). */
         final AtomicReference<RuntimeException> failNextApply = new AtomicReference<>();
         /** When true together with {@link #failNextApply}, the player leaves while that apply fails. */
@@ -288,6 +290,7 @@ final class MemberPlayFixtures {
                 if (this.offlineOnFailedApply.getAndSet(false)) this.online.remove(playerId);
                 return CompletableFuture.failedFuture(failure);
             }
+            this.lastApplyIsolation.set(isolation);
             this.live.put(playerId, state);
             this.applied.add(state);
             return CompletableFuture.completedFuture(null);
@@ -306,6 +309,7 @@ final class MemberPlayFixtures {
                     this.cancelledApplies.incrementAndGet();
                     return;
                 }
+                this.lastApplyIsolation.set(isolation);
                 this.live.put(playerId, state);
                 this.applied.add(state);
             });

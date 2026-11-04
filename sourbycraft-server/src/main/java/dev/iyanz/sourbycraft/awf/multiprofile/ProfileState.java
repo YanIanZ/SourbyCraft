@@ -138,6 +138,13 @@ public record ProfileState(int schema, List<Item> inventory, List<Item> armor, L
         return java.util.Collections.unmodifiableMap(copy);
     }
 
+    /** This state with its respawn point and return point replaced (Build 56: a satellite stores the head's, never its own). */
+    public ProfileState withLocations(final Location replacementSpawn, final Location replacementReturnPoint) {
+        return new ProfileState(this.schema, this.inventory, this.armor, this.offhand, this.enderChest, this.level,
+            this.experience, this.health, this.food, this.saturation, this.effects, replacementSpawn, replacementReturnPoint,
+            this.adapters);
+    }
+
     /** This state with its adapter entries replaced. */
     public ProfileState withAdapters(final Map<String, byte[]> replacement) {
         return new ProfileState(this.schema, this.inventory, this.armor, this.offhand, this.enderChest, this.level,

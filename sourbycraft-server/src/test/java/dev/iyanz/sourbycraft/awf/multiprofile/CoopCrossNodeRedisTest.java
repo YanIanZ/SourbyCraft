@@ -326,6 +326,86 @@ class CoopCrossNodeRedisTest {
         assertEquals(13, a.levelOf(a.head(p.coop(), p.first(), p.firstEpoch())));
     }
 
+    // ------------------------------------------------------------------ the island bed survives the spawn node
+
+    /** {@link MemberPlayFixtures#level} with a respawn point and a return point in {@code world}. */
+    private static ProfileState at(final int level, final String world) {
+        final ProfileState.Location spawn = new ProfileState.Location(world, 1.0, 64.0, 1.0, 0.0f, 0.0f);
+        final ProfileState.Location here = new ProfileState.Location(world, 2.0, 65.0, 2.0, 90.0f, 0.0f);
+        return level(level).withLocations(spawn, here);
+    }
+
+    /**
+     * Both nodes run the same isolation (location on). The member sets a bed on the island (their head stores an island
+     * respawn point and return point); on the spawn node the restore is applied with location off (the port is asked for
+     * no respawn point, so nothing is set or cleared there) and every save, the quit included, stores the head's island
+     * locations unchanged, never the spawn node's, while the rest of the captured state is stored; a stream without a
+     * head stores no location. Back on the island the bed and the return point are the ones the island saved.
+     */
+    @Test
+    void CoopSatelliteKeepsIslandLocations() throws Exception {
+        final Node a = node("island", island(), true);
+        final Node b = node("spawn", spawn(), false);
+        final Party p = party(a);
+        a.activate(p.second(), a.profile(p.coop()));
+
+        // First entry on the spawn node: no head yet, so no location is stored, whatever the spawn node captured.
+        b.ports.live.put(p.second(), at(5, "spawn"));
+        assertEquals(ProfileEngine.LoginRestore.Outcome.RESTORED, b.login(p.second()).outcome());
+        assertFalse(b.ports.lastApplyIsolation.get().location(), "a satellite applies with location off");
+        assertTrue(b.ports.lastApplyIsolation.get().inventory(), "the other categories are applied as configured");
+        assertTrue(b.save(p.second(), at(6, "spawn")));
+        ProfileState stored = ProfileStateCodec.decode(b.repository.memberSnapshot(p.coop(), p.second(), p.secondEpoch(),
+            b.head(p.coop(), p.second(), p.secondEpoch()).snapshotId()).orElseThrow().state());
+        assertEquals(6, stored.level());
+        assertNull(stored.spawn(), "a satellite never stores its own respawn point");
+        assertNull(stored.returnPoint(), "a satellite never stores its own return point");
+        b.ports.live.put(p.second(), at(7, "spawn"));
+        assertTrue(b.quit(p.second()));
+
+        // On the island the member sets a bed: the head stores island locations; the island applies location as configured.
+        a.ports.live.put(p.second(), level(0));
+        assertEquals(ProfileEngine.LoginRestore.Outcome.RESTORED, a.login(p.second()).outcome());
+        assertTrue(a.ports.lastApplyIsolation.get().location(), "a world host applies location as configured");
+        assertEquals(7, a.ports.levelOf(p.second()));
+        assertTrue(a.save(p.second(), at(8, "island")));
+        a.ports.live.put(p.second(), at(9, "island"));
+        assertTrue(a.quit(p.second()));
+        stored = ProfileStateCodec.decode(a.repository.memberSnapshot(p.coop(), p.second(), p.secondEpoch(),
+            a.head(p.coop(), p.second(), p.secondEpoch()).snapshotId()).orElseThrow().state());
+        assertEquals(9, stored.level());
+        assertEquals("island", stored.spawn().world());
+        assertEquals("island", stored.returnPoint().world());
+        final ProfileState.Location bed = stored.spawn();
+        final ProfileState.Location left = stored.returnPoint();
+
+        // Back on the spawn node: the restore carries the island state (the port gets it with location off), and every
+        // save there, the quit included, keeps the island bed and return point byte for byte.
+        b.ports.live.put(p.second(), at(0, "spawn"));
+        assertEquals(ProfileEngine.LoginRestore.Outcome.RESTORED, b.login(p.second()).outcome());
+        assertFalse(b.ports.lastApplyIsolation.get().location());
+        assertEquals(9, b.ports.levelOf(p.second()));
+        assertTrue(b.save(p.second(), at(10, "spawn")));
+        stored = ProfileStateCodec.decode(b.repository.memberSnapshot(p.coop(), p.second(), p.secondEpoch(),
+            b.head(p.coop(), p.second(), p.secondEpoch()).snapshotId()).orElseThrow().state());
+        assertEquals(10, stored.level(), "the rest of the captured state is stored");
+        assertEquals(bed, stored.spawn(), "the island bed is carried forward unchanged");
+        assertEquals(left, stored.returnPoint(), "the island return point is carried forward unchanged");
+        b.ports.live.put(p.second(), at(11, "spawn"));
+        assertTrue(b.quit(p.second()));
+        stored = ProfileStateCodec.decode(b.repository.memberSnapshot(p.coop(), p.second(), p.secondEpoch(),
+            b.head(p.coop(), p.second(), p.secondEpoch()).snapshotId()).orElseThrow().state());
+        assertEquals(11, stored.level());
+        assertEquals(bed, stored.spawn(), "the quit on the satellite keeps the island bed");
+        assertEquals(left, stored.returnPoint());
+
+        // And the island restores exactly that.
+        a.ports.live.put(p.second(), level(0));
+        assertEquals(ProfileEngine.LoginRestore.Outcome.RESTORED, a.login(p.second()).outcome());
+        assertEquals(bed, a.ports.state(p.second()).spawn());
+        assertEquals(left, a.ports.state(p.second()).returnPoint());
+    }
+
     // ------------------------------------------------------------------ bank from each node
 
     /**
@@ -352,30 +432,29 @@ class CoopCrossNodeRedisTest {
         assertEquals(150L, a.sharedBalance(p.coop()));
         assertEquals(150L, b.sharedBalance(p.coop()));
 
-        // Both nodes at once: the transaction claim serialises them; a refused posting writes nothing and is retried.
+        // Both nodes at once: the transaction claim P (OWNERSHIP_CONFLICT) or the S revision CAS (STALE_STATE) serialises
+        // them, whichever the interleaving reaches first; a refused posting writes nothing, and its sequential retry posts.
         final CompletableFuture<ProfileBank.View> fromA = a.engine.deposit(p.owner(), p.coop(), 7L);
         final CompletableFuture<ProfileBank.View> fromB = b.engine.deposit(p.second(), p.coop(), 5L);
+        join(fromA.handle((view, failed) -> null));
+        join(fromB.handle((view, failed) -> null));
         long posted = 150L;
+        final List<Runnable> retries = new ArrayList<>();
         for (final CompletableFuture<ProfileBank.View> posting : List.of(fromA, fromB)) {
-            try {
-                posted += posting == fromA ? 7L : 5L;
-                join(posting);
-            } catch (final AssertionError | RuntimeException failed) {
-                final Throwable cause = failed instanceof RuntimeException ? failed : failed.getCause();
-                assertEquals(ProfileErrorCode.OWNERSHIP_CONFLICT, ProfileEngine.codeOf(cause), String.valueOf(cause));
-                posted -= posting == fromA ? 7L : 5L;
-                assertEquals(posted, a.sharedBalance(p.coop()), "a refused posting wrote nothing");
-                // The retry posts.
-                if (posting == fromA) {
-                    join(a.engine.deposit(p.owner(), p.coop(), 7L));
-                    posted += 7L;
-                } else {
-                    join(b.engine.deposit(p.second(), p.coop(), 5L));
-                    posted += 5L;
-                }
+            final long amount = posting == fromA ? 7L : 5L;
+            if (!posting.isCompletedExceptionally()) {
+                posted += amount;
+                continue;
             }
+            final Throwable cause = join(posting.handle((view, failed) -> failed));
+            final ProfileErrorCode code = ProfileEngine.codeOf(cause);
+            assertTrue(code == ProfileErrorCode.OWNERSHIP_CONFLICT || code == ProfileErrorCode.STALE_STATE,
+                "a loser is refused by P or by the S CAS, got " + code + ": " + cause);
+            retries.add(posting == fromA ? () -> join(a.engine.deposit(p.owner(), p.coop(), 7L))
+                : () -> join(b.engine.deposit(p.second(), p.coop(), 5L)));
         }
-        assertEquals(162L, posted);
+        assertEquals(posted, a.sharedBalance(p.coop()), "a refused posting wrote nothing");
+        for (final Runnable retry : retries) retry.run();
         assertEquals(162L, a.sharedBalance(p.coop()), "every posting counted exactly once");
         assertEquals(162L, b.sharedBalance(p.coop()));
 
@@ -439,14 +518,14 @@ class CoopCrossNodeRedisTest {
         assertNotNull(a.profile(p.coop()).member(p.second()));
         assertEquals(6, b.levelOf(b.head(p.coop(), p.second(), p.secondEpoch())), "the member's stream is untouched");
 
-        // An operator lock from the island while the second member plays the co-op on the spawn node is refused: the
-        // satellite holds no node claim, so the members' session claims are what the island looks at.
+        // An operator lock from the island while the second member has the co-op active (and plays it on the spawn node,
+        // which holds no node claim) is refused naming them; a lock would refuse their saves.
         a.ports.live.put(p.first(), level(2));
         success(a.switchTo(p.first(), p.kiwi().id()));
         assertNull(join(a.profiles.foreignHolder(p.coop())), "no node claim names another node");
         final ProfileOperationException lock = CoopFixtures.refusal(() -> join(a.engine.setLocked(p.coop(), true)));
-        assertEquals(ProfileErrorCode.OWNERSHIP_CONFLICT, lock.code(), lock.getMessage());
-        assertTrue(lock.getMessage().contains("spawn"), lock.getMessage());
+        assertEquals(ProfileErrorCode.PROFILE_LOCKED, lock.code(), lock.getMessage());
+        assertTrue(lock.getMessage().contains(p.second().toString()), lock.getMessage());
         assertEquals(ProfileStatus.ACTIVE, a.profile(p.coop()).status());
 
         // Once the member quit the spawn node (their quit published their head), the leave from the island repoints them.
@@ -455,6 +534,9 @@ class CoopCrossNodeRedisTest {
         join(a.engine.leave(p.second(), p.coop()));
         assertNull(a.profile(p.coop()).member(p.second()), "the member left");
         assertEquals(p.lime().id(), a.account(p.second()).activeProfile(), "the removal moved the account to the solo profile");
+        // Nobody has the co-op active any more: the lock goes through.
+        join(a.engine.setLocked(p.coop(), true));
+        assertEquals(ProfileStatus.LOCKED, a.profile(p.coop()).status());
     }
 
     // ------------------------------------------------------------------ default: cross-node off is Build 55.1

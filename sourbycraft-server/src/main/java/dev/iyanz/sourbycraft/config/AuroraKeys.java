@@ -415,7 +415,8 @@ public final class AuroraKeys {
             "Build 56. Members of one co-op on different nodes at once (a spawn node and an island node, or two members on "
                 + "the island together). false (default) = owner decision OD-1 of Builds 53-55.1: one node per co-op, a member's "
                 + "join, switch and every co-op operation elsewhere refused WRONG_NODE. true needs mode: distributed and "
-                + "repository: redis (the server refuses to start otherwise; the file repository has no cross-node fence): "
+                + "repository: redis (otherwise MultiProfile refuses to start, ERROR + a boot-stage WARN, and the server runs without it "
+                + "on vanilla playerdata; the file repository has no cross-node fence): "
                 + "every member save is fenced by that member's own session claim Q and the stream's revisions, every shared "
                 + "record (bank, collections, membership, label) by the profile transaction claim P and its revision CAS, so "
                 + "the node claim only marks the node that hosts the co-op's bound worlds (coop.world-host). Same on both "
@@ -425,8 +426,9 @@ public final class AuroraKeys {
                 + "profiles: it takes the node claim and behaves as Build 55.1 (a second world host is WRONG_NODE). false = a "
                 + "satellite (spawn/lobby node): no node claim on any profile, no bound world prepared, loaded or created, no "
                 + "WRONG_NODE; a member plays their own stream there and bank, collection and membership operations run "
-                + "under P and CAS. Needs switching.enabled: false (refused at start otherwise); false with cross-node off is "
-                + "refused at start. Set isolation.location: false on a satellite. Not a boolean: WARN, true."));
+                + "under P and CAS. Needs switching.enabled: false and cross-node: true (otherwise MultiProfile refuses to start, "
+                + "see cross-node). A satellite applies restores with the location category off and stores the head's "
+                + "respawn/return point unchanged, so isolation.* must be identical on both nodes. Not a boolean: WARN, true."));
 
     // [aurora.awf.redis.fabric] — Aurora Redis Fabric (docs/awf/multiprofile/REDIS-FABRIC.md)
     public static final List<ConfigKey> AWF_REDIS_FABRIC_KEYS = List.of(

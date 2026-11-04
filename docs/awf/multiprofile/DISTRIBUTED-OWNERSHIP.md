@@ -220,8 +220,9 @@ has a bound world. On a format-2 store the first meaning is gone, because no gam
 
 `P` (`coop:profile-claim:<id>`) and `Q` (`coop:player-claim:<id>`) are strict: a different token is refused while the
 holder's lease is live, on any node. Two nodes posting to one bank therefore serialise on `P` (one gets
-`OWNERSHIP_CONFLICT`, writes nothing, and retries); a stale read is refused by the `S` CAS (`STALE_STATE`). Per-member
-state (snapshots, capture tickets, purse adapter data) is per `(member, epoch)` stream and never shared.
+`OWNERSHIP_CONFLICT`, writes nothing, and the caller retries); a posting planned against a shared record another node
+advanced meanwhile is refused by the `S` CAS (`STALE_STATE`, nothing written, the caller retries). Per-member state
+(snapshots, capture tickets, purse adapter data) is per `(member, epoch)` stream and never shared.
 
 So with cross-node on, the node claim keeps only its remaining job: **it marks the node that hosts the profile's
 bound worlds** (`ensureReady`, `prepareActive`, idle unload). The decision is per node, not per profile:
@@ -235,15 +236,24 @@ bound worlds** (`ensureReady`, `prepareActive`, idle unload). The decision is pe
 Rules the runtime enforces at start (`ProfileRuntime.validateCrossNode`, before the fabric checks):
 `cross-node: true` needs `mode: distributed` and `repository: redis` (the FILE repository compares revisions in one
 process and is refused); `world-host: false` needs `switching.enabled: false` (a switch takes the node claim and
-prepares the target's worlds) and `cross-node: true`. A satellite on a format-1 store claims like any node (format 1
-has no `Q`; `writeAuthority` needs the claim), so the feature is effectively format 2 only.
+prepares the target's worlds) and `cross-node: true`. A refused combination means MultiProfile refuses to start (ERROR `AWF MultiProfile could not start: ...` and a WARN for the failed boot stage); the server keeps running **without MultiProfile**, on vanilla playerdata, as for every refused MultiProfile setting since Build 51.
+A satellite on a format-1 store claims like any node (format 1 has no `Q`; `writeAuthority` needs the claim), so
+the feature is effectively format 2 only.
+
+**Locations on a satellite (isolation stays identical on both nodes).** The bound world, the member's bed and their
+return point are on the world host. A satellite therefore applies every restore with the location category off (the
+port is asked for no respawn point, so it neither sets nor clears one for a world that is not loaded there), and
+every snapshot it publishes (lockstep save, quit, shutdown, adoption, salvage destination) carries the head's stored
+respawn point and return point forward **unchanged**, never the satellite's (`withCarriedLocations`); a stream without
+a head stores none. The same `isolation.*` keys must be set on both nodes: a category that is off on one node and on
+on the other is not captured there and would be replaced by that node's vanilla value at the next save on the other.
 
 ### What happens where (WuretaMC shape)
 
 - **A member joins the spawn node** with a co-op active: `Q` is claimed (with the Build 55.1 handoff wait), no node
   claim, the committed member head is restored, no world is prepared. The island's node claim is not consulted and not
   disturbed; the island's members keep playing. The member's saves, quit and shutdown captures publish their own stream
-  under `Q`. `isolation.location: false` on the spawn node (the bound world is not there).
+  under `Q`, with the island bed and return point carried forward (above). Same `isolation.*` on both nodes.
 - **A member joins the island** while another member is on the spawn node: the island claims the node claim (nobody
   else holds it) and plays as Build 55.1. Two members on the island share the node's one claim as before.
 - **Two island nodes** (two world hosts) and one co-op: the second is refused `WRONG_NODE` on join, switch and every
@@ -255,11 +265,15 @@ has no `Q`; `writeAuthority` needs the claim), so the feature is effectively for
 - **Leave/kick of a member who plays the co-op on the other node:** refused `MEMBER_ONLINE` from either side. On the
   spawn node the member cannot be switched out (switching is off); from the island the member's `Q` is held on the
   spawn node. Once they quit (their quit published their head), a leave or kick repoints them (Build 53 `REPOINT`).
-- **Operator lock** of a co-op while a member has it active on the other node: refused `OWNERSHIP_CONFLICT` naming the
-  node (new check, the satellite holds no node claim for the old check to see). Archive and delete already refuse on
-  the members' accounts.
-- **Switching on the spawn node:** refused at start (`switching.enabled: false` required). Every profile switch and
-  SSB2 island action stays on the island.
+- **Operator lock** of a co-op while any member has it as their active profile (on this node, the other node or
+  offline): refused `PROFILE_LOCKED` naming them, as an archive is (new in Build 56, on every node: a lock refuses
+  every save of such a member, and a satellite holds no node claim an older check could see). Delete already refuses
+  a co-op with other members.
+- **Switching on the spawn node:** `switching.enabled: false` is required (else MultiProfile refuses to start). Every
+  profile switch and SSB2 island action stays on the island. A pending switch journal of a member who joins the
+  satellite is recovered there under the player's `Q` and the revision CAS without a node claim (`claimForRecovery`);
+  the stale-fence comparison against the node claim's epoch is not made on a satellite (a Redis epoch that went back
+  is an unsupported failover on every node).
 
 ### What stays refused or unchanged
 
