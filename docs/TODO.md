@@ -33,13 +33,17 @@ Rencana dan keputusan OD-1…4: [BUILD-51-55-PLAN.md](releases/BUILD-51-55-PLAN.
 - [-] Build 52 (`v26.2-r52`, dipublikasikan 2026-11-03) — slice 4: keanggotaan co-op (undang/terima/tolak/kedaluwarsa, keluar, peran, vote kick, batas anggota),
   intent FILE+Redis, level store minimumBuild 52, `/coop`. Kode ditulis, direview, dikompilasi; belum diuji owner:
   TO-B52-01…07 di [catatan rilis Build 52](releases/26.2-build-52-aurora-nexus.md).
-- [-] Build 53 — slice 5 + RFC E03: anggota main di co-op, login otoritatif (auto) + autosave lockstep + marker sesi/adopsi
+- [-] Build 53 (`v26.2-r53`, dipublikasikan 2026-11-04) — slice 5 + RFC E03: anggota main di co-op, login otoritatif (auto) + autosave lockstep + marker sesi/adopsi
   vanilla, kontrak adapter REQUIRED/BEST_EFFORT, penghapusan anggota online, snapshot quit saat shutdown (PM-076, patch 0081).
   Kode ditulis, direview, dikompilasi; belum diuji owner: TO-B53-01…08 di [catatan rilis Build 53](releases/26.2-build-53-aurora-nexus.md).
-- [-] Build 54 — slice 6 + registry tipe profil (dikelola addon) + API developer: bank bersama/pribadi, koleksi, transfer
+- [-] Build 54 (`v26.2-r54`, dipublikasikan 2026-11-04) — slice 6 + registry tipe profil (dikelola addon) + API developer: bank bersama/pribadi, koleksi, transfer
   dengan receipt + retry idempoten, salvage exactly-once (OD-3), purse via adapter (OD-4), `SourbyAPI`, AWF listWorlds/info/
   createInstance. Kode ditulis, direview, dikompilasi; belum diuji owner: TO-B54-01…06 di [catatan rilis Build 54](releases/26.2-build-54-aurora-nexus.md).
-- [ ] Build 55 — slice 7 + G5–G7: audit, switch guard, aturan tipe, paritas API, antrean I/O per akun (PM-091).
+- [-] Build 55 — slice 7 + G5–G7 + penyelesaian API developer + port addon: audit log, profil diarsipkan (read-only),
+  cooldown + switch guard, aturan tipe di setiap batas aksi engine, antrean I/O per akun (PM-091, `io.partitions`),
+  `/perf multiprofile`, scheduler facade + event AWF/profil di `sourbyapi`, panduan + plugin contoh, aset rilis
+  `sourbyapi-<N>.zip`, port SSB-AuroraProfiles. Kode ditulis, direview, dikompilasi; belum diuji owner: TO-B55-01…09 di
+  [catatan rilis Build 55](releases/26.2-build-55-aurora-nexus.md).
 
 ---
 
@@ -113,7 +117,7 @@ langkah uji owner: [Tester Owner](tester%20owner.md); penutupan per gate: [readi
   join memuat dunia terikat, idle sweep hanya dunia AWF terikat (PM-078-080, 092, 093, 107, 108);
   `PlayerStatePort.unavailable`/`ProfileWorldPort.loadedWorlds` yang tak terpakai dihapus (sisa PM-296); argumen
   `bind|unbind` di-lower-case (`e7c8c57`, PM-288).
-- [-] Sebagian: PM-091 (satu antrean serial untuk semua akun, kapasitas konstan), PM-076 (tanpa snapshot quit saat
+- [-] Sebagian: PM-091 (Build 55: partisi per akun/profil lewat `io.partitions`, default 1 = antrean serial lama; belum diuji owner), PM-076 (tanpa snapshot quit saat
   shutdown, butuh urutan patch 0081).
 - [!] PM-028: playerdata vanilla tidak di-commit saat switch (kill -9 sebelum autosave bisa menyimpan state A di
   bawah B); PM-080: respawn point dipulihkan sebagai forced; PM-456: advancements/statistics/recipe book tetap

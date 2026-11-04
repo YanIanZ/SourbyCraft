@@ -68,6 +68,23 @@ public interface ProfileStateAdapter {
     void apply(Player player, byte[] data) throws Exception;
 
     /**
+     * Added in Build 55. Called instead of {@link #apply} when the state being applied holds <em>no entry at all</em>
+     * for this adapter's id (a profile the adapter never captured into: a new profile, a profile created before the
+     * plugin was installed, the state restored at login, a rollback or an evacuation target). Without it, whatever this
+     * adapter last applied or the player accumulated (a per-profile purse, for example) stays on the player and follows
+     * them into the other profile. Runs on the player's owning thread, on every apply path the server has (switch target,
+     * rollback, login restore and adoption, evacuation, salvage destination), after the other adapters' {@code apply}.
+     *
+     * <p>A {@link ProfileDataCriticality#REQUIRED} adapter must reset the player to its empty state here (a purse to 0);
+     * a failure has the same semantics as a failing {@link #apply} (the apply is refused with
+     * {@code ADAPTER_REQUIRED_FAILED}). A best-effort adapter's failure is logged and the apply goes on. The default does
+     * nothing, which keeps the Build 53-54 behaviour for adapters that do not override it. Stored data under a version
+     * this registration does not read is <em>not</em> "absent": it stays in the profile and this is not called.</p>
+     */
+    default void applyAbsent(final Player player) throws Exception {
+    }
+
+    /**
      * Converts bytes this adapter stored under an older {@link #version()} into bytes of the current version
      * (Build 53). Called when a profile holds this adapter's data at {@code fromVersion} (below the registered
      * version) and the state is about to be applied; the returned bytes are what {@link #apply} then receives, and

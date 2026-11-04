@@ -128,6 +128,10 @@ aurora:
         enabled: true
         timeout-ms: 15000
         require-durable-save: true
+        # RESTART_REQUIRED (Build 55). Seconds after a COMMITTED switch during which the player's next switch is
+        # refused (SWITCH_COOLDOWN). 0 = off (the Build 54 behaviour); Hypixel parity is 90; at most 86400. A refused,
+        # vetoed or failed switch starts none; kept in memory on this node (a restart clears it).
+        cooldown-seconds: 0
       isolation:
         inventory: true
         armor: true
@@ -271,6 +275,21 @@ aurora:
         # RESTART_REQUIRED (Build 54). Least hours between two interest postings of one co-op, on the store clock
         # (the bank record remembers its last posting; a sooner posting is INVALID_REQUEST). 0 = no minimum.
         interest-interval-hours: 24
+      audit:
+        # RESTART_REQUIRED (Build 55). The audit log: immutable entries recorded after the durable outcome of each
+        # switch (and each switch refusal), create, delete, lock, archive, co-op membership change, bank posting and
+        # salvage delivery; newest 4096 in memory (/awf multiprofile audit <profile>, AuroraProfiles.audit), daily files
+        # <directory>/audit/<date>.log on the storage lane. Recording never changes an outcome. false = nothing recorded.
+        enabled: true
+        # RESTART_REQUIRED (Build 55). Days a daily audit file is kept, 1-3660.
+        retention-days: 30
+      io:
+        # RESTART_REQUIRED (Build 55, PM-091). Partitions of the profile I/O queue, 1-64. 1 = one profile step at a
+        # time, FIFO over all accounts, exactly as Build 54. Above 1, per-account steps (switch, save, login, session) of
+        # accounts in different partitions may run at once (each holding one storage lane slot) while every account's
+        # own steps stay FIFO; store-wide steps are barriers. Shows an effect only with aurora.scheduler.storage-threads > 1.
+        # Unqualified above 1 until the owner's soak.
+        partitions: 1
     redis:
       fabric:
         # RESTART_REQUIRED, read early (every fabric key). Aurora Redis Fabric. Default false: no socket,

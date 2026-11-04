@@ -13,12 +13,12 @@ Every profile has a **type id** chosen once at creation. The registry maps a typ
 |---|---|
 | `id` | `[a-z0-9_-]{1,32}`, the stored key |
 | `displayName`, `description` | 1-32 and 0-256 characters, no control characters |
-| `coopAllowed` | `false` denies `coop.convert`, `coop.invite` and `coop.accept` whatever the rules say |
+| `coopAllowed` | `false` denies `coop.convert`, `coop.invite`, `coop.accept` and (Build 55) `coop.kick`, `coop.label` whatever the rules say |
 | `creatable` | `false` refuses new profiles of the type (`TYPE_NOT_ALLOWED`); existing profiles keep it |
 | `maxMembers` | co-op cap override 2-8, or none (then `coop.max-members`) |
 | `naming` | `server` (the fruit/vegetable pool) or `pool` (the type's own 1-256 names, see below) |
 | `rules` | up to 64 action ids, each `allow` or `deny` with up to 8 string parameters |
-| `defaultRule` | the rule of an action without its own (default `allow`) |
+| `defaultRule` | the rule of an action without its own (default `allow`); not applied to the Build 55 ids `profile.switch`, `coop.kick`, `coop.label`, which are allowed unless `rules` names them (see Rule ids) |
 
 Action ids are free strings `[a-z0-9][a-z0-9_.:-]{0,63}`. The server reads only the allow/deny decision; parameters
 are stored and returned for the consumer.
@@ -60,10 +60,45 @@ Engine-owned (the server checks them itself, `ProfileTypes.require(profile, acti
 | `coop.invite` | `invite` (also needs `coopAllowed`) |
 | `coop.accept` | `acceptInvite` (also needs `coopAllowed`) |
 | `salvage.claim` | `claimSalvage` |
+| `profile.switch` | Build 55: `switchProfile`, checked on the **target** at admission (before any claim or capture); a type that denies it can be created, read and administered but nobody plays it. Not applied to a target whose type has **no definition** on the server, whatever `types.unknown-type-policy` says (legacy free-form types stay playable; review P2-7), nor to the evacuation switch of a leave or kick |
+| `coop.kick` | Build 55: `startKickVote` and `voteKick` (casting a ballot; also refused outright by a type with `coopAllowed: false`) |
+| `coop.label` | Build 55: `setCoopLabel` (also refused outright by a type with `coopAllowed: false`) |
+
+**The Build 55 ids and `defaultRule` (review N2).** `profile.switch`, `coop.kick` and `coop.label` are **allowed unless
+the definition names them** in `rules` (`ProfileTypeRegistry.allowedUnlessNamed`, applied by
+`ProfileTypeDefinition.rule`): a definition's `defaultRule` does not decide them. A type registered for Build 54 with
+`defaultRule: deny` never named these ids, so after the upgrade its profiles stay playable and its kick votes and
+labels are not refused; a type that wants to deny one names it (`.deny(ProfileTypeRegistry.PROFILE_SWITCH)`).
+`coopAllowed: false` still refuses `coop.kick` and `coop.label`. The definition that stands for an unreadable stored
+record denies all three by name, so a corrupt file never lifts a deny.
 
 The `/coop` and `/awf multiprofile coop bank` commands call the same engine methods, so the same checks apply. Reads
-(`bank`, `collections`, `salvage`, `getCoopDetails`, listings) and leave, decline, cancel and the kick vote are not
-type-gated. This table is the code's call sites; it is not a test result.
+(`bank`, `collections`, `salvage`, `getCoopDetails`, listings) and leave, decline and cancel are not type-gated (Build 55
+audit of the remaining entry points: they move or close state the member already holds; a type rule there would trap a
+member). Casting a ballot **is** type-gated (`coop.kick`, review P3-9).
+
+**Order of the archived and type checks.** An archived profile refuses every mutation except a member's leave
+(`PROFILE_ARCHIVED`, [OPERATIONS.md](OPERATIONS.md#archived-read-only-profiles)), but where that refusal comes relative
+to the type rule differs by action:
+
+- `switchProfile`: the archive is checked first, on the target; an archived target answers `PROFILE_ARCHIVED` before
+  `profile.switch` is consulted.
+- `convertToCoop`, `setCoopLabel`, `invite`, `acceptInvite`, `startKickVote`, `voteKick`, every bank operation
+  (`deposit`, `withdraw`, personal, `transfer`, `applyInterest`, `contribute`) and `claimSalvage`: the type rule is
+  checked first, so an archived profile whose type denies the action answers `ACTION_FORBIDDEN_BY_TYPE`; an archived
+  profile whose type allows it answers `PROFILE_ARCHIVED`. Either way nothing is written.
+
+This table and list are the code's call sites; they are not a test result.
+
+### Seasonal types (Build 55)
+
+`ProfileTypeDefinition.seasonal()` (`Builder.seasonal(true)`; the built-in `bingo` has it) marks a type whose
+profiles are meant to be archived read-only when its event ends (owner decision, HYPIXEL-PARITY §6.4: never silently
+deleted). The flag changes no rule and triggers nothing in the server: the consumer that runs the event archives its
+profiles through `AuroraProfiles.archiveProfile` (or an operator with `/awf multiprofile archive`), and
+`ProfileDetails.seasonal()` shows it. A stored definition with the flag uses record version 2 (one flags byte); a
+definition without it keeps the version-1 record, so a Build 54 server reads every non-seasonal stored definition
+unchanged and treats a seasonal one as unreadable — unknown, deny (never classic).
 
 Consumer-owned examples (the server never checks them; the consumer calls `allows`): `trade`, `auction`, `bazaar`,
 `island-bank`, `portal`, or any id the consumer invents.
@@ -82,7 +117,9 @@ salvage actions are **allowed** for all four. This follows the Hypixel SkyBlock 
 §6: Ironman keeps its bank; its restriction is trading, auction house and bazaar, which the server has no action
 for). A server that wants "Ironman: no bank" says so in its consumer's definition (example below) — the built-in
 defaults deny nothing new, so a Build 54 upgrade does not refuse an operation by surprise. Bingo's end-of-event
-archiving and Stranded's single island are not rules of this registry; archiving is planned for Build 55.
+archiving and Stranded's single island are not rules of this registry. Since Build 55 a consumer or operator archives a
+profile read-only with `AuroraProfiles.archiveProfile` or `/awf multiprofile archive` (see Seasonal types above and
+[OPERATIONS.md](OPERATIONS.md#archived-read-only-profiles)); the server archives nothing on its own.
 
 `coop.allowed-types` (default `[classic]`) still applies to conversion of a built-in type, in addition to the
 registry rule.

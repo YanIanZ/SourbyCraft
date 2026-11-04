@@ -74,6 +74,9 @@ release manifest (yank list + staged rollout; section below). Then, in order,
 `SourbyUpdater.downloadAndStage` / `verifyOrThrow`:
 
 0. **Asset checks before any request** (PR #62, `stagedPath`, `getAsset`, `UpdateOverrides.assetUrlAllowed`).
+   The server jar is chosen by name (Build 55, `SourbyUpdater.selectServerJar`): among assets ending in `.jar` with a
+   download URL, never one starting with `sourbyapi-` (the plugin API ships as `sourbyapi-<N>.zip`), the first named
+   `SourbyCraft-*` wins, else the first in listing order (Builds 51-54 took the first `.jar` asset).
    The jar asset name must be a plain file name of letters, digits, `.`, `_` and `-` ending in `.jar`
    (`[A-Za-z0-9][A-Za-z0-9._-]*\.jar`) and resolve inside `auto_update/sourbycraft/`; a declared size above
    `MAX_JAR_BYTES` (512 MiB) is refused; every asset URL (jar, `.sig`, manifest, manifest `.sig`) must be

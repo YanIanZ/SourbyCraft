@@ -10,7 +10,11 @@ import org.bukkit.event.server.ServerLoadEvent;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.ServicePriority;
 
-/** Publishes {@link AuroraWorlds} and loads autoload worlds once the server has started. */
+/**
+ * Publishes {@link AuroraWorlds} and loads autoload worlds once the server has started. Since Build 55 it also
+ * registers the {@link dev.iyanz.sourbycraft.api.scheduler.AuroraScheduler} facade, first, so the scheduler is
+ * published even when the AWF world registry cannot be read.
+ */
 public final class AuroraWorldsRuntime {
 
     private static volatile AuroraWorldsService service;
@@ -36,6 +40,14 @@ public final class AuroraWorldsRuntime {
             dev.iyanz.sourbycraft.api.SourbyAPI.bindServiceEvents(owner);
         } catch (final RuntimeException failed) {
             dev.iyanz.sourbycraft.util.SourbyLogger.warn("SourbyAPI service lookups stay uncached: " + failed.getMessage());
+        }
+        // Build 55: the AuroraScheduler facade (SourbyAPI.scheduler()). Before the AWF registry is read, so a
+        // world registry that cannot be read does not take the scheduler with it; it needs no setting.
+        try {
+            dev.iyanz.sourbycraft.scheduler.AuroraSchedulerService.register(owner);
+        } catch (final RuntimeException failed) {
+            dev.iyanz.sourbycraft.util.SourbyLogger.warn("The AuroraScheduler service could not be registered"
+                + " (SourbyAPI.scheduler() will throw): " + failed.getMessage());
         }
         final AuroraWorldsService created = new AuroraWorldsService(new AuroraWorldRegistry(AwfEngine.MANAGED_FILE),
             new AuroraTemplates(AwfEngine.TEMPLATES));

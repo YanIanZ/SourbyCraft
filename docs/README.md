@@ -116,7 +116,8 @@ Dated evidence reports (history; each is linked from the TODO or release-gate ro
 
 ### Guides (`guides/`)
 [commands.md](guides/commands.md) (operator commands) ·
-[developing-awf.md](guides/developing-awf.md) (plugin API) · [testing-awf.md](guides/testing-awf.md) ·
+[developing-with-sourbyapi.md](guides/developing-with-sourbyapi.md) (SourbyAPI developer guide; example plugin in `examples/sourbyapi-example/`) ·
+[developing-awf.md](guides/developing-awf.md) (worlds API) · [testing-awf.md](guides/testing-awf.md) ·
 [testing-legacy-plugins.md](guides/testing-legacy-plugins.md) ·
 [region-threaded-commands.md](guides/region-threaded-commands.md) ·
 [datapack-functions.md](architecture/datapack-functions.md) ·

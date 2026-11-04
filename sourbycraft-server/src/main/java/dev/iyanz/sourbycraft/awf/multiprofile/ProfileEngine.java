@@ -8,6 +8,7 @@ import dev.iyanz.sourbycraft.api.profile.ProfileOwner;
 import dev.iyanz.sourbycraft.api.profile.ProfileRequest;
 import dev.iyanz.sourbycraft.api.profile.ProfileSwitchResult;
 import dev.iyanz.sourbycraft.api.profile.ProfileWorldRef;
+import dev.iyanz.sourbycraft.awf.multiprofile.ProfileIoQueue.Key;
 import dev.iyanz.sourbycraft.awf.multiprofile.CoopWriteGuard.Expected;
 import dev.iyanz.sourbycraft.awf.multiprofile.CoopWriteGuard.PlayerClaim;
 import dev.iyanz.sourbycraft.awf.multiprofile.CoopWriteGuard.ProfileClaim;
@@ -117,7 +118,7 @@ import java.util.function.Consumer;
 public final class ProfileEngine {
 
     /** Profile steps that may wait for their turn on the I/O lane; beyond this an operation is refused. */
-    static final int IO_QUEUE_CAPACITY = 4096;
+    public static final int IO_QUEUE_CAPACITY = 4096;
     /** Snapshots kept per profile, besides those a pending journal still names. */
     private static final int SNAPSHOTS_KEPT = 3;
 
@@ -130,6 +131,14 @@ public final class ProfileEngine {
     private final ProfileIoQueue ioQueue;
     private final FabricMetrics metrics;
     private final EventFabric events;
+    /** Build 55: switch latency, queue wait, salvage/vote age and counters for {@code /perf multiprofile}. */
+    private final ProfileMetrics profileMetrics = new ProfileMetrics();
+    /** Build 55: the switch guards and the cooldown (settings {@code switching.cooldown-seconds}). */
+    private final ProfileSwitchGuards switchGuards;
+    /** Build 55: the audit log; {@code null} until the runtime attaches one (or when {@code audit.enabled} is false). */
+    private volatile ProfileAudit audit;
+    /** Build 55: where profile lifecycle events go (the runtime maps them to Bukkit events); no-op until set. */
+    private volatile Consumer<ProfileEvent> profileEventSink = event -> {};
     private final ConcurrentHashMap<UUID, UUID> switches = new ConcurrentHashMap<>();
     /**
      * Players whose state a running switch or salvage delivery captured, by player id, value the run that froze them
@@ -227,9 +236,213 @@ public final class ProfileEngine {
         this.players = Objects.requireNonNull(players, "players");
         this.worlds = Objects.requireNonNull(worlds, "worlds");
         this.nodeId = Objects.requireNonNull(nodeId, "nodeId");
-        this.ioQueue = new ProfileIoQueue(Objects.requireNonNull(io, "io"), IO_QUEUE_CAPACITY);
+        // Review P2-6: never more steps in flight than the storage lane has threads, so partitioned profile traffic cannot
+        // fill the lane's queue in front of AWF world commits; an executor that is not a governed lane gets the partition count.
+        final int laneThreads = io instanceof dev.iyanz.sourbycraft.execution.GovernedLane lane ? lane.threads() : settings.io().partitions();
+        this.ioQueue = new ProfileIoQueue(Objects.requireNonNull(io, "io"), IO_QUEUE_CAPACITY, settings.io().partitions(),
+            Math.max(1, laneThreads), this.profileMetrics::queueWaited);
+        this.switchGuards = new ProfileSwitchGuards(settings.switching().cooldownSeconds());
         this.metrics = metrics;
         this.events = events;
+    }
+
+    // ------------------------------------------------------------------ operations (Build 55)
+
+    /**
+     * A profile lifecycle event (Build 55), handed to the sink of {@link #onProfileEvent} on the engine's event thread
+     * after the durable outcome. {@code PRE_SWITCH} is the exception by design: it is handed over once admission, type
+     * rules, guards and cooldown passed and before the player's state changes.
+     */
+    public record ProfileEvent(Kind kind, UUID playerId, UUID fromProfileId, UUID toProfileId, UUID transitionId,
+                               ProfileInfo profile, ProfileSwitchResult result) {
+        public enum Kind { PRE_SWITCH, SWITCHED, CREATED, DELETED }
+    }
+
+    /** The sink is called on the engine's co-op event thread, never on a region, entity, global-tick or Netty thread. */
+    public void onProfileEvent(final Consumer<ProfileEvent> sink) {
+        this.profileEventSink = Objects.requireNonNull(sink, "sink");
+    }
+
+    private void fireProfileEvent(final ProfileEvent event) {
+        if (this.closed) return;
+        try {
+            coopEventLane().execute(() -> {
+                try {
+                    this.profileEventSink.accept(event);
+                } catch (final RuntimeException failed) {
+                    SourbyLogger.warn("AWF MultiProfile: a handler of the " + event.kind() + " profile event failed: " + failed.getMessage());
+                }
+            });
+        } catch (final RejectedExecutionException full) {
+            this.profileMetrics.profileEventDropped();
+            SourbyLogger.warn("AWF MultiProfile: a " + event.kind() + " profile event was dropped (the event queue of " + COOP_EVENT_QUEUE
+                + " is full or closed); the store is the source of truth");
+        }
+    }
+
+    /** Attaches the audit log; {@code null} turns recording off. Set by the runtime before the first operation. */
+    public void audit(final ProfileAudit audit) {
+        this.audit = audit;
+    }
+
+    /** The audit log, or {@code null} when off. */
+    public ProfileAudit audit() {
+        return this.audit;
+    }
+
+    /** Records an audit entry after a durable outcome; never blocks, never throws, never changes the outcome. */
+    private void auditRecord(final String kind, final UUID profileId, final UUID actor, final UUID operationId, final boolean success,
+                        final ProfileErrorCode code, final String detail) {
+        final ProfileAudit log = this.audit;
+        if (log == null) return;
+        try {
+            log.record(kind, profileId, actor, operationId, success, code, detail);
+        } catch (final RuntimeException never) {
+            SourbyLogger.warn("AWF MultiProfile: audit record failed: " + never.getMessage());
+        }
+    }
+
+    /**
+     * Audits the outcome of a mutating operation when its future settles: {@code <kind>} on success, {@code <kind>.refused}
+     * with the error code otherwise. The record is made on whatever thread completes the future (an offer to the audit's
+     * own queue, no I/O).
+     */
+    private <T> CompletableFuture<T> audited(final String kind, final UUID profileId, final UUID actor, final CompletableFuture<T> operation,
+                                             final java.util.function.Function<T, String> detail) {
+        return operation.whenComplete((value, failed) -> {
+            if (failed == null) {
+                String text = "";
+                if (detail != null) {
+                    try {
+                        text = String.valueOf(detail.apply(value));
+                    } catch (final RuntimeException never) {
+                        // Review P3-10: a detail formatter that throws must not turn the committed operation into a failure.
+                        text = "(detail unavailable: " + never.getMessage() + ")";
+                    }
+                }
+                auditRecord(kind, profileId, actor, null, true, null, text);
+            } else {
+                auditRecord(kind + ".refused", profileId, actor, null, false, codeOf(failed), messageOf(failed));
+            }
+        });
+    }
+
+    public ProfileMetrics profileMetrics() {
+        return this.profileMetrics;
+    }
+
+    public ProfileSwitchGuards switchGuards() {
+        return this.switchGuards;
+    }
+
+    /**
+     * One consistent read of the Build 55 metrics. No I/O on the calling thread (a command thread): salvage and vote ages
+     * are judged against this node's wall clock, not the store clock they were recorded on, so they are approximate.
+     */
+    public ProfileMetrics.Snapshot metricsSnapshot() {
+        return this.profileMetrics.snapshot(System.currentTimeMillis(), this.ioQueue, this.audit);
+    }
+
+    /** One page of the audit entries about a profile (in memory); fails {@code DISABLED} when the audit log is off. */
+    public CompletableFuture<dev.iyanz.sourbycraft.api.profile.CoopPage<dev.iyanz.sourbycraft.api.profile.ProfileAuditEntry>> auditPage(
+            final UUID profileId, final String cursor) {
+        final ProfileAudit log = this.audit;
+        if (log == null) return failed(ProfileErrorCode.DISABLED, "the MultiProfile audit log is off (" + ProfileSettings.AUDIT_ENABLED_KEY + ")");
+        try {
+            return CompletableFuture.completedFuture(log.page(profileId, cursor));
+        } catch (final ProfileOperationException bad) {
+            return CompletableFuture.failedFuture(bad);
+        }
+    }
+
+    /**
+     * Archives ({@code archived} true) or unarchives a profile: read-only, stored as {@link ProfileStatus#LOCKED} plus the
+     * {@link AuroraProfile#ARCHIVED_METADATA_KEY} marker (no store level change; a Build 54 node reads a locked profile).
+     * Refused for the account's active profile ({@code PROFILE_LOCKED}) and, for a co-op, while any member has it as
+     * their active profile ({@code PROFILE_LOCKED}, naming them) or plays it in an admitted session on this node
+     * ({@code MEMBER_ONLINE}); review P1-3: an archived profile refuses every save, so a member left inside it would
+     * lose their quit save (and a restored older head would duplicate items). A no-op when already in the asked state.
+     */
+    public CompletableFuture<Void> setArchived(final UUID profileId, final boolean archived) {
+        if (!this.settings.enabled()) return failed(ProfileErrorCode.DISABLED, "AWF MultiProfile is disabled");
+        return audited(archived ? "profile.archived" : "profile.unarchived", profileId, null, io(() -> {
+            final AuroraProfile profile = this.repository.profile(profileId)
+                .filter(found -> found.status() != ProfileStatus.DELETED)
+                .orElseThrow(() -> error(ProfileErrorCode.PROFILE_NOT_FOUND, "no profile " + profileId));
+            if (profile.archived() == archived) return null;
+            if (this.switches.containsKey(profile.accountId())) {
+                throw error(ProfileErrorCode.SWITCH_IN_PROGRESS, "account transition in progress");
+            }
+            requireNoPendingJournal(profile.accountId());
+            final PlayerAccount account = this.repository.loadAccount(profile.accountId(), this.settings.defaultSlots());
+            if (archived && profileId.equals(account.activeProfile())) {
+                throw error(ProfileErrorCode.PROFILE_LOCKED, "the active profile cannot be archived; switch away first");
+            }
+            if (archived) requireNoMemberInside(profile);
+            final Long at = archived ? Long.valueOf(storeClock()) : null;
+            if (format2()) {
+                requireNoUnresolvedIntent(profile.accountId());
+                if (profile.pendingIntent() != null) {
+                    throw error(ProfileErrorCode.RECOVERY_REQUIRED, "profile " + profileId + " is reserved by intent " + profile.pendingIntent());
+                }
+                final List<PlayerClaim> acquired = new ArrayList<>(1);
+                ProfileClaim transaction = null;
+                try {
+                    final PlayerClaim q = actorClaim(profile.accountId(), acquired);
+                    transaction = transactionClaim(profileId);
+                    commitProfile(profile.withArchived(at), CoopWriteGuard.metadata(operation(CoopOperation.Kind.SET_STATUS,
+                        profile.accountId(), profileId, archived ? "archive" : "unarchive", profile.revision()), transaction, q,
+                        account.revision(), profile.revision()));
+                } finally {
+                    if (transaction != null) releaseTransactionClaim(transaction);
+                    releasePlayerClaims(acquired);
+                }
+            } else {
+                final OwnerClaim admin = adminClaim(profileId);
+                try {
+                    this.repository.saveProfile(profile.withArchivedHold(at), ProfileWriteGuard.of(admin, profile.revision()));
+                } finally {
+                    releaseAdminClaim(admin);
+                }
+            }
+            return null;
+        }), ignored -> archived ? "archived read-only" : "unarchived");
+    }
+
+    /**
+     * Refuses archiving a co-op while a member (the owner's row included) has it as their active profile or plays it in
+     * an admitted session on this node (review P1-3). Reads every member's account; runs inside the archive's I/O step.
+     */
+    private void requireNoMemberInside(final AuroraProfile profile) throws IOException {
+        final List<UUID> active = new ArrayList<>();
+        final List<UUID> playing = new ArrayList<>();
+        for (final ProfileMember member : profile.members()) {
+            final UUID player = member.playerId();
+            final PlayerSession session = this.sessions.get(player);
+            if (session != null && profile.id().equals(session.activeProfile())) playing.add(player);
+            if (player.equals(profile.accountId())) continue; // the owner's account was checked by the caller
+            final PlayerAccount account = this.repository.loadAccount(player, this.settings.defaultSlots());
+            if (profile.id().equals(account.activeProfile())) active.add(player);
+        }
+        if (!playing.isEmpty()) {
+            throw error(ProfileErrorCode.MEMBER_ONLINE, "co-op profile " + profile.id() + " cannot be archived: " + playing
+                + " play(s) it on this node right now; their saves would be refused by the archive. They must switch away or leave"
+                + " first. Nothing was written");
+        }
+        if (!active.isEmpty()) {
+            throw error(ProfileErrorCode.PROFILE_LOCKED, "co-op profile " + profile.id() + " cannot be archived: it is the active"
+                + " profile of member(s) " + active + "; they must switch away or leave first (an archived profile refuses every save,"
+                + " so a member left inside it would lose their quit save). Nothing was written");
+        }
+    }
+
+    /** Refuses a mutation of an archived (read-only) profile. */
+    private static void requireNotArchived(final AuroraProfile profile) {
+        if (profile.archived()) {
+            throw error(ProfileErrorCode.PROFILE_ARCHIVED, "profile " + profile.id() + " is archived (read-only since store clock "
+                + profile.archivedAtMillis() + "); it can be read but not changed, switched into or joined until an operator unarchives it."
+                + " Nothing was written");
+        }
     }
 
     public ProfileSettings settings() {
@@ -593,7 +806,7 @@ public final class ProfileEngine {
     /** Profiles of an account with their name and policy type, in account order. */
     public CompletableFuture<List<ProfileDetails>> listDetails(final UUID accountId) {
         if (!this.settings.enabled()) return failed(ProfileErrorCode.DISABLED, "AWF MultiProfile is disabled");
-        return io(() -> {
+        return io(ProfileIoQueue.Key.of(accountId), () -> {
             final PlayerAccount account = this.repository.loadAccount(accountId, this.settings.defaultSlots());
             final List<ProfileDetails> details = new ArrayList<>();
             final List<AuroraProfile> profiles = this.repository.profiles(accountId);
@@ -613,7 +826,7 @@ public final class ProfileEngine {
     /** One profile with its name and policy type. */
     public CompletableFuture<Optional<ProfileDetails>> getDetails(final UUID profileId) {
         if (!this.settings.enabled()) return failed(ProfileErrorCode.DISABLED, "AWF MultiProfile is disabled");
-        return io(() -> describeDetails(profileId));
+        return io(ProfileIoQueue.Key.of(profileId), () -> describeDetails(profileId));
     }
 
     public CompletableFuture<Optional<ProfileInfo>> active(final UUID accountId) {
@@ -685,7 +898,10 @@ public final class ProfileEngine {
         // blocking publish on the caller's thread, which may be a region thread.
         publish(FabricEventType.PROFILE_CREATED, Map.of("profile", profile.id().toString(),
             "account", profile.accountId().toString(), "type", profile.type()));
-        return details(profile, null);
+        final ProfileDetails created = details(profile, null);
+        auditRecord("profile.created", profile.id(), profile.accountId(), null, true, null, "type " + plan.typeId() + " (format 1)");
+        fireProfileEvent(new ProfileEvent(ProfileEvent.Kind.CREATED, profile.accountId(), null, profile.id(), null, created.info(), null));
+        return created;
     }
 
     private ProfileDetails createFormat2(final ProfileRequest request, final ProfileTypes.CreatePlan plan,
@@ -732,7 +948,10 @@ public final class ProfileEngine {
         }
         publish(FabricEventType.PROFILE_CREATED, Map.of("profile", profile.id().toString(),
             "account", profile.accountId().toString(), "type", profile.type(), "profile-type", plan.typeId(), "name", name));
-        return details(profile, after.activeProfile());
+        final ProfileDetails created = details(profile, after.activeProfile());
+        auditRecord("profile.created", profile.id(), profile.accountId(), null, true, null, "type " + plan.typeId() + ", name " + name);
+        fireProfileEvent(new ProfileEvent(ProfileEvent.Kind.CREATED, profile.accountId(), null, profile.id(), null, created.info(), null));
+        return created;
     }
 
     /** Tombstones a profile; its AWF worlds are left alone (a consumer may own them). */
@@ -754,18 +973,29 @@ public final class ProfileEngine {
             if (profileId.equals(account.activeProfile())) {
                 throw error(ProfileErrorCode.PROFILE_LOCKED, "the active profile cannot be deleted; switch away first");
             }
-            if (format2()) return deleteFormat2(profile, account);
+            if (format2()) {
+                final boolean deleted = deleteFormat2(profile, account);
+                if (deleted) profileDeleted(profile);
+                return deleted;
+            }
             final OwnerClaim admin = adminClaim(profileId);
             try {
                 this.repository.saveProfile(profile.withStatus(ProfileStatus.DELETED),
                     ProfileWriteGuard.of(admin, profile.revision()));
                 this.repository.saveAccount(account.withoutProfile(profileId), ProfileWriteGuard.of(admin, account.revision()));
                 this.repository.deleteProfileData(profileId, ProfileWriteGuard.claimed(admin));
+                profileDeleted(profile);
                 return true;
             } finally {
                 releaseAdminClaim(admin);
             }
         });
+    }
+
+    /** After a committed tombstone: the audit entry and {@code ProfileDeletedEvent}. */
+    private void profileDeleted(final AuroraProfile profile) {
+        auditRecord("profile.deleted", profile.id(), profile.accountId(), null, true, null, "type " + ProfileTypes.typeIdOf(profile));
+        fireProfileEvent(new ProfileEvent(ProfileEvent.Kind.DELETED, profile.accountId(), null, profile.id(), null, null, null));
     }
 
     /**
@@ -870,10 +1100,16 @@ public final class ProfileEngine {
      */
     public CompletableFuture<Void> setLocked(final UUID profileId, final boolean locked) {
         if (!this.settings.enabled()) return failed(ProfileErrorCode.DISABLED, "AWF MultiProfile is disabled");
-        return io(() -> {
+        return audited(locked ? "profile.locked" : "profile.unlocked", profileId, null, io(() -> {
             final AuroraProfile profile = this.repository.profile(profileId)
                 .filter(found -> found.status() != ProfileStatus.DELETED)
                 .orElseThrow(() -> error(ProfileErrorCode.PROFILE_NOT_FOUND, "no profile " + profileId));
+            // Build 55: an archived profile is locked by its archive; lock is a no-op, unlock goes through unarchive.
+            if (profile.archived()) {
+                if (locked) return null;
+                throw error(ProfileErrorCode.PROFILE_ARCHIVED, "profile " + profileId + " is archived; /awf multiprofile unarchive lifts it."
+                    + " Nothing was written");
+            }
             if (this.switches.containsKey(profile.accountId())) {
                 throw error(ProfileErrorCode.SWITCH_IN_PROGRESS, "account transition in progress");
             }
@@ -912,7 +1148,7 @@ public final class ProfileEngine {
                 }
             }
             return null;
-        });
+        }), ignored -> "");
     }
 
     /**
@@ -946,6 +1182,17 @@ public final class ProfileEngine {
 
     /** Switches the player's active profile; never throws, failures are in the result. */
     public CompletableFuture<ProfileSwitchResult> switchProfile(final UUID playerId, final UUID targetId) {
+        return switchProfile(playerId, targetId, false);
+    }
+
+    /**
+     * {@link #switchProfile(UUID, UUID)}; {@code evacuation} marks the switch a membership removal (leave, kick) makes to
+     * move a member out of a co-op (review P3-8): it is not the player's own switch, so the cooldown is neither checked
+     * nor started, the registered guards are not asked (the removal is the policy decision; a guard could otherwise trap
+     * a member in a co-op they left) and the target's {@code profile.switch} rule is not applied (the target is the
+     * member's own or a fresh default-type profile).
+     */
+    private CompletableFuture<ProfileSwitchResult> switchProfile(final UUID playerId, final UUID targetId, final boolean evacuation) {
         final long began = System.currentTimeMillis();
         if (!this.settings.enabled()) {
             return CompletableFuture.completedFuture(failure(ProfileErrorCode.DISABLED, "AWF MultiProfile is disabled",
@@ -955,7 +1202,7 @@ public final class ProfileEngine {
             return CompletableFuture.completedFuture(failure(ProfileErrorCode.SWITCHING_DISABLED,
                 "profile switching is disabled by configuration", null, began));
         }
-        return io(() -> {
+        return io(ProfileIoQueue.Key.of(playerId, targetId), () -> {
             final PlayerAccount account = this.repository.loadAccount(playerId, this.settings.defaultSlots());
             final Optional<AuroraProfile> target = this.repository.profile(targetId);
             if (target.isEmpty() || target.get().status() == ProfileStatus.DELETED) {
@@ -986,8 +1233,19 @@ public final class ProfileEngine {
                 // OD-1: a co-op profile is played on the node that holds its bound world; no cross-node routing.
                 requireProfileNode(targetId);
             }
+            // Build 55: an archived profile is read-only (PROFILE_ARCHIVED before the generic LOCKED), the target's type
+            // must allow being played (profile.switch; a type with no definition here is not gated, review P2-7), and a
+            // committed switch's cooldown must have passed. An evacuation skips the type rule and the cooldown (P3-8).
+            requireNotArchived(target.get());
             if (target.get().status() != ProfileStatus.ACTIVE) {
                 throw error(ProfileErrorCode.PROFILE_LOCKED, "profile " + targetId + " is " + target.get().status());
+            }
+            if (!evacuation) ProfileTypes.get().requireIfDefined(target.get(), ProfileTypes.PROFILE_SWITCH);
+            final long cooldown = evacuation ? 0L : this.switchGuards.cooldownRemainingMillis(playerId);
+            if (cooldown > 0L) {
+                this.profileMetrics.cooldownRefused();
+                throw error(ProfileErrorCode.SWITCH_COOLDOWN, "the player switched profiles " + (this.switchGuards.cooldownMillis() - cooldown) / 1000L
+                    + " s ago; the next switch is allowed in " + ((cooldown + 999L) / 1000L) + " s (" + ProfileSettings.SWITCHING_COOLDOWN_KEY + ")");
             }
             if (!target.get().usable()) {
                 throw error(ProfileErrorCode.PROFILE_LOCKED, "profile " + targetId + " is not usable");
@@ -1015,12 +1273,17 @@ public final class ProfileEngine {
                 requireMemberPlayStoreLevel();
             }
             return begin(new SwitchStart(account, target.get(), format2() ? switchAdmission(account, target.get()) : null),
-                targetId, began);
+                targetId, began, evacuation);
         }).thenCompose(result -> result)
-            .exceptionally(failed -> failure(codeOf(failed), messageOf(failed), null, began));
+            .exceptionally(failed -> {
+                // Refused at admission (nothing captured, no journal): audited as a refusal, not a failure.
+                auditRecord("switch.refused", targetId, playerId, null, false, codeOf(failed), messageOf(failed));
+                return failure(codeOf(failed), messageOf(failed), null, began);
+            });
     }
 
-    private CompletableFuture<ProfileSwitchResult> begin(final SwitchStart start, final UUID targetId, final long began) {
+    private CompletableFuture<ProfileSwitchResult> begin(final SwitchStart start, final UUID targetId, final long began,
+                                                         final boolean evacuation) {
         final UUID playerId = start.account().playerId();
         final long deadline = System.currentTimeMillis() + this.settings.switching().timeoutMillis();
         final ProfileTransition started = ProfileTransition.started(playerId, start.account().activeProfile(),
@@ -1037,7 +1300,7 @@ public final class ProfileEngine {
                 "another profile switch is already running for this player", null, began));
         }
         final UUID ownerToken = UUID.randomUUID();
-        final SwitchRun run = new SwitchRun(journal, start.account(), start.target(), ownerToken, began, coop);
+        final SwitchRun run = new SwitchRun(journal, start.account(), start.target(), ownerToken, began, coop, evacuation);
         this.runs.add(run);
         return run.execute().whenComplete((result, failed) -> {
             this.runs.remove(run);
@@ -1070,7 +1333,7 @@ public final class ProfileEngine {
     public CompletableFuture<Void> save(final UUID profileId) {
         if (!this.settings.enabled()) return failed(ProfileErrorCode.DISABLED, "AWF MultiProfile is disabled");
         if (format2()) return saveMembers(profileId);
-        return io(() -> {
+        return io(ProfileIoQueue.Key.of(profileId), () -> {
             final AuroraProfile profile = this.repository.profile(profileId)
                 .orElseThrow(() -> error(ProfileErrorCode.PROFILE_NOT_FOUND, "no profile " + profileId));
             if (this.switches.containsKey(profile.accountId())) {
@@ -1085,7 +1348,7 @@ public final class ProfileEngine {
             requireNoPendingJournal(profile.accountId());
             return new SaveStart(profile, account.revision(), writeAuthority(profile), null);
         }).thenCompose(start -> this.players.captureDetailed(start.profile().accountId(), this.settings.isolation())
-            .thenCompose(captured -> io(() -> {
+            .thenCompose(captured -> io(ProfileIoQueue.Key.of(profileId), () -> {
                 final AuroraProfile profile = start.profile();
                 final ProfileState state = captured.state();
                 // The switch may have started while the player thread was capturing. Writing now
@@ -1120,7 +1383,7 @@ public final class ProfileEngine {
      * failure is reported after all ran.
      */
     private CompletableFuture<Void> saveMembers(final UUID profileId) {
-        return io(() -> {
+        return io(ProfileIoQueue.Key.of(profileId), () -> {
             final AuroraProfile profile = this.repository.profile(profileId)
                 .orElseThrow(() -> error(ProfileErrorCode.PROFILE_NOT_FOUND, "no profile " + profileId));
             if (profile.status() != ProfileStatus.ACTIVE) {
@@ -1160,7 +1423,7 @@ public final class ProfileEngine {
             final List<CompletableFuture<Void>> saves = new ArrayList<>(tickets.size());
             for (final CaptureTicket ticket : tickets) {
                 saves.add(this.players.captureDetailed(ticket.playerId(), this.settings.isolation())
-                    .thenCompose(captured -> this.<Void>io(() -> {
+                    .thenCompose(captured -> this.<Void>io(ProfileIoQueue.Key.of(profileId), () -> {
                         if (this.switches.containsKey(ticket.playerId()) || this.deliveries.containsKey(ticket.playerId())) {
                             throw error(ProfileErrorCode.SWITCH_IN_PROGRESS, "a profile switch or salvage delivery of " + ticket.playerId()
                                 + " started while the state was captured; the snapshot was not written");
@@ -1238,8 +1501,11 @@ public final class ProfileEngine {
             throw error(ProfileErrorCode.STALE_STATE, "membership " + ticket.epoch() + " of " + accountId + " in "
                 + profile.id() + " is not current; the snapshot was not written");
         }
-        return publishMemberState(profile, accountId, ticket.epoch(), state, adapters, ticket.claim(), ticket.accountRevision());
+        return publishMemberState(profile, accountId, ticket.epoch(), state, adapters, ticket.claim(), ticket.accountRevision()).snapshot();
     }
+
+    /** A snapshot as written and the state it encodes (the capture with carried adapter entries). */
+    private record Published(ProfileSnapshot snapshot, ProfileState state) {}
 
     /**
      * Publishes {@code state} as the next snapshot of the stream {@code (profile, member, epoch)} under
@@ -1247,9 +1513,9 @@ public final class ProfileEngine {
      * and the head's {@code R} ({@link CoopWriteGuard#ABSENT} initialises the stream). The state keeps the
      * adapter entries of the head's snapshot no adapter of this boot accounts for. Runs inside an I/O step.
      */
-    private ProfileSnapshot publishMemberState(final AuroraProfile profile, final UUID member, final UUID epoch,
-                                               final ProfileState state, final ProfileStateAdapters.Capture adapters,
-                                               final PlayerClaim q, final long expectedAccount)
+    private Published publishMemberState(final AuroraProfile profile, final UUID member, final UUID epoch,
+                                         final ProfileState state, final ProfileStateAdapters.Capture adapters,
+                                         final PlayerClaim q, final long expectedAccount)
         throws IOException {
         final Optional<MemberStateHead> head = this.repository.memberHead(profile.id(), member, epoch);
         if (head.isPresent() && head.get().state() == MemberStateHead.State.CONSUMED) {
@@ -1275,7 +1541,7 @@ public final class ProfileEngine {
             settle("the snapshot of " + next.describe(), result, () -> receipted(profile.id(), op)
                 || next.equals(this.repository.memberHead(profile.id(), member, epoch).orElse(null)));
         }
-        return snapshot;
+        return new Published(snapshot, carried);
     }
 
     /**
@@ -1327,7 +1593,10 @@ public final class ProfileEngine {
         Objects.requireNonNull(captured, "captured");
         final ProfileState state = captured.state();
         if (!this.settings.enabled() || this.closed) return CompletableFuture.completedFuture(false);
-        return io(() -> {
+        // Review P2-6: the member stream written here belongs to the ticket's profile, which save()/saveMembers() key by
+        // profile id, so the key names both; without a ticket (format 1, or none) the step is a barrier.
+        final ProfileIoQueue.Key key = ticket == null ? ProfileIoQueue.Key.BARRIER : ProfileIoQueue.Key.of(accountId, ticket.profileId());
+        return io(key, () -> {
             if (this.switches.containsKey(accountId)) {
                 throw error(ProfileErrorCode.SWITCH_IN_PROGRESS, "a profile switch is running for " + accountId
                     + "; its capture is the authoritative save");
@@ -1533,7 +1802,7 @@ public final class ProfileEngine {
         }
         // Claim and record in one I/O step: the lane may dispatch the next step before a completion callback runs, so a
         // quit or save queued right after would not yet see the recorded claim (review P2).
-        return io(() -> {
+        return io(ProfileIoQueue.Key.of(playerId, profileId), () -> {
             final ClaimResult claim = nodeClaim(profileId, UUID.randomUUID());
             if (claim.granted() && this.switches.containsKey(playerId)) {
                 // A switch started while this join was claiming the old profile; the switch's
@@ -1554,10 +1823,21 @@ public final class ProfileEngine {
     public CompletableFuture<Boolean> releaseSession(final UUID playerId) {
         final OwnerClaim claim = this.sessionClaims.remove(playerId);
         if (claim == null) return CompletableFuture.completedFuture(false);
-        return io(() -> {
+        // Keyed by the player and the claimed profile (review P2-6): a co-op member's join is keyed (member, profile), so
+        // the release shares its partition and never runs beside a join adopting the same node claim.
+        return io(ProfileIoQueue.Key.of(playerId, claimedProfile(claim)), () -> {
             releaseNodeClaimUnlessHeld(claim, playerId);
             return true;
         });
+    }
+
+    /** The profile id a node claim names, or {@code null} when it is not a UUID (the key then has the player alone). */
+    private static UUID claimedProfile(final OwnerClaim claim) {
+        try {
+            return UUID.fromString(claim.id());
+        } catch (final IllegalArgumentException notAProfile) {
+            return null;
+        }
     }
 
     /**
@@ -1682,7 +1962,7 @@ public final class ProfileEngine {
             return CompletableFuture.failedFuture(error(ProfileErrorCode.DISABLED, "AWF MultiProfile is disabled"));
         }
         if (!format2()) return CompletableFuture.completedFuture(new Admission(true, null, "format 1"));
-        return io(() -> {
+        return io(ProfileIoQueue.Key.of(playerId), () -> {
             if (this.switches.containsKey(playerId)) {
                 // A switch of the previous session still runs under its claim; it must end before a new session.
                 throw error(ProfileErrorCode.SWITCH_IN_PROGRESS, "a profile switch of the player's previous session is"
@@ -1785,7 +2065,7 @@ public final class ProfileEngine {
      * Also clears a recorded claim loss. Runs on the I/O lane, after the quit save queued before it.
      */
     public CompletableFuture<Boolean> releasePlayerSession(final UUID playerId, final PlayerClaim expected) {
-        return io(() -> {
+        return io(ProfileIoQueue.Key.of(playerId), () -> {
             final PlayerSession session = this.sessions.get(playerId);
             if (session == null || (expected != null && !session.claim().equals(expected))) {
                 if (expected == null || session == null) this.lostSessions.remove(playerId);
@@ -1928,7 +2208,7 @@ public final class ProfileEngine {
         if (!this.settings.enabled() || this.closed) return CompletableFuture.completedFuture(false);
         final AtomicBoolean ended = new AtomicBoolean();
         final String current = joinedWorld.toLowerCase(java.util.Locale.ROOT);
-        return io(() -> joinTarget(playerId, current))
+        return io(ProfileIoQueue.Key.of(playerId), () -> joinTarget(playerId, current))
             .thenCompose(target -> target == null ? CompletableFuture.completedFuture(false)
                 : this.worlds.ensureReady(target.binding()).thenCompose(ready -> returnToProfile(playerId, target, ended)))
             .orTimeout(this.settings.switching().timeoutMillis(), TimeUnit.MILLISECONDS)
@@ -1985,7 +2265,7 @@ public final class ProfileEngine {
             // A switch or a recovery runs; it decides where the player goes.
             return CompletableFuture.completedFuture(false);
         }
-        return io(() -> target.profile().equals(this.repository.loadAccount(playerId, this.settings.defaultSlots())
+        return io(ProfileIoQueue.Key.of(playerId), () -> target.profile().equals(this.repository.loadAccount(playerId, this.settings.defaultSlots())
                 .activeProfile()) && !pendingJournal(playerId))
             .thenCompose(unchanged -> {
                 if (!unchanged || ended.get() || !this.players.online(playerId)) {
@@ -2170,7 +2450,7 @@ public final class ProfileEngine {
         final java.util.function.BooleanSupplier abandon = () -> abandoned.get() || stale.getAsBoolean()
             || (gate != null && !gateHeld(playerId, gate));
         final long budget = this.settings.switching().timeoutMillis();
-        return io(() -> {
+        return io(ProfileIoQueue.Key.of(playerId), () -> {
                 requireCurrentLogin(playerId, abandon);
                 return loginSource(playerId, recoveredJournal);
             })
@@ -2192,7 +2472,7 @@ public final class ProfileEngine {
                     });
                 return worlds.thenCompose(ignored -> this.players.apply(playerId, source.state(), this.settings.isolation(), abandon))
                     .orTimeout(budget, TimeUnit.MILLISECONDS)
-                    .thenCompose(applied -> source.initialise() ? io(() -> {
+                    .thenCompose(applied -> source.initialise() ? io(ProfileIoQueue.Key.of(playerId), () -> {
                         requireCurrentLogin(playerId, abandon);
                         publishInitialState(playerId, source);
                         return source.restore;
@@ -2229,7 +2509,7 @@ public final class ProfileEngine {
         final long budget = this.settings.switching().timeoutMillis();
         return this.players.captureDetailed(playerId, this.settings.isolation())
             .orTimeout(budget, TimeUnit.MILLISECONDS)
-            .thenCompose(captured -> io(() -> {
+            .thenCompose(captured -> io(ProfileIoQueue.Key.of(playerId), () -> {
                 requireCurrentLogin(playerId, abandon);
                 final PlayerSession session = this.sessions.get(playerId);
                 if (session == null || !session.claim().equals(source.ticket().claim())) {
@@ -3151,6 +3431,9 @@ public final class ProfileEngine {
 
     public void close() {
         this.closed = true;
+        final ProfileAudit log = this.audit;
+        if (log != null) log.close();
+        this.switchGuards.close();
         final java.util.concurrent.ThreadPoolExecutor events = this.coopEventLane;
         if (events != null) events.shutdown();
         this.switches.clear();
@@ -3217,16 +3500,71 @@ public final class ProfileEngine {
          * compensation then never rolls back, it leaves the journal for recovery to decide from the account.
          */
         private volatile String unknownCommit;
+        /** The resources this run touches: the player (account), the target and the profile being left (PM-091). */
+        private final Key key;
+        /** A membership removal's move-out (review P3-8): no guards, no cooldown. */
+        private final boolean evacuation;
 
         private SwitchRun(final ProfileTransition journal, final PlayerAccount account, final AuroraProfile target,
-                          final UUID ownerToken, final long began, final SwitchCoop coop) {
+                          final UUID ownerToken, final long began, final SwitchCoop coop, final boolean evacuation) {
             this.journal = new AtomicReference<>(journal);
             this.account = account;
             this.target = target;
             this.ownerToken = ownerToken;
             this.began = began;
             this.coop = coop;
+            this.evacuation = evacuation;
             this.fromHead = coop == null ? CoopWriteGuard.ABSENT : coop.fromHead();
+            this.key = Key.of(account.playerId(), target.id(), account.activeProfile());
+        }
+
+        /** Every I/O step of this run is keyed by the run's resources (FIFO with the player's other steps). */
+        private <T> CompletableFuture<T> io(final IoSupplier<T> work) {
+            return ProfileEngine.this.io(this.key, work);
+        }
+
+        /**
+         * Build 55: the registered switch guards, after admission and the target world and before the freeze. A veto
+         * fails the run before anything of the player was captured ({@code SWITCH_VETOED}; compensation finds no capture
+         * and records the journal FAILED). After the hooks the reservation, the player and the deadline are checked again,
+         * then {@code ProfilePreSwitchEvent} is handed to the event thread: the state changes from here on.
+         */
+        private CompletableFuture<Void> guards() {
+            checkDeadline();
+            final UUID from = this.account.activeProfile();
+            final CompletableFuture<ProfileSwitchGuards.Verdict> evaluated = this.evacuation
+                ? CompletableFuture.completedFuture(ProfileSwitchGuards.Verdict.ALLOWED)
+                : ProfileEngine.this.switchGuards.evaluate(playerId(), from, this.target.id());
+            return evaluated.thenCompose(verdict -> {
+                if (!verdict.allowed()) {
+                    if (verdict.timedOut()) ProfileEngine.this.profileMetrics.guardTimedOut();
+                    ProfileEngine.this.profileMetrics.vetoed();
+                    throw error(ProfileErrorCode.SWITCH_VETOED, verdict.reason());
+                }
+                // Revalidate after the asynchronous hooks: still this run's reservation, still online, still in budget.
+                checkDeadline();
+                if (!this.journal.get().transitionId().equals(ProfileEngine.this.switches.get(playerId()))) {
+                    throw error(ProfileErrorCode.SWITCH_IN_PROGRESS, "the switch lost its reservation while the guards ran");
+                }
+                if (!ProfileEngine.this.players.online(playerId())) {
+                    throw error(ProfileErrorCode.PLAYER_OFFLINE, "the player left while the switch guards ran");
+                }
+                // Review P3-16: the guards ran outside any I/O step, so an operator's archive or lock of the target (a
+                // barrier) may have landed meanwhile; the target is read again before the player's state changes.
+                return io(() -> {
+                    final AuroraProfile current = ProfileEngine.this.repository.profile(this.target.id())
+                        .filter(found -> found.status() != ProfileStatus.DELETED)
+                        .orElseThrow(() -> error(ProfileErrorCode.PROFILE_NOT_FOUND, "the target " + this.target.id()
+                            + " disappeared while the switch guards ran"));
+                    requireNotArchived(current);
+                    if (current.status() != ProfileStatus.ACTIVE || !current.usable()) {
+                        throw error(ProfileErrorCode.PROFILE_LOCKED, "profile " + current.id() + " became " + current.status()
+                            + " while the switch guards ran");
+                    }
+                    return null;
+                });
+            }).thenRun(() -> fireProfileEvent(new ProfileEvent(ProfileEvent.Kind.PRE_SWITCH, playerId(), from, this.target.id(),
+                this.journal.get().transitionId(), null, null)));
         }
 
         private UUID playerId() {
@@ -3253,6 +3591,7 @@ public final class ProfileEngine {
             // is created or loaded.
             chain = chain.thenCompose(ignored -> claimTarget());
             chain = chain.thenCompose(ignored -> worldReady());
+            chain = chain.thenCompose(ignored -> guards());
             chain = chain.thenCompose(ignored -> {
                 // From the capture until this run ends, the runtime's freeze listener cancels the
                 // player's item and interaction events: a pickup in between would be lost and an item
@@ -3276,15 +3615,33 @@ public final class ProfileEngine {
                 .thenCompose(ignored -> describeTarget())
                 .thenApply(found -> {
                     final ProfileTransition current = this.journal.get();
+                    final UUID from = this.account.activeProfile();
                     if (this.commitPoint.get()) {
-                        return ProfileSwitchResult.success(found, current.transitionId(),
-                            System.currentTimeMillis() - this.began);
+                        final long took = System.currentTimeMillis() - this.began;
+                        // Build 55: only a committed switch of the player's own consumes the cooldown (an evacuation does not,
+                        // P3-8); metrics, audit and the event follow the commit.
+                        if (!this.evacuation) ProfileEngine.this.switchGuards.committed(playerId());
+                        ProfileEngine.this.profileMetrics.switchCommitted(took);
+                        auditRecord("switch.committed", this.target.id(), playerId(), current.transitionId(), true, null,
+                            "from " + from + " in " + took + " ms" + (this.evacuation ? " (evacuation)" : ""));
+                        // Review P3-16: the committed switch always fires SWITCHED; when the target cannot be read again
+                        // (I/O failure, deleted in between) the event carries the target as admission read it.
+                        final ProfileInfo shown = found != null ? found : new ProfileInfo(this.target.id(), this.target.accountId(),
+                            this.target.type(), this.target.metadata(), this.target.createdAtMillis(), this.target.revision(),
+                            this.target.apiStatus(), true, List.of());
+                        final ProfileSwitchResult success = ProfileSwitchResult.success(shown, current.transitionId(), took);
+                        fireProfileEvent(new ProfileEvent(ProfileEvent.Kind.SWITCHED, playerId(), from, this.target.id(),
+                            current.transitionId(), shown, success));
+                        return success;
                     }
                     final ProfileErrorCode code = this.rollbackPending
                         ? ProfileErrorCode.RECOVERY_REQUIRED : switchFailureCode(this.failure);
-                    return failure(code, current.failure() == null
-                            ? "the switch did not commit: " + messageOf(this.failure) : current.failure(),
-                        found, current.transitionId(), this.began);
+                    final String why = current.failure() == null
+                        ? "the switch did not commit: " + messageOf(this.failure) : current.failure();
+                    ProfileEngine.this.profileMetrics.switchFailed();
+                    auditRecord(code == ProfileErrorCode.SWITCH_VETOED ? "switch.vetoed" : "switch.failed", this.target.id(), playerId(),
+                        current.transitionId(), false, code, why);
+                    return failure(code, why, found, current.transitionId(), this.began);
                 });
         }
 
@@ -3342,6 +3699,9 @@ public final class ProfileEngine {
                     "capturing the player's state")
                 .thenCompose(captured -> io(() -> {
                     final ProfileState state = captured.state();
+                    // Review P2-4: the rollback point is what the store keeps, that is the capture with the previous
+                    // snapshot's adapter entries carried forward (a best-effort adapter whose capture failed keeps its
+                    // stored bytes); the raw capture would make the rollback reset those adapters as "absent".
                     this.previousState = state;
                     final OwnerClaim held = this.previousClaim.get();
                     if (ProfileEngine.this.settings.coordination().fencingEnabled() && held != null
@@ -3361,11 +3721,15 @@ public final class ProfileEngine {
                                 throw error(ProfileErrorCode.STALE_STATE, "profile " + previous + " changed since the switch"
                                     + " was admitted; the rollback point was not written");
                             }
-                            snapshot = publishMemberState(source, playerId(), this.coop.fromEpoch(), state, captured.adapters(),
-                                this.coop.claim(), this.coop.accountRevision());
+                            final Published published = publishMemberState(source, playerId(), this.coop.fromEpoch(), state,
+                                captured.adapters(), this.coop.claim(), this.coop.accountRevision());
+                            snapshot = published.snapshot();
+                            this.previousState = published.state();
                             this.fromHead = snapshot.revision();
                         } else {
-                            snapshot = writeSnapshotFor(previous, state, captured.adapters(), held);
+                            final Published published = writeSnapshotFor(previous, state, captured.adapters(), held);
+                            snapshot = published.snapshot();
+                            this.previousState = published.state();
                         }
                         this.journal.set(this.journal.get().withFromSnapshot(snapshot.snapshotId()));
                     } catch (final IOException | ProfileOperationException failed) {
@@ -3606,7 +3970,7 @@ public final class ProfileEngine {
                         + messageOf(failed));
                 }
                 return (Void) null;
-            }).thenCompose(ignored -> ProfileEngine.this.<Void>io(() -> {
+            }).thenCompose(ignored -> this.<Void>io(() -> {
                 ProfileEngine.this.repository.deleteTransition(this.journal.get().transitionId(), journalGuard());
                 return null;
             }).handle((deleted, failed) -> {
@@ -3629,7 +3993,7 @@ public final class ProfileEngine {
         private CompletableFuture<Void> settleCommit(final Throwable failed) {
             final long expected = this.uncertainCommit;
             this.uncertainCommit = -1L;
-            return ProfileEngine.this.<Boolean>io(() -> {
+            return this.<Boolean>io(() -> {
                 final ClaimResult barrier = ProfileEngine.this.ownership
                     .claim(this.target.id(), ProfileEngine.this.nodeId, UUID.randomUUID()).join();
                 this.claim.set(barrier.granted() ? barrier.claim() : null);
@@ -3684,7 +4048,7 @@ public final class ProfileEngine {
                 return CompletableFuture.completedFuture(null);
             }
             final OwnerClaim held = this.previousClaim.getAndSet(null);
-            return ProfileEngine.this.io(() -> {
+            return io(() -> {
                 if (held != null) {
                     ProfileEngine.this.sessionClaims.remove(playerId(), held);
                     // Other members of a co-op still play the profile just left on this node: the node keeps its claim.
@@ -3709,7 +4073,7 @@ public final class ProfileEngine {
             if (held == null) return CompletableFuture.completedFuture(null);
             // A node claim other members' sessions share is not this run's to release; checked in the I/O step (review P2-6).
             if (this.targetClaimShared) return CompletableFuture.completedFuture(null);
-            return ProfileEngine.this.<Void>io(() -> {
+            return this.<Void>io(() -> {
                 releaseNodeClaimUnlessHeld(held, playerId());
                 return null;
             }).handle((released, failed) -> {
@@ -3751,7 +4115,7 @@ public final class ProfileEngine {
                 "transition", this.journal.get().transitionId().toString(), "reason", truncate(reason));
             adoptPreviousClaim();
             return releaseTargetClaim()
-                .thenCompose(ignored -> ProfileEngine.this.<Void>io(() -> {
+                .thenCompose(ignored -> this.<Void>io(() -> {
                     publish(FabricEventType.PROFILE_RECOVERY_REQUIRED, recovery);
                     return null;
                 }))
@@ -3776,6 +4140,11 @@ public final class ProfileEngine {
                 // partial, so it stays pending for a join on a node that has the adapter.
                 return leavePending(reason + "; the rollback cannot apply completely: " + unappliable.getMessage());
             }
+            // Build 55 review N1: no adapter is left untouched here. The rollback runs only after the forward apply
+            // started, and that apply (no untouched set) already put the target's data, or a reset, on every adapter,
+            // including those whose capture failed. The rollback point carries the source's stored entry for such an
+            // adapter (review P2-4), so it is restored; with no stored entry it is reset as absent, never left holding
+            // the target's value inside the source profile, which the next save would duplicate.
             return ProfileEngine.this.players.apply(playerId(), captured, ProfileEngine.this.settings.isolation())
                 .orTimeout(ProfileEngine.this.settings.switching().timeoutMillis(), TimeUnit.MILLISECONDS)
                 .handle((applied, rollbackFailed) -> rollbackFailed)
@@ -3805,7 +4174,7 @@ public final class ProfileEngine {
 
         private CompletableFuture<Void> record(final ProfileTransition outcome) {
             this.journal.set(outcome);
-            return ProfileEngine.this.<Void>io(() -> {
+            return this.<Void>io(() -> {
                 ProfileEngine.this.repository.saveTransition(outcome, journalGuard());
                 return null;
             }).handle((written, failed) -> {
@@ -3820,7 +4189,7 @@ public final class ProfileEngine {
 
         /** Publishes a committed switch and describes the target for the result; never fails the result. */
         private CompletableFuture<ProfileInfo> describeTarget() {
-            return ProfileEngine.this.io(() -> {
+            return io(() -> {
                 if (this.commitPoint.get()) {
                     publish(FabricEventType.PROFILE_SWITCH_COMPLETED, Map.of(
                         "player", playerId().toString(),
@@ -3946,17 +4315,18 @@ public final class ProfileEngine {
      * the profile on in between. The state keeps the adapter entries of the profile's latest snapshot
      * that the capture does not account for ({@link #withCarriedAdapters}).
      */
-    private ProfileSnapshot writeSnapshotFor(final UUID profileId, final ProfileState state,
-                                             final ProfileStateAdapters.Capture adapters, final OwnerClaim claim)
+    private Published writeSnapshotFor(final UUID profileId, final ProfileState state,
+                                       final ProfileStateAdapters.Capture adapters, final OwnerClaim claim)
         throws IOException {
         final AuroraProfile profile = this.repository.profile(profileId)
             .orElseThrow(() -> error(ProfileErrorCode.PROFILE_NOT_FOUND, "no profile " + profileId));
-        final byte[] encoded = encode(profileId, withCarriedAdapters(profileId, state, adapters));
+        final ProfileState carried = withCarriedAdapters(profileId, state, adapters);
+        final byte[] encoded = encode(profileId, carried);
         final ProfileSnapshot snapshot = new ProfileSnapshot(profileId, UUID.randomUUID(), ProfileState.SCHEMA,
             profile.revision() + 1, encoded, ProfileStateCodec.checksum(encoded), System.currentTimeMillis());
         this.repository.publishSnapshot(profile.nextRevision(), snapshot, SNAPSHOTS_KEPT,
             ProfileWriteGuard.of(claim, profile.revision()));
-        return snapshot;
+        return new Published(snapshot, carried);
     }
 
     /**
@@ -4380,7 +4750,9 @@ public final class ProfileEngine {
      */
     private ProfileDetails details(final AuroraProfile profile, final UUID activeProfile, final Map<UUID, String> legacyNames) {
         final String name = profile.legacy() ? legacyNames.getOrDefault(profile.id(), profile.name()) : profile.name();
-        return new ProfileDetails(info(profile, activeProfile), name, profile.profileType());
+        final boolean seasonal = ProfileTypes.get().definition(ProfileTypes.typeIdOf(profile))
+            .map(dev.iyanz.sourbycraft.api.profile.ProfileTypeDefinition::seasonal).orElse(false);
+        return new ProfileDetails(info(profile, activeProfile), name, profile.profileType(), profile.archivedAtMillis(), seasonal);
     }
 
     private ProfileInfo info(final AuroraProfile profile, final UUID activeProfile) {
@@ -4391,7 +4763,7 @@ public final class ProfileEngine {
             SourbyLogger.warn("AWF MultiProfile: could not read the binding of " + profile.id() + ": " + failed.getMessage());
         }
         return new ProfileInfo(profile.id(), profile.accountId(), profile.type(), profile.metadata(),
-            profile.createdAtMillis(), profile.revision(), profile.status().name(),
+            profile.createdAtMillis(), profile.revision(), profile.apiStatus(),
             profile.id().equals(activeProfile), worlds);
     }
 
@@ -4473,6 +4845,10 @@ public final class ProfileEngine {
      * other node may hold the profile ({@code WRONG_NODE}). One intent under {@code P} and the actor's {@code Q}.
      */
     public CompletableFuture<dev.iyanz.sourbycraft.api.profile.CoopDetails> convertToCoop(final UUID actor, final UUID profileId) {
+        return audited("coop.convert", profileId, actor, convertToCoopInternal(actor, profileId), view -> "members " + view.members().size());
+    }
+
+    private CompletableFuture<dev.iyanz.sourbycraft.api.profile.CoopDetails> convertToCoopInternal(final UUID actor, final UUID profileId) {
         return coop(() -> {
             final AuroraProfile profile = coopProfile(profileId, false);
             if (!profile.accountId().equals(actor)) {
@@ -4500,12 +4876,14 @@ public final class ProfileEngine {
      * the profile record only, never an account alias. An invalid label is {@code NAME_INVALID}.
      */
     public CompletableFuture<Void> setCoopLabel(final UUID actor, final UUID profileId, final String label) {
-        return coop(() -> {
+        return audited("coop.label", profileId, actor, coop(() -> {
             if (label != null && !AuroraProfile.validDisplayLabel(label)) {
                 throw error(ProfileErrorCode.NAME_INVALID, "the display label must be 1-" + AuroraProfile.MAX_DISPLAY_LABEL
                     + " printable characters without surrounding whitespace. Nothing was written");
             }
             final AuroraProfile profile = coopProfile(profileId, true);
+            // Build 55: the type decides (coop.label; refused outright by a type that allows no co-op).
+            ProfileTypes.get().require(profile, ProfileTypes.COOP_LABEL);
             requireProfileNode(profileId);
             requireProfileReady(profile);
             final PlayerAccount account = loadReadyAccount(actor);
@@ -4517,7 +4895,7 @@ public final class ProfileEngine {
             runCoopPlan(CoopMembership.renameLabel(operation(CoopOperation.Kind.RENAME_DISPLAY, actor, profileId,
                 label == null ? "" : label, profile.revision()), profile, account, label, storeNow + INTENT_DEADLINE_MILLIS));
             return null;
-        });
+        }), ignored -> label == null ? "label cleared" : "label set");
     }
 
     /**
@@ -4527,6 +4905,11 @@ public final class ProfileEngine {
      */
     public CompletableFuture<dev.iyanz.sourbycraft.api.profile.CoopInviteInfo> invite(final UUID actor, final UUID profileId,
                                                                                     final UUID invitee) {
+        return audited("coop.invite", profileId, actor, inviteInternal(actor, profileId, invitee), info -> "invitee " + invitee + ", invite " + info.id());
+    }
+
+    private CompletableFuture<dev.iyanz.sourbycraft.api.profile.CoopInviteInfo> inviteInternal(final UUID actor, final UUID profileId,
+                                                                                            final UUID invitee) {
         return coop(() -> {
             if (actor.equals(invitee)) throw error(ProfileErrorCode.INVALID_REQUEST, "a member cannot invite itself. Nothing was written");
             final AuroraProfile first = coopProfile(profileId, true);
@@ -4546,7 +4929,7 @@ public final class ProfileEngine {
             runCoopPlan(plan);
             final ProfileInvite created = this.repository.invite(plan.result().recordId()).orElseThrow(() -> readBack("invite",
                 plan.result().recordId()));
-            final dev.iyanz.sourbycraft.api.profile.CoopInviteInfo info = inviteInfo(created, storeNow);
+            final dev.iyanz.sourbycraft.api.profile.CoopInviteInfo info = inviteInfo(created, storeNow, profile);
             fireCoopEvent(new dev.iyanz.sourbycraft.api.profile.CoopInviteEvent(info));
             return info;
         });
@@ -4560,6 +4943,10 @@ public final class ProfileEngine {
      * profile. Fires {@code CoopMemberJoinEvent}. The new member cannot switch into the profile before Build 53.
      */
     public CompletableFuture<dev.iyanz.sourbycraft.api.profile.CoopMemberInfo> acceptInvite(final UUID player, final UUID inviteId) {
+        return audited("coop.accept", null, player, acceptInviteInternal(player, inviteId), member -> "invite " + inviteId + ", role " + member.role());
+    }
+
+    private CompletableFuture<dev.iyanz.sourbycraft.api.profile.CoopMemberInfo> acceptInviteInternal(final UUID player, final UUID inviteId) {
         return coop(() -> {
             final ProfileInvite invite = inviteOf(player, inviteId);
             final AuroraProfile profile = coopProfile(invite.profileId(), true);
@@ -4604,11 +4991,11 @@ public final class ProfileEngine {
 
     /** The invitee declines an open invitation. Fires {@code CoopInviteEvent} (DECLINED). */
     public CompletableFuture<Void> declineInvite(final UUID player, final UUID inviteId) {
-        return coop(() -> {
+        return audited("coop.decline", null, player, coop(() -> {
             final ProfileInvite invite = inviteOf(player, inviteId);
             closeInvite(invite, player, ProfileInvite.Status.DECLINED);
             return null;
-        });
+        }), ignored -> "invite " + inviteId);
     }
 
     /**
@@ -4616,7 +5003,7 @@ public final class ProfileEngine {
      * {@code CoopInviteEvent} (CANCELLED).
      */
     public CompletableFuture<Void> cancelInvite(final UUID actor, final UUID inviteId) {
-        return coop(() -> {
+        return audited("coop.cancel", null, actor, coop(() -> {
             final ProfileInvite invite = this.repository.invite(inviteId).orElseThrow(() -> error(ProfileErrorCode.INVITE_NOT_FOUND,
                 "no invite " + inviteId));
             final AuroraProfile profile = coopProfile(invite.profileId(), true);
@@ -4628,7 +5015,7 @@ public final class ProfileEngine {
             }
             closeInvite(invite, actor, ProfileInvite.Status.REVOKED);
             return null;
-        });
+        }), ignored -> "invite " + inviteId);
     }
 
     /** One page of the open invitations addressed to {@code player}, oldest first; expired ones are left out. */
@@ -4640,7 +5027,9 @@ public final class ProfileEngine {
             final long now = this.repository.storeClockMillis();
             final List<dev.iyanz.sourbycraft.api.profile.CoopInviteInfo> items = new ArrayList<>();
             for (final ProfileInvite invite : page.items()) {
-                if (invite.open() && !invite.expired(now) && invite.invitee().equals(player)) items.add(inviteInfo(invite, now));
+                if (invite.open() && !invite.expired(now) && invite.invitee().equals(player)) {
+                    items.add(inviteInfo(invite, now, this.repository.profile(invite.profileId()).orElse(null)));
+                }
             }
             return new dev.iyanz.sourbycraft.api.profile.CoopPage<>(items, nextCursor(page));
         });
@@ -4666,8 +5055,9 @@ public final class ProfileEngine {
                 listingCursor(cursor, ProfileIndexPage.Kind.INVITES_BY_PROFILE, profileId));
             final long now = this.repository.storeClockMillis();
             final List<dev.iyanz.sourbycraft.api.profile.CoopInviteInfo> items = new ArrayList<>();
+            final AuroraProfile named = this.repository.profile(profileId).orElse(null);
             for (final ProfileInvite invite : page.items()) {
-                if (invite.open() && !invite.expired(now) && invite.profileId().equals(profileId)) items.add(inviteInfo(invite, now));
+                if (invite.open() && !invite.expired(now) && invite.profileId().equals(profileId)) items.add(inviteInfo(invite, now, named));
             }
             return new dev.iyanz.sourbycraft.api.profile.CoopPage<>(items, nextCursor(page));
         });
@@ -4680,6 +5070,15 @@ public final class ProfileEngine {
      * Fires {@code CoopMemberLeaveEvent} (LEFT).
      */
     public CompletableFuture<Void> leave(final UUID player, final UUID profileId) {
+        return audited("coop.leave", profileId, player, leaveInternal(player, profileId), ignored -> "");
+    }
+
+    /**
+     * Leaving is the one membership change an <em>archived</em> co-op allows (PM decision, Build 55 review P1-2): a
+     * member must be able to drop a read-only profile from their account, so only the pending-intent half of the ready
+     * check applies here ({@link #requireNotReserved}); the archive refuses everything else.
+     */
+    private CompletableFuture<Void> leaveInternal(final UUID player, final UUID profileId) {
         return coop(() -> {
             final AuroraProfile profile = coopProfile(profileId, true);
             final ProfileMember row = profile.member(player);
@@ -4689,7 +5088,7 @@ public final class ProfileEngine {
                     + " available, and a sole owner deletes the profile instead. Nothing was written");
             }
             requireProfileNode(profileId);
-            requireProfileReady(profile);
+            requireNotReserved(profile);
             final PlayerAccount account = loadReadyAccount(player);
             return evacuationFor(account, profile);
         }).thenCompose(evacuation -> evacuate(evacuation).thenCompose(moved -> this.<Void>coop(() -> {
@@ -4697,7 +5096,7 @@ public final class ProfileEngine {
             final ProfileMember row = profile.member(player);
             if (row == null) throw error(ProfileErrorCode.NOT_A_MEMBER, player + " is not a member of " + profileId + ". Nothing was written");
             requireProfileNode(profileId);
-            requireProfileReady(profile);
+            requireNotReserved(profile);
             final PlayerAccount account = loadReadyAccount(player);
             final CoopMembership.NextActive next = evacuation.nextFor(account, profileId, this);
             final MemberStateHead head = this.repository.memberHead(profileId, player, row.epoch()).orElse(null);
@@ -4705,7 +5104,7 @@ public final class ProfileEngine {
             // The member's open invitations are revoked and the profile's undecided votes cancelled in the same intent;
             // the expired-invite cleanup on the way reserved M, so the profile is read again.
             final List<ProfileInvite> issued = openInvites(ProfileIndexPage.Kind.INVITES_BY_PROFILE, profileId, player, storeNow);
-            final AuroraProfile current = readyAgain(profileId, profile);
+            final AuroraProfile current = unreservedAgain(profileId, profile);
             runCoopPlan(CoopMembership.leave(operation(CoopOperation.Kind.MEMBER_REMOVE, player, profileId, row.epoch(),
                 current.revision()), current, account, head, issued, undecidedVotes(current), next, storeNow, storeNow + INTENT_DEADLINE_MILLIS));
             fireCoopEvent(new dev.iyanz.sourbycraft.api.profile.CoopMemberLeaveEvent(profileId, player,
@@ -4831,7 +5230,7 @@ public final class ProfileEngine {
     /** Runs the {@link Evacuation}: a {@code SWITCH_OUT} switches the member; the other modes do nothing here. */
     private CompletableFuture<Evacuation> evacuate(final Evacuation evacuation) {
         if (evacuation.mode() != Evacuation.Mode.SWITCH_OUT) return CompletableFuture.completedFuture(evacuation);
-        return switchProfile(evacuation.member(), evacuation.nextProfile()).thenApply(result -> {
+        return switchProfile(evacuation.member(), evacuation.nextProfile(), true).thenApply(result -> {
             if (!result.success()) {
                 throw error(ProfileErrorCode.MEMBER_ONLINE, evacuation.member() + " plays " + evacuation.profileId() + " on this node and"
                     + " could not be switched out to " + evacuation.describeNext() + " first (" + result.errorCode() + ": " + result.message()
@@ -4904,8 +5303,16 @@ public final class ProfileEngine {
      */
     public CompletableFuture<dev.iyanz.sourbycraft.api.profile.CoopKickVoteInfo> startKickVote(final UUID actor, final UUID profileId,
                                                                                             final UUID target) {
+        return audited("coop.kick.open", profileId, actor, startKickVoteInternal(actor, profileId, target),
+            info -> "target " + target + ", vote " + info.id() + " " + info.state());
+    }
+
+    private CompletableFuture<dev.iyanz.sourbycraft.api.profile.CoopKickVoteInfo> startKickVoteInternal(final UUID actor, final UUID profileId,
+                                                                                                     final UUID target) {
         return coop(() -> {
             final AuroraProfile first = coopProfile(profileId, true);
+            // Build 55: the type decides (coop.kick; refused outright by a type that allows no co-op).
+            ProfileTypes.get().require(first, ProfileTypes.COOP_KICK);
             requireProfileNode(profileId);
             requireProfileReady(first);
             final PlayerAccount account = loadReadyAccount(actor);
@@ -4917,9 +5324,14 @@ public final class ProfileEngine {
             final CoopIntentPlan plan = CoopMembership.createVote(operation(CoopOperation.Kind.VOTE_CREATE, actor, profileId, target,
                 profile.revision()), profile, account, target, undecided, coopPolicy(profile), openedAt, openedAt + INTENT_DEADLINE_MILLIS);
             runCoopPlan(plan);
-            return this.repository.vote(plan.result().recordId()).orElseThrow(() -> readBack("vote", plan.result().recordId()));
+            final KickVote opened = this.repository.vote(plan.result().recordId()).orElseThrow(() -> readBack("vote", plan.result().recordId()));
+            this.profileMetrics.voteOpened(opened.id(), opened.createdAtMillis());
+            return opened;
         }).thenCompose(vote -> vote.status() == KickVote.Status.PASSED ? executeKick(actor, vote) : CompletableFuture.completedFuture(vote))
-            .thenCompose(vote -> coop(() -> voteInfo(vote, this.repository.storeClockMillis())));
+            .thenCompose(vote -> coop(() -> {
+                if (!vote.undecided()) this.profileMetrics.voteClosed(vote.id());
+                return voteInfo(vote, this.repository.storeClockMillis());
+            }));
     }
 
     /**
@@ -4930,10 +5342,18 @@ public final class ProfileEngine {
      */
     public CompletableFuture<dev.iyanz.sourbycraft.api.profile.CoopKickVoteInfo> voteKick(final UUID voter, final UUID voteId,
                                                                                        final boolean approve) {
+        return audited("coop.kick.vote", null, voter, voteKickInternal(voter, voteId, approve),
+            info -> "vote " + voteId + (approve ? " approved" : " declined") + ", now " + info.state());
+    }
+
+    private CompletableFuture<dev.iyanz.sourbycraft.api.profile.CoopKickVoteInfo> voteKickInternal(final UUID voter, final UUID voteId,
+                                                                                                final boolean approve) {
         return coop(() -> {
             final KickVote vote = this.repository.vote(voteId).orElseThrow(() -> error(ProfileErrorCode.VOTE_NOT_FOUND, "no vote " + voteId));
             final AuroraProfile profile = coopProfile(vote.profileId(), true);
             if (profile.member(voter) == null) throw error(ProfileErrorCode.NOT_A_MEMBER, voter + " is not a member of " + profile.id());
+            // Build 55 (review P3-9): the ballot and the removal it may run are kick actions; the type decides at every boundary.
+            ProfileTypes.get().require(profile, ProfileTypes.COOP_KICK);
             requireProfileNode(profile.id());
             requireProfileReady(profile);
             final PlayerAccount account = loadReadyAccount(voter);
@@ -4963,7 +5383,10 @@ public final class ProfileEngine {
                 profile, vote, account, approve, storeNow, storeNow + INTENT_DEADLINE_MILLIS));
             return this.repository.vote(voteId).orElseThrow(() -> readBack("vote", voteId));
         }).thenCompose(after -> after.status() == KickVote.Status.PASSED ? executeKick(voter, after) : CompletableFuture.completedFuture(after))
-            .thenCompose(after -> coop(() -> voteInfo(after, this.repository.storeClockMillis())));
+            .thenCompose(after -> coop(() -> {
+                if (!after.undecided()) this.profileMetrics.voteClosed(after.id());
+                return voteInfo(after, this.repository.storeClockMillis());
+            }));
     }
 
     /** The undecided (OPEN or PASSED, unexpired) kick vote of a co-op profile, if any; the operator's and the API's form. */
@@ -5451,6 +5874,9 @@ public final class ProfileEngine {
     }
 
     private void fireLedger(final ProfileBank.LedgerEvent event) {
+        auditRecord("bank." + event.entry().name().toLowerCase(java.util.Locale.ROOT).replace('_', '-'), event.profileId(), event.actor(),
+            event.operationId(), true, null, (event.collection() == null ? "" : event.collection() + " ") + event.amount()
+                + (event.from() == null ? "" : " " + event.from() + "->" + event.to()));
         if (this.closed) return;
         try {
             coopEventLane().execute(() -> {
@@ -5497,6 +5923,11 @@ public final class ProfileEngine {
             requireViewer(profile, viewer);
             final CoopMembership.Page<ProfileSalvage> page = CoopMembership.salvageByProfile(this.repository, profileId,
                 listingCursor(cursor, ProfileIndexPage.Kind.SALVAGE_BY_PROFILE, profileId));
+            for (final ProfileSalvage item : page.items()) {
+                // Build 55 metrics: outstanding salvage this node has seen (listings and claims), judged on the store clock.
+                if (item.claimable()) this.profileMetrics.salvageOutstanding(item.id(), item.createdAtMillis());
+                else this.profileMetrics.salvageSettled(item.id());
+            }
             return new SalvageListing(page.items(), nextCursor(page));
         });
     }
@@ -5505,7 +5936,8 @@ public final class ProfileEngine {
     private record ClaimPrep(ProfileSalvage salvage, AuroraProfile profile, ProfileMember row, CaptureTicket ticket,
                              ProfileSnapshot payload, List<ProfileState.Item> items) {}
 
-    private record Delivered(ProfileState state, SalvageDelivery result) {}
+    /** {@code untouched}: adapter ids the claim capture preserved (failed best-effort captures), never reset by the apply (P2-4). */
+    private record Delivered(ProfileState state, SalvageDelivery result, Set<String> untouched) {}
 
     /**
      * Delivers a salvage record into the claimant's active profile exactly once (COOP-DESIGN §7; OD-3):
@@ -5590,7 +6022,7 @@ public final class ProfileEngine {
             .thenCompose(capture -> this.<Delivered>coop(() -> deliverSalvage(claimant, prep, capture))))
             .thenCompose(delivered -> {
                 if (delivered.state() == null) return CompletableFuture.completedFuture(delivered.result());
-                return this.players.apply(claimant, delivered.state(), this.settings.isolation())
+                return this.players.apply(claimant, delivered.state(), this.settings.isolation(), delivered.untouched())
                     .orTimeout(this.settings.switching().timeoutMillis(), TimeUnit.MILLISECONDS)
                     .handle((ignored, failed) -> {
                         if (failed == null) return delivered.result();
@@ -5722,10 +6154,15 @@ public final class ProfileEngine {
             ? "Salvage " + salvage.id().toString().substring(0, 8) + " delivered: " + merged.placed().size() + " stack(s)."
             : "Salvage " + salvage.id().toString().substring(0, 8) + ": " + merged.placed().size() + " stack(s) delivered, "
                 + merged.remainder().size() + " left for a later claim (free some slots).");
-        return new Delivered(merged.placed().isEmpty() ? null : merged.state(), result);
+        return new Delivered(merged.placed().isEmpty() ? null : merged.state(), result, ProfileStateAdapters.preservedIds(capture.adapters()));
     }
 
     private void fireSalvage(final SalvageDelivery event) {
+        auditRecord("salvage.delivered", event.profileId(), event.claimant(), event.operationId(), true, null, event.delivered() + " stack(s) delivered, "
+            + event.remaining() + " remaining" + (event.complete() ? ", complete" : ""));
+        if (event.complete()) {
+            this.profileMetrics.salvageSettled(event.salvageId());
+        }
         if (this.closed) return;
         try {
             coopEventLane().execute(() -> {
@@ -5808,6 +6245,14 @@ public final class ProfileEngine {
         return current;
     }
 
+    /** {@link #readyAgain} for a leave: archived passes, a pending intent does not (P1-2). */
+    private AuroraProfile unreservedAgain(final UUID profileId, final AuroraProfile first) throws IOException {
+        final AuroraProfile current = coopProfile(profileId, true);
+        if (current.revision() == first.revision()) return first;
+        requireNotReserved(current);
+        return current;
+    }
+
     /**
      * A commit that succeeded but whose record does not read back: the outcome is not known to the caller, never
      * reported as a plain I/O failure (the record may well be installed).
@@ -5845,6 +6290,12 @@ public final class ProfileEngine {
     }
 
     private static void requireProfileReady(final AuroraProfile profile) {
+        requireNotArchived(profile);
+        requireNotReserved(profile);
+    }
+
+    /** The pending-intent half of {@link #requireProfileReady}: what a leave of an archived co-op still requires. */
+    private static void requireNotReserved(final AuroraProfile profile) {
         if (profile.pendingIntent() != null) {
             throw error(ProfileErrorCode.RECOVERY_REQUIRED, "profile " + profile.id() + " is reserved by intent " + profile.pendingIntent()
                 + "; it is resolved at the next start or the owner's next login. Nothing was written");
@@ -6006,7 +6457,7 @@ public final class ProfileEngine {
         runCoopPlan(CoopMembership.closeInvite(operation(CoopOperation.Kind.INVITE_REVOKE, actor, invite.id(), next, invite.revision()),
             profile, invite, account, next, storeNow, storeNow + INTENT_DEADLINE_MILLIS));
         final ProfileInvite closed = this.repository.invite(invite.id()).orElseThrow(() -> readBack("invite", invite.id()));
-        fireCoopEvent(new dev.iyanz.sourbycraft.api.profile.CoopInviteEvent(inviteInfo(closed, storeNow)));
+        fireCoopEvent(new dev.iyanz.sourbycraft.api.profile.CoopInviteEvent(inviteInfo(closed, storeNow, profile)));
     }
 
     /** A cleanup close (an expired invite): best effort, never an event; a failure is logged and retried by a later cleanup. */
@@ -6118,6 +6569,7 @@ public final class ProfileEngine {
                 profile.revision()), profile, vote, targetAccount, head, issued, coopPolicy(profile), next, storeNow, storeNow + INTENT_DEADLINE_MILLIS));
             fireCoopEvent(new dev.iyanz.sourbycraft.api.profile.CoopMemberLeaveEvent(first.id(), vote.target(),
                 dev.iyanz.sourbycraft.api.profile.CoopMemberLeaveEvent.Reason.KICKED, vote.id()));
+            auditRecord("coop.kick.executed", first.id(), actor, vote.id(), true, null, "removed " + vote.target());
             notify(vote.target(), "You were removed from co-op profile " + profile.shownLabel() + " by vote"
                 + (evacuation.mode() == Evacuation.Mode.NONE ? "." : "; you now play profile " + evacuation.describeNext() + ".")
                 + " Your items there are recorded for salvage.");
@@ -6220,7 +6672,9 @@ public final class ProfileEngine {
             member.lastSeenAtMillis());
     }
 
-    private static dev.iyanz.sourbycraft.api.profile.CoopInviteInfo inviteInfo(final ProfileInvite invite, final long now) {
+    /** The API view of an invite; {@code profile} (the invited co-op as read with it, or {@code null}) supplies name and type (Build 55). */
+    private static dev.iyanz.sourbycraft.api.profile.CoopInviteInfo inviteInfo(final ProfileInvite invite, final long now,
+                                                                             final AuroraProfile profile) {
         final dev.iyanz.sourbycraft.api.profile.CoopInviteState state = switch (invite.status()) {
             case OPEN -> invite.expired(now) ? dev.iyanz.sourbycraft.api.profile.CoopInviteState.EXPIRED
                 : dev.iyanz.sourbycraft.api.profile.CoopInviteState.OPEN;
@@ -6230,7 +6684,8 @@ public final class ProfileEngine {
             case EXPIRED -> dev.iyanz.sourbycraft.api.profile.CoopInviteState.EXPIRED;
         };
         return new dev.iyanz.sourbycraft.api.profile.CoopInviteInfo(invite.id(), invite.profileId(), invite.inviter(), invite.invitee(),
-            invite.createdAtMillis(), invite.expiresAtMillis(), state);
+            invite.createdAtMillis(), invite.expiresAtMillis(), state, profile == null ? null : profile.name(),
+            profile == null ? null : profile.profileType());
     }
 
     private static dev.iyanz.sourbycraft.api.profile.CoopKickVoteInfo voteInfo(final KickVote vote, final long now) {
@@ -6255,11 +6710,20 @@ public final class ProfileEngine {
      * step's read-modify-write and the switch admission checks never interleave with another step;
      * a step never waits on another step.
      */
+    /** A store-wide step: a barrier that waits for every running step and blocks every later one (PM-091). */
     private <T> CompletableFuture<T> io(final IoSupplier<T> work) {
+        return io(Key.BARRIER, work);
+    }
+
+    /**
+     * A step keyed by the account and profile ids it touches: FIFO with the other steps of those ids, concurrent with
+     * steps of other ids when {@code io.partitions} is above 1 (one partition keeps the Build 54 global FIFO).
+     */
+    private <T> CompletableFuture<T> io(final Key key, final IoSupplier<T> work) {
         this.pendingIo.incrementAndGet();
         final CompletableFuture<T> future = new CompletableFuture<>();
         final CompletableFuture<T> tracked = future.whenComplete((ignored, failed) -> this.pendingIo.decrementAndGet());
-        final boolean queued = this.ioQueue.offer(new ProfileIoQueue.Step() {
+        final boolean queued = this.ioQueue.offer(key, new ProfileIoQueue.Step() {
             @Override
             public Runnable run() {
                 try {
@@ -6368,7 +6832,7 @@ public final class ProfileEngine {
                  PROFILE_NOT_FOUND, NOT_OWNED, PROFILE_LOCKED, SWITCHING_DISABLED, DISABLED, TIMEOUT,
                  COUNTER_EXHAUSTED, CLAIM_LOST, UNKNOWN_OUTCOME, STORE_FORMAT_REFUSED, MIGRATION_REQUIRED,
                  ADAPTER_REQUIRED_FAILED, ADAPTER_MISSING, NOT_A_MEMBER, WRONG_NODE, COOP_DISABLED, COOP_SWITCH_UNAVAILABLE,
-                 SWITCH_IN_PROGRESS, RECOVERY_REQUIRED -> code;
+                 SWITCH_IN_PROGRESS, RECOVERY_REQUIRED, SWITCH_COOLDOWN, SWITCH_VETOED, PROFILE_ARCHIVED, ACTION_FORBIDDEN_BY_TYPE -> code;
             default -> ProfileErrorCode.RECOVERY_REQUIRED;
         };
     }

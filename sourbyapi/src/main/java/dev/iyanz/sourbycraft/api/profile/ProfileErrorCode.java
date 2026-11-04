@@ -181,5 +181,23 @@ public enum ProfileErrorCode {
      * refused. The consumer plugin that holds the purse moves that money on its side and credits or debits the bank
      * ledger through {@link AuroraProfiles#deposit} / {@link AuroraProfiles#withdraw}. Nothing was written.
      */
-    PURSE_TRANSFER_UNSUPPORTED
+    PURSE_TRANSFER_UNSUPPORTED,
+    /**
+     * Added in Build 55. The player committed a switch less than {@code switching.cooldown-seconds} ago; the message
+     * names the remaining seconds. Only a committed switch starts the cooldown (a refused, vetoed or failed one does
+     * not). Nothing was written.
+     */
+    SWITCH_COOLDOWN,
+    /**
+     * Added in Build 55. A registered {@link ProfileSwitchGuard} refused the switch (or threw, or did not answer in
+     * time); the message carries the guard's reason. The player's state was not touched and nothing was written.
+     */
+    SWITCH_VETOED,
+    /**
+     * Added in Build 55. The profile is archived (read-only: a seasonal profile after its event, or an operator's
+     * {@code /awf multiprofile archive}): it can be listed and read, but not switched into, changed, converted,
+     * joined or used for bank, collection or salvage operations until an operator unarchives it. A member may still
+     * {@linkplain AuroraProfiles#leave leave} an archived co-op. Nothing was written.
+     */
+    PROFILE_ARCHIVED
 }

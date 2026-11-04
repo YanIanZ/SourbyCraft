@@ -186,6 +186,62 @@ Build 54 code written; compiled by an agent; not tested by the owner. Full contr
 - `ProfileRequest.withTypeId(id)` creates a profile of a registered type (stored as `classic` plus the metadata entry
   `aurora:type`); `ProfileDetails.typeId()` returns the effective id.
 
+## Operations and parity (Build 55)
+
+Build 55 code written; compiled by an agent; not tested by the owner. Every addition is append-only (new default
+methods, new record components with the old constructors kept, new enum constants, new types).
+
+- `ProfileAuditEntry` and `AuroraProfiles.audit(profileId, cursor)`: one page (newest first, 32) of the node-local
+  audit entries about a profile — or about an account, when the id is the actor — from the entries this node keeps in
+  memory (newest 4096 over all profiles); the retained log is the daily files under `<directory>/audit/`
+  ([OPERATIONS.md](OPERATIONS.md#audit-log-build-55)). Fails `DISABLED` while `audit.enabled` is false.
+- `ProfileSwitchGuard` with `AuroraProfiles.registerSwitchGuard(plugin, guard)` / `unregisterSwitchGuard` (at most
+  `MAX_SWITCH_GUARDS` = 16): `refusal(playerId, fromProfileId, toProfileId)` returns `null` to allow or a reason to
+  veto. Called off every game thread, after admission and before the capture, with one 2 s budget for all guards;
+  throwing or timing out is a veto with a WARN. The switch then completes with `SWITCH_VETOED` carrying the reason,
+  the player untouched, no cooldown consumed. Do not call Bukkit entity/world APIs from a guard; read your own
+  concurrent state.
+- `AuroraProfiles.switchCooldownRemainingMillis(playerId)`: `0` when the player may switch now; otherwise the wait
+  after their last committed switch on this node (`switching.cooldown-seconds`). Synchronous, in memory.
+- `AuroraProfiles.archiveProfile(profileId)` / `unarchiveProfile(profileId)`: read-only archive, see
+  [OPERATIONS.md](OPERATIONS.md#archived-read-only-profiles). Mutations of an archived profile fail
+  `PROFILE_ARCHIVED`; `ProfileInfo.status()` reads `ARCHIVED` (so `usable()` is false). The archive markers
+  `aurora:archived` and `aurora:archived-from-locked` are server-written: a `ProfileRequest` whose metadata carries
+  either is refused `INVALID_REQUEST`.
+- `ProfileDetails` gains `archivedAtMillis()` (null while not archived), `archived()` and `seasonal()` (the type's
+  flag on this server); the 3-argument constructor is kept.
+- `ProfileTypeDefinition` gains `seasonal()` and `Builder.seasonal(boolean)` (the 9-argument constructor is kept; the
+  built-in `bingo` is seasonal). `ProfileTypeRegistry` gains the engine-owned rule ids `PROFILE_SWITCH`,
+  `COOP_KICK`, `COOP_LABEL`; `coopAction` includes the two co-op ones. These three are allowed unless a definition
+  names them in its `rules` (`ProfileTypeRegistry.allowedUnlessNamed`; `defaultRule` does not decide them), so a
+  Build 54 type with a deny default rule keeps working after the upgrade.
+- `ProfileErrorCode` appends `SWITCH_COOLDOWN`, `SWITCH_VETOED`, `PROFILE_ARCHIVED`.
+- `ProfileStateAdapter.applyAbsent(player)` (default no-op): called on the owning thread, on every apply path (switch
+  target, rollback, login restore and adoption, evacuation, salvage destination), for every registered adapter whose
+  id has **no entry** in the state being applied, after the other adapters' `apply`. A REQUIRED adapter must reset the
+  player to its empty state there (a per-profile purse to 0), or per-profile plugin state follows the player into a
+  profile that holds none — including switches the consumer did not start (operator switch, kick of an online member,
+  login restore, evacuation). Failure semantics are those of `apply`. Stored data under a version the registration does
+  not read is not "absent": it stays in the profile and `applyAbsent` is not called for it.
+
+### Profile events (Build 55)
+
+Package `dev.iyanz.sourbycraft.api.profile.event`, asynchronous Bukkit events, not cancellable, fired on the profile
+service's event thread (`SourbyCraft-AWF-coop-events`; never a region, entity, global-tick or Netty thread) with the
+same delivery limits as the co-op events below (bounded queue of 256, dropped with a warning and counted in
+`/perf multiprofile`; the store is the source of truth):
+
+- `ProfilePreSwitchEvent(playerId, fromProfileId, toProfileId, transitionId)`: fired once admission, membership, type
+  rules (`profile.switch`), switch guards and cooldown have passed and the target world is ready, **before** the
+  player is frozen and captured. Informational: the switch may still fail afterwards (a capture, apply or commit
+  failure rolls back), so pair it with `ProfileSwitchedEvent`.
+- `ProfileSwitchedEvent(playerId, fromProfileId, result)`: after the commit point, committed switches only
+  (`result.success()`, `result.profile()` set, `result.durationMillis()`). Every switch fires it, whoever started
+  it (the player, an operator, a kick evacuation); when the target cannot be read again after the commit the event
+  carries the target as admission read it.
+- `ProfileCreatedEvent(profile)`, `ProfileDeletedEvent(profileId, accountId)`: after the durable create / tombstone;
+  not fired when a delete found nothing to do.
+
 ## Co-op membership (Build 52)
 
 Build 52 code written and compiled by an agent; not tested by the owner. Co-op is **off by default**:
@@ -220,7 +276,8 @@ calling thread.
 
 Value types: `CoopRole` (`OWNER`, `MANAGER`, `MEMBER`), `CoopMemberInfo(playerId, role, joinedAtMillis,
 lastSeenAtMillis)`, `CoopInviteInfo(id, profileId, inviter, invitee, createdAtMillis, expiresAtMillis,
-state)` with `CoopInviteState` (`OPEN`, `ACCEPTED`, `DECLINED`, `CANCELLED`, `EXPIRED`),
+state, profileName, profileType)` (the last two added in Build 55, `null` when the profile could not be read; the Build 52
+seven-argument constructor remains) with `CoopInviteState` (`OPEN`, `ACCEPTED`, `DECLINED`, `CANCELLED`, `EXPIRED`),
 `CoopKickVoteInfo(id, profileId, target, votes, electorateSize, createdAtMillis, expiresAtMillis, state)`
 with `CoopKickVoteState` (`OPEN`, `PASSED`, `EXECUTED`, `DECLINED`, `CANCELLED`, `EXPIRED`),
 `CoopDetails(profileId, label, members, maxMembers)` and `CoopPage<T>(items, nextCursor)`. Enums only gain
@@ -344,6 +401,7 @@ lifecycle: [PROFILE-LIFECYCLE.md](PROFILE-LIFECYCLE.md#co-op-bank-collections-an
 
 | Method | Who | Type action | Result |
 |---|---|---|---|
+| `bankPolicy()` | anyone; Build 55; synchronous, no I/O | none | `Optional<ProfileBankPolicy>` (currency, caps, interest; empty without a bank) |
 | `bank(UUID viewerId, UUID profileId)` | a member, or `null` (operator) | none | `ProfileBankInfo` |
 | `deposit(UUID actorId, UUID profileId, long amount)` | any member | `bank.deposit` | `ProfileBankInfo` |
 | `withdraw(actorId, profileId, amount)` | OWNER, MANAGER | `bank.withdraw` | `ProfileBankInfo` |

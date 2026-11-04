@@ -240,6 +240,112 @@ A membership intent that a crash left PREPARED or COMMITTED is resolved at the n
 next login ([PROFILE-LIFECYCLE.md](PROFILE-LIFECYCLE.md#co-op-membership-build-52)). `/awf multiprofile
 format` lists pending intents.
 
+## Build 55: audit, archive, cooldown, guards, metrics
+
+Review fixes folded into this build (b55-review): the audit log caps a daily file at 256 MiB (entries beyond it stay in
+the ring and count as dropped) and a `close()` no longer drops writes already handed to the lane; a detail formatter
+that throws never fails the audited operation; the switch guards run on their own two-thread lane with a 64-deep queue
+and a hung guard is interrupted at the budget (never the shared 64-permit virtual executor AWF world operations use).
+
+Build 55 code written; compiled by an agent; not tested by the owner (the owner runs every test, benchmark and
+server since 2026-10-22). Nothing here changes a Build 51–54 safety property: every new check runs before a capture,
+every new record is written after the durable outcome, and no new record type enters the profile store format.
+
+### Audit log (Build 55)
+
+`audit.enabled` (default on). An **immutable entry is recorded after the durable outcome** of: every switch
+(`switch.committed` with the transition id and duration; `switch.refused` for an admission refusal — cooldown,
+archived, lock, type rule, not a member…; `switch.vetoed` for a guard veto; `switch.failed` with the error code),
+`profile.created`, `profile.deleted`, `profile.locked`/`profile.unlocked`, `profile.archived`/`profile.unarchived`,
+the co-op membership operations (`coop.convert`, `coop.invite`, `coop.accept`, `coop.decline`, `coop.cancel`,
+`coop.leave`, `coop.kick.open`, `coop.kick.vote`, `coop.kick.executed`, `coop.label`, each also as `<kind>.refused`
+with the code when the call failed), every bank posting (`bank.deposit`, `bank.withdraw`, `bank.deposit-personal`,
+`bank.withdraw-personal`, `bank.transfer`, `bank.contribute`, `bank.interest`, recorded when the ledger event fires,
+i.e. after the commit) and `salvage.delivered`. An entry carries the node-local sequence, the time, the kind, the
+profile, the actor, the operation or transition id, OK or the error code and a short detail.
+
+Where: the newest 4096 entries in memory (`/awf multiprofile audit <profile> [cursor]`, `AuroraProfiles.audit`,
+newest first, pages of 32), and the retained log as append-only daily files `<directory>/audit/<yyyy-MM-dd>.log`,
+one tab-separated line per entry, kept `audit.retention-days` (older files deleted when a new day's file opens).
+Both are **node-local**: each node records what it committed; with `repository: redis` the files still go below the
+configured directory of each node.
+
+How: `record` is non-blocking on every thread (it appends to the ring and offers one write step to the audit's own
+single-slot queue on the storage lane; that queue is separate from the profile step queue, so it never delays or
+reorders profile steps and holds at most one lane slot). **Audit failure never changes an outcome**: a full queue
+drops the entry and counts it, a failed file write is counted and logged at most once a minute; the counters are
+rows of `/perf multiprofile` and `/awf multiprofile status`. The audit log is **not** the recovery journal: the
+store's intents and transitions are; nothing reads the audit log back during recovery.
+
+### Archived (read-only) profiles
+
+`/awf multiprofile archive <profile>` (admin) or `AuroraProfiles.archiveProfile`: the profile keeps every record
+(snapshots, member streams, bank, collections, salvage, binding) and stays listed with status `ARCHIVED`
+(`ProfileInfo.status()`; `ProfileDetails.archivedAtMillis()`), but it cannot be switched into, converted, joined,
+labelled, locked or used for bank, collection or salvage **mutations** (`PROFILE_ARCHIVED`); reads keep working, and a
+member may still **leave** an archived co-op (PM decision, review P1-2: a read-only profile must not stay stuck in a
+member's account; the leave records the salvage as usual). Refused for an account's active profile (switch away first),
+for a tombstone, and for a co-op while any member has it as their active profile (`PROFILE_LOCKED`, naming them) or plays
+it in an admitted session on this node (`MEMBER_ONLINE`) — review P1-3: an archived profile refuses every save, so a member
+left inside it would lose their quit save and a restored older head would duplicate items. `unarchive` restores the
+status the profile had before the archive: `ACTIVE`, or `LOCKED` when an operator lock preceded the archive (marker
+`aurora:archived-from-locked`, review P3-14); `unlock` on an archived profile is refused (use `unarchive`); `delete` still
+works on it. Stored as status `LOCKED` plus the metadata marker `aurora:archived=<store clock>`, so a Build 54 server
+reads an archived profile as a locked one — no store level is raised. The two markers are written by the server only:
+a create request (`ProfileRequest` metadata) that carries `aurora:archived` or `aurora:archived-from-locked` is refused
+`INVALID_REQUEST` (review N4), so no plugin can create a profile that reads as archived while its status is `ACTIVE`.
+Where the archive refusal comes relative to a type rule depends on the action (a switch checks the archive first; the
+co-op, bank and salvage mutations check the type first, so an archived profile whose type denies the action answers
+`ACTION_FORBIDDEN_BY_TYPE`): see [PROFILE-TYPES.md](PROFILE-TYPES.md#rule-ids). Owner decision (HYPIXEL-PARITY §6.4): a seasonal profile (type flag
+`seasonal`, built-in `bingo`) is archived read-only at the end of its event, never deleted; the server archives
+nothing on its own — the consumer that runs the event calls `archiveProfile`, or an operator does.
+
+### Switch cooldown and guards
+
+`switching.cooldown-seconds` (default `0` = off; parity 90) refuses a switch for that long after the player's last
+**committed** switch (`SWITCH_COOLDOWN`); refused, vetoed, failed or rolled-back switches start none. In memory on
+this node (restart clears it); `/awf multiprofile cooldown <player>` shows it, `... reset` (admin) forgets it.
+
+Switch guards (`AuroraProfiles.registerSwitchGuard`, at most 16): consumer hooks (combat, dungeon, open trade) that
+may veto a switch. They run after admission, membership and type checks, after the target world is ready and
+**before the player is frozen or captured**, off every game thread with one 2 s budget for all; a veto, an exception
+or the budget running out refuses the switch with `SWITCH_VETOED` (WARN naming the plugin for the latter two),
+leaves the player exactly as they were and consumes no cooldown. After the hooks the run re-checks its reservation,
+the player's presence and the deadline, then fires `ProfilePreSwitchEvent`. A guard that calls `switchProfile` for the
+same player is refused `SWITCH_IN_PROGRESS` by the running switch's reservation. A disabled plugin's guards are
+removed with its adapters.
+
+### Type rules at every engine action boundary
+
+Build 55 adds the engine-owned rules `profile.switch` (checked on the target at every switch admission),
+`coop.kick` (opening a kick vote and casting a ballot, review P3-9) and `coop.label` (the shared label); with the Build 54
+rules, every engine mutation that a type could sensibly deny now passes `ProfileTypes.require` before anything is written
+([PROFILE-TYPES.md](PROFILE-TYPES.md#rule-ids)). Reads, leave, decline and cancel stay ungated. `profile.switch` is the
+one rule that does **not** gate a profile whose type has no definition on the server (review P2-7): Build 54 stores hold
+profiles with free-form `aurora:type` ids that were always playable, and `types.unknown-type-policy: deny` must not lock
+their owners out; every other engine action keeps the deny policy for unknown types. The move-out switch a leave or
+kick makes for a member (evacuation) is not the player's own switch: it skips the cooldown, the guards and the target's
+`profile.switch` rule, and does not start a cooldown (review P3-8). The three Build 55 ids are allowed unless a
+definition names them in its `rules`; its `defaultRule` does not decide them (review N2), so a Build 54 type with a deny
+default rule stays playable and keeps its kick votes and labels after the upgrade.
+
+### `/perf multiprofile`
+
+In-memory rows, no store I/O: committed switches with latency p50/p95/p99 (last 1024 commits on this node), switches
+failed, refused by cooldown, vetoed and guard timeouts; the profile I/O queue (waiting/running/peak, partitions, queue
+wait p50/p95/p99 over the last 1024 steps); outstanding salvage records and the oldest one's age, open kick votes and
+the oldest's age, as this node saw them (listings, claims, votes it ran; ages against this node's clock); audit
+recorded/dropped/write failures; profile events dropped. Everything resets at restart.
+
+### Commands (Build 55)
+
+| Command | Permission | Does |
+|---|---|---|
+| `/awf multiprofile audit <profile> [cursor]` | `...multiprofile` | the in-memory audit entries about a profile, newest first |
+| `/awf multiprofile archive <profile>` / `unarchive <profile>` | `...multiprofile.admin` | read-only archive and its reversal |
+| `/awf multiprofile cooldown <player> [reset]` | `...multiprofile` (`reset`: `.admin`) | the player's switch cooldown; forget it |
+| `/perf multiprofile` | `/perf` | the metrics above |
+
 ## Backups
 
 Before the Build 51 format-2 migration the backup in `migration.backup-dir` is the only rollback

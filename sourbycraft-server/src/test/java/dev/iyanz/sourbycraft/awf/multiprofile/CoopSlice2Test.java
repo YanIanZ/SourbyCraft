@@ -377,11 +377,16 @@ class CoopSlice2Test {
             "MIGRATION_REQUIRED")) {
             assertTrue(ProfileErrorCode.valueOf(added).ordinal() >= build50.size(), added + " was not appended");
         }
-        // Build 54 appends its codes after every earlier one, in this order, at the end.
+        // Build 54 appends its codes after every earlier one, in this order; Build 55 appends its own after them, at the end.
         final List<String> build54 = List.of("ACTION_FORBIDDEN_BY_TYPE", "TYPE_UNKNOWN", "PURSE_TRANSFER_UNSUPPORTED");
-        final int firstBuild54 = ProfileErrorCode.values().length - build54.size();
+        final List<String> build55 = List.of("SWITCH_COOLDOWN", "SWITCH_VETOED", "PROFILE_ARCHIVED");
+        final int firstBuild54 = ProfileErrorCode.values().length - build54.size() - build55.size();
         for (int i = 0; i < build54.size(); i++) {
             assertEquals(firstBuild54 + i, ProfileErrorCode.valueOf(build54.get(i)).ordinal(), build54.get(i) + " was not appended");
+        }
+        final int firstBuild55 = ProfileErrorCode.values().length - build55.size();
+        for (int i = 0; i < build55.size(); i++) {
+            assertEquals(firstBuild55 + i, ProfileErrorCode.valueOf(build55.get(i)).ordinal(), build55.get(i) + " was not appended last");
         }
         assertTrue(ProfileErrorCode.HEAD_UNREADABLE.ordinal() < firstBuild54, "a Build 54 code was inserted before HEAD_UNREADABLE");
         // The Build 54 service methods are default methods (providers built against Build 53 still link).

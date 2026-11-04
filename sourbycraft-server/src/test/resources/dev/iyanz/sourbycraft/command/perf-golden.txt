@@ -1,7 +1,7 @@
 ## VIEWS
-tick,cpu,memory,gc,lanes,async,network,governor,scheduler,incidents,storage,awf,plugins,history,player,chunks,entities,region,health
+tick,cpu,memory,gc,lanes,async,network,governor,scheduler,incidents,storage,awf,multiprofile,plugins,history,player,chunks,entities,region,health
 ## perf usage / permission / description
-/perf [tick|cpu|memory|gc|lanes|async|network|governor|scheduler|incidents|storage|awf|plugins|history|player|chunks|entities|region|health]
+/perf [tick|cpu|memory|gc|lanes|async|network|governor|scheduler|incidents|storage|awf|multiprofile|plugins|history|player|chunks|entities|region|health]
 sourbycraft.command.perf
 SourbyCraft performance diagnostics
 ## ram usage / permission / description
@@ -9,7 +9,7 @@ SourbyCraft performance diagnostics
 sourbycraft.command.ram
 SourbyCraft performance diagnostics
 ## tab perf []
-[tick, cpu, memory, gc, lanes, async, network, governor, scheduler, incidents, storage, awf, plugins, history, player, chunks, entities, region, health]
+[tick, cpu, memory, gc, lanes, async, network, governor, scheduler, incidents, storage, awf, multiprofile, plugins, history, player, chunks, entities, region, health]
 ## tab perf [p]
 [plugins, player]
 ## tab perf [REG]
@@ -39,11 +39,11 @@ SourbyCraft performance diagnostics
 ## tab ram
 []
 ## execute /perf [tick extra] -> true
-{"color":"#64748B","text":"/perf [tick|cpu|memory|gc|lanes|async|network|governor|scheduler|incidents|storage|awf|plugins|history|player|chunks|entities|region|health]"}
+{"color":"#64748B","text":"/perf [tick|cpu|memory|gc|lanes|async|network|governor|scheduler|incidents|storage|awf|multiprofile|plugins|history|player|chunks|entities|region|health]"}
 ## execute /perf [no-such-view] -> true
-{"color":"#64748B","text":"/perf [tick|cpu|memory|gc|lanes|async|network|governor|scheduler|incidents|storage|awf|plugins|history|player|chunks|entities|region|health]"}
+{"color":"#64748B","text":"/perf [tick|cpu|memory|gc|lanes|async|network|governor|scheduler|incidents|storage|awf|multiprofile|plugins|history|player|chunks|entities|region|health]"}
 ## execute /perf [overview extra] -> true
-{"color":"#64748B","text":"/perf [tick|cpu|memory|gc|lanes|async|network|governor|scheduler|incidents|storage|awf|plugins|history|player|chunks|entities|region|health]"}
+{"color":"#64748B","text":"/perf [tick|cpu|memory|gc|lanes|async|network|governor|scheduler|incidents|storage|awf|multiprofile|plugins|history|player|chunks|entities|region|health]"}
 ## execute /perf [player] -> true
 {"color":"#64748B","text":"/perf player <name>"}
 ## execute /perf [PLAYER a b] -> true

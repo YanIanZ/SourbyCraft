@@ -32,6 +32,7 @@ final class PerfViews {
         PerfView.of("incidents", PerfIncidentsView::render),
         new PerfStorageView(),
         new PerfAwfView(),
+        new PerfMultiprofileView(),
         new PerfPluginsView(),
         new PerfHistoryView(),
         new PerfPlayerView(),

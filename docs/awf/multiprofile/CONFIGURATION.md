@@ -132,6 +132,19 @@ read at another scale; there is no conversion. A changed `bank.shared-capacity` 
 percentages apply to every record at once. The purse is not configured here: it stays per profile through its
 REQUIRED state adapter (owner decision OD-4), and the server has no purse provider.
 
+### Build 55: switch cooldown, audit log, I/O partitions
+
+Build 55 code written; compiled by an agent; not tested by the owner. All four keys are **RESTART_REQUIRED** (read
+once by the early reader, like every MultiProfile key). Accessors: `ProfileSettings.switching().cooldownSeconds()`,
+`ProfileSettings.audit()`, `ProfileSettings.io()`.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `switching.cooldown-seconds` | `0` | seconds after a **committed** switch during which the player's next switch is refused (`SWITCH_COOLDOWN`, the message names the wait). `0` = no cooldown, the Build 54 behaviour; Hypixel parity is `90`; at most `86400`. Only a committed switch starts it: a refused, vetoed, failed or rolled-back switch does not. Kept in memory on this node: a restart clears every cooldown, and a second node knows nothing of it (OD-1). `/awf multiprofile cooldown <player> [reset]`. Outside the range: WARN, `0` |
+| `audit.enabled` | `true` | the audit log ([OPERATIONS.md](OPERATIONS.md#audit-log-build-55)): entries recorded after each durable outcome and each switch refusal, newest 4096 in memory, daily files below `<directory>/audit/`. `false`: nothing is recorded, `AuroraProfiles.audit` fails `DISABLED`, `/awf multiprofile audit` reports it off. Not a boolean: WARN, `true` |
+| `audit.retention-days` | `30` | days a daily audit file is kept, `1` to `3660`; older files are deleted when the first entry of a new day is written. Outside the range: WARN, `30` |
+| `io.partitions` | `1` | partitions of the profile I/O queue ([ARCHITECTURE.md](ARCHITECTURE.md#profile-io-queue-build-55-pm-091)), `1` to `64`. `1` = one profile step at a time, FIFO over all accounts, exactly as Build 54. Above 1, steps that name only their own account and profiles (switch, save, login, session) may run at once when they fall in different partitions, one storage-lane slot each, while every account's own steps stay FIFO; store-wide steps (create, delete, lock/archive, co-op, bank, salvage, recovery, startup) are barriers; a quit save is keyed by player and the ticket's profile and a session release by player and claimed profile, so they stay FIFO with the profile's saves and a member's join (review P2-6). At most `aurora.scheduler.storage-threads` steps are in flight whatever the partition count, so an effect shows only with that key above 1. **Unqualified above 1** until the owner's soak. Outside the range: WARN, `1` |
+
 ## `aurora.awf.redis.fabric.*`
 
 | Key | Default | Meaning |

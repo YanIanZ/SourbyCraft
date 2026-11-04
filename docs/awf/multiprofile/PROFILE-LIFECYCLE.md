@@ -22,6 +22,14 @@ an account's limit within 1..`max-slots`; profiles above a lowered limit are kep
 writes compare the stored revision: within one process for the file repository, atomically in the write
 script for the Redis repository (`STALE_STATE` on a conflict).
 
+Build 55 adds the **archived** state on top: a `LOCKED` profile with the metadata marker `aurora:archived=<store
+clock>` reads as `ARCHIVED` in the API, refuses every mutation but a member's leave (`PROFILE_ARCHIVED`: switch, convert,
+invite, accept, kick, label, bank, collections, salvage claim, lock/unlock; a member may leave an archived co-op, PM
+decision) and keeps every record; `archive`/`unarchive` set and clear it (format 2: a metadata mutation, `M` advances;
+format 1: a hold without a revision bump, like lock), and the archive is refused while a member has the profile active or
+plays it here. A Build 54 server reads it as a locked profile. A create request may not carry the markers
+(`INVALID_REQUEST`). See [OPERATIONS.md](OPERATIONS.md#archived-read-only-profiles).
+
 ## Name and policy type (Build 51)
 
 Build 51 code written; not built by an agent; not tested by the owner. A profile gets a name and a
@@ -400,11 +408,35 @@ do not raise it.
 - Distributed (Redis) deployments: bank changes and claims run on the node that holds the profile (OD-1); there is no
   cross-node routing.
 
-## Remaining after Build 54
+## Build 55: switch policy, audit, adapters
 
-Build 55: audit log, switch guard and cooldown, the SSB-AuroraProfiles consumer port (type rules for `trade`,
-`auction`, `bazaar`, `island-bank` enforced by the consumer), API parity fields, per-account I/O ordering, `/perf`
-metrics. Owner transfer is in no scheduled build.
+Code written; compiled by an agent; not tested by the owner.
+
+- **Admission** (the switch's first I/O step, before any claim) now also refuses: an archived target
+  (`PROFILE_ARCHIVED`), a target whose type denies `profile.switch` (`ACTION_FORBIDDEN_BY_TYPE`; a type with no
+  definition on the server is not gated here), and a player inside the cooldown of their last committed switch
+  (`SWITCH_COOLDOWN`). Refusals are audited (`switch.refused`); nothing is captured or journaled. After the guards ran
+  (outside any I/O step) the target is read again and must still be active, usable and not archived before the player
+  is frozen. An evacuation switch (leave/kick moving a member out) skips the type rule, the cooldown and the guards.
+- **Guards** run after `claimTarget` and `worldReady` and before `FREEZING`: a veto (`SWITCH_VETOED`) fails the run
+  with the player untouched; compensation finds no target apply started and records the journal `FAILED`, releasing
+  the target claim. After the guards the run re-checks its reservation (`switches`), the player's presence and the
+  deadline, then `ProfilePreSwitchEvent` is handed to the event thread.
+- **Commit**: only a committed switch starts the cooldown and records `switch.committed`; `ProfileSwitchedEvent`
+  follows the commit on the event thread. A failed switch records `switch.failed` (or `switch.vetoed`) with its code
+  and starts no cooldown.
+- **Adapters**: on every apply (switch target, rollback, login restore and adoption, evacuation, salvage destination)
+  each registered adapter whose id has no entry in the applied state is told so (`applyAbsent`), after the others'
+  `apply`, with the same REQUIRED/best-effort semantics; before Build 55 such an adapter was simply not called and its
+  previous profile's value stayed on the player.
+- **Events and audit** are recorded after the durable outcome and never change it; the audit log is not the recovery
+  journal and recovery never reads it.
+
+## Remaining after Build 55
+
+The SSB-AuroraProfiles consumer port (type rules for `trade`, `auction`, `bazaar`, `island-bank` enforced by the
+consumer) lives in its own repository. Owner transfer is in no scheduled build. `io.partitions` above 1 is unqualified
+until the owner's soak.
 
 ## Snapshot revisions
 

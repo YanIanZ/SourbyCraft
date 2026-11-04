@@ -24,7 +24,8 @@ import java.util.Set;
 public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int maxSlots, Switching switching,
                               ProfileIsolation isolation, Worlds worlds, Coordination coordination, String directory,
                               Repository repository, Types types, Names names, Migration migration, Coop coop,
-                              Shutdown shutdown, Login login, Adapters adapters, TypeRegistry typeRegistry, Bank bank) {
+                              Shutdown shutdown, Login login, Adapters adapters, TypeRegistry typeRegistry, Bank bank,
+                              Audit audit, Io io) {
 
     public enum Mode {
         STANDALONE,
@@ -56,11 +57,58 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
      * @param enabled whether switching is allowed at all
      * @param timeoutMillis one switch's budget; a switch that exceeds it is failed and recovered
      * @param requireDurableSave refuse to apply a target unless the old state's snapshot was forced to disk
+     * @param cooldownSeconds Build 55: seconds after a <em>committed</em> switch during which the player's next
+     *     switch is refused ({@code SWITCH_COOLDOWN}); {@code 0} = no cooldown (the Build 54 behaviour; Hypixel parity
+     *     is 90). A refused, vetoed or failed switch starts none. In memory per node; cleared by a restart.
      */
-    public record Switching(boolean enabled, int timeoutMillis, boolean requireDurableSave) {
+    public record Switching(boolean enabled, int timeoutMillis, boolean requireDurableSave, int cooldownSeconds) {
+        /** Longest cooldown: one day. */
+        public static final int MAX_COOLDOWN_SECONDS = 86_400;
+
         public Switching {
             if (timeoutMillis < 1000 || timeoutMillis > 600_000) {
                 throw new IllegalArgumentException("switching.timeout-ms must be 1000-600000");
+            }
+            if (cooldownSeconds < 0 || cooldownSeconds > MAX_COOLDOWN_SECONDS) {
+                throw new IllegalArgumentException("switching.cooldown-seconds must be 0-" + MAX_COOLDOWN_SECONDS);
+            }
+        }
+
+        /** The Build 51-54 shape: no cooldown. */
+        public Switching(final boolean enabled, final int timeoutMillis, final boolean requireDurableSave) {
+            this(enabled, timeoutMillis, requireDurableSave, 0);
+        }
+    }
+
+    /**
+     * Build 55: the audit log ({@link ProfileAudit}).
+     *
+     * @param enabled whether entries are recorded at all; {@code false} = no ring, no files, {@code AuroraProfiles.audit}
+     *     fails {@code DISABLED}
+     * @param retentionDays days a daily audit file below {@code <directory>/audit} is kept, 1-3660
+     */
+    public record Audit(boolean enabled, int retentionDays) {
+        public static final int MAX_RETENTION_DAYS = 3660;
+
+        public Audit {
+            if (retentionDays < 1 || retentionDays > MAX_RETENTION_DAYS) {
+                throw new IllegalArgumentException("audit.retention-days must be 1-" + MAX_RETENTION_DAYS);
+            }
+        }
+    }
+
+    /**
+     * Build 55: the profile I/O queue ({@link ProfileIoQueue}, PM-091).
+     *
+     * @param partitions partitions of the queue, 1-64. {@code 1} (default) = the Build 54 behaviour: one profile step at
+     *     a time, FIFO over all accounts. More = steps of accounts in different partitions may run at once (one lane
+     *     slot each) while each account's own steps stay FIFO; store-wide steps are barriers. Relief only appears with
+     *     more than one storage lane thread. Unqualified above 1 until the owner's soak.
+     */
+    public record Io(int partitions) {
+        public Io {
+            if (partitions < 1 || partitions > ProfileIoQueue.MAX_PARTITIONS) {
+                throw new IllegalArgumentException("io.partitions must be 1-" + ProfileIoQueue.MAX_PARTITIONS);
             }
         }
     }
@@ -534,6 +582,10 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
     public static final String REPOSITORY_KEY = "aurora.awf.multiprofile.repository";
     public static final String REDIS_REQUIRE_AOF_KEY = "aurora.awf.multiprofile.redis.require-aof";
     public static final String REDIS_WAIT_FOR_AOF_KEY = "aurora.awf.multiprofile.redis.wait-for-aof";
+    public static final String SWITCHING_COOLDOWN_KEY = "aurora.awf.multiprofile.switching.cooldown-seconds";
+    public static final String AUDIT_ENABLED_KEY = "aurora.awf.multiprofile.audit.enabled";
+    public static final String AUDIT_RETENTION_KEY = "aurora.awf.multiprofile.audit.retention-days";
+    public static final String IO_PARTITIONS_KEY = "aurora.awf.multiprofile.io.partitions";
 
     public static final List<String> KEYS = List.of(ENABLED_KEY, MODE_KEY, DEFAULT_SLOTS_KEY, MAX_SLOTS_KEY,
         SWITCHING_ENABLED_KEY, SWITCHING_TIMEOUT_KEY, SWITCHING_DURABLE_KEY,
@@ -548,7 +600,8 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         COOP_ALLOWED_TYPES_KEY, SHUTDOWN_CAPTURE_DEADLINE_KEY, LOGIN_AUTHORITATIVE_KEY, ADAPTERS_REQUIRED_KEY,
         TYPES_OVERRIDE_BUILTINS_KEY, TYPES_UNKNOWN_POLICY_KEY,
         BANK_CURRENCY_PROVIDER_KEY, BANK_CURRENCY_ID_KEY, BANK_CURRENCY_SCALE_KEY, BANK_SHARED_CAPACITY_KEY, BANK_PERSONAL_CAP_KEY,
-        BANK_INTEREST_KEY, BANK_INTEREST_INTERVAL_KEY);
+        BANK_INTEREST_KEY, BANK_INTEREST_INTERVAL_KEY,
+        SWITCHING_COOLDOWN_KEY, AUDIT_ENABLED_KEY, AUDIT_RETENTION_KEY, IO_PARTITIONS_KEY);
 
     /** The file repository; a server that sets no repository key keeps the behaviour of earlier builds. */
     public static final Repository DEFAULT_REPOSITORY = new Repository(Backend.FILE, true, true);
@@ -576,12 +629,16 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
     public static final TypeRegistry DEFAULT_TYPE_REGISTRY = new TypeRegistry(true, UnknownTypePolicy.DENY);
     /** Hypixel parity ({@link ProfileBank.Policy#DEFAULT}): aurora:coins at scale 0, no shared cap, personal 20 %, interest 10 %. */
     public static final Bank DEFAULT_BANK = Bank.of(ProfileBank.Policy.DEFAULT);
+    /** Build 55: the audit log on, daily files kept 30 days. */
+    public static final Audit DEFAULT_AUDIT = new Audit(true, 30);
+    /** Build 55: one partition (the Build 54 queue behaviour). */
+    public static final Io DEFAULT_IO = new Io(1);
 
     public static final ProfileSettings DEFAULT = new ProfileSettings(false, Mode.STANDALONE, 3, 8,
-        new Switching(true, 15_000, true), ProfileIsolation.ALL, new Worlds(300),
+        new Switching(true, 15_000, true, 0), ProfileIsolation.ALL, new Worlds(300),
         new Coordination(Provider.LOCAL, true, true), DIRECTORY_DEFAULT, DEFAULT_REPOSITORY,
         DEFAULT_TYPES, DEFAULT_NAMES, DEFAULT_MIGRATION, DEFAULT_COOP, DEFAULT_SHUTDOWN, DEFAULT_LOGIN, DEFAULT_ADAPTERS,
-        DEFAULT_TYPE_REGISTRY, DEFAULT_BANK);
+        DEFAULT_TYPE_REGISTRY, DEFAULT_BANK, DEFAULT_AUDIT, DEFAULT_IO);
 
     /** Settings with {@link #DEFAULT_REPOSITORY} and the Build 51 defaults. */
     public ProfileSettings(final boolean enabled, final Mode mode, final int defaultSlots, final int maxSlots,
@@ -635,6 +692,17 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
                            final Shutdown shutdown, final Login login, final Adapters adapters, final TypeRegistry typeRegistry) {
         this(enabled, mode, defaultSlots, maxSlots, switching, isolation, worlds, coordination, directory,
             repository, types, names, migration, coop, shutdown, login, adapters, typeRegistry, DEFAULT_BANK);
+    }
+
+    /** Settings with the Build 55 defaults ({@link #DEFAULT_AUDIT}, {@link #DEFAULT_IO}). */
+    public ProfileSettings(final boolean enabled, final Mode mode, final int defaultSlots, final int maxSlots,
+                           final Switching switching, final ProfileIsolation isolation, final Worlds worlds,
+                           final Coordination coordination, final String directory, final Repository repository,
+                           final Types types, final Names names, final Migration migration, final Coop coop,
+                           final Shutdown shutdown, final Login login, final Adapters adapters, final TypeRegistry typeRegistry,
+                           final Bank bank) {
+        this(enabled, mode, defaultSlots, maxSlots, switching, isolation, worlds, coordination, directory,
+            repository, types, names, migration, coop, shutdown, login, adapters, typeRegistry, bank, DEFAULT_AUDIT, DEFAULT_IO);
     }
 
     public ProfileSettings {
@@ -749,7 +817,8 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         final Switching switching = new Switching(
             flag(values, SWITCHING_ENABLED_KEY, DEFAULT.switching().enabled(), invalid),
             whole(values, SWITCHING_TIMEOUT_KEY, DEFAULT.switching().timeoutMillis(), 1000, 600_000, invalid),
-            flag(values, SWITCHING_DURABLE_KEY, DEFAULT.switching().requireDurableSave(), invalid));
+            flag(values, SWITCHING_DURABLE_KEY, DEFAULT.switching().requireDurableSave(), invalid),
+            whole(values, SWITCHING_COOLDOWN_KEY, DEFAULT.switching().cooldownSeconds(), 0, Switching.MAX_COOLDOWN_SECONDS, invalid));
         final ProfileIsolation isolation = new ProfileIsolation(
             flag(values, ProfileIsolation.INVENTORY_KEY, DEFAULT.isolation().inventory(), invalid),
             flag(values, ProfileIsolation.ARMOR_KEY, DEFAULT.isolation().armor(), invalid),
@@ -820,9 +889,12 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         final TypeRegistry typeRegistry = new TypeRegistry(
             flag(values, TYPES_OVERRIDE_BUILTINS_KEY, DEFAULT_TYPE_REGISTRY.allowOverrideBuiltins(), invalid), unknownTypePolicy);
         final Bank bank = bank(values, invalid);
+        final Audit audit = new Audit(flag(values, AUDIT_ENABLED_KEY, DEFAULT_AUDIT.enabled(), invalid),
+            whole(values, AUDIT_RETENTION_KEY, DEFAULT_AUDIT.retentionDays(), 1, Audit.MAX_RETENTION_DAYS, invalid));
+        final Io io = new Io(whole(values, IO_PARTITIONS_KEY, DEFAULT_IO.partitions(), 1, ProfileIoQueue.MAX_PARTITIONS, invalid));
         return new Parsed(new ProfileSettings(enabled, mode, defaultSlots, maxSlots, switching, isolation, worlds,
-            coordination, directory, repository, types, names, migration, coop, shutdown, login, adapters, typeRegistry, bank),
-            invalid);
+            coordination, directory, repository, types, names, migration, coop, shutdown, login, adapters, typeRegistry, bank,
+            audit, io), invalid);
     }
 
     /** The bank policy; each unusable key falls back to its own default and is reported. */
@@ -1075,6 +1147,10 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         values.put(BANK_PERSONAL_CAP_KEY, DEFAULT.bank().personalCapPercent());
         values.put(BANK_INTEREST_KEY, DEFAULT.bank().interestPercent());
         values.put(BANK_INTEREST_INTERVAL_KEY, DEFAULT.bank().interestIntervalHours());
+        values.put(SWITCHING_COOLDOWN_KEY, DEFAULT.switching().cooldownSeconds());
+        values.put(AUDIT_ENABLED_KEY, DEFAULT.audit().enabled());
+        values.put(AUDIT_RETENTION_KEY, DEFAULT.audit().retentionDays());
+        values.put(IO_PARTITIONS_KEY, DEFAULT.io().partitions());
         return values;
     }
 

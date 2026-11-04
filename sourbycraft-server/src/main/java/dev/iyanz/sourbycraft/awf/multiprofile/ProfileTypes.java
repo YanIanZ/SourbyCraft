@@ -82,10 +82,13 @@ public final class ProfileTypes implements ProfileTypeRegistry {
     public static final String COOP_ACCEPT = ProfileTypeRegistry.COOP_ACCEPT;
     public static final String SALVAGE_CLAIM = ProfileTypeRegistry.SALVAGE_CLAIM;
     public static final String COLLECTIONS_CONTRIBUTE = ProfileTypeRegistry.COLLECTIONS_CONTRIBUTE;
+    public static final String PROFILE_SWITCH = ProfileTypeRegistry.PROFILE_SWITCH;
+    public static final String COOP_KICK = ProfileTypeRegistry.COOP_KICK;
+    public static final String COOP_LABEL = ProfileTypeRegistry.COOP_LABEL;
 
-    /** Every action id the engine enforces itself. */
+    /** Every action id the engine enforces itself (Build 55 adds profile.switch, coop.kick and coop.label). */
     public static final Set<String> ENGINE_ACTIONS = Set.of(BANK_DEPOSIT, BANK_WITHDRAW, BANK_PERSONAL, BANK_TRANSFER,
-        COOP_CONVERT, COOP_INVITE, COOP_ACCEPT, SALVAGE_CLAIM, COLLECTIONS_CONTRIBUTE);
+        COOP_CONVERT, COOP_INVITE, COOP_ACCEPT, SALVAGE_CLAIM, COLLECTIONS_CONTRIBUTE, PROFILE_SWITCH, COOP_KICK, COOP_LABEL);
 
     /** Consumer action ids the built-in definitions name (enforced by the consumer, not by the engine). */
     public static final String TRADE = "trade";
@@ -232,7 +235,10 @@ public final class ProfileTypes implements ProfileTypeRegistry {
         return ProfileTypeDefinition.builder(id).displayName(id.length() > ProfileTypeDefinition.MAX_DISPLAY_NAME
                 ? id.substring(0, ProfileTypeDefinition.MAX_DISPLAY_NAME) : id)
             .description("The stored definition of this type is unreadable; every action is refused until its plugin registers it again.")
-            .coopAllowed(false).creatable(false).defaultRule(ProfileRule.deny()).build();
+            .coopAllowed(false).creatable(false).defaultRule(ProfileRule.deny())
+            // The Build 55 ids are not decided by the default rule (review N2), so they are denied by name here.
+            .rule(PROFILE_SWITCH, ProfileRule.deny()).rule(COOP_KICK, ProfileRule.deny()).rule(COOP_LABEL, ProfileRule.deny())
+            .build();
     }
 
     /**
@@ -303,6 +309,18 @@ public final class ProfileTypes implements ProfileTypeRegistry {
     }
 
     /**
+     * {@link #require} for an action that must not lock out profiles of a type this server has no definition for
+     * (review P2-7): with a definition the type decides; without one the action is <em>allowed</em> whatever
+     * {@code types.unknown-type-policy} says. Used for {@code profile.switch} only: a Build 54 store may hold profiles
+     * whose free-form {@code aurora:type} never had a definition, and Build 54 let their owners play them; the other
+     * engine actions (bank, co-op, salvage) keep the deny policy for unknown types.
+     */
+    public void requireIfDefined(final AuroraProfile profile, final String action) throws ProfileOperationException {
+        if (definition(typeIdOf(profile)).isEmpty()) return;
+        require(profile, action);
+    }
+
+    /**
      * The co-op member cap of a profile: the type's {@link ProfileTypeDefinition#maxMembers()} when set, else
      * {@code configured} ({@code coop.max-members}); never above {@link ProfileSettings.Coop#MAX_MEMBERS_LIMIT}.
      */
@@ -332,7 +350,8 @@ public final class ProfileTypes implements ProfileTypeRegistry {
      * @throws ProfileOperationException {@link ProfileErrorCode#TYPE_NOT_ALLOWED} (a built-in type outside
      *     {@code types.allowed}, or a type that is not {@link ProfileTypeDefinition#creatable()}),
      *     {@link ProfileErrorCode#TYPE_UNKNOWN} (no definition), {@link ProfileErrorCode#INVALID_REQUEST} (a malformed
-     *     id, or a {@code profileType} that contradicts the metadata id)
+     *     id, a {@code profileType} that contradicts the metadata id, or a metadata key only the engine writes,
+     *     {@link AuroraProfile#ENGINE_METADATA_KEYS})
      */
     public CreatePlan planCreate(final ProfileRequest request, final ProfileSettings.Types types)
         throws ProfileOperationException {
@@ -347,6 +366,14 @@ public final class ProfileTypes implements ProfileTypeRegistry {
     public CreatePlan planCreate(final ProfileRequest request, final ProfileSettings.Types types, final boolean evacuation)
         throws ProfileOperationException {
         final Map<String, String> metadata = new LinkedHashMap<>(request.metadata());
+        // Build 55 review N4: the archive markers are written by archive/unarchive only; a request carrying one would
+        // create a profile that reads as archived (read-only) while its status is ACTIVE.
+        for (final String reserved : AuroraProfile.ENGINE_METADATA_KEYS) {
+            if (metadata.containsKey(reserved)) {
+                throw new ProfileOperationException(ProfileErrorCode.INVALID_REQUEST, "metadata key '" + reserved
+                    + "' is written by the server only (archive and unarchive); a create request may not set it. Nothing was written");
+            }
+        }
         final String named = metadata.get(TYPE_METADATA_KEY);
         final dev.iyanz.sourbycraft.api.profile.ProfileType policy;
         final String typeId;
@@ -676,7 +703,7 @@ public final class ProfileTypes implements ProfileTypeRegistry {
             .description("One island; no trading, auction house or bazaar.")
             .deny(TRADE).deny(AUCTION).deny(BAZAAR).build());
         map.put("bingo", ProfileTypeDefinition.builder("bingo").displayName("Bingo")
-            .description("A seasonal profile, archived at the end of its event.").build());
+            .description("A seasonal profile, archived at the end of its event.").seasonal(true).build());
         return java.util.Collections.unmodifiableMap(map);
     }
 

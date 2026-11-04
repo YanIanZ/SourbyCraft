@@ -63,6 +63,8 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
     private final Set<String> instanceDeleteWarned = java.util.concurrent.ConcurrentHashMap.newKeySet();
     /** Set once startup has finished ({@link #scheduleAutoload}); the sweep runs only from then on. */
     private volatile boolean sweeping;
+    /** Build 55: the world lifecycle events, fired after each outcome on their own bounded lane. */
+    private final AwfWorldEvents events = new AwfWorldEvents();
 
     /** A world's dimension folder; the server's storage source in production. */
     private final java.util.function.Function<String, Path> folders;
@@ -144,33 +146,68 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
         return new WorldOperationGate.Resource("file:" + file.toAbsolutePath().normalize(), false);
     }
 
+    /**
+     * Build 55: once {@code created} (the operation's own future, which a caller cannot cancel) completes
+     * successfully, fires {@code AwfWorldCreatedEvent} and then {@code AwfWorldLoadedEvent(created)}. A failed
+     * creation fires nothing. Returns {@code created} itself.
+     */
+    private <T> CompletableFuture<T> announceCreated(final String name, final dev.iyanz.sourbycraft.api.world.event.AwfWorldCreatedEvent.Origin origin,
+                                                     final CompletableFuture<T> created) {
+        created.whenComplete((ok, failed) -> {
+            if (failed != null) return;
+            final String template = this.registry.get(name).map(AuroraWorldRegistry.Entry::template).orElse(null);
+            this.events.fire(new dev.iyanz.sourbycraft.api.world.event.AwfWorldCreatedEvent(name, origin, template));
+            this.events.fire(new dev.iyanz.sourbycraft.api.world.event.AwfWorldLoadedEvent(name, true));
+        });
+        return created;
+    }
+
+    /** World lifecycle events dropped because their queue was full, since startup. */
+    public long droppedWorldEvents() {
+        return this.events.dropped();
+    }
+
     @Override
     public CompletableFuture<World> create(final WorldCreator creator, final String generator, final boolean autoload) {
-        return this.operations.run("create", worldResources(creator.name()), () -> createInternal(creator, generator, autoload));
+        return this.operations.run("create", worldResources(creator.name()),
+            () -> announceCreated(creator.name(), dev.iyanz.sourbycraft.api.world.event.AwfWorldCreatedEvent.Origin.CREATE, createInternal(creator, generator, autoload)));
     }
 
     @Override
     public CompletableFuture<World> importSlime(final Path file, final WorldCreator creator, final String generator,
                                                 final boolean autoload) {
         return this.operations.run("importSlime", worldResources(creator.name()),
-            () -> importSlimeInternal(file, creator, generator, autoload));
+            () -> announceCreated(creator.name(), dev.iyanz.sourbycraft.api.world.event.AwfWorldCreatedEvent.Origin.IMPORT_SLIME,
+                importSlimeInternal(file, creator, generator, autoload)));
     }
 
     @Override
     public CompletableFuture<World> createFromTemplate(final String template, final String name, final boolean autoload) {
         final var resources = new java.util.ArrayList<>(worldResources(name));
         resources.add(new WorldOperationGate.Resource("template:" + template, true));
-        return this.operations.run("createFromTemplate", resources, () -> createFromTemplateInternal(template, name, autoload));
+        return this.operations.run("createFromTemplate", resources,
+            () -> announceCreated(name, dev.iyanz.sourbycraft.api.world.event.AwfWorldCreatedEvent.Origin.TEMPLATE_INSTANCE, createFromTemplateInternal(template, name, autoload)));
     }
 
     @Override
     public CompletableFuture<World> load(final String name) {
-        return this.operations.run("load", worldResources(name), () -> loadInternal(name));
+        return this.operations.run("load", worldResources(name), () -> {
+            // Under the reservation: a load that finds the world already loaded announces nothing.
+            final boolean alreadyLoaded = Bukkit.getWorld(name) != null;
+            final CompletableFuture<World> loaded = loadInternal(name);
+            if (!alreadyLoaded) {
+                loaded.whenComplete((world, failed) -> {
+                    if (failed == null) this.events.fire(new dev.iyanz.sourbycraft.api.world.event.AwfWorldLoadedEvent(name, false));
+                });
+            }
+            return loaded;
+        });
     }
 
     @Override
     public CompletableFuture<World> importWorld(final Path file, final String name, final boolean autoload) {
-        return this.operations.run("importWorld", worldResources(name), () -> importWorldInternal(file, name, autoload));
+        return this.operations.run("importWorld", worldResources(name),
+            () -> announceCreated(name, dev.iyanz.sourbycraft.api.world.event.AwfWorldCreatedEvent.Origin.IMPORT_AWF, importWorldInternal(file, name, autoload)));
     }
 
     @Override
@@ -241,7 +278,8 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
     public CompletableFuture<World> createInstance(final String template, final String name) {
         final var resources = new java.util.ArrayList<>(worldResources(name));
         resources.add(new WorldOperationGate.Resource("template:" + template, true));
-        return this.operations.run("createInstance", resources, () -> createFromTemplateInternal(template, name, false, true));
+        return this.operations.run("createInstance", resources,
+            () -> announceCreated(name, dev.iyanz.sourbycraft.api.world.event.AwfWorldCreatedEvent.Origin.DISPOSABLE_INSTANCE, createFromTemplateInternal(template, name, false, true)));
     }
 
     /** No I/O: the registry's published snapshot, the configured backend and the loaded worlds. */
@@ -407,7 +445,7 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
                     + " so the copy is one consistent moment"));
             }
             final AuroraWorldRegistry.Entry copy = entry.named(target, entry.template(), autoload);
-            return start(copy, () -> {
+            return announceCreated(target, dev.iyanz.sourbycraft.api.world.event.AwfWorldCreatedEvent.Origin.CLONE, start(copy, () -> {
                 final AwfBackend backend = AwfEngine.backend();
                 final java.util.Map<String, Integer> copied = new java.util.LinkedHashMap<>();
                 for (final String storage : AwfEngine.STORAGE_FOLDERS) {
@@ -435,7 +473,7 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
                 }
                 SourbyLogger.info("Aurora World Fabric: cloned " + source + " to " + target + " " + copied
                     + (entry.template() != null ? " over template " + entry.template() : ""));
-            });
+            }));
         });
     }
 
@@ -1021,7 +1059,10 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
                     }
                 }
                 recordKnownStores(name);
-                this.lastSaved.put(name, java.time.Instant.now());
+                final java.time.Instant committed = java.time.Instant.now();
+                this.lastSaved.put(name, committed);
+                // Build 55: after every storage confirmed its commit durable.
+                this.events.fire(new dev.iyanz.sourbycraft.api.world.event.AwfWorldSavedEvent(name, committed));
             }, ioExecutor);
     }
 
@@ -1142,7 +1183,14 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
             try {
                 Bukkit.getServer().unloadWorldAsync(world, save, outcome -> {
                     this.unloadWithoutSaving.remove(name);
-                    result.complete(map(outcome));
+                    final UnloadResult mapped = map(outcome);
+                    // Build 55: the engine reports the unload after the world's storages closed. FAILED also
+                    // covers a world that is gone with its final commit unconfirmed; only a world actually gone
+                    // is announced.
+                    if (mapped == UnloadResult.SUCCESS || (mapped == UnloadResult.FAILED && Bukkit.getWorld(name) == null)) {
+                        this.events.fire(new dev.iyanz.sourbycraft.api.world.event.AwfWorldUnloadedEvent(name, mapped));
+                    }
+                    result.complete(mapped);
                 });
             } catch (final Throwable failed) {
                 this.unloadWithoutSaving.remove(name);
@@ -1195,11 +1243,19 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
                     throw new CompletionException(new IOException("AWF storages under " + folder + " are open (a load or unload of " + name
                         + " is in progress); nothing was deleted, retried later"));
                 }
+                final AuroraWorldRegistry.Entry gone = this.registry.get(name).orElse(null);
                 AwfEngine.deleteStores(folder);
                 deleteRecursively(folder);
                 this.registry.remove(name);
                 AwfEngine.release(name);
                 SourbyLogger.info("Aurora World Fabric: deleted world " + name);
+                // Build 55: after the stores, the folder and the (forced) registry write are gone.
+                final String template = gone == null ? null : gone.template();
+                final boolean disposable = gone != null && gone.deletedOnUnload();
+                this.events.fire(new dev.iyanz.sourbycraft.api.world.event.AwfWorldDeletedEvent(name, template, disposable));
+                if (disposable && template != null) {
+                    this.events.fire(new dev.iyanz.sourbycraft.api.world.event.AwfInstanceDisposedEvent(name, template));
+                }
             } catch (final IOException failed) {
                 throw new CompletionException(failed);
             } finally {

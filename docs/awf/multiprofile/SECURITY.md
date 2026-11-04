@@ -145,6 +145,18 @@ refused members with `COOP_SWITCH_UNAVAILABLE`), never for a removed member;
   commit as described above, and OD-1 refuses joining a co-op profile on a node that does not hold its
   bound world rather than claiming a multi-writer world.
 
+## Build 55 additions
+
+- The audit files (`<directory>/audit/*.log`) name players (UUIDs), profiles, operation ids, amounts and error codes,
+  never inventories or item data; they inherit the server process's file permissions like the rest of the profile
+  directory. `/awf multiprofile audit` needs `sourbycraft.command.awf.multiprofile`; the API page is available to
+  every plugin, like every other read.
+- A switch guard is plugin code run off the game threads with a 2 s budget; a guard cannot hold the player's
+  reservation (reentry is `SWITCH_IN_PROGRESS`) and cannot make a switch succeed, only refuse it. Its reason is
+  cut to 128 characters and shown to the player.
+- `archive`/`unarchive` need `sourbycraft.command.awf.multiprofile.admin`; the API methods are available to every
+  plugin, like `setProfileLocked`.
+
 ## Residual risks
 
 - A malicious plugin with access to the storage lane or the fabric can call the fabric directly; like

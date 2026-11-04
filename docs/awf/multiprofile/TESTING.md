@@ -54,6 +54,22 @@ PR #62 edited one existing assertion: `ProfileEngineTest.recoveryRefusesAJournal
 now records the journal's target fence with the ownership incarnation, because recovery compares fences
 only within one incarnation.
 
+### Build 55 unit tests (written, compiled; not run by the agent — owner rule)
+
+| Class | Covers |
+|---|---|
+| `ProfileIoQueuePartitionTest` | one partition = Build 54 FIFO; different partitions run at once while each key stays FIFO; a later step never overtakes an earlier waiting step of its partition; barrier waits for every running step and blocks later ones; capacity bound; lane rejection releases partitions without recursing; the in-flight cap (lane threads) below the partition count; key/mask contract and wait sampling (hand-driven lane, no threads) |
+| `ProfileAuditTest` | ring + daily file line format, sanitising, paging with cursor, ring bound, a refusing lane counts drops, an unwritable directory counts write failures, a write handed to the lane before `close()` still lands, entry contract |
+| `ProfileSwitchGuardsTest` | cooldown on an injected clock (committed only, reset, 0 = off); guards in order, first refusal wins, duplicate registration, per-plugin removal; throwing guard = refusal, reason cut, blank reason; registration bound; the guard lane (own named threads, a hung guard is interrupted at the budget, a full lane is a veto) |
+| `Build55ReviewFixesTest` | review fixes through the engine over a FILE store: leaving an archived co-op is allowed; archive refused while a member has the co-op active or plays it here; unarchive restores a prior lock; a salvage apply never resets a best-effort adapter whose capture failed; a switch rollback restores such an adapter from the stored entry its rollback point carries and resets it when the source stores none, never leaving the target's value (review N1); `profile.switch` does not gate an undefined type; the Build 55 action ids ignore a deny `defaultRule` (N2); a ballot is a `coop.kick` action; a create request may not carry the archive markers (N4); `CoopInviteInfo` carries the profile's name and type |
+| `ProfileSettingsBuild55Test` | the four Build 55 keys: defaults, parsing, per-key fallback, AuroraKeys rows, shorter constructors; seasonal type-definition round trip and record version (1 without the flag, 2 with it) |
+| `PerfViewRegistryTest`, `PerfCommandGoldenTest` | the view count (20) and the golden `VIEWS` lines include `multiprofile` (existing tests, pins updated) |
+
+Not covered (owner cases from COOP-DESIGN §10 slice 7): `CoopAuditRuntimeWired`, `CoopAuditFailureDoesNotRollback`,
+`CoopAuditQueueBounded`, `CoopSwitchGuardAdmissionAndReentrancy`, `CoopCooldownOnlyAfterCommit`; the engine-level
+switch path with a vetoing guard, the archived-profile refusals and the `applyAbsent` call on each apply path are
+exercised by no test on this branch.
+
 ### Not covered by any test (pending for the owner or a test wave)
 
 - `RedisProfileRepository`: `FENCED`/`STALE`/`MISSING` replies, a stale owner refused after a takeover,

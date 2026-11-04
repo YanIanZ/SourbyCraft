@@ -67,7 +67,8 @@ import java.util.zip.ZipFile;
  *       and applied on its own.</li>
  *   <li><b>Verify.</b> Asset URLs must be https (plain http only on a loopback host while the
  *       {@link UpdateOverrides} test override is set). The asset name must be a plain file name
- *       ending in {@code .jar}. The download is bounded BEFORE it is read (the asset's declared size,
+ *       ending in {@code .jar}. The server jar is chosen by name ({@link #selectServerJar}): never a
+ *       {@code sourbyapi-} asset, a {@code SourbyCraft-} name first. The download is bounded BEFORE it is read (the asset's declared size,
  *       which may not exceed {@link #MAX_JAR_BYTES}, else {@link #MAX_JAR_BYTES}; an oversize
  *       {@code Content-Length} is refused without reading the body, a stream that runs past the bound
  *       is cut off, and the whole transfer has {@link #MAX_DOWNLOAD_TIME}). It is written to a fresh
@@ -968,6 +969,35 @@ public final class SourbyUpdater {
         return best;
     }
 
+    /** Name prefix of the plugin API files a release carries beside the server jar ({@code sourbyapi-<N>.zip}). */
+    static final String API_ASSET_PREFIX = "sourbyapi-";
+    /** Name prefix of the server jar CI publishes ({@code SourbyCraft-26.2-REL.jar}). */
+    static final String SERVER_ASSET_PREFIX = "SourbyCraft-";
+
+    /**
+     * The release asset that is the server jar, chosen by name. A candidate ends in {@code .jar}, has a download URL
+     * and is not a plugin API file (a name starting with {@value #API_ASSET_PREFIX}, ignoring case). Among the
+     * candidates the first one whose name starts with {@value #SERVER_ASSET_PREFIX} (ignoring case) wins; a release
+     * without such a name (an older release published under another jar name) keeps the earlier rule: the first
+     * candidate in listing order. So every release with a single {@code .jar} asset selects exactly what it always did;
+     * the choice no longer depends on the order in which extra assets were uploaded. Null when there is none.
+     */
+    static @Nullable JsonObject selectServerJar(JsonArray assets) {
+        JsonObject firstCandidate = null;
+        for (JsonElement ae : assets) {
+            if (!ae.isJsonObject()) continue;
+            JsonObject asset = ae.getAsJsonObject();
+            String name = getString(asset, "name");
+            if (name == null) continue;
+            String lower = name.toLowerCase(Locale.ROOT);
+            if (!lower.endsWith(".jar") || lower.startsWith(API_ASSET_PREFIX.toLowerCase(Locale.ROOT))) continue;
+            if (getString(asset, "browser_download_url") == null) continue;
+            if (lower.startsWith(SERVER_ASSET_PREFIX.toLowerCase(Locale.ROOT))) return asset;
+            if (firstCandidate == null) firstCandidate = asset;
+        }
+        return firstCandidate;
+    }
+
     private @Nullable ReleaseInfo parseRelease(JsonObject rel, UpdateChannel channel) {
         if (getBool(rel, "draft")) return null;
         boolean prerelease = getBool(rel, "prerelease");
@@ -981,16 +1011,7 @@ public final class SourbyUpdater {
             ? rel.getAsJsonArray("assets") : null;
         if (assets == null || assets.isEmpty()) return null;
 
-        JsonObject jar = null;
-        for (JsonElement ae : assets) {
-            if (!ae.isJsonObject()) continue;
-            JsonObject asset = ae.getAsJsonObject();
-            String name = getString(asset, "name");
-            if (name == null || !name.toLowerCase(Locale.ROOT).endsWith(".jar")) continue;
-            if (getString(asset, "browser_download_url") == null) continue;
-            jar = asset;
-            break;
-        }
+        JsonObject jar = selectServerJar(assets);
         if (jar == null) return null;
         String jarName = getString(jar, "name");
 
