@@ -226,6 +226,17 @@ aurora:
         # only, together with the type's registry rule coop.convert (Build 54). The engine does not enforce
         # trade/auction/bazaar, so widening this gives those types co-op with only engine-owned rules applied.
         allowed-types: ["classic"]
+        # RESTART_REQUIRED (Build 56). Default false = OD-1 (Builds 53-55.1): one node per co-op, WRONG_NODE
+        # elsewhere. true = members of one co-op may be on different nodes at once (spawn + island). Needs
+        # mode: distributed and repository: redis (refused at start otherwise). Member saves are fenced by the
+        # member's own session claim Q; bank, collections, membership and label by the transaction claim P and
+        # revision CAS; the node claim then only marks the node hosting the co-op's bound worlds (world-host).
+        cross-node: false
+        # RESTART_REQUIRED (Build 56, read with cross-node: true only). true = this node hosts the bound worlds of
+        # co-op profiles (Build 55.1 behaviour; a second world host is WRONG_NODE). false = a satellite (spawn or
+        # lobby): no node claim, no bound world prepared, no WRONG_NODE; needs switching.enabled: false. Set
+        # isolation.location: false there.
+        world-host: true
         kick-vote:
           # RESTART_REQUIRED. Kick-vote lifetime, 1-1440 minutes. Approval is unanimous among the members other
           # than the target (owner included); the starter's approval counts.

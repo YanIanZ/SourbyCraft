@@ -196,6 +196,81 @@ Redis outage during the wait (the attempt fails, the join is refused), and the c
 switch in both directions under load, kill the old server mid-switch (expect the refusal until the TTL), restart
 Redis during a switch.
 
+## Co-op across nodes (Build 56, `coop.cross-node`)
+
+Build 56 code written and compiled by an agent; **not run, not tested by the owner** (owner cases TO-B56-01..06 in the
+[Build 56 notes](../../releases/26.2-build-56-aurora-nexus.md)). Off by default; with the default every node behaves
+as Build 55.1 (OD-1). The target shape is the WuretaMC network: a **spawn node** (lobby: no island worlds, profile
+switching disabled) and an **island node** (SSB2 islands in AWF worlds, every switch and world operation), with the
+members of one co-op on both at once, or together on the island.
+
+### What "the node of a co-op" is
+
+Since Build 53 the **node claim** (`session:<profile>` in `SessionFabric`, one per profile, shared by every member's
+session on that node) has two meanings at once: it fences format-1 writes, and it marks the node that *plays* the
+co-op (OD-1): a join, a switch and every co-op operation elsewhere are refused `WRONG_NODE`, whether or not the profile
+has a bound world. On a format-2 store the first meaning is gone, because no gameplay write carries the node claim:
+
+| Record | Written by | Fence at commit (Build 53–55.1, unchanged by Build 56) |
+|---|---|---|
+| member head + snapshot `R(profile, member, epoch)` | that member's save, quit, login initialisation, switch | that member's session claim `Q`, expected `A`, `M` (compared), `R` (`CoopWriteGuard.memberSave`) |
+| shared record `S` (bank, personal subaccounts, collections) | bank/collection postings, interest | transaction claim `P`, actor `Q`, expected `A`, `M`, `S`, actor active on the profile (`mutateShared`) |
+| metadata `M` (members, roles, label, hold, binding reference) | convert, invite, accept, leave, kick, label, lock, archive | `P`, actor `Q` (and the affected member's `Q` for a removal), expected `A`, `M`, invite/vote revision (intents) |
+| account `A` (slots, aliases, active pointer) | switch, accept, removal repoint | `Q`, expected `A` |
+
+`P` (`coop:profile-claim:<id>`) and `Q` (`coop:player-claim:<id>`) are strict: a different token is refused while the
+holder's lease is live, on any node. Two nodes posting to one bank therefore serialise on `P` (one gets
+`OWNERSHIP_CONFLICT`, writes nothing, and retries); a stale read is refused by the `S` CAS (`STALE_STATE`). Per-member
+state (snapshots, capture tickets, purse adapter data) is per `(member, epoch)` stream and never shared.
+
+So with cross-node on, the node claim keeps only its remaining job: **it marks the node that hosts the profile's
+bound worlds** (`ensureReady`, `prepareActive`, idle unload). The decision is per node, not per profile:
+
+| `coop.cross-node` | `coop.world-host` | Role | Node claim | `WRONG_NODE` | Bound worlds |
+|---|---|---|---|---|---|
+| `false` (default) | ignored (`false` refused) | Build 55.1, OD-1 | taken on join/switch, one node per profile | join, switch, every co-op operation while another node holds the claim | prepared and hosted |
+| `true` | `true` (default) | **world host** (island) | taken on join/switch, exactly as Build 55.1 | as Build 55.1: a second world host of the same co-op is refused | prepared and hosted |
+| `true` | `false` | **satellite** (spawn) | **never taken** (format 2); the session is recorded without one (`satelliteSession`), so the quit, lockstep and shutdown captures still run | **never**: join, bank, collections, membership and label run under `P`/`Q`/CAS | **never** prepared, loaded or created: the world port is the no-op one, `prepareActive` returns at once |
+
+Rules the runtime enforces at start (`ProfileRuntime.validateCrossNode`, before the fabric checks):
+`cross-node: true` needs `mode: distributed` and `repository: redis` (the FILE repository compares revisions in one
+process and is refused); `world-host: false` needs `switching.enabled: false` (a switch takes the node claim and
+prepares the target's worlds) and `cross-node: true`. A satellite on a format-1 store claims like any node (format 1
+has no `Q`; `writeAuthority` needs the claim), so the feature is effectively format 2 only.
+
+### What happens where (WuretaMC shape)
+
+- **A member joins the spawn node** with a co-op active: `Q` is claimed (with the Build 55.1 handoff wait), no node
+  claim, the committed member head is restored, no world is prepared. The island's node claim is not consulted and not
+  disturbed; the island's members keep playing. The member's saves, quit and shutdown captures publish their own stream
+  under `Q`. `isolation.location: false` on the spawn node (the bound world is not there).
+- **A member joins the island** while another member is on the spawn node: the island claims the node claim (nobody
+  else holds it) and plays as Build 55.1. Two members on the island share the node's one claim as before.
+- **Two island nodes** (two world hosts) and one co-op: the second is refused `WRONG_NODE` on join, switch and every
+  co-op operation, exactly as Build 55.1. A co-op's bound world is hosted by one node; there is no routing.
+- **Bank, collections, label from either node:** `P` + `Q` + CAS, as in the table. The spawn node skips the OD-1 node
+  check (`requireProfileNode`) because it hosts no world; the island keeps it (against other world hosts).
+- **Invite/accept:** an accept on the spawn node admits the member under `P` and the invitee's `Q` while the island
+  plays the co-op; the member's first entry on either node initialises their stream.
+- **Leave/kick of a member who plays the co-op on the other node:** refused `MEMBER_ONLINE` from either side. On the
+  spawn node the member cannot be switched out (switching is off); from the island the member's `Q` is held on the
+  spawn node. Once they quit (their quit published their head), a leave or kick repoints them (Build 53 `REPOINT`).
+- **Operator lock** of a co-op while a member has it active on the other node: refused `OWNERSHIP_CONFLICT` naming the
+  node (new check, the satellite holds no node claim for the old check to see). Archive and delete already refuse on
+  the members' accounts.
+- **Switching on the spawn node:** refused at start (`switching.enabled: false` required). Every profile switch and
+  SSB2 island action stays on the island.
+
+### What stays refused or unchanged
+
+- Two world hosts for one co-op (`WRONG_NODE`); loading a bound world on two nodes; any routing or live-state
+  transfer (the join restores the last committed head, Build 53).
+- The FILE repository, standalone mode, a format-1 store.
+- A member's node claim on a world host still waits out the Build 55.1 handoff window only for claims another
+  *world host* holds; a satellite never holds one, so a switch spawn → island never waits on the co-op's node claim.
+- Switch cooldown stays per node; `/perf multiprofile` stays per node.
+- No new record type, no store level change, no Lua script change: the fences above are the Build 53–55 ones.
+
 ## Known gaps
 
 - A player's live state does not follow them between servers. With `login.authoritative: true` (Build 53) a
@@ -204,7 +279,8 @@ Redis during a switch.
   capture that missed the shutdown deadline, is lost. With `false` a join keeps that server's vanilla playerdata
   (Build 52 behaviour).
 - Shutdown capture (Build 53) is per node and bounded by `shutdown.capture-deadline-ms`; it is not a distributed
-  handoff. A member plays a co-op only on the node holding its bound world (OD-1, `WRONG_NODE` elsewhere).
+  handoff. With `coop.cross-node` off (default) a member plays a co-op only on the node holding its bound world
+  (OD-1, `WRONG_NODE` elsewhere); Build 56 lifts that for satellite nodes (above), untested.
 - No proxy or portal handoff transport: `RoutingFabric` has no transport and advertises an empty address. A
   proxy server switch is handled only on the joining side by the session handoff wait above (Build 55.1,
   `coordination.handoff-wait-ms`, off by default); nothing moves live state, and nothing routes players.

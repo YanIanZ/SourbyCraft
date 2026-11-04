@@ -78,6 +78,16 @@ exercised by no test on this branch.
 | `ProfileSettingsBuild551Test` | `coordination.handoff-wait-ms`: default 0, the Build 51 `Coordination` constructor keeping it, parsing, per-key fallback with the key reported, the 0..15000 range, the AuroraKeys row; `adapters.preserve-unregistered`: default empty, the Build 53 `Adapters` constructor, parsing, id validation and cap, the AuroraKeys row |
 | `AdapterPreservationTest` | `adapters.preserve-unregistered` in the registry: stored REQUIRED data of a listed, unregistered id passes `validateApply` and `apply` untouched, is carried forward byte-identical with the required record and applied again by a registry that registers the adapter; an unlisted id still refuses `ADAPTER_MISSING`; a listed id that is registered here (UNSUPPORTED scope, older version) still refuses; a plugin registering the id mid-session is not captured for a player whose apply passed the data through, until the next apply (`passedThrough`, `forgetPassedThrough`); `preservedHere` |
 
+### Build 56 unit tests (written, compiled; not run by the agent — owner rule)
+
+| Class | Covers |
+|---|---|
+| `CoopCrossNodeRedisTest` | two engines as two nodes on one Redis (`FabricTestNodes.sessionsAs`): island = world host, spawn = satellite. A member on each node at once (the spawn join is admitted without a node claim, `satelliteSession`, restore `RESTORED` not `WRONG_NODE`, `prepareActive` false, each member's stream moves only with that member's saves, the spawn quit publishes the head, the island keeps its claim, then both members on the island); a bank posting from each node (conservation; two at once serialise on `P`, a refused posting writes nothing and its retry posts; `P` held on the island refuses the spawn node until released); membership while a member is on the other node (an invite accepted on the spawn node joins; a leave on the spawn node and the same leave from the island are `MEMBER_ONLINE`; an operator lock from the island is `OWNERSHIP_CONFLICT` naming the spawn node; after the quit the leave repoints); the default (cross-node off) keeping the Build 55.1 `WRONG_NODE` on claim, restore, bank and label. Needs `redis-server` (skipped without it; CI requires it) |
+| `ProfileSettingsBuild56Test` | both keys: defaults (OD-1, every node a world host), the Build 52 `Coop` constructor, parsing, per-key fallback with the key reported, AuroraKeys rows, `crossNodeCoop()`/`satellite()` need the feature on; `ProfileRuntime.validateCrossNode`: cross-node off is never refused, the FILE repository and standalone mode refuse cross-node, a satellite needs switching off and cross-node on (the WuretaMC shape passes) |
+
+Not covered: the runtime wiring of the no-op world port on a satellite, the start-up INFO, and every multi-server
+behaviour (TO-B56-01..06 in the [Build 56 notes](../../releases/26.2-build-56-aurora-nexus.md)).
+
 ### Not covered by any test (pending for the owner or a test wave)
 
 - `RedisProfileRepository`: `FENCED`/`STALE`/`MISSING` replies, a stale owner refused after a takeover,

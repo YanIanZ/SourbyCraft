@@ -312,14 +312,33 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
      *     vote may start, 1 to {@value #MAX_INACTIVE_DAYS} days
      * @param allowedTypes the {@linkplain dev.iyanz.sourbycraft.api.profile.ProfileType policy types} whose solo
      *     profile may be converted to co-op; never empty. Checked at conversion only.
+     * @param crossNode Build 56: members of one co-op may be on different nodes at once. {@code false} (default) is
+     *     owner decision OD-1 of Builds 53–55.1: one node per co-op, {@code WRONG_NODE} elsewhere. {@code true}
+     *     needs {@code mode: distributed} and {@code repository: redis} (refused at start otherwise): every member
+     *     save is fenced by the member's own session claim {@code Q} and the stream's revisions, and every shared
+     *     record (bank, collections, membership, label) by the profile transaction claim {@code P} and its
+     *     revision CAS, so the node claim is only the marker of the node that hosts the profile's bound worlds.
+     * @param worldHost Build 56, read with {@code crossNode} only: whether this node prepares and claims the bound
+     *     worlds of co-op profiles. {@code true} (default) = a world host, which behaves exactly as Build 55.1 (one
+     *     world host per co-op, {@code WRONG_NODE} on a second). {@code false} = a <em>satellite</em> (a spawn or
+     *     lobby node): it takes no node claim, never prepares, loads or creates a bound world, refuses no join or
+     *     shared operation as {@code WRONG_NODE}, and needs {@code switching.enabled: false} (refused at start
+     *     otherwise). {@code false} with {@code crossNode} off is refused at start.
      */
     public record Coop(boolean enabled, int maxMembers, int inviteExpiryMinutes, int kickVoteExpiryMinutes,
-                       int kickVoteInactiveDays, Set<dev.iyanz.sourbycraft.api.profile.ProfileType> allowedTypes) {
+                       int kickVoteInactiveDays, Set<dev.iyanz.sourbycraft.api.profile.ProfileType> allowedTypes,
+                       boolean crossNode, boolean worldHost) {
 
         public static final int MIN_MEMBERS = 2;
         public static final int MAX_MEMBERS_LIMIT = 8;
         public static final int MAX_EXPIRY_MINUTES = 1440;
         public static final int MAX_INACTIVE_DAYS = 3650;
+
+        /** The Build 52–55.1 shape: one node per co-op (OD-1), this node a world host. */
+        public Coop(final boolean enabled, final int maxMembers, final int inviteExpiryMinutes, final int kickVoteExpiryMinutes,
+                    final int kickVoteInactiveDays, final Set<dev.iyanz.sourbycraft.api.profile.ProfileType> allowedTypes) {
+            this(enabled, maxMembers, inviteExpiryMinutes, kickVoteExpiryMinutes, kickVoteInactiveDays, allowedTypes, false, true);
+        }
 
         public Coop {
             Objects.requireNonNull(allowedTypes, "allowedTypes");
@@ -354,6 +373,11 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         /** Whether a solo profile of this policy type may be converted to co-op. */
         public boolean allows(final dev.iyanz.sourbycraft.api.profile.ProfileType type) {
             return this.allowedTypes.contains(type);
+        }
+
+        /** Build 56: a satellite node (cross-node on, not a world host); see {@link #worldHost}. */
+        public boolean satellite() {
+            return this.crossNode && !this.worldHost;
         }
     }
 
@@ -599,6 +623,10 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
     public static final String COOP_VOTE_EXPIRY_KEY = "aurora.awf.multiprofile.coop.kick-vote.expiry-minutes";
     public static final String COOP_INACTIVE_DAYS_KEY = "aurora.awf.multiprofile.coop.kick-vote.inactive-days";
     public static final String COOP_ALLOWED_TYPES_KEY = "aurora.awf.multiprofile.coop.allowed-types";
+    /** Build 56: co-op members on different nodes at once ({@link Coop#crossNode}). */
+    public static final String COOP_CROSS_NODE_KEY = "aurora.awf.multiprofile.coop.cross-node";
+    /** Build 56: whether this node hosts the bound worlds of co-op profiles ({@link Coop#worldHost}). */
+    public static final String COOP_WORLD_HOST_KEY = "aurora.awf.multiprofile.coop.world-host";
     public static final String SHUTDOWN_CAPTURE_DEADLINE_KEY = "aurora.awf.multiprofile.shutdown.capture-deadline-ms";
     public static final String LOGIN_AUTHORITATIVE_KEY = "aurora.awf.multiprofile.login.authoritative";
     public static final String ADAPTERS_REQUIRED_KEY = "aurora.awf.multiprofile.adapters.required";
@@ -649,7 +677,7 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         TYPES_ALLOWED_KEY, TYPES_DEFAULT_KEY, NAMES_POLICY_KEY, MIGRATION_MODE_KEY, MIGRATION_BACKUP_DIR_KEY,
         COOP_ENABLED_KEY, COOP_MAX_MEMBERS_KEY, COOP_INVITE_EXPIRY_KEY, COOP_VOTE_EXPIRY_KEY, COOP_INACTIVE_DAYS_KEY,
         COOP_ALLOWED_TYPES_KEY, SHUTDOWN_CAPTURE_DEADLINE_KEY, LOGIN_AUTHORITATIVE_KEY, ADAPTERS_REQUIRED_KEY, ADAPTERS_PRESERVE_KEY,
-        TYPES_OVERRIDE_BUILTINS_KEY, TYPES_UNKNOWN_POLICY_KEY,
+        TYPES_OVERRIDE_BUILTINS_KEY, TYPES_UNKNOWN_POLICY_KEY, COOP_CROSS_NODE_KEY, COOP_WORLD_HOST_KEY,
         BANK_CURRENCY_PROVIDER_KEY, BANK_CURRENCY_ID_KEY, BANK_CURRENCY_SCALE_KEY, BANK_SHARED_CAPACITY_KEY, BANK_PERSONAL_CAP_KEY,
         BANK_INTEREST_KEY, BANK_INTEREST_INTERVAL_KEY,
         SWITCHING_COOLDOWN_KEY, AUDIT_ENABLED_KEY, AUDIT_RETENTION_KEY, IO_PARTITIONS_KEY);
@@ -834,6 +862,24 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
      */
     public boolean authoritativeLogin() {
         return this.enabled && this.login.applies(this.coop.enabled());
+    }
+
+    /**
+     * Build 56: whether members of one co-op may be on different nodes at once ({@code coop.cross-node} with the
+     * feature on). Independent of {@code coop.enabled}: a satellite that accepts no co-op operation still admits a
+     * co-op member's join without the node claim.
+     */
+    public boolean crossNodeCoop() {
+        return this.enabled && this.coop.crossNode();
+    }
+
+    /**
+     * Build 56: whether this node is a satellite ({@code coop.cross-node: true}, {@code coop.world-host: false}): no
+     * node claim on any profile, no bound world prepared, no {@code WRONG_NODE}. {@code false} on every other node,
+     * which behaves as Build 55.1 (a world host, or OD-1 with cross-node off).
+     */
+    public boolean satellite() {
+        return crossNodeCoop() && !this.coop.worldHost();
     }
 
     /** Whether profiles are stored in the Aurora Redis Fabric instead of the directory. */
@@ -1053,7 +1099,9 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
             whole(values, COOP_INVITE_EXPIRY_KEY, DEFAULT_COOP.inviteExpiryMinutes(), 1, Coop.MAX_EXPIRY_MINUTES, invalid),
             whole(values, COOP_VOTE_EXPIRY_KEY, DEFAULT_COOP.kickVoteExpiryMinutes(), 1, Coop.MAX_EXPIRY_MINUTES, invalid),
             whole(values, COOP_INACTIVE_DAYS_KEY, DEFAULT_COOP.kickVoteInactiveDays(), 1, Coop.MAX_INACTIVE_DAYS, invalid),
-            allowed);
+            allowed,
+            flag(values, COOP_CROSS_NODE_KEY, DEFAULT_COOP.crossNode(), invalid),
+            flag(values, COOP_WORLD_HOST_KEY, DEFAULT_COOP.worldHost(), invalid));
     }
 
     private static Types types(final Map<String, Object> values, final List<String> invalid) {
@@ -1212,6 +1260,8 @@ public record ProfileSettings(boolean enabled, Mode mode, int defaultSlots, int 
         values.put(AUDIT_ENABLED_KEY, DEFAULT.audit().enabled());
         values.put(AUDIT_RETENTION_KEY, DEFAULT.audit().retentionDays());
         values.put(IO_PARTITIONS_KEY, DEFAULT.io().partitions());
+        values.put(COOP_CROSS_NODE_KEY, DEFAULT.coop().crossNode());
+        values.put(COOP_WORLD_HOST_KEY, DEFAULT.coop().worldHost());
         return values;
     }
 
