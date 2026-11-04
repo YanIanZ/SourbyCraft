@@ -51,7 +51,13 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityPickupItemEvent;
+import org.bukkit.event.inventory.InventoryOpenEvent;
+import org.bukkit.event.player.PlayerCommandPreprocessEvent;
+import org.bukkit.event.player.PlayerMoveEvent;
+import org.bukkit.event.player.PlayerPortalEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.player.PlayerDropItemEvent;
@@ -275,7 +281,12 @@ public final class ProfileRuntime {
         } else if (repository instanceof RedisProfileRepository redis) {
             redis.attachDefaultSlots(settings.defaultSlots());
         }
-        final ProfileStateAdapters adapters = new ProfileStateAdapters(settings.adapters().required());
+        final ProfileStateAdapters adapters = new ProfileStateAdapters(settings.adapters().required(),
+            settings.adapters().preserveUnregistered());
+        if (!settings.adapters().preserveUnregistered().isEmpty()) {
+            SourbyLogger.info("AWF MultiProfile: stored data of the adapter id(s) " + settings.adapters().preserveUnregistered()
+                + " passes through this node unchanged while no plugin registers them here (adapters.preserve-unregistered)");
+        }
         final BukkitPlayerStatePort statePort = new BukkitPlayerStatePort(plugin, adapters);
         final AwfProfileWorldPort worldPort = new AwfProfileWorldPort(
             dev.iyanz.sourbycraft.awf.world.AuroraWorldsRuntime::service);
@@ -401,6 +412,7 @@ public final class ProfileRuntime {
             Bukkit.getServicesManager().register(AuroraProfiles.class, runtime.api(), plugin, ServicePriority.Normal);
             Bukkit.getPluginManager().registerEvents(runtime.new Sessions(), plugin);
             Bukkit.getPluginManager().registerEvents(runtime.new SwitchFreeze(), plugin);
+            Bukkit.getPluginManager().registerEvents(runtime.new HandoffFreeze(), plugin);
             // PM-076: the server hands the online players to these before it saves and removes them.
             ProfileShutdownHook.registerAdapterCapture(runtime.shutdownAdapterCapture);
             ProfileShutdownHook.register(runtime.shutdownCapture);
@@ -830,6 +842,11 @@ public final class ProfileRuntime {
     private final java.util.Set<UUID> quitting = ConcurrentHashMap.newKeySet();
     /** Players with a lockstep save queued and not yet settled (at most one pending autosave per player, D2). */
     private final java.util.Set<UUID> autosavePending = ConcurrentHashMap.newKeySet();
+    /**
+     * Build 55.1: players whose join is waiting for a session handoff (coordination.handoff-wait-ms). They stand on the
+     * join's vanilla playerdata behind the login gate; {@link HandoffFreeze} keeps that state inert meanwhile.
+     */
+    private final java.util.Set<UUID> handoffWaiting = ConcurrentHashMap.newKeySet();
 
     /** Join/quit integration: recovery, session claim, the active profile's worlds, save on the way out, lockstep autosave. */
     private final class Sessions implements Listener {
@@ -840,6 +857,8 @@ public final class ProfileRuntime {
             final UUID playerId = player.getUniqueId();
             ProfileRuntime.this.quitting.remove(playerId);
             ProfileRuntime.this.autosavePending.remove(playerId);
+            ProfileRuntime.this.handoffWaiting.remove(playerId);
+            ProfileRuntime.this.adapters.forgetPassedThrough(playerId);
             // Read here, on the thread that owns the player: the world the join placed them in.
             final String joinedWorld = player.getWorld().getName();
             // A quit during a switch asked for the session claim to be released when the switch
@@ -850,8 +869,10 @@ public final class ProfileRuntime {
             final UUID gate = ProfileRuntime.this.engine.gateLogin(playerId);
             final Join join = new Join(event, gate, joinedWorld);
             // Format 2: the player's session claim Q comes first, before recovery, capture or restore. A format-1
-            // store admits at once.
-            ProfileRuntime.this.engine.admitSession(playerId).handle((admission, failed) -> {
+            // store admits at once. Build 55.1: a claim another live session still holds (a proxy switch whose
+            // previous server has not released it yet) is retried within the join's handoff window
+            // (coordination.handoff-wait-ms, default 0 = one attempt); the retries run off this thread.
+            ProfileRuntime.this.engine.admitSession(playerId, join.window, join::stale).handle((admission, failed) -> {
                 if (failed != null) {
                     join.refuse(ProfileEngine.codeOf(failed), "admitting the session failed: " + ProfileEngine.messageOf(failed),
                         "Your profile session could not be started (" + ProfileEngine.codeOf(failed) + "). Try again in a moment.");
@@ -868,7 +889,10 @@ public final class ProfileRuntime {
                 }
                 return true;
             }).thenCompose(admitted -> !admitted ? CompletableFuture.completedFuture(null) : joinAdmitted(join))
-                .whenComplete((ignored, failed) -> ProfileRuntime.this.engine.releaseLoginGate(playerId, gate));
+                .whenComplete((ignored, failed) -> {
+                    ProfileRuntime.this.handoffWaiting.remove(playerId);
+                    ProfileRuntime.this.engine.releaseLoginGate(playerId, gate);
+                });
         }
 
         /** One join: its player instance, gate token and the world it placed the player in; refuses hold the gate first. */
@@ -877,12 +901,27 @@ public final class ProfileRuntime {
             final UUID playerId;
             final UUID gate;
             final String joinedWorld;
+            /** Build 55.1: the handoff budget the admission and the active profile's node claim share. */
+            final ProfileEngine.HandoffWindow window;
 
             Join(final PlayerJoinEvent event, final UUID gate, final String joinedWorld) {
                 this.player = event.getPlayer();
                 this.playerId = this.player.getUniqueId();
                 this.gate = gate;
                 this.joinedWorld = joinedWorld;
+                this.window = ProfileRuntime.this.engine.handoffWindow().onWait(this::tellWaiting);
+            }
+
+            /** The join started waiting for the previous server: freeze the player (HandoffFreeze) and tell them once. */
+            private void tellWaiting() {
+                if (Bukkit.getPlayer(this.playerId) != this.player) return;
+                ProfileRuntime.this.handoffWaiting.add(this.playerId);
+                try {
+                    this.player.getScheduler().execute(ProfileRuntime.this.plugin, () -> this.player.sendActionBar(
+                        net.kyori.adventure.text.Component.text("Loading your profile...")), null, 1L);
+                } catch (final RuntimeException retired) {
+                    // The player's scheduler is retired (they left); the wait notices through stale().
+                }
             }
 
             /** Whether this join is no longer the player's current connection (quit, or joined again meanwhile). */
@@ -928,7 +967,7 @@ public final class ProfileRuntime {
             }).thenCompose(ignored -> ProfileRuntime.this.engine.active(playerId)).thenCompose(active -> {
                 if (active.isEmpty()) return CompletableFuture.completedFuture(null);
                 final UUID profileId = active.get().id();
-                return ProfileRuntime.this.engine.claimSession(playerId, profileId)
+                return ProfileRuntime.this.engine.claimSession(playerId, profileId, join.window, join::stale)
                     .thenCompose(claim -> {
                         if (claim.granted() && !ProfileRuntime.this.statePort.online(playerId)) {
                             // The player quit while recovery and the claim ran; their quit found no
@@ -1042,6 +1081,7 @@ public final class ProfileRuntime {
             final Player player = event.getPlayer();
             final UUID playerId = player.getUniqueId();
             final ProfileEngine engine = ProfileRuntime.this.engine;
+            ProfileRuntime.this.handoffWaiting.remove(playerId);
             // The server's own player save follows this event synchronously; the lockstep listener must not capture again.
             // The mark is dropped on the next global tick (or at a rejoin), so the set never outgrows the players quitting now.
             ProfileRuntime.this.quitting.add(playerId);
@@ -1080,6 +1120,8 @@ public final class ProfileRuntime {
                 SourbyLogger.warn("AWF MultiProfile: capturing " + playerId + " on quit failed (" + ProfileEngine.messageOf(failed)
                     + "); no quit snapshot was written and the last committed snapshot stays");
             }
+            // Build 55.1: the quit capture above was the session's last; the pass-through memory ends with the session.
+            ProfileRuntime.this.adapters.forgetPassedThrough(playerId);
             final CompletableFuture<Boolean> saved = captured == null
                 ? CompletableFuture.completedFuture(false) : engine.saveCapturedAndClose(playerId, captured, ticket);
             saved.handle((written, failed) -> {
@@ -1203,6 +1245,58 @@ public final class ProfileRuntime {
     }
 
     /** The {@link AuroraProfiles} implementation registered in the services manager. */
+    /**
+     * Build 55.1: while a join waits for a session handoff the player stands on the join's vanilla playerdata, which the
+     * login gate keeps out of every save but which would otherwise still change the world (damage dealt, drops at a
+     * death, commands, chests, movement, portals) for up to the handoff window. Every handler runs on the thread that
+     * owns the player and reads one concurrent set; nothing crosses a region. {@link SwitchFreeze} already cancels the
+     * item, experience and interaction events of a gated player; this adds damage to and by the player (a death and its
+     * drops cannot happen), every command, opening an inventory, movement to another block and portal use. Lifted when
+     * the join is admitted or refused, and at quit.
+     */
+    private final class HandoffFreeze implements Listener {
+
+        private boolean waiting(final Object entity) {
+            return entity instanceof Player player && ProfileRuntime.this.handoffWaiting.contains(player.getUniqueId());
+        }
+
+        @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+        public void onDamage(final EntityDamageEvent event) {
+            if (waiting(event.getEntity())) event.setCancelled(true);
+        }
+
+        @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+        public void onDamageBy(final EntityDamageByEntityEvent event) {
+            final Object damager = event.getDamager();
+            if (waiting(damager)
+                || (damager instanceof org.bukkit.entity.Projectile projectile && waiting(projectile.getShooter()))) {
+                event.setCancelled(true);
+            }
+        }
+
+        @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+        public void onCommand(final PlayerCommandPreprocessEvent event) {
+            if (!waiting(event.getPlayer())) return;
+            event.setCancelled(true);
+            event.getPlayer().sendMessage(net.kyori.adventure.text.Component.text("Your profile is still loading; try again in a moment."));
+        }
+
+        @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+        public void onInventoryOpen(final InventoryOpenEvent event) {
+            if (waiting(event.getPlayer())) event.setCancelled(true);
+        }
+
+        @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+        public void onMove(final PlayerMoveEvent event) {
+            if (event.hasChangedBlock() && waiting(event.getPlayer())) event.setCancelled(true);
+        }
+
+        @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+        public void onPortal(final PlayerPortalEvent event) {
+            if (waiting(event.getPlayer())) event.setCancelled(true);
+        }
+    }
+
     private final class Api implements AuroraProfiles {
 
         private final ProfileEngine engine;

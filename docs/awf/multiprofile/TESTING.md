@@ -70,6 +70,14 @@ Not covered (owner cases from COOP-DESIGN §10 slice 7): `CoopAuditRuntimeWired`
 switch path with a vetoing guard, the archived-profile refusals and the `applyAbsent` call on each apply path are
 exercised by no test on this branch.
 
+### Build 55.1 unit tests (written, compiled; not run by the agent — owner rule)
+
+| Class | Covers |
+|---|---|
+| `SessionHandoffTest` | `coordination.handoff-wait-ms` through the real engine over a format-2 FILE store with the session claim held under another node id: the admission waits and is admitted after the holder releases `Q` (under a higher fence, the live claim never replaced); the window elapses with the Build 55 refusal while the holder's claim stays live and valid; default 0 is one attempt with nothing counted; a stale join (player left) stops the wait with the refusal; closing the engine ends a wait with the refusal; the active profile's node claim waits under the same window; a join on a closed engine fails at once with `INTERNAL_ERROR` before any attempt (Build 55 behaviour); the metrics rows. The `HandoffFreeze` listener is not unit-tested (Bukkit events; owner case TO-B55.1-01) |
+| `ProfileSettingsBuild551Test` | `coordination.handoff-wait-ms`: default 0, the Build 51 `Coordination` constructor keeping it, parsing, per-key fallback with the key reported, the 0..15000 range, the AuroraKeys row; `adapters.preserve-unregistered`: default empty, the Build 53 `Adapters` constructor, parsing, id validation and cap, the AuroraKeys row |
+| `AdapterPreservationTest` | `adapters.preserve-unregistered` in the registry: stored REQUIRED data of a listed, unregistered id passes `validateApply` and `apply` untouched, is carried forward byte-identical with the required record and applied again by a registry that registers the adapter; an unlisted id still refuses `ADAPTER_MISSING`; a listed id that is registered here (UNSUPPORTED scope, older version) still refuses; a plugin registering the id mid-session is not captured for a player whose apply passed the data through, until the next apply (`passedThrough`, `forgetPassedThrough`); `preservedHere` |
+
 ### Not covered by any test (pending for the owner or a test wave)
 
 - `RedisProfileRepository`: `FENCED`/`STALE`/`MISSING` replies, a stale owner refused after a takeover,
