@@ -46,6 +46,8 @@ disagree, the code wins ([DEVELOPMENT.md](DEVELOPMENT.md), truthfulness policy).
 
 ## Future design RFC (proposed, not implemented)
 
+**[Aurora Engine Independence — Builds 56–100](proposals/aurora-engine-independence/README.md)** — Aurora-only future program: lifecycle, region ownership and execution contracts, chunk/entity/network optimization, Resource Governor, AWF reliability, source/patch independence, performance qualification and Build 100. Documentation proposal only; no Metal or Spottedleaf upgrade and no runtime changes.
+
 **[Aurora Identity + Territory Fabric v3](proposals/aurora-identity-territory-v3/README.md)** — major planned upgrade covering Mojang account UUID + unique character identities, GameProfile presentation, transactional MultiProfile, AWF territory partitioning, cross-server handoff, plugin compatibility, security, migration, owner tests and epic roadmap. This is a **docs-only PROPOSAL**, not Build 50 implementation or a released feature. Existing Build 50 readiness and TODO remain the source of truth.
 
 ## Index
