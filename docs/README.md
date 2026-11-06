@@ -36,7 +36,7 @@ disagree, the code wins ([DEVELOPMENT.md](DEVELOPMENT.md), truthfulness policy).
 6. **Test.** Gradle and Python suites (commands in [AGENTS.md](../AGENTS.md#running-tests)); AWF and
    legacy-plugin guides under [guides/](guides/). Performance claims need the evidence rules in
    [BASELINE.md](BASELINE.md) and [PROFILING.md](PROFILING.md).
-7. **Track and release.** Priorities and status live only in [TODO.md](TODO.md); per-item Build 50
+7. **Track and release.** The latest published release is [Build 57](releases/26.2-build-57-aurora-nexus.md) (not owner-qualified or STABLE). Priorities and status live only in [TODO.md](TODO.md); per-item Build 50
    detail is in the generated [PM matrix](releases/BUILD-50-PM-MATRIX.md) and the owner's manual
    test steps in [Tester Owner](tester%20owner.md). A build is declared STABLE only after the gates in
    its release doc under [releases/](releases/) pass, and the owner decides the channel and which build
