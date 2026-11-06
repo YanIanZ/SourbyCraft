@@ -44,6 +44,14 @@ disagree, the code wins ([DEVELOPMENT.md](DEVELOPMENT.md), truthfulness policy).
    as a prerelease (owner decisions 2026-10-21, 2026-10-22 and 2026-10-24); the 26.3 line starts at Build 100,
    Aurora Forge (owner 2026-10-24). Plan: [ROADMAP-47-50.md](releases/ROADMAP-47-50.md).
 
+## Contributing and open-source evidence
+
+- [Contributing guide](../CONTRIBUTING.md) — public issue/PR workflow, review expectations,
+  available contributor tasks and the private-toolchain build limitation.
+- [Security policy](../SECURITY.md) — safe reporting without publishing exploit details.
+- [Adoption and evidence](community/OPEN-SOURCE-EVIDENCE.md) — public verification links,
+  downstream usage reports and criteria for stronger claims.
+
 ## Future design RFC (proposed, not implemented)
 
 **[Aurora Engine Independence — Builds 56–100](proposals/aurora-engine-independence/README.md)** — Aurora-only future program: lifecycle, region ownership and execution contracts, chunk/entity/network optimization, Resource Governor, AWF reliability, source/patch independence, performance qualification and Build 100. Documentation proposal only; no Metal or Spottedleaf upgrade and no runtime changes.
