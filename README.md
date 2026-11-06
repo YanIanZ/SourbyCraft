@@ -163,6 +163,7 @@ SourbyCraft is licensed under the [GPL version 3 only](LICENSE.md); upstream com
 licences, listed there. The SourbyCraft and Aurora names and logos are covered by the
 [trademark policy](TRADEMARK.md): forks are welcome under the GPL, but must use their own name.
 
-Build 50 candidate (PR #62): [readiness](docs/releases/BUILD-50-READINESS.md) ·
-[PM matrix](docs/releases/BUILD-50-PM-MATRIX.md) · [Tester Owner](docs/tester%20owner.md) · status in
-[docs/TODO.md](docs/TODO.md). Owner build and manual qualification are pending.
+Historical Build 50 planning and test handoffs remain available in the
+[documentation index](docs/README.md). For the current release, consult the
+[Build 57 release evidence and outstanding owner tests](docs/releases/26.2-build-57-aurora-nexus.md).
+No build should be called STABLE or production-qualified without the stated gates.
