@@ -27,21 +27,22 @@ Aurora optimizes in this order: correctness, reliability, stability, predictable
 efficiency, scalability, observability, then peak throughput. A faster result that weakens region
 ownership, persistence, shutdown or plugin semantics is not accepted.
 
-**Status.** The newest normal releases are [Build 49 — Aurora Nexus](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.2-r49)
-(signed, not STABLE; [release notes](docs/releases/26.2-build-49-release.md), open gates in
-[docs/releases/26.2-build-49.md](docs/releases/26.2-build-49.md)) and its test-only hotfix
-[Build 49.1](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.2-r49.1)
-([notes](docs/releases/26.2-build-49.1-hotfix.md)). Build 49 brings YAML configuration with the one-time
-TOML conversion, AbyssLink (disabled by default) and the 48.4 shutdown fixes.
-[Build 50](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.2-r50) is a GitHub **prerelease**
-(`release=pre`; the auto-updater skips it unless `updater.allow-prerelease` is on). Its tag (`5f5a167`)
-predates PR #61 and PR #62, so the Build 50 AWF and MultiProfile fixes in
-[readiness](docs/releases/BUILD-50-READINESS.md) are in no published build yet. PR #62 is code written and
-statically reviewed, not built, not tested by the owner; neither PR has owner test results. How they ship
-(an r50.1 hotfix or Build 51) is an owner decision.
-**Do not use `aurora.awf.multiprofile.mode: distributed` on `v26.2-r50`:** that build runs it on the file
-repository, which cannot fence writes between servers. STABLE still waits on the gate list; the 26.3 line
-starts at Build 100, codename Aurora Forge ([roadmap](docs/releases/ROADMAP-47-50.md)).
+**Release status (2026-11-06).** The latest published GitHub release is
+[Build 57 — Aurora Nexus](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.2-r57)
+([release notes](docs/releases/26.2-build-57-aurora-nexus.md)). It is **not STABLE or
+owner-qualified**: although CI and compile evidence are documented, the required owner-run
+manual tests and performance qualification are not complete. Earlier releases, experimental
+features and implementation notes must not be presented as independently validated.
+See [release gates and test evidence](docs/releases/26.2-build-57-aurora-nexus.md),
+[development policy](docs/DEVELOPMENT.md), and the
+[documentation index](docs/README.md).
+
+**Safety note.** The Aurora Compatibility Bridge can relax region ownership checks for
+legacy plugins. Running with `aurora.bridge.thread-checks: relaxed` is unsafe and unqualified;
+do not interpret fewer errors or improved compatibility as proof of thread safety.
+Use `thread-checks: enforced` when strict region-ownership guarantees are required.
+Do not use experimental AWF or distributed-profile features in production without
+completing the relevant owner qualification and recovery tests.
 
 ## Features
 
@@ -52,7 +53,7 @@ starts at Build 100, codename Aurora Forge ([roadmap](docs/releases/ROADMAP-47-5
 | Auto-updater (`updater.apply-mode: notify` by default; releases signed from Build 48) | Implemented |
 | Aurora Compatibility Bridge for non-region-aware plugins | Implemented, off by default, not qualified; with `mode: safe` the region-ownership checks are **relaxed** by default (owner decision 2026-10-22, LightingLuminol parity) -- unsafe, set `aurora.bridge.thread-checks: enforced` to keep them |
 | Aurora World Fabric (region storage, templates, instances) | Experimental, off by default |
-| AWF MultiProfile and Aurora Redis Fabric | Experimental, off by default; the shared Redis profile repository (`repository: redis`, required by `mode: distributed`) comes with PR #62 and is in no published build; it is unqualified, and live player state does not yet follow a player between servers |
+| AWF MultiProfile and Aurora Redis Fabric | Experimental, off by default; implementation and test status differ by release. Consult the release notes and owner test gates before evaluating distributed deployments; not production-qualified |
 | Async pathfinding | Experimental, off by default |
 | Cherry server-side mixins (`-Dcherry.enable.mixin=true`) | Off by default; provided by the private SourbyClip launcher, not covered by this repository's tests |
 
@@ -121,6 +122,25 @@ patch workflow, tests and release rules.
 - [Development rules](docs/DEVELOPMENT.md): truthfulness policy, evidence requirements, testing matrix
 - [Release notes and gates](docs/releases/)
 - [Performance baseline](docs/BASELINE.md) and [qualification readiness](docs/architecture/qualification-readiness.md)
+
+## Contributing and community
+
+SourbyCraft is developed in public and accepts appropriately scoped contributions.
+Start with [CONTRIBUTING.md](CONTRIBUTING.md) for issue and pull-request guidelines,
+testing expectations, and honest limitations of the private maintainer build toolchain.
+External plugin authors can start with the
+[public SourbyAPI release artifacts and example plugin](docs/guides/developing-with-sourbyapi.md)
+without building the full server.
+
+- **Security:** See [SECURITY.md](SECURITY.md) before reporting a vulnerability. Do not
+  place exploit details, access tokens or private server logs in public issues.
+- **Evidence of use:** The [open-source adoption and evidence guide](docs/community/OPEN-SOURCE-EVIDENCE.md)
+  distinguishes shipped capabilities from verified downstream use. Maintainers welcome
+  voluntary, public, permission-to-cite reports from plugin authors and server operators;
+  none are assumed without evidence.
+- **Project status:** Features and benchmarks must follow
+  [development truthfulness rules](docs/DEVELOPMENT.md). Public commits and releases
+  show activity, but are not proof of external adoption or production safety.
 
 ## Credits and license
 
