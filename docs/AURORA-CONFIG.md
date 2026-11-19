@@ -428,3 +428,16 @@ standalone, which nothing limits to one server) the feature is **EXPERIMENTAL an
 player's live state does not follow them to another server, players online at shutdown get no quit
 snapshot (feature patch 0081 order), and no proxy or portal hands players between servers. Code
 written and statically reviewed; not built; not tested by the owner.
+
+## Plugin class lookup (system property, not in a published build)
+
+`-Dsourbycraft.pluginClassLoader.legacyForeignLookup=true` (read once at class load, RESTART_REQUIRED, default
+`false`) restores Paper's lookup of a class on behalf of another plugin. Without it, a Bukkit plugin's class loader
+that is asked for a class by another plugin first checks whether it can hold that class at all (already defined,
+an entry of its jar or of a URL added to it, an entry of its library loader's jars) and otherwise answers with an
+exception that carries no stack trace. Which classes are found, and from which plugin, is meant to be the same;
+only the cost of a miss changes. API feature patch 0004.
+
+Evidence for the change is one boot profile of a server with 84 plugins (JFR, 162 s recorded): 2.58 million
+exceptions were created, and 26% of the main thread's samples were in this lookup. The effect of the patch on boot
+time has not been measured.
