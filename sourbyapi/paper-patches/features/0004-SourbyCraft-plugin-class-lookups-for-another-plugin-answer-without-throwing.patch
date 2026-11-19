@@ -1,0 +1,90 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Thu, 19 Nov 2026 12:05:09 +0700
+Subject: [PATCH] SourbyCraft - plugin class lookups for another plugin answer
+ without throwing
+
+
+diff --git a/src/main/java/org/bukkit/plugin/java/PluginClassLoader.java b/src/main/java/org/bukkit/plugin/java/PluginClassLoader.java
+index c53cac5cbaa65a1c984043f69d159118c80fa6dd..2c8c821dc625f58ed521bb2f3e7efe61bc66602f 100644
+--- a/src/main/java/org/bukkit/plugin/java/PluginClassLoader.java
++++ b/src/main/java/org/bukkit/plugin/java/PluginClassLoader.java
+@@ -175,7 +175,78 @@ public final class PluginClassLoader extends URLClassLoader implements io.paperm
+         return loadClass0(name, resolve, true, true);
+     }
+ 
++    // SourbyCraft start - a lookup on behalf of another plugin answers "not mine" without throwing
++    /**
++     * {@code -Dsourbycraft.pluginClassLoader.legacyForeignLookup=true} restores the lookup that asks the parent
++     * loader, {@code findClass} and the library loader of every plugin for a class another plugin could not find.
++     */
++    private static final boolean LEGACY_FOREIGN_LOOKUP = Boolean.getBoolean("sourbycraft.pluginClassLoader.legacyForeignLookup");
++
++    /** Thrown for "this plugin does not have that class" on the foreign-lookup path: no stack trace is filled in. */
++    private static final class ForeignMiss extends ClassNotFoundException {
++        ForeignMiss(final String name) {
++            super(name, null);
++        }
++
++        @Override
++        public synchronized Throwable fillInStackTrace() {
++            return this;
++        }
++    }
++
++    /**
++     * Whether this loader itself can hold {@code name}: a class it already defined, an entry of the plugin jar,
++     * or an entry of a URL that the plugin added to this loader afterwards (library injectors do that). The
++     * parent chain is deliberately not asked: a class from there is never returned to another plugin (see the
++     * check on {@code result.getClassLoader()} below), and the asking plugin has tried it already.
++     */
++    private boolean definesOrCanDefine(final String name) {
++        if (this.classes.containsKey(name) || this.findLoadedClass(name) != null) {
++            return true;
++        }
++        if (name.startsWith("org.bukkit.") || name.startsWith("net.minecraft.")) {
++            return false;
++        }
++        final String path = name.replace('.', '/').concat(".class");
++        try {
++            return this.jar.getJarEntry(path) != null || this.findResource(path) != null;
++        } catch (final IllegalStateException zipFileClosed) {
++            return true; // let the normal path report the closed jar
++        }
++    }
++
++    /** Whether the library loader can hold {@code name} in its own jars; anything but a URLClassLoader is asked. */
++    private boolean libraryCanDefine(final String name) {
++        if (!(this.libraryLoader instanceof URLClassLoader)) {
++            return true;
++        }
++        return ((URLClassLoader) this.libraryLoader).findResource(name.replace('.', '/').concat(".class")) != null;
++    }
++    // SourbyCraft end - a lookup on behalf of another plugin answers "not mine" without throwing
++
+     Class<?> loadClass0(@NotNull String name, boolean resolve, boolean checkGlobal, boolean checkLibraries) throws ClassNotFoundException {
++        // SourbyCraft start - a lookup on behalf of another plugin answers "not mine" without throwing
++        // With ~90 plugins a class nobody has was asked of every loader, and each one threw three or four
++        // ClassNotFoundExceptions with full stack traces: 2.58 million exceptions in one server start.
++        if (!checkGlobal && !LEGACY_FOREIGN_LOOKUP) {
++            if (this.definesOrCanDefine(name)) {
++                try {
++                    Class<?> result = super.loadClass(name, resolve);
++                    if (result.getClassLoader() == this) {
++                        return result;
++                    }
++                } catch (ClassNotFoundException ex) {
++                }
++            }
++            if (checkLibraries && libraryLoader != null && this.libraryCanDefine(name)) {
++                try {
++                    return libraryLoader.loadClass(name);
++                } catch (ClassNotFoundException ex) {
++                }
++            }
++            throw new ForeignMiss(name);
++        }
++        // SourbyCraft end - a lookup on behalf of another plugin answers "not mine" without throwing
+         try {
+             Class<?> result = super.loadClass(name, resolve);
+ 
