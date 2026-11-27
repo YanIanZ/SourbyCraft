@@ -28,21 +28,86 @@ final class AbyssLinkConnectionManager implements AutoCloseable {
     private int failedAttempts;
     /** The first failure is logged, then every Nth while it keeps failing. */
     private static final int LOG_EVERY=10;
+    /** An authenticated session shorter than this counts as a flap; repeated flaps are logged like failed attempts. */
+    private static final long BRIEF_SESSION_NANOS=TimeUnit.SECONDS.toNanos(60);
+    /**
+     * Configured host, resolved address and port of the attempt in progress, for server log lines only (never for
+     * {@code /ping}); empty until an attempt has resolved its address. Event-loop confined like {@link #failures}.
+     */
+    private String target="";
+    /** Consecutive authenticated sessions that ended within {@link #BRIEF_SESSION_NANOS}. */
+    private int briefSessions;
+    /** The next link-up is logged: true at start and after every logged link-down, so up/down lines always pair. */
+    private boolean announceUp=true;
     AbyssLinkConnectionManager(AbyssLinkClient client){this.client=client;}
     void start(){prepare();}
-    void authenticated(){failures=0;failedAttempts=0;}
+    /** On the event loop, once a session has authenticated: logs the link coming up and resets the failure counts. */
+    void authenticated(String node,java.util.Set<String> capabilities){
+        if(announceUp){
+            dev.iyanz.sourbycraft.util.SourbyLogger.info("AbyssLink: link up as node '"+node+"' to "+target
+                +", capabilities "+new java.util.TreeSet<>(capabilities)
+                +(failedAttempts>0?", after "+failedAttempts+" failed attempt"+(failedAttempts==1?"":"s"):""));
+            announceUp=false;
+        }
+        failures=0;failedAttempts=0;
+    }
+    /**
+     * On the event loop, when an authenticated session ends while the client still runs. A session that lasted at
+     * least a minute is always logged; brief ones (a flapping link) on the first and then every Nth in a row.
+     */
+    void linkDown(String reason,long upNanos){
+        boolean brief=upNanos<BRIEF_SESSION_NANOS;
+        briefSessions=brief?briefSessions+1:0;
+        if(brief && briefSessions!=1 && briefSessions%LOG_EVERY!=0)return;
+        dev.iyanz.sourbycraft.util.SourbyLogger.warn("AbyssLink: link down after "+duration(upNanos)+": "+reason+"; reconnecting"
+            +(!brief?"":briefSessions==1?" (links that drop within a minute again are logged every "+LOG_EVERY+")"
+                :" ("+briefSessions+" links in a row dropped within a minute)"));
+        announceUp=true;
+    }
+    static String duration(long nanos){
+        long seconds=Math.max(0,TimeUnit.NANOSECONDS.toSeconds(nanos));
+        if(seconds<120)return seconds+" s";
+        if(seconds<7200)return seconds/60+" min";
+        return seconds/3600+" h "+seconds%3600/60+" min";
+    }
     /** On the event loop: records the failed stage for status and logs the first and every Nth failure. */
     private void attemptFailed(String stage,Throwable cause){
+        attemptFailed(stage,cause==null?"no cause reported":AbyssLinkClient.describe(cause));
+    }
+    /** As above with a prepared, already sanitized detail (an authentication failure reported by the session). */
+    void attemptFailed(String stage,String detail){
         client.failed(stage);
         failedAttempts++;
         if(failedAttempts==1 || failedAttempts%LOG_EVERY==0){
-            dev.iyanz.sourbycraft.util.SourbyLogger.warn("AbyssLink: "+stage+" failed (attempt "+failedAttempts+"): "
-                +(cause==null?"no cause reported":AbyssLinkClient.describe(cause))+"; retrying with backoff"
+            dev.iyanz.sourbycraft.util.SourbyLogger.warn("AbyssLink: "+stage+(target.isEmpty()?"":" to "+target)
+                +" failed (attempt "+failedAttempts+"): "+detail+"; retrying with backoff"
                 +(failedAttempts==1?", logged again every "+LOG_EVERY+" failed attempts":""));
         }
     }
+    /**
+     * A TLS handshake failure in words. When the peer only closed the socket or never answered, the exception
+     * ("SslHandler removed before handshake completed", a closed channel, a handshake timeout) does not say why, so
+     * the likely causes are named: something other than the Leviathan AbyssLink listener at this address, or a proxy
+     * that refused this source address or client certificate.
+     */
+    static String tlsFailure(Throwable cause){
+        if(cause==null)return "no cause reported";
+        Throwable root=cause instanceof java.util.concurrent.CompletionException && cause.getCause()!=null?cause.getCause():cause;
+        String text=AbyssLinkClient.describe(root);
+        String message=String.valueOf(root.getMessage());
+        boolean closed=root instanceof java.nio.channels.ClosedChannelException
+            || root.getCause() instanceof java.nio.channels.ClosedChannelException
+            || message.contains("SslHandler removed before handshake completed")
+            || message.contains("Connection closed while SSL/TLS handshake was in progress");
+        if(closed)return "the peer closed the connection during the TLS handshake ("+text+"); the address may not be the"
+            +" Leviathan AbyssLink listener, or the proxy refused this source address or client certificate";
+        if(root instanceof SslHandshakeTimeoutException)return "no TLS answer in time ("+text+"); the address may not be"
+            +" the Leviathan AbyssLink listener";
+        return text;
+    }
     private void prepare(){
         if(stopped)return;
+        target="";
         var preparing=VirtualExecutor.supply(() -> {
             var settings=client.settings;
             SslContextBuilder builder=SslContextBuilder.forClient().sslProvider(SslProvider.JDK).protocols("TLSv1.3","TLSv1.2");
@@ -67,6 +132,8 @@ final class AbyssLinkConnectionManager implements AutoCloseable {
     private record Prepared(SslContext tls,InetSocketAddress address,byte[] nonce){}
     private void connect(Prepared prepared){
         var settings=client.settings;
+        String address=prepared.address.getAddress().getHostAddress();
+        target=settings.host()+":"+settings.port()+(settings.host().equals(address)?"":" ("+address+")");
         new Bootstrap().group(group).channel(NioSocketChannel.class)
             .option(ChannelOption.CONNECT_TIMEOUT_MILLIS,settings.timeoutMillis())
             .option(ChannelOption.TCP_NODELAY,true)
@@ -81,10 +148,15 @@ final class AbyssLinkConnectionManager implements AutoCloseable {
                     socket.pipeline().addLast("frames",new AbyssLinkFrameCodec(AbyssLinkFrame.MAX_PAYLOAD));
                     // Reject application bytes/errors before authentication; session is never installed early.
                     socket.pipeline().addLast("preauth-errors",new ChannelInboundHandlerAdapter(){
-                        @Override public void exceptionCaught(ChannelHandlerContext ctx,Throwable failure){client.metrics.rejected.increment();ctx.close();}
+                        @Override public void exceptionCaught(ChannelHandlerContext ctx,Throwable failure){
+                            client.metrics.rejected.increment();
+                            // Frame/TLS decode errors stop here, before the session handler; it still closes, with the reason logged.
+                            if(ctx.pipeline().get("session") instanceof AbyssLinkSession session){session.failed("connection error: "+AbyssLinkClient.describe(failure));return;}
+                            ctx.close();
+                        }
                     });
                     ssl.handshakeFuture().addListener(handshake -> {
-                        if(!handshake.isSuccess() && !stopped)attemptFailed("TLS handshake",handshake.cause());
+                        if(!handshake.isSuccess() && !stopped)attemptFailed("TLS handshake",tlsFailure(handshake.cause()));
                         if(!handshake.isSuccess() || stopped){socket.close();return;}
                         // Past every recorded stage: an earlier attempt's label would now be stale.
                         client.failed(null);

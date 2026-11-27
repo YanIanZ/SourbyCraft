@@ -42,16 +42,25 @@ public final class AbyssLinkClient implements AutoCloseable {
     synchronized long nextId() { if (nextId == Long.MAX_VALUE) nextId=1; return nextId++; }
     synchronized void authenticated(AbyssLinkSession value) {
         if (closed) { value.close(); return; }
-        if (session != null && session != value) session.close();
+        if (session != null && session != value) session.close("replaced by a newer session");
         cache.clear(); generation++;session=value; metrics.connections.increment();
         lastFailure=null;
-        if(manager!=null)manager.authenticated();
+        if(manager!=null)manager.authenticated(settings.nodeId(),value.capabilities());
     }
     /**
      * Records which stage of a connection attempt failed; the detail goes to the log, not to {@link #status()}.
      * {@code null} clears it once an attempt has passed every recorded stage (TLS handshake done).
      */
     void failed(String stage) { lastFailure=stage; }
+    /**
+     * On the event loop: a connection passed TLS but did not authenticate. Logged (first and every Nth failed attempt)
+     * with what the proxy answered; {@link #status()} shows {@code disconnected (authentication failed)}. Silent once
+     * the client is closed, so shutdown does not report the sessions it closes.
+     */
+    synchronized void authenticationFailed(String detail) {
+        if (closed || manager == null) return;
+        manager.attemptFailed("authentication",detail);
+    }
     /** One log line for a failure: exception class and message, control characters removed, capped at 240 characters. */
     static String describe(Throwable failure) {
         Throwable cause=failure instanceof java.util.concurrent.CompletionException && failure.getCause()!=null?failure.getCause():failure;
@@ -138,9 +147,15 @@ public final class AbyssLinkClient implements AutoCloseable {
         }
         request.result.complete(sample);
     }
-    synchronized void lost(AbyssLinkSession from) {
-        if(session==from) { session=null;generation++;cache.clear(); }
+    /**
+     * A session's connection closed. {@code reason} is non-null only for a session that had authenticated; the
+     * current one going down is logged as a link-down (not a session replaced by a newer one, not during shutdown).
+     */
+    synchronized void lost(AbyssLinkSession from,String reason,long upNanos) {
+        boolean current=session==from;
+        if(current) { session=null;generation++;cache.clear(); }
         for(var entry:new ArrayList<>(pending.entrySet())) if(entry.getValue().session==from) finish(entry.getKey(),entry.getValue(),Optional.empty(),false);
+        if(current && reason!=null && !closed && manager!=null) manager.linkDown(reason,upNanos);
     }
     void reportBatch(Runnable batch) {
         var current=session;

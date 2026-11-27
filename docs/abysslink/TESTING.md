@@ -37,6 +37,20 @@ Still unverified anywhere: a production Leviathan distribution, gameplay forward
 latency, and the `/ping` self/other/command-block forms on a running server. These are owner
 checks, not yet listed as open items in [`docs/TODO.md`](../TODO.md).
 
+Owner checks for the link-up / link-down and authentication log lines ([INTEGRATION.md](INTEGRATION.md#diagnostics);
+written after PR #87, compiled with `javac` against an earlier build's classes only, no Gradle build and no
+test run):
+
+1. Boot a backend with a working link: one INFO `AbyssLink: link up as node '<node>' to <host>:<port> (<address>), capabilities [...]`.
+2. Restart the proxy: one WARN `AbyssLink: link down after …: the proxy closed the connection; reconnecting`, then
+   `connect … failed` while it is down, then `link up …, after N failed attempts`.
+3. Point `aurora.abysslink.host` at a host that is not the AbyssLink listener: the TLS or authentication line names
+   that host and its resolved address and the likely cause.
+4. Give the backend a `node-id` the proxy does not accept for its certificate: `authentication to … failed (attempt 1):
+   the proxy closed the connection without answering HELLO as node '<node>' (…)`, and `/ping` shows
+   `disconnected (authentication failed)`.
+5. `stop` the backend: no link-down or authentication line during shutdown.
+
 Golden zero-payload HEARTBEAT request 1: `4142594c01000300000000000000000000000001`.
 
 Run the normal suites (the server module discovers tests through suite classes):
